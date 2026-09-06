@@ -79,6 +79,13 @@ if(NATIVEUI_BUILD_PLATFORM)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
+  if(WIN32)
+    # windows.h defines function-like min/max macros unless NOMINMAX is set.
+    # The C++ platform bridge intentionally uses std::min/std::max throughout;
+    # keep the Win32 macros out of this target instead of rewriting portable
+    # code around macro expansion. Pugl's C target is intentionally unchanged.
+    target_compile_definitions(nativeui PRIVATE NOMINMAX)
+  endif()
   if(APPLE)
     target_compile_definitions(nativeui PRIVATE GL_SILENCE_DEPRECATION)
   endif()
