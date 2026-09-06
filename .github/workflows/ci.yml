@@ -39,8 +39,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
-      - name: Configure
-        shell: bash
+      - name: Configure Unix
+        if: runner.os != 'Windows'
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -49,8 +49,23 @@ jobs:
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
 
+      # skia-builder's Windows archive is built with the MSVC ABI. Do not use
+      # Ninja from Git Bash here: on hosted runners that can select MinGW and
+      # cannot link the supplied Skia.lib. The native default Visual Studio
+      # generator discovers the installed MSVC toolchain without relying on
+      # shell PATH ordering.
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -A x64
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
       - name: Build
-        run: cmake --build build --parallel 2
+        run: cmake --build build --config Release --parallel 2
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
