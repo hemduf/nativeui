@@ -105,6 +105,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t024_goldens
   t025_text_edit_model
   t026_label
+  t027_fonts
   t041_smoke_harness
 )
 
@@ -170,6 +171,10 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
   nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
+  nativeui_add_core_test(nativeui_font_tests tests/font_tests.cpp)
+  target_compile_definitions(nativeui_font_tests PRIVATE
+    NATIVEUI_TEST_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/resources"
+  )
 
   if(NATIVEUI_BUILD_PLATFORM)
     add_executable(nativeui_smoke_standalone tests/smoke_standalone.cpp)
