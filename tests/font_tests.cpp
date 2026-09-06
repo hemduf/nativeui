@@ -28,6 +28,20 @@ std::vector<std::byte> read_font(std::string_view filename) {
     return bytes;
 }
 
+bool renders_red_ink(std::string text, const ui::TextStyle& style) {
+    ui::UI label{ui::Label{std::move(text)}.style(style)};
+    ui::HeadlessRenderer renderer{{96.0f, 48.0f}, 1.0f};
+    if (!renderer.render(label)) return false;
+
+    const auto& pixels = renderer.rgba_pixels();
+    for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        if (pixels[i] > 100 && pixels[i] > pixels[i + 1] && pixels[i] > pixels[i + 2]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void suite() {
     ui::TextStyle system_style{};
     const auto system_match = ui::FontManager::match(system_style, U'A');
@@ -98,19 +112,13 @@ void suite() {
                    a_metrics.width + omega_metrics.width + cjk_metrics.width,
                    0.05f);
 
-    ui::UI label{ui::Label{mixed}.style(style)};
-    ui::HeadlessRenderer renderer{{160.0f, 48.0f}, 1.0f};
-    NUI_CHECK(renderer.render(label));
-
-    bool visible_red_ink = false;
-    const auto& pixels = renderer.rgba_pixels();
-    for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
-        if (pixels[i] > 100 && pixels[i] > pixels[i + 1] && pixels[i] > pixels[i + 2]) {
-            visible_red_ink = true;
-            break;
-        }
-    }
-    NUI_CHECK(visible_red_ink);
+    // Painting must use the same resolved runs as measurement. Verify each
+    // deterministic fixture glyph independently so a visible primary glyph
+    // cannot hide a broken fallback draw path.
+    NUI_CHECK(renders_red_ink("A", style));
+    NUI_CHECK(renders_red_ink(std::string{omega}, style));
+    NUI_CHECK(renders_red_ink(std::string{cjk}, style));
+    NUI_CHECK(renders_red_ink(mixed, style));
 }
 
 } // namespace
