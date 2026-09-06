@@ -130,7 +130,7 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025` complete; `T026` implementation is complete and awaiting real-Skia validation before the strict sequence can advance to `T027`.
+Progress: `T025` complete; `T026` implementation and local real-Skia validation pass (40/40 CTest after the golden-test correction). CI and merge remain pending before the strict sequence can advance to `T027`.
 
 ## Milestone 5 — Standard widget set
 
