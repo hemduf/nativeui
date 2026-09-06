@@ -12,7 +12,6 @@ std::unique_ptr<ui::UI> make_ui() {
 
     ui::TextStyle multilingual{};
     multilingual.size = 22.0f;
-    multilingual.fallback_families = {};
 
     const auto default_face = ui::FontManager::match(multilingual, U'A');
     const std::string family = default_face ? default_face.family : std::string{"system default"};
@@ -29,7 +28,14 @@ std::unique_ptr<ui::UI> make_ui() {
             ui::Label{"Bold + italic style request"}
                 .size(18.0f)
                 .bold()
-                .italic()
+                .italic(),
+            ui::Canvas{560.0f, 56.0f, [multilingual](ui::CanvasContext2D& g) {
+                g.fill_rounded_rect({0.0f, 0.0f, g.width(), g.height()}, 8.0f, ui::colors::panel);
+                auto style = multilingual;
+                style.size = 16.0f;
+                style.color = ui::colors::text;
+                g.text({12.0f, 28.0f}, "Canvas TextStyle / \xCE\xA9 / \xE6\x97\xA5", style);
+            }}
         }.padding(20.0f).gap(14.0f));
 }
 
@@ -60,5 +66,5 @@ int main(int argc, char** argv) {
     }
 
     auto tree = make_ui();
-    return example::run_window(*tree, "NativeUI T027 - Fonts", {680.0f, 360.0f});
+    return example::run_window(*tree, "NativeUI T027 - Fonts", {680.0f, 430.0f});
 }
