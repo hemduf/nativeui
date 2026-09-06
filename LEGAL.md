@@ -1,6 +1,6 @@
 # NativeUI Legal Index
 
-NativeUI uses a JUCE-style dual-licensing structure: an open-source licence for users who can comply with its copyleft obligations, and a separate commercial licence for proprietary products.
+NativeUI uses a dual-licensing structure: an open-source licence for users who can comply with its copyleft obligations, and a separate commercial licence for proprietary products.
 
 ## Licence paths
 
