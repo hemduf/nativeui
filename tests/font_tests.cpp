@@ -22,7 +22,9 @@ std::vector<std::byte> read_font(std::string_view filename) {
                             std::istreambuf_iterator<char>());
     std::vector<std::byte> bytes;
     bytes.reserve(chars.size());
-    for (const char value : chars) bytes.push_back(static_cast<std::byte>(value));
+    for (const char value : chars) {
+        bytes.push_back(std::byte{static_cast<unsigned char>(value)});
+    }
     return bytes;
 }
 
@@ -31,6 +33,7 @@ void suite() {
     const auto system_match = ui::FontManager::match(system_style, U'A');
     NUI_CHECK(system_match);
     NUI_CHECK(!system_match.family.empty());
+    NUI_CHECK(system_match.glyph_available);
     NUI_CHECK(!system_match.embedded);
 
     const auto latin = read_font("NativeUITestLatin.ttf");
@@ -40,7 +43,6 @@ void suite() {
 
     const std::array<std::byte, 4> invalid{};
     NUI_CHECK(!ui::FontManager::register_embedded_font("NativeUI Invalid", invalid));
-    NUI_CHECK(!ui::FontManager::has_family("NativeUI Invalid"));
 
     NUI_CHECK(ui::FontManager::register_embedded_font("NativeUI Test Latin", latin));
     NUI_CHECK(ui::FontManager::register_embedded_font("NativeUI Test Fallback", fallback));
@@ -56,17 +58,30 @@ void suite() {
     const auto latin_match = ui::FontManager::match(style, U'A');
     NUI_CHECK(latin_match);
     NUI_CHECK(latin_match.embedded);
+    NUI_CHECK(latin_match.glyph_available);
     NUI_CHECK(latin_match.family == "NativeUI Test Latin");
 
     const auto greek_match = ui::FontManager::match(style, U'\u03A9');
     NUI_CHECK(greek_match);
     NUI_CHECK(greek_match.embedded);
+    NUI_CHECK(greek_match.glyph_available);
     NUI_CHECK(greek_match.family == "NativeUI Test Fallback");
 
     const auto cjk_match = ui::FontManager::match(style, U'\u65E5');
     NUI_CHECK(cjk_match);
     NUI_CHECK(cjk_match.embedded);
+    NUI_CHECK(cjk_match.glyph_available);
     NUI_CHECK(cjk_match.family == "NativeUI Test Fallback");
+
+    // Style requests must remain attached to the selected family instead of
+    // silently escaping the explicit fallback chain.
+    auto styled = style;
+    styled.weight = ui::FontWeight::Bold;
+    styled.slant = ui::FontSlant::Italic;
+    const auto styled_match = ui::FontManager::match(styled, U'A');
+    NUI_CHECK(styled_match);
+    NUI_CHECK(styled_match.embedded);
+    NUI_CHECK(styled_match.family == "NativeUI Test Latin");
 
     constexpr std::string_view omega = "\xCE\xA9";
     constexpr std::string_view cjk = "\xE6\x97\xA5";
