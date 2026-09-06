@@ -166,3 +166,12 @@ T026 remains `Doing` until the corrected suite is rerun on real macOS/Skia.
 - CTest: 39/40 pass; Label unit tests and all 17 feature self-tests pass.
 - Remaining failure: `nativeui_golden_tests`, `label_scene` (597/1104 compared pixels differ, maximum delta 181, first mismatch `(8,4)`). Tracked in [T026](https://github.com/hemduf/nativeui/issues/26).
 - Source publication changes Git exclusions and recovery documentation only; toolkit code and golden baselines remain unchanged. Native platform smoke tests were not enabled.
+
+## T026 golden-test correction — 2026-09-06
+
+- Red: the new mask regression failed because changing pixels in the Label's text box affected the supposedly geometry-only golden comparison.
+- Cause: the old Label baseline contained background RGB `(60,64,70)` and no glyphs; real Skia paints background `(14,15,18)` and text. The old stripe mask also sampled glyph pixels.
+- Correction: clip Label text to `(24,24,172,32)`, compare the background above it and both stripe ends, and regenerate only `label_scene.ppm` from the reviewed pinned real-Skia render. Channel tolerance stays 2 and allowed mismatch ratio stays zero; 3360 deterministic pixels are compared.
+- Regression coverage: changes inside the text/footer areas are ignored, but background/left-stripe/right-stripe changes must fail. Same-platform Label pixel tests require visible red glyphs and correct left/center/right placement using measured text width.
+- Targeted golden/Label/example checks: 3/3 pass. Full Release build and CTest: **40/40 pass**, including all 17 feature self-tests. All baseline SHA256 hashes remain unchanged during normal CTest; the other three baseline files match the original commit.
+- Review passes completed: API/runtime scope (test-only change), meaningful negative cases and cross-platform pixel policy, then documentation/CI coverage. No library code or CMake target changed. Existing CI jobs run the modified test targets; remote CI and merge are still pending, so T026 remains Doing.

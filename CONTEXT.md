@@ -133,11 +133,11 @@ cmake -S . -B build \
 - Strict sequential workflow is now mandatory; priority may not skip numeric tickets.
 - Last completed sequential ticket: `T025` — reusable text edit model.
 - `T041` exists ahead of sequence and must not be used to skip T027–T040.
-- Current ticket: `T026` — Text/Label component and centralized text measurement; implementation complete, real-Skia golden validation still failing.
+- Current ticket: `T026` — Text/Label component and centralized text measurement; local real-Skia validation passes after the golden-test correction on `test/26-label-golden`. CI and merge remain pending before closing the ticket.
 - Next ticket after T026 is validated: `T027` — font manager/fallback abstraction.
-- Latest local baseline (2026-09-06, macOS arm64, real Skia): Release configure and build pass; CTest 39/40 pass. Only `nativeui_golden_tests` fails on `label_scene` (597/1104 compared pixels differ, max delta 181, first pixel `(8,4)`). Label unit tests and all 17 feature self-tests pass. Native platform smoke execution remains opt-in and was not run.
+- Latest local baseline (2026-09-06, macOS arm64, real Skia): Release configure and build pass; CTest **40/40 pass**, including all 17 feature self-tests. Normal CTest preserves all golden baseline hashes. Native platform smoke execution remains opt-in and was not run.
 - Git source repository: [hemduf/nativeui](https://github.com/hemduf/nativeui), branch `main`. `.gitignore` excludes generated/local files, recovery ZIPs, `tickets/` and `TICKETS.md`; `.gitattributes` preserves binary PPM baselines and normalizes text. Source, tests, examples, CMake, CI and continuation documentation are versioned.
-- All 52 tickets live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue): 22 closed/completed, 30 open at import, with priority/status labels and nine roadmap milestones. GitHub is authoritative for ticket content and status. Optional ignored local copies are available on the original machine; a fresh clone resumes from GitHub without them. T026 remains Doing; no feature ticket was advanced during migration or source publication.
+- All 52 tickets live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue): 22 closed/completed, 30 open at import, with priority/status labels and nine roadmap milestones. GitHub is authoritative for ticket content and status. Optional ignored local copies are available on the original machine; a fresh clone resumes from GitHub without them. T026 remains Doing pending CI and merge; no later feature ticket has started.
 - Feature examples are mandatory; T026 adds `examples/features/t026_label.cpp` with `--self-test`.
 
 ## T025 compact note
@@ -215,4 +215,4 @@ cmake -S . -B build \
 
 ### Current validation gate (T026)
 
-Real macOS/Skia baseline now reaches 39/40. `toggle_on` and the Label stripe probe pass, but the `label_scene` golden still differs. Inspect `build/golden-artifacts/label_scene.actual.ppm` and `.diff.ppm` against the versioned baseline; resolve the mismatch before advancing T026. No toolkit code or golden baseline was changed during Git preparation.
+Local real-Skia CTest reaches 40/40 on `test/26-label-golden`. The old Label reference used an incorrect gray background and contained no glyphs, while its comparison stripe intersected system text. The corrected scene clips Label text to a fixed box, compares 3360 deterministic pixels outside text, and uses a reviewed real-Skia baseline. Mask regressions still reject geometry changes; Label tests independently verify visible colored text and left/center/right placement. Runtime/library code and the other three baselines are unchanged. CI and merge are still required before closing T026 and advancing to T027.
