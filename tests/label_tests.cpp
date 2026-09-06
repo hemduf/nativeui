@@ -1,8 +1,56 @@
 #include "test_support.hpp"
 
+#include <algorithm>
+
 namespace {
 
+void painted_alignment() {
+    constexpr int width = 320;
+    constexpr int height = 120;
+    ui::TextStyle style{};
+    style.size = 18.0f;
+    style.color = {1.0f, 0.0f, 0.0f, 1.0f};
+    style.weight = ui::FontWeight::Bold;
+    const auto metrics = ui::TextService::measure("NativeUI", style);
+    NUI_CHECK(metrics.width > 0.0f && metrics.width < width);
+
+    ui::HeadlessRenderer renderer{{width, height}, 1.0f};
+    ui::UI empty{ui::Label{""}.style(style)};
+    NUI_CHECK(renderer.render(empty));
+    const auto background = renderer.rgba_pixels();
+
+    int left_ink_x = 0;
+    for (const auto align : {ui::TextAlign::Left, ui::TextAlign::Center, ui::TextAlign::Right}) {
+        ui::UI label{ui::Label{"NativeUI"}.style(style).align(align)};
+        NUI_CHECK(renderer.render(label));
+        const auto& pixels = renderer.rgba_pixels();
+        int first_ink_x = width;
+        bool visible_red_ink = false;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const auto i = (y * width + x) * 4;
+                if (pixels[i] == background[i] && pixels[i + 1] == background[i + 1] &&
+                    pixels[i + 2] == background[i + 2]) continue;
+                first_ink_x = std::min(first_ink_x, x);
+                NUI_CHECK(pixels[i] >= background[i]);
+                NUI_CHECK(pixels[i + 1] <= background[i + 1]);
+                NUI_CHECK(pixels[i + 2] <= background[i + 2]);
+                visible_red_ink = visible_red_ink || pixels[i] > 100;
+            }
+        }
+        // Same-platform ink bounds test actual painting, color and alignment
+        // without requiring CoreText/DirectWrite/Fontconfig to share glyphs.
+        NUI_CHECK(visible_red_ink);
+        if (align == ui::TextAlign::Left) left_ink_x = first_ink_x;
+        const float shift = align == ui::TextAlign::Left ? 0.0f :
+                            align == ui::TextAlign::Center ? (width - metrics.width) * 0.5f :
+                            width - metrics.width;
+        NUI_CHECK_NEAR(first_ink_x - left_ink_x, shift, 1.0f);
+    }
+}
+
 void suite() {
+    painted_alignment();
     ui::TextStyle style{};
     style.size = 18.0f;
     style.color = ui::colors::text;
