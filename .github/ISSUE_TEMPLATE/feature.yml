@@ -1,0 +1,33 @@
+name: Feature
+description: NativeUI feature work item
+title: "[Txxx] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] Behavior implemented
+        - [ ] Unit/integration tests added
+        - [ ] Dedicated executable example added/updated
+        - [ ] Example `--self-test` passes
+        - [ ] macOS / Windows / Linux CI green
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
