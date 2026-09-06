@@ -99,4 +99,9 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          # Skia's Linux fallback path calls Fontconfig FcFontRenderPrepare,
+          # whose process-lifetime caches are reported as leaks by LSan on the
+          # hosted image. Keep leak detection enabled and suppress only this
+          # known third-party allocation path; NativeUI/Skia leaks remain fatal.
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
         run: ctest --test-dir build-sanitize --output-on-failure
