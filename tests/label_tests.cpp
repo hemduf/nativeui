@@ -50,6 +50,14 @@ void painted_alignment() {
 }
 
 void suite() {
+    // T027 red test: the platform-neutral font service must expose the same
+    // default face used by measurement/painting before named/fallback fonts
+    // can be added. This intentionally does not compile on the T026 API.
+    ui::TextStyle selection{};
+    const auto default_font = ui::FontManager::match(selection, U'A');
+    NUI_CHECK(default_font);
+    NUI_CHECK(!default_font.family.empty());
+
     painted_alignment();
     ui::TextStyle style{};
     style.size = 18.0f;
