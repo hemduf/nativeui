@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-06
+**Updated:** 2026-09-07
 
 ## Goal
 
@@ -53,24 +53,16 @@ Core/runtime:
 - separate layout/paint invalidation with bounded logical dirty-region aggregation;
 - generic `Painter`/`PaintContext` over Skia.
 
-Widgets:
+Widgets/text:
 
 - `Header`;
 - `Label` / `TextLabel` with shared `TextStyle` + `TextService` measurement;
+- T027 branch adds platform-neutral `FontManager`, named family/style selection, embedded font aliases and ordered fallback families;
+- measurement and painting share the same UTF-8 font-run resolver; `CanvasContext2D` accepts full `TextStyle` as well as the legacy size/color overload;
 - `Knob`;
 - `Toggle`;
 - `TextInput` with UTF-8 committed text, selection, caret, clipboard, undo/redo, word navigation, double/triple click, horizontal scrolling, placeholder, max length, submit, Escape/revert;
 - interactive `Canvas` with local `CanvasContext2D` and local input callback.
-
-Canvas demo:
-
-- 16-step sequencer rendering;
-- click toggles steps;
-- click-drag paints/erases steps;
-- keyboard selection with Left/Right;
-- Space/Enter toggle;
-- Up adds;
-- Down/Backspace/Delete removes.
 
 Windowing:
 
@@ -88,13 +80,9 @@ Build:
 - `SkFontMetrics.h` is explicitly included;
 - no direct macOS `gl3.h` include; Pugl owns platform GL headers/proc lookup.
 
-## Known issue just addressed
-
-Reverse focus must normalize macOS/AppKit BackTab (`U+0019`) to `Tab` with `shift=true`. Ensure this remains covered by tests when input translation is refactored.
-
 ## Feature example policy
 
-Every feature ticket must add a dedicated executable with `--self-test`. Existing M1/M2 features T007–T015 now have executables under `examples/features/`. Infrastructure-only T001–T006 are exempt.
+Every feature ticket must add a dedicated executable with `--self-test`. Existing M1/M2 features T007–T019 and current text-system features follow this policy. Infrastructure-only tickets may update an existing example when appropriate.
 
 ## Current limitations
 
@@ -108,7 +96,7 @@ Every feature ticket must add a dedicated executable with `--self-test`. Existin
 - no centralized style/theme state system beyond basic colors/painting;
 - no accessibility layer;
 - no Wayland backend;
-- packaging/install/export and full host integration matrix remain incomplete; standalone/embedded smoke harness now exists.
+- packaging/install/export and full host integration matrix remain incomplete; standalone/embedded smoke harness exists.
 
 ## Build commands
 
@@ -130,23 +118,17 @@ cmake -S . -B build \
 ## Recovery status
 
 - Milestones M0, M1 and M2 are complete; M4 text-system work is in progress.
-- Strict sequential workflow is now mandatory; priority may not skip numeric tickets.
-- Last completed sequential ticket: `T025` — reusable text edit model.
-- `T041` exists ahead of sequence and must not be used to skip T027–T040.
-- Current ticket: `T026` — Text/Label component and centralized text measurement; local real-Skia validation passes after the golden-test correction on `test/26-label-golden`. CI and merge remain pending before closing the ticket.
-- Next ticket after T026 is validated: `T027` — font manager/fallback abstraction.
-- Latest local baseline (2026-09-06, macOS arm64, real Skia): Release configure and build pass; CTest **40/40 pass**, including all 17 feature self-tests. Normal CTest preserves all golden baseline hashes. Native platform smoke execution remains opt-in and was not run.
-- Git source repository: [hemduf/nativeui](https://github.com/hemduf/nativeui), branch `main`. `.gitignore` excludes generated/local files, recovery ZIPs, `tickets/` and `TICKETS.md`; `.gitattributes` preserves binary PPM baselines and normalizes text. Source, tests, examples, CMake, CI and continuation documentation are versioned.
-- All 52 tickets live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue): 22 closed/completed, 30 open at import, with priority/status labels and nine roadmap milestones. GitHub is authoritative for ticket content and status. Optional ignored local copies are available on the original machine; a fresh clone resumes from GitHub without them. T026 remains Doing pending CI and merge; no later feature ticket has started.
-- Feature examples are mandatory; T026 adds `examples/features/t026_label.cpp` with `--self-test`.
-
-## T025 compact note
-
-- Public `ui::TextEditModel` lives in `include/nativeui/text_edit.hpp` and has no Skia/Pugl/platform dependency.
-- It owns UTF-8-safe cursor/selection byte offsets, word/codepoint/document navigation, insertion/deletion, max-length enforcement, word selection and bounded undo/redo.
-- `TextInputComponent` now owns only view behavior: focus snapshot, horizontal scrolling, pixel-to-byte hit testing, clipboard/platform requests and paint.
-- External `State<std::string>` updates call `model.set_text(..., preserve_selection=true, clear_history=true)`.
-- Escape revert uses `set_text(snapshot, preserve_selection=false, clear_history=false)`.
+- Strict sequential workflow is mandatory; priority may not skip numeric tickets.
+- Last completed sequential ticket: `T026` — Text/Label component and centralized text measurement. PR #53 is merged; real macOS arm64 Release CTest was **40/40** before advancing.
+- Current ticket: `T027` — font manager/fallback abstraction, issue #27 `Doing`, branch `feature/t027-font-manager`, draft PR #55.
+- T027 implementation is present: neutral font service, named family/weight/slant, embedded fonts, ordered explicit fallbacks plus platform Unicode fallback, shared measure/paint run resolution, Label/Canvas fluent consumption, deterministic embedded-font fixtures, dedicated unit test, feature example and platform smoke probes.
+- T027 TDD red state was recorded before the API existed. Review passes found and corrected moved-typeface metadata, insufficient fallback-paint assertions, and missing full-`TextStyle` Canvas drawing.
+- Validation blocker: the current GitHub Actions PR run is still queued/pending and has not allocated jobs. Do **not** merge #55 until the relevant build/tests are green. The artifact container has no DNS and cannot independently fetch the pinned Skia/Pugl dependencies.
+- Next ticket after T027 is validated/merged/closed: `T028`.
+- `T041` exists ahead of sequence and must not be used to skip T028–T040.
+- Latest proven baseline on `main` (2026-09-06, macOS arm64, real Skia): Release configure/build pass; CTest **40/40**, including all 17 then-current feature self-tests. Normal CTest preserves golden baseline hashes. Native window smoke execution remains opt-in.
+- Git source repository: [hemduf/nativeui](https://github.com/hemduf/nativeui), default branch `main`. `.gitignore` excludes generated/local files, recovery ZIPs, `tickets/` and `TICKETS.md`; `.gitattributes` preserves binary PPM baselines and normalizes text.
+- GitHub Issues are authoritative for ticket content/status. A fresh clone must resume from GitHub, not optional local ticket exports.
 
 ## Non-negotiable invariants
 
@@ -159,60 +141,38 @@ cmake -S . -B build \
 - Skia comes from skia-builder binaries, not a NativeUI Skia build pipeline;
 - adding a widget must not require a central component enum/switch.
 
-## T017 compact note
+## T025 compact note
 
-- Portable commands: Copy/Cut/Paste/SelectAll/Undo/Redo.
-- `InputEvent::primary` is platform-normalized by Pugl (Command macOS, Ctrl Windows/Linux).
-- Command precedence: focused target -> nearest `CommandScope` -> outer scopes -> global UI handler.
-- TextInput consumes command events instead of raw primary-modifier keydowns.
+- Public `ui::TextEditModel` lives in `include/nativeui/text_edit.hpp` and has no Skia/Pugl/platform dependency.
+- It owns UTF-8-safe cursor/selection byte offsets, word/codepoint/document navigation, insertion/deletion, max-length enforcement, word selection and bounded undo/redo.
+- `TextInputComponent` owns view behavior: focus snapshot, horizontal scrolling, pixel-to-byte hit testing, clipboard/platform requests and paint.
 
-## T018 compact note
+## T026 compact note
 
-- Drag/drop is distinct from clipboard paste.
-- `DropOffer` carries MIME types + logical position; `DropData` carries MIME + bytes + logical position.
-- Components accept/reject through neutral InputContext methods; Pugl details stay inside `pugl_skia.cpp`.
+- Public text styling/measurement lives in `include/nativeui/text.hpp`: `TextStyle`, `TextMetrics`, `TextService`, `TextAlign`, `FontWeight`.
+- `Label` is the reusable single-line text widget; wrapping remains out of scope. `TextLabel` is an alias.
+- `Painter::text()` consumes `TextStyle`; `Painter::measure_text()` delegates to `TextService`.
+- `Header` uses the same shared text style/measurement path.
+- Cross-platform golden policy excludes platform-shaped glyph interiors and compares deterministic geometry; same-platform tests verify visible glyphs and alignment.
 
-## T019 compact note
+## T027 compact note (in progress)
 
-- `Painter` owns a tracked Skia save/restore depth with protected component scopes.
-- Every component paint is automatically isolated; leaked transforms are cleaned before siblings paint.
-- `push_clip/pop_clip` use the same tracked state stack.
-- `CanvasContext2D` coordinates are genuinely local: CanvasComponent establishes the bounds-origin translation before the callback, so scale/rotate/concat do not transform the Canvas layout position.
-- APIs: `save`, `restore`, `translate`, `scale`, `rotate(radians)`, `concat(Transform2D)`.
-
-## T024 compact note
-
-- Golden format: versioned binary PPM (`P6`) under `tests/golden/baselines/`.
-- Normal CTest is read-only with respect to baselines.
-- Explicit update: `nativeui_golden_tests --update-goldens` or CMake target `nativeui_update_goldens`.
-- Mismatch artifacts: `golden-artifacts/<name>.actual.ppm` and `.diff.ppm` with CI-readable stats.
-- Cross-platform policy: compare deterministic geometry interiors; exclude font pixels and unstable anti-aliased edges unless a ticket explicitly establishes tolerance.
-- Current golden cases: Canvas solid geometry, Row layout placement, Toggle geometry.
+- `TextStyle` adds `family`, `fallback_families`, `FontSlant`, and numeric regular/bold Skia-compatible weights.
+- `FontManager` is platform-neutral. CoreText/DirectWrite/Fontconfig construction remains private in `src/skia_core.cpp`.
+- Embedded fonts are registered from owned/copied bytes under NativeUI aliases. Registry publication is copy-on-write; normal measure/paint loads an immutable snapshot without taking the registration mutex.
+- Resolution order per Unicode scalar: explicit primary family -> ordered explicit fallbacks -> platform Unicode fallback -> best `.notdef` face.
+- Adjacent scalars using the same face are grouped into UTF-8 byte runs. `TextService::measure()` and `Painter::text()` consume the same resolved layout, so alignment width and painted faces cannot diverge.
+- Tests use tiny deterministic generated fonts: primary contains `A`; fallback contains `Ω` and `日`. Selection, embedded registration, mixed-run measurement and independent painting of all three glyphs are covered.
+- `nativeui_example_t027_fonts --self-test` exercises platform default selection and a named fallback chain without opening a window. Standalone/embedded smoke executables also probe platform font resolution when native smoke tests are enabled.
 
 ## Pugl reject-offer portability hotfix
 
 - Pugl pinned at `b7637149...` declares `puglRejectOffer()` but only X11 defines it.
 - Never call `puglRejectOffer()` directly from portable NativeUI code. Use `reject_pugl_drop_offer()` in `pugl_skia_setup.inc`.
-- X11 uses explicit rejection; macOS/Windows rely on the native backend's unaccepted-offer rejection semantics.
-- This rule exists because a real macOS arm64 link failed with undefined `_puglRejectOffer`.
+- X11 uses explicit rejection; macOS/Windows rely on native unaccepted-offer semantics.
 
 ## T041 compact note
 
 - `nativeui_smoke_standalone` exercises PUGL_PROGRAM construction, native handle, non-blocking poll, resize, close and teardown.
-- `nativeui_smoke_embedded` creates a real standalone parent then attaches a PUGL_MODULE child via the parent native handle; repeated child `poll()` calls are checked for non-blocking behavior.
-- `StandaloneWindow::last_error()` and `EmbeddedView::last_error()` expose runtime Pugl/renderer failures after successful construction. Constructor failures still throw with the precise Pugl stage.
+- `nativeui_smoke_embedded` creates a standalone parent then attaches a PUGL_MODULE child via the parent native handle; repeated child `poll()` calls are checked for non-blocking behavior.
 - CTest registration is opt-in with `-DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON`; tests carry labels `integration;platform;smoke` and a 20-second timeout.
-- Native smoke runtime was not executed in the artifact container because it has no desktop session; run it on macOS/Windows/Linux X11 before release.
-
-## T026 compact note
-
-- Public text styling/measurement lives in `include/nativeui/text.hpp`: `TextStyle`, `TextMetrics`, `TextService`, `TextAlign`, `FontWeight`.
-- `Label` is the reusable single-line text widget; wrapping remains off/out of scope. `TextLabel` is an alias.
-- `Painter::text()` consumes `TextStyle`; `Painter::measure_text()` delegates to `TextService`.
-- `Header` now uses the same shared text style/measurement path without changing its intended regular-weight title appearance.
-- Golden text policy remains cross-platform: exclude platform-shaped glyph interiors and compare deterministic scene geometry; measurement consistency is tested separately.
-
-
-### Current validation gate (T026)
-
-Local real-Skia CTest reaches 40/40 on `test/26-label-golden`. The old Label reference used an incorrect gray background and contained no glyphs, while its comparison stripe intersected system text. The corrected scene clips Label text to a fixed box, compares 3360 deterministic pixels outside text, and uses a reviewed real-Skia baseline. Mask regressions still reject geometry changes; Label tests independently verify visible colored text and left/center/right placement. Runtime/library code and the other three baselines are unchanged. CI and merge are still required before closing T026 and advancing to T027.
