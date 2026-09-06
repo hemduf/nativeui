@@ -27,17 +27,37 @@ public:
         return std::move(*this);
     }
 
+    Label&& slant(FontSlant value) && {
+        style_.slant = value;
+        return std::move(*this);
+    }
+
+    Label&& italic(bool value = true) && {
+        style_.slant = value ? FontSlant::Italic : FontSlant::Upright;
+        return std::move(*this);
+    }
+
+    Label&& family(std::string value) && {
+        style_.family = std::move(value);
+        return std::move(*this);
+    }
+
+    Label&& fallback_families(std::vector<std::string> value) && {
+        style_.fallback_families = std::move(value);
+        return std::move(*this);
+    }
+
     Label&& style(TextStyle value) && {
-        style_ = value;
+        style_ = std::move(value);
         return std::move(*this);
     }
 
     Spec spec() && {
         auto text = std::move(text_);
-        const auto style = style_;
+        auto style = std::move(style_);
         return Spec{
-            [text = std::move(text), style]() mutable {
-                return std::make_unique<LabelComponent>(std::move(text), style);
+            [text = std::move(text), style = std::move(style)]() mutable {
+                return std::make_unique<LabelComponent>(std::move(text), std::move(style));
             },
             {}};
     }
