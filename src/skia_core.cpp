@@ -37,8 +37,9 @@ struct EmbeddedFace {
 
 using EmbeddedFaces = std::vector<EmbeddedFace>;
 
-std::shared_ptr<const EmbeddedFaces>& embedded_faces_storage() {
-    static std::shared_ptr<const EmbeddedFaces> faces = std::make_shared<const EmbeddedFaces>();
+std::atomic<std::shared_ptr<const EmbeddedFaces>>& embedded_faces_storage() {
+    static std::atomic<std::shared_ptr<const EmbeddedFaces>> faces{
+        std::make_shared<const EmbeddedFaces>()};
     return faces;
 }
 
@@ -48,7 +49,7 @@ std::mutex& embedded_faces_mutex() {
 }
 
 std::shared_ptr<const EmbeddedFaces> embedded_faces_snapshot() {
-    return std::atomic_load_explicit(&embedded_faces_storage(), std::memory_order_acquire);
+    return embedded_faces_storage().load(std::memory_order_acquire);
 }
 
 sk_sp<SkFontMgr> platform_font_manager() {
@@ -370,8 +371,7 @@ bool FontManager::register_embedded_font(std::string_view family_alias,
         found->typeface = std::move(typeface);
     }
     std::shared_ptr<const detail::EmbeddedFaces> published = std::move(updated);
-    std::atomic_store_explicit(
-        &detail::embedded_faces_storage(), std::move(published), std::memory_order_release);
+    detail::embedded_faces_storage().store(std::move(published), std::memory_order_release);
     return true;
 }
 
