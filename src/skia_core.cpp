@@ -100,6 +100,15 @@ struct ResolvedFace {
     std::size_t priority{};
 };
 
+ResolvedFace make_system_face(sk_sp<SkTypeface> typeface,
+                              char32_t codepoint,
+                              std::size_t priority) {
+    if (!typeface) return {};
+    const bool glyph = has_glyph(typeface, codepoint);
+    auto family = typeface_family(typeface);
+    return {std::move(typeface), std::move(family), false, glyph, priority};
+}
+
 ResolvedFace match_embedded_family(const EmbeddedFaces& embedded,
                                    std::string_view family,
                                    char32_t codepoint,
@@ -122,11 +131,12 @@ ResolvedFace match_system_family(const sk_sp<SkFontMgr>& manager,
                                  bool require_glyph) {
     if (!manager || family.empty()) return {};
     const std::string owned_family{family};
-    auto typeface = manager->matchFamilyStyle(owned_family.c_str(), requested_style(style));
-    if (!typeface) return {};
-    const bool glyph = has_glyph(typeface, codepoint);
-    if (require_glyph && !glyph) return {};
-    return {std::move(typeface), typeface_family(typeface), false, glyph, priority};
+    auto face = make_system_face(
+        manager->matchFamilyStyle(owned_family.c_str(), requested_style(style)),
+        codepoint,
+        priority);
+    if (require_glyph && !face.glyph_available) return {};
+    return face;
 }
 
 ResolvedFace match_named_family(const EmbeddedFaces& embedded,
@@ -171,18 +181,16 @@ ResolvedFace resolve_face(const TextStyle& style,
     // after the explicit NativeUI chain. This keeps multilingual default text
     // useful without exposing CoreText/DirectWrite/Fontconfig to widgets.
     if (manager && codepoint != U'\0') {
-        auto typeface = manager->matchFamilyStyleCharacter(
-            nullptr,
-            requested_style(style),
-            nullptr,
-            0,
-            static_cast<SkUnichar>(codepoint));
-        if (typeface) {
-            const bool glyph = has_glyph(typeface, codepoint);
-            if (glyph) {
-                return {std::move(typeface), typeface_family(typeface), false, true, priority};
-            }
-        }
+        auto face = make_system_face(
+            manager->matchFamilyStyleCharacter(
+                nullptr,
+                requested_style(style),
+                nullptr,
+                0,
+                static_cast<SkUnichar>(codepoint)),
+            codepoint,
+            priority);
+        if (face.typeface && face.glyph_available) return face;
     }
 
     // A final face is still useful for the font's .notdef glyph when no font
@@ -207,11 +215,8 @@ ResolvedFace resolve_face(const TextStyle& style,
     }
 
     if (manager) {
-        auto typeface = manager->matchFamilyStyle(nullptr, requested_style(style));
-        if (typeface) {
-            const bool glyph = has_glyph(typeface, codepoint);
-            return {std::move(typeface), typeface_family(typeface), false, glyph, priority};
-        }
+        return make_system_face(
+            manager->matchFamilyStyle(nullptr, requested_style(style)), codepoint, priority);
     }
     return {};
 }
@@ -229,7 +234,7 @@ Utf8Scalar decode_utf8(std::string_view text, std::size_t offset) {
     const unsigned char a = u(offset);
     if (a < 0x80u) return {static_cast<char32_t>(a), offset + 1};
 
-    auto continuation = [&](std::size_t index) {
+    const auto continuation = [&](std::size_t index) {
         return index < text.size() && (u(index) & 0xC0u) == 0x80u;
     };
 
@@ -303,7 +308,7 @@ ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& s
     std::size_t offset = 0;
     bool have_metrics = false;
 
-    auto flush = [&](std::size_t run_end) {
+    const auto flush = [&](std::size_t run_end) {
         if (!current.typeface || run_end <= run_begin) return;
         const bool embolden = synthetic_bold(current.typeface, style);
         auto font = make_font(current.typeface, style, embolden);
