@@ -1,0 +1,226 @@
+cmake_minimum_required(VERSION 3.24)
+project(NativeUI VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+option(NATIVEUI_BUILD_PLATFORM "Build Pugl/OpenGL windowing integration" ON)
+option(NATIVEUI_BUILD_EXAMPLES "Build NativeUI examples" ON)
+option(NATIVEUI_BUILD_TESTS "Build NativeUI core tests" ON)
+option(NATIVEUI_ENABLE_SANITIZERS "Enable ASan+UBSan on NativeUI-owned code/tests" OFF)
+option(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS "Register native standalone/embedded smoke tests with CTest" OFF)
+
+if(NATIVEUI_BUILD_EXAMPLES AND NOT NATIVEUI_BUILD_PLATFORM)
+  message(FATAL_ERROR "NATIVEUI_BUILD_EXAMPLES requires NATIVEUI_BUILD_PLATFORM=ON")
+endif()
+
+include(cmake/CPM.cmake)
+include(cmake/Dependencies.cmake)
+
+function(nativeui_enable_project_warnings target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endfunction()
+
+function(nativeui_enable_sanitizers target)
+  if(NOT NATIVEUI_ENABLE_SANITIZERS)
+    return()
+  endif()
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target} PRIVATE
+      -fsanitize=address,undefined
+      -fno-omit-frame-pointer
+    )
+    target_link_options(${target} PRIVATE
+      -fsanitize=address,undefined
+      -fno-omit-frame-pointer
+    )
+  elseif(MSVC)
+    target_compile_options(${target} PRIVATE /fsanitize=address)
+    message(WARNING "MSVC sanitizer mode enables ASan; UBSan is unavailable with MSVC")
+  else()
+    message(FATAL_ERROR "NATIVEUI_ENABLE_SANITIZERS is unsupported by ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endfunction()
+
+# Core runtime + Skia-only services.  This target deliberately has no Pugl or
+# OpenGL dependency so retained-mode behavior can be tested without a window.
+add_library(nativeui_core STATIC
+  src/skia_core.cpp
+  src/headless.cpp
+)
+add_library(NativeUI::Core ALIAS nativeui_core)
+set_target_properties(nativeui_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(nativeui_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_compile_features(nativeui_core PUBLIC cxx_std_20)
+target_link_libraries(nativeui_core PUBLIC SkiaBuilder::skia)
+nativeui_enable_project_warnings(nativeui_core)
+nativeui_enable_sanitizers(nativeui_core)
+
+if(NATIVEUI_BUILD_PLATFORM)
+  add_library(nativeui STATIC
+    src/pugl_skia.cpp
+  )
+  add_library(NativeUI::NativeUI ALIAS nativeui)
+  set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_features(nativeui PUBLIC cxx_std_20)
+  target_compile_definitions(nativeui PRIVATE SK_GL)
+  if(APPLE)
+    target_compile_definitions(nativeui PRIVATE GL_SILENCE_DEPRECATION)
+  endif()
+  target_link_libraries(nativeui
+    PUBLIC
+      NativeUI::Core
+    PRIVATE
+      NativeUI::Pugl
+      NativeUI::OpenGL
+  )
+  nativeui_enable_project_warnings(nativeui)
+  nativeui_enable_sanitizers(nativeui)
+endif()
+
+set(NATIVEUI_FEATURE_EXAMPLES
+  t007_constraints
+  t008_alignment
+  t009_flex
+  t010_grid
+  t011_clipping
+  t012_scroll
+  t013_bubbling
+  t014_focus_scopes
+  t015_pointer_capture
+  t016_gestures
+  t017_commands
+  t018_drop
+  t019_transforms
+  t024_goldens
+  t025_text_edit_model
+  t026_label
+  t041_smoke_harness
+)
+
+if(NATIVEUI_BUILD_EXAMPLES)
+  add_executable(nativeui_demo examples/standalone.cpp)
+  target_link_libraries(nativeui_demo PRIVATE NativeUI::NativeUI)
+  nativeui_enable_sanitizers(nativeui_demo)
+
+  function(nativeui_add_feature_example name)
+    add_executable(nativeui_example_${name} examples/features/${name}.cpp)
+    target_include_directories(nativeui_example_${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
+    target_link_libraries(nativeui_example_${name} PRIVATE NativeUI::NativeUI)
+    nativeui_enable_project_warnings(nativeui_example_${name})
+    nativeui_enable_sanitizers(nativeui_example_${name})
+  endfunction()
+
+  foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)
+    nativeui_add_feature_example(${_example})
+  endforeach()
+endif()
+
+if(NATIVEUI_BUILD_TESTS)
+  enable_testing()
+
+  function(nativeui_add_core_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE NativeUI::Core)
+    nativeui_enable_project_warnings(${name})
+    nativeui_enable_sanitizers(${name})
+    add_test(NAME ${name} COMMAND ${name})
+  endfunction()
+
+  nativeui_add_core_test(nativeui_state_tests tests/state_tests.cpp)
+  nativeui_add_core_test(nativeui_focus_tests tests/focus_tests.cpp)
+  nativeui_add_core_test(nativeui_routing_tests tests/routing_tests.cpp)
+  nativeui_add_core_test(nativeui_pointer_capture_tests tests/pointer_capture_tests.cpp)
+  nativeui_add_core_test(nativeui_gesture_tests tests/gesture_tests.cpp)
+  nativeui_add_core_test(nativeui_command_tests tests/command_tests.cpp)
+  nativeui_add_core_test(nativeui_drop_tests tests/drop_tests.cpp)
+  nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
+  nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
+  target_compile_definitions(nativeui_golden_tests PRIVATE
+    NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
+    NATIVEUI_GOLDEN_ARTIFACT_DIR="${CMAKE_CURRENT_BINARY_DIR}/golden-artifacts"
+  )
+  add_custom_target(nativeui_update_goldens
+    COMMAND $<TARGET_FILE:nativeui_golden_tests> --update-goldens
+    DEPENDS nativeui_golden_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Explicitly update NativeUI golden image baselines"
+  )
+  nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
+  nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
+  nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
+  nativeui_add_core_test(nativeui_layout_alignment_tests tests/layout_alignment_tests.cpp)
+  nativeui_add_core_test(nativeui_layout_flex_tests tests/layout_flex_tests.cpp)
+  nativeui_add_core_test(nativeui_grid_layout_tests tests/grid_layout_tests.cpp)
+  nativeui_add_core_test(nativeui_clipping_tests tests/clipping_tests.cpp)
+  nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
+  nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
+  nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
+  nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
+  nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
+
+  if(NATIVEUI_BUILD_PLATFORM)
+    add_executable(nativeui_smoke_standalone tests/smoke_standalone.cpp)
+    target_link_libraries(nativeui_smoke_standalone PRIVATE NativeUI::NativeUI)
+    nativeui_enable_project_warnings(nativeui_smoke_standalone)
+    nativeui_enable_sanitizers(nativeui_smoke_standalone)
+
+    add_executable(nativeui_smoke_embedded tests/smoke_embedded.cpp)
+    target_link_libraries(nativeui_smoke_embedded PRIVATE NativeUI::NativeUI)
+    nativeui_enable_project_warnings(nativeui_smoke_embedded)
+    nativeui_enable_sanitizers(nativeui_smoke_embedded)
+
+    if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
+      add_test(NAME nativeui_smoke_standalone COMMAND nativeui_smoke_standalone)
+      add_test(NAME nativeui_smoke_embedded COMMAND nativeui_smoke_embedded)
+      set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
+        LABELS "integration;platform;smoke"
+        TIMEOUT 20
+      )
+    endif()
+  endif()
+
+  # Each public header gets its own translation unit so missing direct includes
+  # cannot be accidentally masked by umbrella include order.
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text paint component command focus layout widgets ui headless window nativeui)
+    add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
+    target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
+    nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
+    nativeui_enable_sanitizers(nativeui_header_${_header}_compile)
+  endforeach()
+
+  # Every completed feature ships an executable example. Compile every
+  # example source against the core even in platform-less CI so public API
+  # regressions are caught without requiring a display server.
+  foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)
+    add_library(nativeui_feature_example_${_example}_compile OBJECT examples/features/${_example}.cpp)
+    target_include_directories(nativeui_feature_example_${_example}_compile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
+    target_link_libraries(nativeui_feature_example_${_example}_compile PRIVATE NativeUI::Core)
+    nativeui_enable_project_warnings(nativeui_feature_example_${_example}_compile)
+    nativeui_enable_sanitizers(nativeui_feature_example_${_example}_compile)
+
+    if(NATIVEUI_BUILD_EXAMPLES AND NATIVEUI_BUILD_PLATFORM)
+      add_test(NAME nativeui_example_${_example}_self_test
+               COMMAND nativeui_example_${_example} --self-test)
+    endif()
+  endforeach()
+
+  # Compile the existing demo source against the umbrella header without
+  # linking a platform backend. This guards the public source-level API.
+  add_library(nativeui_demo_consumer_compile OBJECT examples/standalone.cpp)
+  target_link_libraries(nativeui_demo_consumer_compile PRIVATE NativeUI::Core)
+  nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
+  nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
+endif()

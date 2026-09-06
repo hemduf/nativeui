@@ -1,0 +1,13 @@
+# Normalize text consistently across macOS, Linux and Windows.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# C++ declarations and implementation fragments use Git's C++ diff driver.
+*.cpp diff=cpp
+*.hpp diff=cpp
+*.inc diff=cpp
+
+# P6 golden baselines contain binary pixels: never normalize their bytes.
+*.ppm binary
+*.zip binary
