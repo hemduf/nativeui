@@ -4,7 +4,7 @@
 
 This Privacy Policy explains how personal data may be processed by the NativeUI project and its licensor in connection with commercial licensing, support and NativeUI-operated online services.
 
-For the purposes of this policy, **Licensor** means Fabrizio Duhem, acting as the NativeUI licensor and project maintainer.
+For the purposes of this policy, **Licensor** means Fabrizio Duhem, acting as the NativeUI licensor and project maintainer. Where the Licensor determines the purposes and means of processing described in this policy, the Licensor acts as the **data controller** for that processing.
 
 ## 1. The NativeUI framework itself
 
