@@ -34,8 +34,13 @@ function(nativeui_enable_sanitizers target)
   endif()
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # The pinned skia-builder binaries are consumed as a third-party ABI
+    # boundary. UBSan's vptr instrumentation emits RTTI references for Skia
+    # polymorphic types which these prebuilt archives do not provide. Disable
+    # only that check while retaining ASan and the remaining UBSan coverage.
     target_compile_options(${target} PRIVATE
       -fsanitize=address,undefined
+      -fno-sanitize=vptr
       -fno-omit-frame-pointer
     )
     target_link_options(${target} PRIVATE
