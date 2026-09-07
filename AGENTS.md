@@ -108,6 +108,40 @@ This requirement is unconditional for ticket merges. Do not skip the `ROADMAP.md
 
 When creating or editing a ticket, preserve this section as the final section of the issue body.
 
+### 3.3 Mandatory ticket creation format
+
+Every new NativeUI GitHub issue must use the canonical work-item formalism defined by [`.github/ISSUE_TEMPLATE/work-item.yml`](.github/ISSUE_TEMPLATE/work-item.yml).
+
+This rule applies regardless of how the issue is created. Creating a ticket through the GitHub API, an agent, automation, migration script or another integration does **not** exempt it from the Issue Form schema. When the GitHub Issue Form UI is bypassed, reproduce the same fields, section order, defaults and mandatory completion/review content in the generated issue body.
+
+Every new ticket must contain, in this order:
+
+1. `Type` — `Feature`, `Bug`, `Platform`, `Infrastructure`, `Refactor` or `Research`;
+2. `Priority` — `P0`, `P1` or `P2`;
+3. `Milestone` — the applicable `M0`–`M8` milestone or `Backlog`;
+4. `Status` — `Ready`, `Doing` or `Blocked`, using section 3.1 semantics;
+5. `Dependencies` — explicit ticket dependencies only, or `None`;
+6. `Objective` — the observable result, not implementation detail;
+7. `Scope` — included work, relevant architectural constraints and explicit exclusions where useful;
+8. `Acceptance criteria` — observable/testable completion criteria;
+9. `Required tests` — targeted tests plus every applicable full-suite, feature-example, platform, headless or golden validation;
+10. `Implementation / scheduling note` — technical direction, blocker or dependency/parallelization rationale when useful;
+11. `Completion protocol` — the standard TDD, test, review, metadata, `CONTEXT.md` and `ROADMAP.md` completion checklist;
+12. `Mandatory code review record` — the structured `CODE_REVIEW.md` record required by section 5;
+13. `Merge requirement` — the mandatory final section from section 3.2.
+
+The title should use `TNNN — Short imperative title` for numbered roadmap work. Use a precise category prefix only for deliberately unnumbered incident/regression tickets, while still preserving the same body formalism.
+
+When creating a ticket programmatically:
+
+- do not invent a reduced or ad-hoc issue body;
+- do not omit review/test/completion sections because the task appears small;
+- keep dependencies explicit instead of inferring them from ticket number or milestone;
+- synchronize the selected priority/status with GitHub labels (`priority:P0|P1|P2`, `status:ready|doing|blocked`) and set the real GitHub milestone when applicable;
+- preserve the `## Merge requirement` section as the final section of the issue body.
+
+If the canonical issue form changes, update this section in the same change so `AGENTS.md` and `.github/ISSUE_TEMPLATE/work-item.yml` never define different ticket contracts.
+
 ## 4. Development workflow — TDD and small units
 
 For every behavioral change:
