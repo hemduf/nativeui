@@ -11,6 +11,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathBuilder.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
@@ -254,30 +255,30 @@ private:
     }
 
     [[nodiscard]] static SkPath to_sk_path(const Path& path) {
-        SkPath result;
+        SkPathBuilder builder;
         for (const auto& command : path.commands_) {
             switch (command.verb) {
                 case Path::Verb::Move:
-                    result.moveTo(command.a.x, command.a.y);
+                    builder.moveTo(command.a.x, command.a.y);
                     break;
                 case Path::Verb::Line:
-                    result.lineTo(command.a.x, command.a.y);
+                    builder.lineTo(command.a.x, command.a.y);
                     break;
                 case Path::Verb::Quad:
-                    result.quadTo(command.a.x, command.a.y,
-                                  command.b.x, command.b.y);
+                    builder.quadTo(command.a.x, command.a.y,
+                                   command.b.x, command.b.y);
                     break;
                 case Path::Verb::Cubic:
-                    result.cubicTo(command.a.x, command.a.y,
-                                   command.b.x, command.b.y,
-                                   command.c.x, command.c.y);
+                    builder.cubicTo(command.a.x, command.a.y,
+                                    command.b.x, command.b.y,
+                                    command.c.x, command.c.y);
                     break;
                 case Path::Verb::Close:
-                    result.close();
+                    builder.close();
                     break;
             }
         }
-        return result;
+        return builder.detach();
     }
 
     void restore_unchecked() {
