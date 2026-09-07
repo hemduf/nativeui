@@ -27,6 +27,12 @@ void draw_svg(Painter& painter, const SvgIcon& icon, Rect destination);
 /// exposed by this public API. Parsing may allocate and perform XML work; it is
 /// a resource-preparation/UI-domain operation, never a real-time audio callback
 /// operation.
+///
+/// V1 SVG resources are static and self-contained. NativeUI does not fetch
+/// external file/network resources or drive SVG animation. Rendering through
+/// `CanvasContext2D::draw_svg()` preserves the icon's intrinsic aspect ratio
+/// using a centered contain-style fit, clips to the supplied destination, and
+/// treats non-positive or non-finite destination rectangles as safe no-ops.
 class SvgIcon {
 public:
     SvgIcon() = default;
