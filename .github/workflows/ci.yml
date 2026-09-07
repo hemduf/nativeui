@@ -75,6 +75,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
+      # T028 regression: the mocked TextArea self-test cannot exercise the
+      # Pugl/NSPasteboard bridge. Run the real standalone clipboard path on
+      # macOS so an invalid pasteboard MIME/UTI fails CI instead of users.
+      - name: macOS clipboard smoke
+        if: runner.os == 'macOS'
+        run: ./build/nativeui_smoke_standalone
+
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
