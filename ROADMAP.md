@@ -110,7 +110,7 @@ Tickets: `T019`–`T024`.
 
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T026 complete; T027 validating)**
+**Status: In progress (T025–T027 implementation/review/required matrix complete; T028 next)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -132,7 +132,7 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025` and `T026` are complete. `T027` implementation/review is on draft PR #55 with deterministic embedded-font/fallback coverage and a dedicated feature example; merge remains gated on a green build/test run. Strict sequencing advances to `T028` only after T027 is validated, merged and closed.
+Progress: `T025` and `T026` are complete. `T027`'s implementation, deterministic embedded-font/fallback tests, feature example and review passes A/B/C are complete. GitHub Actions run #31 on code head `139f8a5` passed Linux X11, Windows/MSVC, Linux ASan+UBSan and macOS; PR #55 is now in its final recovery-document validation cycle. Strict sequencing advances to `T028` only after that final head is green, #55 is merged, #27 is closed `status:done`, and the T027 recovery ZIP is produced.
 
 ## Milestone 5 — Standard widget set
 
