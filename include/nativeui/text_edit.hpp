@@ -378,6 +378,7 @@ public:
 
     [[nodiscard]] bool insert(std::string_view incoming) {
         if (incoming.empty()) return false;
+        if (composition_active_) cancel_composition();
 
         const auto selected = text::codepoint_count(selected_text());
         const auto current = text::codepoint_count(text_);
