@@ -160,6 +160,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_drop_tests tests/drop_tests.cpp)
   nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
   nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
+  nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
   nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
   target_compile_definitions(nativeui_golden_tests PRIVATE
     NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
