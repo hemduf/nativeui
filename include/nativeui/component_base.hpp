@@ -119,6 +119,10 @@ public:
         painter_.line(a, b, width, color);
     }
 
+    void text(Point position, std::string_view text, const TextStyle& style) {
+        painter_.text(position, text, style);
+    }
+
     void text(Point position, std::string_view text, float size, Color color,
               TextAlign align = TextAlign::Left) {
         painter_.text(position, text, size, color, align);

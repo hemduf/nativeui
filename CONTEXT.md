@@ -1,12 +1,10 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-06
+**Updated:** 2026-09-07
 
-## Goal
+## Mission and architecture
 
-Generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. UI only: no DSP/audio and no plugin parameter model.
-
-## Current architecture
+NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. It owns declarative composition, component lifetime, layout, input/focus, generic state/binding, drawing/widgets, text editing, styling/invalidation/resources, packaging and tests. It does **not** own plugin APIs, audio/DSP, host parameter semantics or a custom native windowing layer.
 
 ```text
 Declarative C++ DSL
@@ -24,91 +22,67 @@ Pugl OpenGL view / event bridge
 ```
 
 - Windowing/embedding: Pugl.
-- Rendering: Skia Ganesh/OpenGL.
-- Headless Skia raster renderer is implemented for display-free pixel/golden tests.
-- Dependencies: CMake + CPM only.
-- Skia: prebuilt static artifacts from `olilarkin/skia-builder`.
-- Public coordinates: logical pixels.
-- Pugl native geometry/framebuffer: physical pixels; divide input/geometry by `puglGetScaleFactor()`, scale Skia canvas once.
+- Rendering: Skia Ganesh/OpenGL plus headless Skia raster rendering for display-free tests.
+- Third-party acquisition: CMake + CPM only.
+- Public coordinates are logical pixels; native geometry/framebuffer is physical pixels.
+- Widgets/layout stay platform-neutral and do not include Pugl/Win32/AppKit/Xlib headers.
 
 ## Pinned dependencies
 
-- Pugl repository: `lv2/pugl`
-- Pugl commit: `b7637149ebe53124e5be90559e02a0185bbcbd73`
-- skia-builder release: `chrome/m149`
-- macOS default asset: `skia-build-mac-universal-gpu-release.zip`
-- Windows: x64 `/MD` default, `/MT` selectable
-- Linux: x64 GPU release
+- Pugl: `lv2/pugl` commit `b7637149ebe53124e5be90559e02a0185bbcbd73`.
+- Skia: `olilarkin/skia-builder` release `chrome/m149`.
+- macOS Skia asset: `skia-build-mac-universal-gpu-release.zip`.
+- Windows: x64 MSVC `/MD` default, `/MT` selectable.
+- Linux: x64 GPU release.
 
-## Implemented today
+## Implemented baseline
 
-Core/runtime:
+Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
 
-- `State<T>` observable with RAII subscription;
-- declarative DSL compiled into runtime component tree;
-- `Row`, `Column`, `Stack`, `Padding`, `Spacer`;
-- focus traversal;
-- hit testing and logical pointer routing;
-- pointer capture at toolkit level;
-- separate layout/paint invalidation with bounded logical dirty-region aggregation;
-- generic `Painter`/`PaintContext` over Skia.
+Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel and interactive Canvas. T027 adds a platform-neutral font service with named family/weight/slant, embedded font aliases, ordered explicit fallback families and platform Unicode fallback. Measurement and painting share the same UTF-8 resolved-run path.
 
-Widgets:
+Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context.
 
-- `Header`;
-- `Label` / `TextLabel` with shared `TextStyle` + `TextService` measurement;
-- `Knob`;
-- `Toggle`;
-- `TextInput` with UTF-8 committed text, selection, caret, clipboard, undo/redo, word navigation, double/triple click, horizontal scrolling, placeholder, max length, submit, Escape/revert;
-- interactive `Canvas` with local `CanvasContext2D` and local input callback.
+Every feature ticket must ship `examples/features/tNNN_<feature>.cpp` with an interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
-Canvas demo:
+## Current sequential status
 
-- 16-step sequencer rendering;
-- click toggles steps;
-- click-drag paints/erases steps;
-- keyboard selection with Left/Right;
-- Space/Enter toggle;
-- Up adds;
-- Down/Backspace/Delete removes.
+Strict numeric sequencing from `AGENTS.md` is mandatory.
 
-Windowing:
+- Last fully closed ticket: **T026** — Text/Label component and centralized text measurement, PR #53 merged; real macOS arm64 Release CTest was **40/40** before advancing.
+- Current completion ticket: **T027** — font manager/fallback abstraction, issue #27, branch `feature/t027-font-manager`, draft PR #55.
+- T027 implementation, required tests and review passes A/B/C are complete.
+- Code head `139f8a5` fixed the Xcode 16.4 libc++ portability problem by using `std::atomic<std::shared_ptr<T>>` only when the specialization is available and falling back to the standard shared_ptr atomic load/store API otherwise. Registry readers still consume immutable snapshots without taking the registration mutex.
+- GitHub Actions run #31 on `139f8a5` is green on **Linux X11**, **Windows/MSVC**, **Linux ASan+UBSan**, and **macOS Intel/CoreText/AppKit**. The macOS lane configured, built and tested successfully.
+- This recovery-document update is part of T027's final completion commit sequence and therefore creates a new final head. **Do not merge PR #55 until the matrix for the resulting documentation head is also green.**
+- No T028 implementation has started.
+- After PR #55 is green/merged, close #27 as `status:done`, create/provide `nativeui_T027.zip`, then advance to **T028 — Add multiline TextArea**.
+- T041 exists ahead of sequence and must not be used to skip T028–T040.
 
-- `StandaloneWindow` uses `PUGL_PROGRAM`;
-- `EmbeddedView` uses `PUGL_MODULE` + native parent;
-- embedded `poll()` is non-blocking;
-- embedded size can be changed externally;
-- clipboard bridge through Pugl;
-- Ganesh resources are created/destroyed only while the Pugl GL context is active.
+## T027 implementation note
 
-Build:
+- `TextStyle` adds `family`, `fallback_families`, `FontSlant`, and numeric regular/bold Skia-compatible weights.
+- `FontManager` is public and platform-neutral; CoreText/DirectWrite/Fontconfig construction remains private in `src/skia_core.cpp`.
+- Embedded font registration owns/copies bytes and publishes immutable registry snapshots. Registration is serialized; normal measure/paint reads do not acquire that mutex.
+- Resolution per Unicode scalar: explicit primary -> ordered explicit fallbacks -> platform Unicode fallback -> best `.notdef` face.
+- Adjacent scalars using the same face are grouped into UTF-8 byte runs; `TextService::measure()` and `Painter::text()` use the same resolved layout.
+- Deterministic tiny test fonts prove primary `A` and fallback `Ω`/`日` selection, mixed-run measurement and painting.
+- `nativeui_example_t027_fonts --self-test` exercises platform default selection and a named fallback chain. Standalone/embedded smoke executables also probe platform font resolution when native smoke tests are enabled.
 
-- CPM fetches Pugl source and skia-builder binary asset;
-- Skia archive layout auto-detects both CPM-flattened and manual `build/` root layouts;
-- `SkFontMetrics.h` is explicitly included;
-- no direct macOS `gl3.h` include; Pugl owns platform GL headers/proc lookup.
+## T027 CI portability record
 
-## Known issue just addressed
+- UBSan `vptr` alone is disabled at the pinned prebuilt Skia ABI boundary; ASan and remaining UBSan checks stay enabled.
+- Linux LSan keeps `detect_leaks=1`; only Fontconfig's process-lifetime `FcFontRenderPrepare` allocation path is suppressed.
+- Windows CI explicitly uses MSVC to match `Skia.lib`; `NOMINMAX` prevents Win32 macro pollution in NativeUI C++ platform code.
+- `macos-15-intel` is used for the macOS lane because the pinned Skia artifact is universal and the arm64 hosted pool remained persistently queued.
+- Run #30 exposed the libc++ atomic-shared_ptr specialization gap; `139f8a5` fixed it and run #31 passed all four required lanes.
 
-Reverse focus must normalize macOS/AppKit BackTab (`U+0019`) to `Tab` with `shift=true`. Ensure this remains covered by tests when input translation is refactored.
+## Current limitations / next work
 
-## Feature example policy
-
-Every feature ticket must add a dedicated executable with `--self-test`. Existing M1/M2 features T007–T015 now have executables under `examples/features/`. Infrastructure-only T001–T006 are exempt.
-
-## Current limitations
-
-- constraints, Row/Column alignment/distribution, flex, Grid, clipping and generic Scroll layout are implemented; interactive ScrollView remains;
-- invalidation is not yet a full dirty-region system;
-- golden PPM baseline/diff tooling exists; broader rendering coverage remains;
-- pointer capture is toolkit-level only;
-- no multiline text / TextArea;
-- advanced IME composition/pre-edit/candidate positioning missing;
-- no standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets yet;
-- no centralized style/theme state system beyond basic colors/painting;
-- no accessibility layer;
-- no Wayland backend;
-- packaging/install/export and full host integration matrix remain incomplete; standalone/embedded smoke harness now exists.
+- T028/T029 still need multiline text/TextArea and advanced text-system work.
+- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain later milestones.
+- Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
+- Advanced IME composition/pre-edit/candidate positioning remains explicit future platform work.
 
 ## Build commands
 
@@ -119,7 +93,7 @@ ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
 
-Offline/local dependency overrides:
+Offline dependency overrides:
 
 ```bash
 cmake -S . -B build \
@@ -127,92 +101,16 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-## Recovery status
-
-- Milestones M0, M1 and M2 are complete; M4 text-system work is in progress.
-- Strict sequential workflow is now mandatory; priority may not skip numeric tickets.
-- Last completed sequential ticket: `T025` — reusable text edit model.
-- `T041` exists ahead of sequence and must not be used to skip T027–T040.
-- Current ticket: `T026` — Text/Label component and centralized text measurement; local real-Skia validation passes after the golden-test correction on `test/26-label-golden`. CI and merge remain pending before closing the ticket.
-- Next ticket after T026 is validated: `T027` — font manager/fallback abstraction.
-- Latest local baseline (2026-09-06, macOS arm64, real Skia): Release configure and build pass; CTest **40/40 pass**, including all 17 feature self-tests. Normal CTest preserves all golden baseline hashes. Native platform smoke execution remains opt-in and was not run.
-- Git source repository: [hemduf/nativeui](https://github.com/hemduf/nativeui), branch `main`. `.gitignore` excludes generated/local files, recovery ZIPs, `tickets/` and `TICKETS.md`; `.gitattributes` preserves binary PPM baselines and normalizes text. Source, tests, examples, CMake, CI and continuation documentation are versioned.
-- All 52 tickets live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue): 22 closed/completed, 30 open at import, with priority/status labels and nine roadmap milestones. GitHub is authoritative for ticket content and status. Optional ignored local copies are available on the original machine; a fresh clone resumes from GitHub without them. T026 remains Doing pending CI and merge; no later feature ticket has started.
-- Feature examples are mandatory; T026 adds `examples/features/t026_label.cpp` with `--self-test`.
-
-## T025 compact note
-
-- Public `ui::TextEditModel` lives in `include/nativeui/text_edit.hpp` and has no Skia/Pugl/platform dependency.
-- It owns UTF-8-safe cursor/selection byte offsets, word/codepoint/document navigation, insertion/deletion, max-length enforcement, word selection and bounded undo/redo.
-- `TextInputComponent` now owns only view behavior: focus snapshot, horizontal scrolling, pixel-to-byte hit testing, clipboard/platform requests and paint.
-- External `State<std::string>` updates call `model.set_text(..., preserve_selection=true, clear_history=true)`.
-- Escape revert uses `set_text(snapshot, preserve_selection=false, clear_history=false)`.
-
 ## Non-negotiable invariants
 
 - no plugin parameter/audio semantics in NativeUI;
 - no SDL/GLFW/Qt/JUCE/NanoVG;
 - widgets never depend on Pugl/Win32/AppKit/Xlib;
-- Pugl remains the default native view/event layer;
-- Skia remains the renderer;
-- dependencies are CMake + CPM;
-- Skia comes from skia-builder binaries, not a NativeUI Skia build pipeline;
-- adding a widget must not require a central component enum/switch.
+- Pugl remains the native view/event layer;
+- Skia remains the renderer and comes from pinned skia-builder binaries;
+- dependencies stay CMake + CPM;
+- a normal new widget must not require a central component enum/switch.
 
-## T017 compact note
+## Pugl reject-offer portability note
 
-- Portable commands: Copy/Cut/Paste/SelectAll/Undo/Redo.
-- `InputEvent::primary` is platform-normalized by Pugl (Command macOS, Ctrl Windows/Linux).
-- Command precedence: focused target -> nearest `CommandScope` -> outer scopes -> global UI handler.
-- TextInput consumes command events instead of raw primary-modifier keydowns.
-
-## T018 compact note
-
-- Drag/drop is distinct from clipboard paste.
-- `DropOffer` carries MIME types + logical position; `DropData` carries MIME + bytes + logical position.
-- Components accept/reject through neutral InputContext methods; Pugl details stay inside `pugl_skia.cpp`.
-
-## T019 compact note
-
-- `Painter` owns a tracked Skia save/restore depth with protected component scopes.
-- Every component paint is automatically isolated; leaked transforms are cleaned before siblings paint.
-- `push_clip/pop_clip` use the same tracked state stack.
-- `CanvasContext2D` coordinates are genuinely local: CanvasComponent establishes the bounds-origin translation before the callback, so scale/rotate/concat do not transform the Canvas layout position.
-- APIs: `save`, `restore`, `translate`, `scale`, `rotate(radians)`, `concat(Transform2D)`.
-
-## T024 compact note
-
-- Golden format: versioned binary PPM (`P6`) under `tests/golden/baselines/`.
-- Normal CTest is read-only with respect to baselines.
-- Explicit update: `nativeui_golden_tests --update-goldens` or CMake target `nativeui_update_goldens`.
-- Mismatch artifacts: `golden-artifacts/<name>.actual.ppm` and `.diff.ppm` with CI-readable stats.
-- Cross-platform policy: compare deterministic geometry interiors; exclude font pixels and unstable anti-aliased edges unless a ticket explicitly establishes tolerance.
-- Current golden cases: Canvas solid geometry, Row layout placement, Toggle geometry.
-
-## Pugl reject-offer portability hotfix
-
-- Pugl pinned at `b7637149...` declares `puglRejectOffer()` but only X11 defines it.
-- Never call `puglRejectOffer()` directly from portable NativeUI code. Use `reject_pugl_drop_offer()` in `pugl_skia_setup.inc`.
-- X11 uses explicit rejection; macOS/Windows rely on the native backend's unaccepted-offer rejection semantics.
-- This rule exists because a real macOS arm64 link failed with undefined `_puglRejectOffer`.
-
-## T041 compact note
-
-- `nativeui_smoke_standalone` exercises PUGL_PROGRAM construction, native handle, non-blocking poll, resize, close and teardown.
-- `nativeui_smoke_embedded` creates a real standalone parent then attaches a PUGL_MODULE child via the parent native handle; repeated child `poll()` calls are checked for non-blocking behavior.
-- `StandaloneWindow::last_error()` and `EmbeddedView::last_error()` expose runtime Pugl/renderer failures after successful construction. Constructor failures still throw with the precise Pugl stage.
-- CTest registration is opt-in with `-DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON`; tests carry labels `integration;platform;smoke` and a 20-second timeout.
-- Native smoke runtime was not executed in the artifact container because it has no desktop session; run it on macOS/Windows/Linux X11 before release.
-
-## T026 compact note
-
-- Public text styling/measurement lives in `include/nativeui/text.hpp`: `TextStyle`, `TextMetrics`, `TextService`, `TextAlign`, `FontWeight`.
-- `Label` is the reusable single-line text widget; wrapping remains off/out of scope. `TextLabel` is an alias.
-- `Painter::text()` consumes `TextStyle`; `Painter::measure_text()` delegates to `TextService`.
-- `Header` now uses the same shared text style/measurement path without changing its intended regular-weight title appearance.
-- Golden text policy remains cross-platform: exclude platform-shaped glyph interiors and compare deterministic scene geometry; measurement consistency is tested separately.
-
-
-### Current validation gate (T026)
-
-Local real-Skia CTest reaches 40/40 on `test/26-label-golden`. The old Label reference used an incorrect gray background and contained no glyphs, while its comparison stripe intersected system text. The corrected scene clips Label text to a fixed box, compares 3360 deterministic pixels outside text, and uses a reviewed real-Skia baseline. Mask regressions still reject geometry changes; Label tests independently verify visible colored text and left/center/right placement. Runtime/library code and the other three baselines are unchanged. CI and merge are still required before closing T026 and advancing to T027.
+Pinned Pugl declares `puglRejectOffer()` but only X11 defines it. Portable NativeUI code must use `reject_pugl_drop_offer()` in `pugl_skia_setup.inc`: X11 rejects explicitly; macOS/Windows rely on native unaccepted-offer semantics.

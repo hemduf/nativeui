@@ -50,6 +50,14 @@ void painted_alignment() {
 }
 
 void suite() {
+    // T027 regression: the public platform-neutral font service must resolve
+    // the same default system used by the shared measurement/painting path.
+    ui::TextStyle selection{};
+    const auto default_font = ui::FontManager::match(selection, U'A');
+    NUI_CHECK(default_font);
+    NUI_CHECK(default_font.glyph_available);
+    NUI_CHECK(!default_font.family.empty());
+
     painted_alignment();
     ui::TextStyle style{};
     style.size = 18.0f;
