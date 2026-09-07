@@ -169,6 +169,39 @@ bool verify_toggle(bool update) {
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+bool verify_paths(bool update) {
+    ui::Path fill;
+    fill.move_to({2.0f, 2.0f})
+        .line_to({10.0f, 2.0f})
+        .line_to({10.0f, 14.0f})
+        .line_to({2.0f, 14.0f})
+        .close();
+
+    ui::Path stroke;
+    stroke.move_to({14.0f, 8.0f}).line_to({22.0f, 8.0f});
+
+    ui::UI tree{
+        ui::Canvas{24.0f, 16.0f, [fill, stroke](ui::CanvasContext2D& g) {
+            g.fill_path(fill, {1.0f, 0.0f, 0.0f, 1.0f});
+            g.stroke_path(stroke, {0.0f, 1.0f, 0.0f, 1.0f},
+                          ui::StrokeStyle{4.0f, ui::StrokeCap::Butt,
+                                          ui::StrokeJoin::Miter});
+        }}
+    };
+    ui::HeadlessRenderer renderer{{24.0f, 16.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    CompareOptions options;
+    options.channel_tolerance = 1;
+    // Compare only solid interiors, away from anti-aliased path edges.
+    options.compare_regions = {
+        Region{4, 4, 4, 6},
+        Region{16, 7, 4, 2},
+    };
+    return test::golden::verify(
+        "path_scene", test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
+}
 
 bool verify_label(bool update) {
     ui::UI tree{
@@ -206,6 +239,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_canvas(update));
     NUI_CHECK(verify_layout(update));
     NUI_CHECK(verify_toggle(update));
+    NUI_CHECK(verify_paths(update));
     NUI_CHECK(verify_label(update));
     return 0;
 }

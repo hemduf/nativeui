@@ -8,6 +8,8 @@
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>
+#include <nativeui/path.hpp>
+#include <nativeui/image.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/component.hpp>
 #include <nativeui/command.hpp>
