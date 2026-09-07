@@ -21,8 +21,9 @@ include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
-# Skia's SVG DOM also references primitive text shaping even for SVGs without
-# text nodes, so keep static link order `svg`, `skshaper`, then `skia`.
+# Skia's SVG DOM references text shaping even for SVGs without text nodes, and
+# skshaper in turn references the packaged SkUnicode ICU implementation. Keep
+# the Unix static-link dependency order from users toward providers.
 find_library(NATIVEUI_SKIA_SVG_LIBRARY
   NAMES svg
   PATHS "${_skia_lib_dir}"
@@ -35,12 +36,24 @@ find_library(NATIVEUI_SKIA_SHAPER_LIBRARY
   NO_DEFAULT_PATH
   REQUIRED
 )
+find_library(NATIVEUI_SKIA_UNICODE_ICU_LIBRARY
+  NAMES skunicode_icu
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(NATIVEUI_SKIA_UNICODE_CORE_LIBRARY
+  NAMES skunicode_core
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
 add_library(SkiaBuilder::svg STATIC IMPORTED GLOBAL)
 set_target_properties(SkiaBuilder::svg PROPERTIES
   IMPORTED_LOCATION "${NATIVEUI_SKIA_SVG_LIBRARY}"
 )
 set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-  "${NATIVEUI_SKIA_SHAPER_LIBRARY};SkiaBuilder::skia")
+  "${NATIVEUI_SKIA_SHAPER_LIBRARY};${NATIVEUI_SKIA_UNICODE_ICU_LIBRARY};${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY};SkiaBuilder::skia")
 
 function(nativeui_enable_project_warnings target)
   if(MSVC)
