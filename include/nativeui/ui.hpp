@@ -7,6 +7,13 @@
 
 namespace ui {
 
+/// One retained NativeUI component tree.
+///
+/// UI is intentionally confined to the host/platform UI thread. Its retained
+/// tree, focus/input routing, invalidation, layout and painting APIs are not
+/// synchronized and must not be called directly from a VST3/CLAP audio or
+/// worker thread. Plug-in adapters must transfer cross-thread state through an
+/// explicitly reviewed thread-safe bridge and apply it from the UI domain.
 class UI {
 public:
     template <class Root>
