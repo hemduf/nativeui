@@ -56,20 +56,22 @@ Rendering includes backend-neutral paths, gradients/paint styles and decoded ima
 
 Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior.
 
-Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context.
+Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context. General text clipboard writes use canonical `text/plain`; this is required by the pinned Pugl macOS MIME→UTI mapping and avoids passing a nil UTI to `NSPasteboard`.
 
 Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
 ## Current work and DAG frontier
 
 - Last completed feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
+- T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
+- The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
 - **T023 — SVG/icon resources** remains `Doing` in draft PR #60. Current head is `b36896641c30c4b8debea2ed669a22ed9ca2e5d6`; CI run #137 is pending on that head. T023 is independent and must not block other Ready work.
 
 Ready now:
 
 - P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package.
 - P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
-- Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation.
+- Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
 - P2: **T046** Wayland strategy/prototype.
 
 Important explicit dependency chains:
@@ -90,7 +92,7 @@ Recommended lane allocation while T023 is only waiting on CI:
 2. release path: T047 -> T048;
 3. robustness/performance path: T042 -> T051.
 
-T029/T033/T043/T044/T046 are valid independent fallback work whenever a lane is free or another branch is waiting on external validation.
+T029/T033/T043/T044/T046 and #64 are valid independent fallback work whenever a lane is free or another branch is waiting on external validation.
 
 ## T022 implementation notes retained for recovery
 
@@ -115,6 +117,7 @@ T029/T033/T043/T044/T046 are valid independent fallback work whenever a lane is 
 
 - T023 SVG/icon resources are not merged yet.
 - T029 advanced IME composition remains to be implemented.
+- Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 
