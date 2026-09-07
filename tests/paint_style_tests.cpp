@@ -79,10 +79,44 @@ void radial_gradient() {
     NUI_CHECK(edge.r < 80 && edge.g < 80 && edge.b < 80);
 }
 
+void opacity_and_blend_modes() {
+    const ui::LinearGradient white{
+        {0.0f, 0.0f}, {16.0f, 0.0f},
+        {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}};
+    const ui::LinearGradient multiply_color{
+        {16.0f, 0.0f}, {32.0f, 0.0f},
+        {0.5f, 0.5f, 1.0f, 1.0f}, {0.5f, 0.5f, 1.0f, 1.0f}};
+
+    ui::UI tree{
+        ui::Canvas{32.0f, 8.0f, [white, multiply_color](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, {0.0f, 0.0f, 0.0f, 1.0f});
+            g.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, white,
+                        ui::PaintOptions{0.25f, ui::BlendMode::SourceOver});
+
+            g.fill_rect({16.0f, 0.0f, 16.0f, 8.0f}, {0.8f, 0.5f, 0.25f, 1.0f});
+            g.fill_rect({16.0f, 0.0f, 16.0f, 8.0f}, multiply_color,
+                        ui::PaintOptions{1.0f, ui::BlendMode::Multiply});
+        }}
+    };
+    ui::HeadlessRenderer renderer{{32.0f, 8.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    const auto translucent = renderer.pixel(8, 4);
+    NUI_CHECK(translucent.r > 45 && translucent.r < 85);
+    NUI_CHECK(translucent.g > 45 && translucent.g < 85);
+    NUI_CHECK(translucent.b > 45 && translucent.b < 85);
+
+    const auto multiplied = renderer.pixel(24, 4);
+    NUI_CHECK(multiplied.r > 80 && multiplied.r < 125);
+    NUI_CHECK(multiplied.g > 45 && multiplied.g < 90);
+    NUI_CHECK(multiplied.b > 45 && multiplied.b < 90);
+}
+
 void suite() {
     two_stop_linear_gradient();
     multi_stop_linear_gradient();
     radial_gradient();
+    opacity_and_blend_modes();
 }
 
 } // namespace
