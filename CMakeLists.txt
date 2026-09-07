@@ -20,6 +20,22 @@ endif()
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
+# T023 consumes the SVG module shipped beside the pinned skia-builder archive.
+# Keep it as an imported target with Skia as its transitive dependency so static
+# link order is `svg` then `skia` on Unix-like toolchains.
+find_library(NATIVEUI_SKIA_SVG_LIBRARY
+  NAMES svg
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+add_library(SkiaBuilder::svg STATIC IMPORTED GLOBAL)
+set_target_properties(SkiaBuilder::svg PROPERTIES
+  IMPORTED_LOCATION "${NATIVEUI_SKIA_SVG_LIBRARY}"
+)
+set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+  SkiaBuilder::skia)
+
 function(nativeui_enable_project_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive-)
@@ -60,6 +76,7 @@ endfunction()
 add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
+  src/skia_svg.cpp
   src/headless.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
@@ -68,7 +85,7 @@ target_include_directories(nativeui_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 target_compile_features(nativeui_core PUBLIC cxx_std_20)
-target_link_libraries(nativeui_core PUBLIC SkiaBuilder::skia)
+target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
 
