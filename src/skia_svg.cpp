@@ -6,6 +6,7 @@
 #include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 
+#include <algorithm>
 #include <cmath>
 #include <locale>
 #include <memory>
@@ -146,13 +147,21 @@ void draw_svg(Painter& painter, const SvgIcon& icon, Rect destination) {
         return;
     }
 
+    const float scale = std::min(destination.w / data->intrinsic.w,
+                                 destination.h / data->intrinsic.h);
+    if (!std::isfinite(scale) || scale <= 0.0f) return;
+
+    const float rendered_w = data->intrinsic.w * scale;
+    const float rendered_h = data->intrinsic.h * scale;
+    const float offset_x = (destination.w - rendered_w) * 0.5f;
+    const float offset_y = (destination.h - rendered_h) * 0.5f;
+
     auto& canvas = painter.canvas();
     canvas.save();
     canvas.clipRect(SkRect::MakeXYWH(
         destination.x, destination.y, destination.w, destination.h));
-    canvas.translate(destination.x, destination.y);
-    canvas.scale(destination.w / data->intrinsic.w,
-                 destination.h / data->intrinsic.h);
+    canvas.translate(destination.x + offset_x, destination.y + offset_y);
+    canvas.scale(scale, scale);
     data->dom->render(&canvas);
     canvas.restore();
 }
