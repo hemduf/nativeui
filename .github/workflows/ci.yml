@@ -21,8 +21,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The standard arm64 macOS pool has been persistently queued for this
+          # repository while Linux/Windows jobs complete. The pinned Skia
+          # artifact is universal, so use the standard Intel macOS 15 runner to
+          # retain macOS/CoreText/AppKit coverage without depending on scarce
+          # arm64 runner capacity.
           - name: macOS
-            os: macos-latest
+            os: macos-15-intel
           - name: Windows
             os: windows-latest
           - name: Linux X11
