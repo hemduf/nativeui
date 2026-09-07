@@ -37,7 +37,7 @@ Pugl OpenGL view / event bridge
 
 ## Scheduling model
 
-NativeUI now uses dependency-driven scheduling. GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are not implicit dependencies.
+NativeUI uses dependency-driven scheduling. GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are not implicit dependencies.
 
 - `Ready`: all explicit dependencies are Done and no real external blocker exists.
 - `Doing`: implementation/review/validation is active.
@@ -58,18 +58,21 @@ Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditM
 
 Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context. General text clipboard writes use canonical `text/plain`; this is required by the pinned Pugl macOS MIME→UTI mapping and avoids passing a nil UTI to `NSPasteboard`.
 
+The cross-cutting plugin-host safety baseline from #62/PR #63 is now merged. `StandaloneWindow` and `EmbeddedView` are non-movable because their internals retain stable back-references; embedded-font aliases are immutable-by-alias within the process-shared registry; retained UI/platform/resource APIs have explicit UI/resource-preparation thread contracts; and macOS platform builds require a consumer/plugin-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` so the statically linked Pugl Objective-C runtime classes do not collide between plug-in/application consumers.
+
 Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
 ## Current work and DAG frontier
 
+- Last completed cross-cutting safety ticket: **#62 — plugin-host CODE_REVIEW revalidation**. PR #63 exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 (`34103924635`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. macOS additionally passed the two-consumer Objective-C runtime-isolation check and the clipboard/multi-instance lifecycle smoke. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
 - Last completed feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
 - T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
 - The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
-- **T023 — SVG/icon resources** remains `Doing` in draft PR #60. Current head is `b36896641c30c4b8debea2ed669a22ed9ca2e5d6`; CI run #137 is pending on that head. T023 is independent and must not block other Ready work.
+- **T023 — SVG/icon resources** remains `Doing` in draft PR #60. Its prior exact head was green; after #63 it must now be synchronized with current `main`, preserving the plugin-host/runtime-prefix contracts, then rerun the exact final-head matrix before merge.
 
 Ready now:
 
-- P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package.
+- P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, **T053** consumer-scoped macOS Pugl/Objective-C bridge.
 - P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
 - Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
 - P2: **T046** Wayland strategy/prototype.
@@ -84,15 +87,12 @@ T030 + T031 + T032 + T036 -> T045
 T030 + T032 + T034 + T035 + T036 -> T049
 T042 -> T051 -> T052
 T047 -> T048 -> T052
+#62 -> T053
+T047 + T053 -> T054
+T047 -> T056 -> T057
 ```
 
-Recommended lane allocation while T023 is only waiting on CI:
-
-1. widget critical path: T030, then T032/T034 according to merge/conflict state;
-2. release path: T047 -> T048;
-3. robustness/performance path: T042 -> T051.
-
-T029/T033/T043/T044/T046 and #64 are valid independent fallback work whenever a lane is free or another branch is waiting on external validation.
+Recommended next increment: synchronize **T023 / PR #60** with current `main`, resolve any overlap with the #62 safety changes without weakening its `CODE_REVIEW.md` record, and let the exact synchronized head run the required CI matrix. If that PR is waiting only on CI afterward, use an independent Ready P0 lane (T042, T047 or T053) on a later run.
 
 ## T022 implementation notes retained for recovery
 
@@ -130,6 +130,15 @@ ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
 
+On macOS platform builds, provide a consumer/application/plugin-specific Objective-C runtime prefix, normally derived from the final bundle identifier:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
+```
+
+Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) do not require the prefix.
+
 Offline dependency overrides:
 
 ```bash
@@ -146,7 +155,9 @@ cmake -S . -B build \
 - Pugl remains the native view/event layer;
 - Skia remains the renderer and comes from pinned skia-builder binaries;
 - dependencies stay CMake + CPM;
-- a normal new widget must not require a central component enum/switch.
+- a normal new widget must not require a central component enum/switch;
+- mutable instance-dependent process-global/singleton/thread-local state is forbidden;
+- macOS runtime-visible classes in the statically linked platform bridge must use a consumer/plugin-specific collision-resistant prefix.
 
 ## Pugl reject-offer portability note
 
