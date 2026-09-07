@@ -178,6 +178,24 @@ void external_edit_cancels_active_composition() {
     NUI_CHECK(model.text() == "hXo");
 }
 
+void selection_erase_cancels_active_composition() {
+    ui::TextEditModel model{"hello"};
+    model.select_range(1, 4);
+    model.begin_composition();
+    model.update_composition("仮", 3, 0);
+
+    // Selection deletion is another committed edit path. It must first cancel
+    // transient preedit state using the same deterministic composition path.
+    NUI_CHECK(model.erase_selection());
+    NUI_CHECK(!model.composition_active());
+    NUI_CHECK(model.composition_text().empty());
+    NUI_CHECK(model.text() == "ho");
+
+    // A stale native commit after the deletion must remain inert.
+    NUI_CHECK(!model.commit_composition("日本"));
+    NUI_CHECK(model.text() == "ho");
+}
+
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
@@ -187,6 +205,7 @@ void suite() {
     composition_is_transient_until_single_commit();
     composition_cancel_preserves_committed_text();
     external_edit_cancels_active_composition();
+    selection_erase_cancels_active_composition();
 }
 
 } // namespace
