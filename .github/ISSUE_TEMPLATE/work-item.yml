@@ -1,0 +1,165 @@
+name: NativeUI work item
+description: Canonical form for every new NativeUI engineering ticket
+title: "Txxx — "
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: Classify the work item by its primary purpose.
+      options:
+        - Feature
+        - Bug
+        - Platform
+        - Infrastructure
+        - Refactor
+        - Research
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0
+        - P1
+        - P2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      options:
+        - M0
+        - M1
+        - M2
+        - M3
+        - M4
+        - M5
+        - M6
+        - M7
+        - M8
+        - Backlog
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Follow the dependency-driven status semantics from AGENTS.md.
+      options:
+        - Ready
+        - Doing
+        - Blocked
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: List explicit ticket dependencies only. Use "None" when the ticket is independent.
+      placeholder: "T025, T028 — complete"
+      value: "None"
+    validations:
+      required: true
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Describe the observable outcome, not the implementation details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Define what is included, important architectural constraints, and explicit exclusions when useful.
+      value: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use observable and testable completion criteria.
+      value: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required tests
+      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering check.
+      value: |
+        - [ ] Targeted regression/unit tests.
+        - [ ] Full relevant test suite.
+        - [ ] Dedicated feature executable + `--self-test` when applicable.
+        - [ ] Platform/headless/golden tests when applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation / scheduling note
+      description: Record the intended technical direction, important constraints, dependency rationale, blocker, or parallelization note when useful.
+
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion protocol
+      value: |
+        - [ ] Run targeted tests.
+        - [ ] Run the full relevant test suite.
+        - [ ] Run required platform/headless/golden tests.
+        - [ ] Perform all applicable review passes from `AGENTS.md`.
+        - [ ] Perform the mandatory final review against `CODE_REVIEW.md` and record the result in the issue/PR.
+        - [ ] Explicitly assess multi-instance isolation and mutable globals/statics.
+        - [ ] Explicitly assess threading/RT boundaries and lifetime/reentrancy.
+        - [ ] Assess Objective-C runtime names/prefixing plus category/ARC/AppKit rules when applicable.
+        - [ ] Resolve every blocking `CODE_REVIEW.md` finding before merge/Done.
+        - [ ] Update issue status/labels and milestone metadata.
+        - [ ] Update `CONTEXT.md` with current state and next recommended ticket.
+        - [ ] Update `ROADMAP.md` in the merge/completion cycle.
+    validations:
+      required: true
+
+  - type: textarea
+    id: review_record
+    attributes:
+      label: Mandatory code review record
+      description: Complete before merge/Done. Follow CODE_REVIEW.md and record applicable evidence/findings/corrections.
+      value: |
+        - **CODE_REVIEW.md:** pending
+        - **Instance isolation:** pending
+        - **Globals/statics:** pending
+        - **Threading/RT:** pending
+        - **Lifetime/reentrancy:** pending
+        - **Objective-C runtime:** pending / not applicable
+        - **Platform integration:** pending
+        - **Tests:** pending
+        - **Remaining blocking findings:** pending
+    validations:
+      required: true
+
+  - type: textarea
+    id: merge_requirement
+    attributes:
+      label: Merge requirement
+      value: |
+        **Mandatory:** when the implementation for this ticket is merged, update `ROADMAP.md` in the same merge/completion cycle so it reflects the ticket's final status, delivered scope, dependency frontier and milestone progress.
+    validations:
+      required: true
