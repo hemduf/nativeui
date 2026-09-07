@@ -137,8 +137,3 @@ const std::vector<std::uint8_t>& HeadlessRenderer::rgba_pixels() const noexcept 
 Rgba8 HeadlessRenderer::pixel(int x, int y) const { return impl_->pixel(x, y); }
 
 } // namespace ui
-
-// Keep Skia image decoding/drawing in the Core target without exposing Skia
-// ownership through the public Image handle. This private implementation unit
-// is compiled exactly once as part of headless.cpp.
-#include "skia_image.inc"
