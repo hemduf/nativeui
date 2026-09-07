@@ -110,7 +110,7 @@ Tickets: `T019`–`T024`.
 
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T027 implementation/review/required matrix complete; T028 next)**
+**Status: In progress (T025–T027 complete; T028 next)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -132,7 +132,7 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025` and `T026` are complete. `T027`'s implementation, deterministic embedded-font/fallback tests, feature example and review passes A/B/C are complete. GitHub Actions run #31 on code head `139f8a5` passed Linux X11, Windows/MSVC, Linux ASan+UBSan and macOS; PR #55 is now in its final recovery-document validation cycle. Strict sequencing advances to `T028` only after that final head is green, #55 is merged, #27 is closed `status:done`, and the T027 recovery ZIP is produced.
+Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. Strict sequencing now advances to `T028 — Add multiline TextArea`.
 
 ## Milestone 5 — Standard widget set
 
