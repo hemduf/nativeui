@@ -32,10 +32,12 @@ public:
 };
 
 bool quadrants_rendered(const ui::HeadlessRenderer& renderer) {
-    const auto red = renderer.pixel(3, 2);
-    const auto green = renderer.pixel(20, 2);
-    const auto blue = renderer.pixel(3, 9);
-    const auto white = renderer.pixel(20, 9);
+    // The 2x2 square SVG is drawn into a 24x12 destination using the public
+    // centered contain-fit contract, so the rendered content occupies x=6..18.
+    const auto red = renderer.pixel(8, 2);
+    const auto green = renderer.pixel(15, 2);
+    const auto blue = renderer.pixel(8, 9);
+    const auto white = renderer.pixel(15, 9);
     return red.r > 200 && red.g < 40 && red.b < 40 &&
            green.g > 200 && green.r < 40 && green.b < 40 &&
            blue.b > 200 && blue.r < 40 && blue.g < 40 &&
@@ -63,7 +65,7 @@ int main(int argc, char** argv) {
         ui::HeadlessRenderer renderer{{24.0f, 12.0f}, 1.0f};
         if (!renderer.render(tree)) return example::fail("headless SVG render failed");
         if (!quadrants_rendered(renderer)) {
-            return example::fail("arbitrary-size SVG scaling changed quadrant colors");
+            return example::fail("centered contain-fit SVG rendering changed quadrant colors");
         }
         return 0;
     }
@@ -76,7 +78,7 @@ int main(int argc, char** argv) {
                 g.draw_svg(icon, {24.0f, 30.0f, 80.0f, 80.0f});
                 g.draw_svg(icon, {150.0f, 30.0f, 150.0f, 80.0f});
                 g.draw_svg(icon, {350.0f, 30.0f, 80.0f, 160.0f});
-                g.text({24.0f, 225.0f}, "Parsed once, cached, then rendered at arbitrary logical sizes",
+                g.text({24.0f, 225.0f}, "Parsed once, cached, aspect-preserving render at arbitrary logical sizes",
                        11.0f, ui::colors::textMuted);
             }}
         }.padding(20.0f).gap(12.0f));
