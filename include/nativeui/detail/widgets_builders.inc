@@ -240,4 +240,40 @@ private:
 };
 
 
+class TextArea {
+public:
+    TextArea(std::string label, State<std::string>& state)
+        : label_(std::move(label)), state_(&state) {}
+
+    TextArea&& placeholder(std::string value) && {
+        placeholder_ = std::move(value);
+        return std::move(*this);
+    }
+
+    TextArea&& max_length(std::size_t value) && {
+        max_length_ = value;
+        return std::move(*this);
+    }
+
+    Spec spec() && {
+        auto label = std::move(label_);
+        auto placeholder = std::move(placeholder_);
+        auto* state = state_;
+        const auto max_length = max_length_;
+        return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
+                     max_length]() mutable {
+                        return std::make_unique<TextAreaComponent>(
+                            std::move(label), *state, std::move(placeholder), max_length);
+                    },
+                    {}};
+    }
+
+private:
+    std::string label_;
+    State<std::string>* state_{};
+    std::string placeholder_;
+    std::size_t max_length_{};
+};
+
+
 } // namespace ui
