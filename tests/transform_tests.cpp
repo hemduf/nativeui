@@ -82,6 +82,28 @@ void suite() {
         NUI_CHECK(red(renderer.pixel(18, 4)));
         NUI_CHECK(!red(renderer.pixel(4, 4)));
     }
+
+    // T020 red unit: arbitrary paths remain local to Canvas transforms and do
+    // not expose backend-specific geometry to the caller.
+    {
+        ui::Path path;
+        path.move_to({0.0f, 0.0f})
+            .line_to({12.0f, 0.0f})
+            .line_to({12.0f, 12.0f})
+            .close();
+
+        ui::UI tree{
+            ui::Padding{10.0f,
+                ui::Canvas{30.0f, 30.0f, [path](ui::CanvasContext2D& g) {
+                    g.translate(5.0f, 5.0f);
+                    g.fill_path(path, {1.0f, 0.0f, 0.0f, 1.0f});
+                }}}
+        };
+        ui::HeadlessRenderer renderer{{50.0f, 50.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(20, 18)));
+        NUI_CHECK(!red(renderer.pixel(8, 8)));
+    }
 }
 
 } // namespace
