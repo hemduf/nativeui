@@ -23,9 +23,9 @@ CompareOptions label_compare_options() {
     CompareOptions options;
     options.channel_tolerance = 2;
     options.compare_regions = {
-        Region{8, 4, 204, 16},
-        Region{8, 35, 12, 4},
-        Region{200, 35, 12, 4},
+        Region{8, 4, 204, 16}, // background above the fixed Label clip
+        Region{8, 35, 12, 4},  // stripe left of the Label clip
+        Region{200, 35, 12, 4}, // stripe right of the Label clip
     };
     return options;
 }
@@ -34,6 +34,8 @@ void label_mask_self_check() {
     test::golden::Image expected{220, 80, std::vector<std::uint8_t>(220 * 80 * 3, 0)};
     auto actual = expected;
     const auto options = label_compare_options();
+    // The scene clips the Label to this fixed box. System glyphs may change
+    // anywhere inside it, and the framework footer also contains system text.
     for (const auto region : {Region{24, 24, 172, 32}, Region{0, 50, 220, 30}}) {
         for (int y = region.y; y < region.y + region.h; ++y) {
             for (int x = region.x; x < region.x + region.w; ++x) {
@@ -43,6 +45,8 @@ void label_mask_self_check() {
     }
     NUI_CHECK(test::golden::compare(expected, actual, options).matched);
 
+    // Ignoring glyphs must still catch changes to the background and both
+    // ends of the stripe, rather than making this a vacuous comparison.
     for (const auto point : {ui::Point{8, 4}, ui::Point{10, 36}, ui::Point{210, 36}}) {
         auto changed = expected;
         const auto offset = (static_cast<int>(point.y) * changed.width +
@@ -112,6 +116,8 @@ bool verify_canvas(bool update) {
 
     CompareOptions options;
     options.channel_tolerance = 1;
+    // Exclude the framework footer at the bottom; the upper area is pure
+    // geometry and should be bit-stable across platforms.
     options.compare_regions = {Region{4, 4, 56, 24}};
     return test::golden::verify(
         "canvas_solid", test::golden::from_renderer(renderer),
@@ -150,10 +156,13 @@ bool verify_toggle(bool update) {
     if (!renderer.render(tree)) return false;
 
     CompareOptions options;
+    // Only compare geometry interiors, away from anti-aliased rounded edges and
+    // away from text. This is the cross-platform tolerance policy for widgets
+    // that contain platform-shaped glyphs.
     options.channel_tolerance = 3;
     options.compare_regions = {
-        Region{154, 22, 10, 10},
-        Region{176, 23, 7, 8},
+        Region{154, 22, 10, 10}, // accent track interior
+        Region{176, 23, 7, 8},   // white knob interior
     };
     return test::golden::verify(
         "toggle_on", test::golden::from_renderer(renderer),
@@ -184,6 +193,7 @@ bool verify_paths(bool update) {
 
     CompareOptions options;
     options.channel_tolerance = 1;
+    // Compare only solid interiors, away from anti-aliased path edges.
     options.compare_regions = {
         Region{4, 4, 4, 6},
         Region{16, 7, 4, 2},
@@ -199,6 +209,8 @@ bool verify_label(bool update) {
             ui::Canvas{220.0f, 80.0f, [](ui::CanvasContext2D& g) {
                 g.fill_rect({0.0f, 34.0f, g.width(), 6.0f}, ui::colors::accent);
             }},
+            // A fixed clip keeps even unusually wide/tall fallback glyphs out
+            // of the geometry comparison regions on every platform.
             ui::Padding{24.0f,
                 ui::Clip{ui::Stack{
                     ui::Spacer{172.0f, 32.0f},
@@ -211,6 +223,9 @@ bool verify_label(bool update) {
     ui::HeadlessRenderer renderer{{220.0f, 80.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
+    // Glyph rasterization varies with CoreText/DirectWrite/Fontconfig. The
+    // deterministic stripe and background are compared here while label
+    // measurement/paint consistency is covered by nativeui_label_tests.
     const auto options = label_compare_options();
     return test::golden::verify(
         "label_scene", test::golden::from_renderer(renderer),
