@@ -2,6 +2,43 @@
 
 namespace {
 
+ui::InputEvent composition(
+    ui::CompositionType type,
+    std::string text = {},
+    std::size_t cursor_byte = 0,
+    std::size_t selection_bytes = 0) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::Composition;
+    event.composition.type = type;
+    event.composition.text = std::move(text);
+    event.composition.cursor_byte = cursor_byte;
+    event.composition.selection_bytes = selection_bytes;
+    return event;
+}
+
+void synthetic_ime_composition_is_transient_and_single_commit() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 6, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello日本");
+
+    // A committed IME composition is one logical history transaction.
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "hello");
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -69,6 +106,8 @@ void suite() {
     tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 50.0f, 3), platform);
     tree.dispatch(test::key(ui::Key::C, false, true), platform);
     NUI_CHECK(platform.clipboard == "Pasted");
+
+    synthetic_ime_composition_is_transient_and_single_commit();
 }
 
 } // namespace
