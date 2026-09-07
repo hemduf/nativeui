@@ -166,8 +166,8 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
     std::size_t begin,
     std::size_t end,
     std::size_t column) noexcept {
-    begin = clamp_boundary(value, std::min(begin, value.size()));
-    end = clamp_boundary(value, std::min(end, value.size()));
+    begin = text::clamp_boundary(value, std::min(begin, value.size()));
+    end = text::clamp_boundary(value, std::min(end, value.size()));
     std::size_t i = std::min(begin, end);
     std::size_t current = 0;
     while (i < end && current < column) {
@@ -400,6 +400,7 @@ public:
 
     [[nodiscard]] bool erase_selection() {
         if (!has_selection()) return false;
+        if (composition_active_) cancel_composition();
         checkpoint();
         erase_selection_untracked();
         return true;
