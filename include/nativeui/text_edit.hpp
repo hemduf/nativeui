@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -138,6 +139,44 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
     return {begin, end};
 }
 
+[[nodiscard]] inline std::size_t line_start(std::string_view value, std::size_t index) noexcept {
+    std::size_t i = clamp_boundary(value, std::min(index, value.size()));
+    while (i > 0) {
+        const auto previous = previous_codepoint(value, i);
+        if (value[previous] == '\n') break;
+        i = previous;
+    }
+    return i;
+}
+
+[[nodiscard]] inline std::size_t line_end(std::string_view value, std::size_t index) noexcept {
+    std::size_t i = clamp_boundary(value, std::min(index, value.size()));
+    while (i < value.size() && value[i] != '\n') i = next_codepoint(value, i);
+    return i;
+}
+
+[[nodiscard]] inline std::size_t line_column(std::string_view value, std::size_t index) noexcept {
+    const auto bounded = clamp_boundary(value, std::min(index, value.size()));
+    const auto begin = line_start(value, bounded);
+    return codepoint_count(value.substr(begin, bounded - begin));
+}
+
+[[nodiscard]] inline std::size_t index_at_line_column(
+    std::string_view value,
+    std::size_t begin,
+    std::size_t end,
+    std::size_t column) noexcept {
+    begin = clamp_boundary(value, std::min(begin, value.size()));
+    end = clamp_boundary(value, std::min(end, value.size()));
+    std::size_t i = std::min(begin, end);
+    std::size_t current = 0;
+    while (i < end && current < column) {
+        i = next_codepoint(value, i);
+        ++current;
+    }
+    return std::min(i, end);
+}
+
 } // namespace text
 
 enum class TextMotion {
@@ -190,6 +229,7 @@ public:
             cursor_ = text_.size();
             anchor_ = cursor_;
         }
+        vertical_column_.reset();
         if (clear_history) this->clear_history();
     }
 
@@ -199,24 +239,26 @@ public:
     }
 
     void move_to(std::size_t target, bool extend = false) noexcept {
-        cursor_ = text::clamp_boundary(text_, std::min(target, text_.size()));
-        if (!extend) anchor_ = cursor_;
+        set_cursor(target, extend, true);
     }
 
     void select_range(std::size_t anchor, std::size_t cursor) noexcept {
         anchor_ = text::clamp_boundary(text_, std::min(anchor, text_.size()));
         cursor_ = text::clamp_boundary(text_, std::min(cursor, text_.size()));
+        vertical_column_.reset();
     }
 
     void select_all() noexcept {
         anchor_ = 0;
         cursor_ = text_.size();
+        vertical_column_.reset();
     }
 
     void select_word_at(std::size_t byte_index) noexcept {
         const auto [begin, end] = text::word_bounds(text_, byte_index);
         anchor_ = begin;
         cursor_ = end;
+        vertical_column_.reset();
     }
 
     void collapse_to_begin() noexcept { move_to(selection_begin()); }
@@ -252,6 +294,22 @@ public:
         move_to(target, extend);
     }
 
+    void move_line_start(bool extend = false) noexcept {
+        set_cursor(text::line_start(text_, cursor_), extend, true);
+    }
+
+    void move_line_end(bool extend = false) noexcept {
+        set_cursor(text::line_end(text_, cursor_), extend, true);
+    }
+
+    void move_up(bool extend = false) noexcept {
+        move_vertical(false, extend);
+    }
+
+    void move_down(bool extend = false) noexcept {
+        move_vertical(true, extend);
+    }
+
     [[nodiscard]] bool insert(std::string_view incoming) {
         if (incoming.empty()) return false;
 
@@ -269,6 +327,7 @@ public:
         text_.insert(cursor_, accepted);
         cursor_ += accepted.size();
         anchor_ = cursor_;
+        vertical_column_.reset();
         return true;
     }
 
@@ -296,6 +355,7 @@ public:
         text_.erase(begin, cursor_ - begin);
         cursor_ = begin;
         anchor_ = cursor_;
+        vertical_column_.reset();
         return true;
     }
 
@@ -315,6 +375,7 @@ public:
         }
         text_.erase(cursor_, end - cursor_);
         anchor_ = cursor_;
+        vertical_column_.reset();
         return true;
     }
 
@@ -351,6 +412,7 @@ private:
         text_ = state.text;
         cursor_ = text::clamp_boundary(text_, std::min(state.cursor, text_.size()));
         anchor_ = text::clamp_boundary(text_, std::min(state.anchor, text_.size()));
+        vertical_column_.reset();
     }
 
     void checkpoint() {
@@ -362,6 +424,39 @@ private:
         redo_.clear();
     }
 
+    void set_cursor(std::size_t target, bool extend, bool reset_vertical) noexcept {
+        cursor_ = text::clamp_boundary(text_, std::min(target, text_.size()));
+        if (!extend) anchor_ = cursor_;
+        if (reset_vertical) vertical_column_.reset();
+    }
+
+    void move_vertical(bool down, bool extend) noexcept {
+        const auto preferred = vertical_column_.value_or(text::line_column(text_, cursor_));
+        vertical_column_ = preferred;
+
+        const auto current_start = text::line_start(text_, cursor_);
+        const auto current_end = text::line_end(text_, cursor_);
+        std::size_t target = cursor_;
+
+        if (down) {
+            if (current_end >= text_.size()) {
+                target = text_.size();
+            } else {
+                const auto next_start = text::next_codepoint(text_, current_end);
+                const auto next_end = text::line_end(text_, next_start);
+                target = text::index_at_line_column(text_, next_start, next_end, preferred);
+            }
+        } else if (current_start == 0) {
+            target = 0;
+        } else {
+            const auto previous_end = text::previous_codepoint(text_, current_start);
+            const auto previous_start = text::line_start(text_, previous_end);
+            target = text::index_at_line_column(text_, previous_start, previous_end, preferred);
+        }
+
+        set_cursor(target, extend, false);
+    }
+
     void erase_selection_untracked() {
         if (!has_selection()) return;
         const auto begin = selection_begin();
@@ -369,12 +464,14 @@ private:
         text_.erase(begin, end - begin);
         cursor_ = begin;
         anchor_ = begin;
+        vertical_column_.reset();
     }
 
     std::string text_;
     std::size_t max_length_{};
     std::size_t cursor_{};
     std::size_t anchor_{};
+    std::optional<std::size_t> vertical_column_;
     std::vector<Snapshot> undo_;
     std::vector<Snapshot> redo_;
 };

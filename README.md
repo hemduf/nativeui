@@ -34,7 +34,7 @@ ui::UI ui {
 };
 ```
 
-`State<T>` is a generic UI observable. A plugin may bridge its own parameter system to it externally, but NativeUI has no plugin parameter concept. The bound `State<T>` objects must outlive the `ui::UI` tree that references them.
+`State<T>` is a generic UI observable. A plugin may bridge its own parameter system to it externally, but NativeUI has no plugin parameter concept. The bound `State<T>` objects must outlive the `ui::UI` tree that references them. `State<T>` and the retained `ui::UI` API are intentionally UI/main-thread confined; they are not audio-thread synchronization primitives. A VST3/CLAP adapter must use an explicitly thread-safe bridge before applying updates in the UI domain.
 
 
 ## Headless text editing model
@@ -111,14 +111,14 @@ The external plugin adapter passes the native parent handle as `uintptr_t`:
 ```cpp
 ui::EmbeddedView view{ui, parentHandle, {640, 420}};
 
-// Call from the host/plugin idle/timer mechanism. Never blocks.
+// Call from the host/plugin UI-thread idle/timer mechanism. Never blocks.
 view.poll();
 
-// When the host grants a new logical size:
+// When the host grants a new logical size, also on the UI/main thread:
 view.set_size({800, 500});
 ```
 
-Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)` is used by `EmbeddedView::poll()`.
+Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)` is used by `EmbeddedView::poll()`. Construction, use and destruction of the platform view are UI/main-thread operations.
 
 ## Dependencies with CPM
 
@@ -128,6 +128,19 @@ The project bootstraps CPM.cmake, then:
 2. downloads the pinned `skia-builder` `chrome/m149` release ZIP for the current platform and imports its static `skia` library.
 
 The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/Ninja Skia build is part of NativeUI.
+
+### macOS plug-in runtime prefix
+
+The pinned Pugl macOS OpenGL backend contains Objective-C runtime classes. Because Objective-C class names are process-global and NativeUI/Pugl is statically linked, a macOS platform build must supply a prefix unique to the **final application or plug-in bundle**, normally derived from its bundle identifier:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
+```
+
+NativeUI applies that prefix to every Pugl Objective-C class compiled by the selected macOS backend and CI verifies that the original unprefixed runtime names are absent. There is deliberately no generic `NativeUI`/`Pugl` fallback: one fixed framework-level prefix is still unsafe if the same static platform archive is copied into several plug-ins loaded by one host process.
+
+For packaging, a generic `NativeUI::Core` library can remain reusable. A precompiled macOS platform/Pugl static archive is only safe when its runtime naming remains unique to the final consumer; otherwise the platform bridge must be built as part of the consumer.
 
 ### Default assets
 
@@ -224,10 +237,13 @@ T041 adds native standalone and embedded smoke executables:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
+  -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProductSmoke_
 cmake --build build -j
 ctest --test-dir build -L smoke --output-on-failure
 ```
+
+`NATIVEUI_OBJC_RUNTIME_PREFIX` is required on macOS platform builds and harmless on other platforms.
 
 Targets can also be run directly:
 
@@ -240,12 +256,17 @@ The embedded smoke creates a `PUGL_PROGRAM` parent and a real `PUGL_MODULE` chil
 
 ## Build
 
+Choose a collision-resistant value unique to the final binary when building the macOS platform backend. Passing the variable is harmless on Linux/Windows, so one cross-platform command can be used:
+
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
+
+Core-only builds with `-DNATIVEUI_BUILD_PLATFORM=OFF` do not require an Objective-C prefix.
 
 ### skia-builder archive layout
 
@@ -275,14 +296,17 @@ The normal build always uses CPM. For local/offline validation you can point to 
 ```bash
 cmake -S . -B build \
   -DNATIVEUI_PUGL_SOURCE=/path/to/pugl \
-  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive
+  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
 ```
+
+The Objective-C prefix is only required when configuring a macOS platform build.
 
 ## Platform build requirements
 
 CPM manages the source/binary dependencies, but the native SDK development packages still come from the platform:
 
-- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks).
+- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks) plus a consumer-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` for platform builds.
 - **Windows**: Windows SDK + OpenGL + DirectWrite; select the Skia `/MD` or `/MT` package with `NATIVEUI_SKIA_WINDOWS_CRT`.
 - **Linux/X11**: X11, OpenGL/GLX and Fontconfig development packages. On Debian/Ubuntu this is typically `libx11-dev libgl1-mesa-dev libfontconfig1-dev`.
 
@@ -353,12 +377,13 @@ but are ignored by Git and are not required after cloning.
 The repository contains the continuation documentation:
 
 - `AGENTS.md` — mandatory development/TDD/review/recovery workflow;
+- `CODE_REVIEW.md` — mandatory plug-in-host-safe C++/platform/Objective-C review gate;
 - `CONTEXT.md` — compact current-state context for resuming without chat history;
 - `ROADMAP.md` — milestone roadmap from POC to reusable toolkit;
 - `PLAN.md` — implementation sequencing and rationale;
 - [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue) — actionable tickets with status, dependencies, acceptance criteria and tests.
 
-Any agent resuming the project should start with `AGENTS.md`, then `CONTEXT.md`, and follow the numeric ticket order and current execution frontier. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
+Any agent resuming the project should start with `AGENTS.md`, then `CODE_REVIEW.md`, then `CONTEXT.md`, and follow the dependency-driven ticket selection rules in `AGENTS.md`. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
 
 
 ## Feature examples

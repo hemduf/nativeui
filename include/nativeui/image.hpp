@@ -41,7 +41,9 @@ void draw_image(Painter& painter,
 ///
 /// Encoded bytes are copied during decode, so the caller does not need to keep
 /// the source buffer alive. Renderer-specific ownership stays behind ImageData
-/// and is never exposed through the public API.
+/// and is never exposed through the public API. Decoding may allocate and is a
+/// resource-preparation/UI-domain operation, never a real-time audio callback
+/// operation.
 class Image {
 public:
     Image() = default;
@@ -76,7 +78,12 @@ struct ImageLoadResult {
 ///
 /// Successful images and failures are both cached by resource identifier so a
 /// missing or malformed resource does not repeatedly hit application I/O or
-/// decoding on paint paths. `clear()` explicitly invalidates the cache.
+/// decoding on paint paths. `clear()` explicitly invalidates this cache only;
+/// caches owned by other UI/plugin instances are unaffected.
+///
+/// The provider is borrowed and **must outlive the ImageCache**. `load()` and
+/// `clear()` are not synchronized and belong to the UI/resource-preparation
+/// domain. Do not call them from a real-time audio callback.
 class ImageCache {
 public:
     explicit ImageCache(ResourceProvider& provider);

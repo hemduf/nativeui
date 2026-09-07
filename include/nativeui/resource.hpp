@@ -12,6 +12,8 @@ namespace ui {
 /// NativeUI deliberately leaves storage policy to the application. Providers
 /// can source bytes from files, bundles, archives, generated memory or any
 /// other backend without coupling widgets or resource caches to filesystem I/O.
+/// Implementations are called from the UI/resource-preparation domain unless a
+/// concrete provider explicitly documents a stronger thread-safety contract.
 class ResourceProvider {
 public:
     virtual ~ResourceProvider() = default;
