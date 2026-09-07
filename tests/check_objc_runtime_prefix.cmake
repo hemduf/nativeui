@@ -22,7 +22,7 @@ if(NOT _nm_result EQUAL 0)
     "NativeUI Objective-C prefix check: nm failed (${_nm_result})\n${_nm_error}")
 endif()
 
-foreach(_class IN ITEMS PuglWindow PuglWrapperView PuglOpenGLView)
+foreach(_class IN ITEMS PuglWindow PuglWindowDelegate PuglWrapperView PuglOpenGLView)
   string(FIND "${_nm_output}" "${PREFIX}${_class}" _prefixed_index)
   if(_prefixed_index EQUAL -1)
     message(FATAL_ERROR
