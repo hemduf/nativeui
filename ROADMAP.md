@@ -84,7 +84,7 @@ Tickets: `T013`–`T018`.
 
 ## Milestone 3 — Rendering and graphics
 
-**Status: In progress (T019–T021 and T024 complete; T022 next)**
+**Status: In progress (T019–T021 and T024 complete; T022 in final validation)**
 
 **Goal:** turn `Painter`/`CanvasContext2D` into a capable but compact 2D API over Skia.
 
@@ -108,7 +108,7 @@ Exit gate:
 
 Tickets: `T019`–`T024`.
 
-Progress: T020 added the backend-neutral `Path` builder and styled path rendering. T021 PR #58 adds backend-neutral linear/radial gradients, multi-stop paint descriptions, clamped opacity and compact blend modes while keeping existing `Color` overloads unchanged. Dedicated headless paint tests, isolated `paint_style.hpp` compilation, a stable gradient golden and `t021_gradients --self-test` are included. Review passes A/B/C are complete. Implementation head `5b23b4609f4fad7d6963b4600f93bc09b999973e` passed CI run #82 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. The exact completion-documentation head is the final merge gate; after merge/closure and recovery snapshot/ref, strict numeric sequencing advances to T022 and then T023.
+Progress: T020 added the backend-neutral `Path` builder and styled path rendering. T021 is complete and squash-merged to `main` as `8064fc9546be83189716058112dd432f0661f981`; issue #21 is closed and recovery ref `recovery/nativeui_T021` exists. T022 PR #59 adds backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, application-owned `ResourceProvider` loading, reusable decoded-image/failure caching, isolated `image.hpp` compilation, deterministic image scaling coverage and `t022_images --self-test`. T022 remains gated only by the exact final documentation/code matrix and final review pass; strict numeric sequencing advances to T023 only after merge, issue closure and recovery ref.
 
 ## Milestone 4 — Text system
 
