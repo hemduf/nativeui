@@ -5,6 +5,7 @@
 #include <nativeui/input.hpp>
 #include <nativeui/invalidation.hpp>
 #include <nativeui/paint.hpp>
+#include <nativeui/svg.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -157,6 +158,10 @@ public:
                     Rect destination,
                     ImageFit fit = ImageFit::Fill) {
         detail::draw_image(painter_, image, source, destination, fit);
+    }
+
+    void draw_svg(const SvgIcon& icon, Rect destination) {
+        detail::draw_svg(painter_, icon, destination);
     }
 
     void text(Point position, std::string_view text, const TextStyle& style) {
