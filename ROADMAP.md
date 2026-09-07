@@ -20,18 +20,18 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 The merged baseline is complete through T028 except for T023, which is still active.
 
-- **Cross-cutting P0 safety gate — #62 / PR #63:** `Doing`. The implementation fixes unsafe movable platform wrappers, makes process-shared embedded-font aliases immutable, documents UI/resource thread contracts, and requires a consumer/plugin-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` for the statically linked macOS Pugl backend. PR #63 is non-draft, mergeable, and its current exact-head CI matrix is green. Completion still requires merge/issue bookkeeping.
-- **T023 — SVG/icon resources / PR #60:** `Doing`. The current head has a green Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan CI matrix. After #63 lands, it must be synchronized with the new `main` safety/runtime baseline and then rerun the exact final-head matrix before merge.
+- **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete**. Exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the macOS two-consumer Objective-C runtime-isolation and multi-instance lifecycle smokes. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
+- **T023 — SVG/icon resources / PR #60:** `Doing`. Its previous exact head was green across Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. Now that #63 is merged, PR #60 must be synchronized with current `main`, preserve the new plugin-host/runtime-prefix contracts, and rerun the exact final-head matrix before merge.
 - **#64 — multiple `StandaloneWindow` instances crash on macOS:** `Ready`, P1. This is a separate `PUGL_PROGRAM` application-world lifecycle defect; independent `EmbeddedView`/`PUGL_MODULE` multi-instance validation is green.
-- **Ready P0 lanes after/alongside the safety merge:** T042 multi-instance/attach-detach stress tests and T047 install/export CMake package.
-- **New M8 CMake/resource chain:** T053 is `Blocked` on #62 and will make the macOS Objective-C/Pugl bridge consumer-scoped. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
+- **Ready P0 lanes:** **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, and **T053** consumer-scoped macOS Pugl/Objective-C bridge (unblocked by #62 completion).
+- **New M8 CMake/resource chain:** T053 is now `Ready`. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
 - **Ready high-unblock widget lane:** T030 Button, T032 Slider/RangeSlider and T034 ScrollView. T033 ProgressBar/Meter and T029 advanced IME remain independent Ready work.
 
 Recommended near-term execution:
 
 ```text
-#62 / PR #63  -> merge safety/runtime baseline -> T053
-T023 / PR #60 -> sync with main -> exact-head CI -> merge
+T023 / PR #60 -> sync with current main -> exact-head CI -> merge
+T053           -> consumer-scoped macOS platform bridge
 
 in parallel when branches do not conflict:
 T042 -> T051
@@ -147,7 +147,7 @@ Tickets: `T019`–`T024`.
 
 Progress: T020 added backend-neutral path drawing and T021 added gradients/paint styles. T022 PR #59 added backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, application-owned `ResourceProvider` loading, reusable decoded-image/failure caching, isolated `image.hpp` compilation, deterministic image scaling coverage and `t022_images --self-test`.
 
-T023 PR #60 now implements the backend-neutral `SvgIcon`, arbitrary logical-size SVG rendering, provider-backed `SvgCache`, headless/cache/public-header coverage and `t023_svg_icons --self-test`. Its current CI matrix is green, but the branch predates the latest plugin-host safety branch; T023 remains `Doing` until #63 is merged, PR #60 is synchronized with the new `main` baseline, and the exact final head is green.
+T023 PR #60 now implements the backend-neutral `SvgIcon`, arbitrary logical-size SVG rendering, provider-backed `SvgCache`, headless/cache/public-header coverage and `t023_svg_icons --self-test`. Its previous CI matrix was green; following the #62/#63 safety merge it remains `Doing` until synchronized with current `main` and the exact final synchronized head passes the required matrix.
 
 ## Milestone 4 — Text system
 
@@ -245,7 +245,7 @@ T030 + T032 -> T037 -> T038 -> T039 / T040
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: T041 complete; T042/T043/T044/T046 and #64 Ready; cross-cutting #62 Doing**
+**Status: T041 and cross-cutting #62 complete; T042/T043/T044/T046 and #64 Ready**
 
 **Goal:** make NativeUI dependable inside real hosts and standalone applications.
 
@@ -274,11 +274,11 @@ Tickets: `T041`–`T046`, plus cross-cutting safety issue #62 and standalone lif
 
 T042 is P0 and feeds the benchmark/release path. T043, T044, T046 and #64 are independent Ready fallback work. T045 remains explicitly blocked on the standard-widget dependency chain.
 
-The #62/PR #63 safety work is a baseline gate rather than a new numbered milestone ticket: it removes unsafe wrapper move semantics, hardens process-shared font registration, makes UI/resource thread contracts explicit and introduces the macOS consumer-specific Objective-C runtime-prefix requirement. It should land before platform/package work that depends on those contracts.
+The #62/PR #63 safety baseline is complete: unsafe wrapper move semantics are removed, process-shared font aliases are immutable, UI/resource thread contracts are explicit, and macOS Pugl Objective-C runtime classes require a consumer/plugin-specific prefix. This completed baseline unblocks T053 and is now the contract that subsequent platform/package work must preserve.
 
 ## Milestone 8 — Packaging, tooling and v1 release
 
-**Status: T047 Ready; T053/T054/T056/T057 added; downstream work follows explicit dependencies; T055 Not planned**
+**Status: T047 and T053 Ready; T054/T056/T057 follow explicit dependencies; T055 Not planned**
 
 **Goal:** make the toolkit easy to consume and maintain.
 
@@ -327,9 +327,9 @@ Tickets: `T047`–`T054`, `T056`–`T057`. `T055` is closed as **Not planned** a
 Release/package dependency chain:
 
 ```text
-#62 / PR #63 -> T053 -----------\
-                                  +-> T054
-T047 ---------------------------/
+#62 / PR #63 (complete) -> T053 -------\
+                                      +-> T054
+T047 ---------------------------------/
   |\
   | +-> T048 -------------------\
   |                              +-> T052
@@ -340,7 +340,7 @@ T042 -> T051 -------------------/
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T047 and T042 remain the existing P0/high-unblock-value release lanes. Once #62 is complete, T053 becomes a P0 packaging/runtime prerequisite. T056 can start after T047 independently of T053, and T054 starts when both T047 and T053 are complete. T057 follows T056. The plug-in target helper is explicitly deferred; NativeUI continues to support embedded views without owning plug-in target creation or plug-in SDK semantics.
+T047, T053 and T042 are now the P0/high-unblock-value release lanes. T056 can start after T047 independently of T053, and T054 starts when both T047 and T053 are complete. T057 follows T056. The plug-in target helper is explicitly deferred; NativeUI continues to support embedded views without owning plug-in target creation or plug-in SDK semantics.
 
 ## Prioritization rule
 
