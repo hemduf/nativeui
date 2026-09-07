@@ -6,10 +6,11 @@
 #include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 
-#include <charconv>
 #include <cmath>
+#include <locale>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -45,7 +46,7 @@ namespace {
     return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
 }
 
-[[nodiscard]] std::optional<Size> parse_viewbox_size(std::span<const std::byte> encoded) noexcept {
+[[nodiscard]] std::optional<Size> parse_viewbox_size(std::span<const std::byte> encoded) {
     const std::string_view xml{reinterpret_cast<const char*>(encoded.data()), encoded.size()};
     std::size_t svg_pos = 0;
     for (;;) {
@@ -98,20 +99,20 @@ namespace {
         const char value_quote = tag[value_pos++];
         const std::size_t value_end = tag.find(value_quote, value_pos);
         if (value_end == std::string_view::npos) return std::nullopt;
-        const std::string_view value = tag.substr(value_pos, value_end - value_pos);
 
-        const char* cursor = value.data();
-        const char* end = cursor + value.size();
+        std::string numbers{tag.substr(value_pos, value_end - value_pos)};
+        for (char& ch : numbers) {
+            if (ch == ',') ch = ' ';
+        }
+
+        std::istringstream input{numbers};
+        input.imbue(std::locale::classic());
         float components[4]{};
         for (float& component : components) {
-            while (cursor < end && (xml_space(*cursor) || *cursor == ',')) ++cursor;
-            if (cursor == end) return std::nullopt;
-            const auto parsed = std::from_chars(cursor, end, component, std::chars_format::general);
-            if (parsed.ec != std::errc{} || parsed.ptr == cursor) return std::nullopt;
-            cursor = parsed.ptr;
+            if (!(input >> component)) return std::nullopt;
         }
-        while (cursor < end && (xml_space(*cursor) || *cursor == ',')) ++cursor;
-        if (cursor != end || !std::isfinite(components[0]) || !std::isfinite(components[1]) ||
+        input >> std::ws;
+        if (!input.eof() || !std::isfinite(components[0]) || !std::isfinite(components[1]) ||
             !std::isfinite(components[2]) || !std::isfinite(components[3]) ||
             components[2] <= 0.0f || components[3] <= 0.0f) {
             return std::nullopt;
@@ -122,7 +123,7 @@ namespace {
 }
 
 [[nodiscard]] Size resolved_intrinsic_size(SkSVGDOM& dom,
-                                           std::span<const std::byte> encoded) noexcept {
+                                           std::span<const std::byte> encoded) {
     const auto sk_size = dom.containerSize();
     const Size intrinsic{sk_size.width(), sk_size.height()};
     if (drawable_size(intrinsic)) return intrinsic;
