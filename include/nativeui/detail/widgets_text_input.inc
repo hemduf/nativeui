@@ -40,6 +40,7 @@ public:
             if (!was_focused) focus_snapshot_ = model_.text();
             ensure_cursor_visible(ctx);
         } else {
+            model_.cancel_composition();
             drag_select_ = false;
             ctx.set_text_input(false);
         }
