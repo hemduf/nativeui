@@ -39,12 +39,15 @@ Pugl is the windowing/embedding layer. Skia is the renderer. Dependencies are ac
 At the beginning of every work session, read in this order:
 
 1. `AGENTS.md`
-2. `CONTEXT.md`
-3. `ROADMAP.md`
-4. the [GitHub issue index](https://github.com/hemduf/nativeui/issues?q=is%3Aissue), including open and closed tickets
-5. the selected GitHub issue, including its latest comments and dependencies
-6. `DESIGN.md` when the ticket changes architecture/platform/rendering
-7. `VALIDATION.md` when the ticket touches build/platform integration
+2. `CODE_REVIEW.md`
+3. `CONTEXT.md`
+4. `ROADMAP.md`
+5. the [GitHub issue index](https://github.com/hemduf/nativeui/issues?q=is%3Aissue), including open and closed tickets
+6. the selected GitHub issue, including its latest comments and dependencies
+7. `DESIGN.md` when the ticket changes architecture/platform/rendering
+8. `VALIDATION.md` when the ticket touches build/platform integration
+
+`CODE_REVIEW.md` is a mandatory merge/Done gate for every code-changing ticket. Its plug-in-host rules apply even though NativeUI itself does not implement VST3/CLAP/AU DSP APIs.
 
 Then run the current baseline tests before editing code:
 
@@ -125,7 +128,11 @@ Infrastructure-only tickets (build refactors, header splitting, CI plumbing) are
 
 ## 5. Review workflow
 
-After implementation, perform review passes proportional to change size.
+Every code-changing ticket must perform a final review against [`CODE_REVIEW.md`](CODE_REVIEW.md). This is mandatory, not proportional to change size. Documentation-only tickets must still consider any applicable architecture/workflow rules.
+
+The review record in the GitHub issue or PR must explicitly cover instance isolation, globals/statics, threading/real-time boundaries, lifetime/reentrancy, Objective-C runtime rules when applicable, platform integration and tests. A bare "reviewed" is not sufficient.
+
+The passes below complement `CODE_REVIEW.md`; they do not replace it.
 
 ### Pass A — correctness/API
 
@@ -138,7 +145,9 @@ Check:
 - event consumption/propagation;
 - logical vs physical coordinates;
 - API consistency and naming;
-- no accidental plugin/audio semantics.
+- no accidental plugin/audio semantics;
+- per-instance ownership and no implicit mutable global/singleton/thread-local instance state;
+- all intentionally process-shared state is documented and safe for simultaneous instances.
 
 ### Pass B — UI/runtime quality
 
@@ -151,7 +160,8 @@ Check:
 - pointer capture lifecycle;
 - redraw-at-idle regressions;
 - text/UTF-8 edge cases;
-- reentrancy during callbacks.
+- reentrancy during callbacks;
+- UI state is not being mutated directly from an audio/real-time thread.
 
 ### Pass C — integration/platform
 
@@ -159,13 +169,29 @@ Required for substantial windowing/rendering/text-input changes. Check:
 
 - standalone and embedded lifecycle;
 - repeated attach/detach/open/close;
-- multiple instances;
+- multiple instances, including destroying one while another remains active;
 - macOS/Windows/Linux conditional code;
 - Pugl API behavior at the pinned commit;
 - Skia API behavior for `chrome/m149`;
-- static-library link requirements.
+- static-library link requirements;
+- symbol/process coexistence inside a host;
+- when Objective-C/Objective-C++ is present, the complete Objective-C runtime section of `CODE_REVIEW.md`.
 
-For significant architectural changes, perform all three passes and correct findings before marking the ticket done.
+### Pass D — Objective-C runtime safety
+
+Mandatory whenever a change introduces or modifies `.m`, `.mm`, Objective-C runtime calls, categories, protocols or generated Objective-C-visible code.
+
+Check at minimum:
+
+- no generic Objective-C runtime class/protocol/category names;
+- every generated/runtime class name uses a **consumer/plugin-specific** collision-resistant prefix;
+- a NativeUI-only class prefix is not treated as sufficient when code can be statically linked into multiple plug-in bundles;
+- categories on Apple/framework classes are avoided; category selectors are prefixed if an explicitly justified category is unavoidable;
+- no method swizzling, `+load`, host-wide `NSApplication` mutation or implicit process-global instance state without an explicit architecture exception;
+- AppKit/UI work stays on the host UI/main thread;
+- ARC/bridging/block ownership is correct.
+
+For significant architectural changes, perform all applicable passes and correct findings before marking the ticket done.
 
 ## 6. Architectural invariants
 
@@ -180,6 +206,9 @@ Do not violate these without an explicit architecture ticket:
 - the Skia framebuffer is physical pixels;
 - new components do not require adding a central component `enum`/switch;
 - plugin parameter semantics remain external;
+- mutable instance-dependent process-global/singleton/thread-local state is forbidden;
+- `State<T>` and normal retained UI mutation are UI/main-thread confined unless an API explicitly documents thread safety;
+- Objective-C runtime-visible classes generated/defined for plug-in embedding must use consumer/plugin-specific collision-resistant names;
 - no SDL, GLFW, Qt, JUCE or NanoVG dependency;
 - third-party acquisition goes through CPM;
 - Skia is consumed from `skia-builder`, not rebuilt by NativeUI;
@@ -250,7 +279,10 @@ A ticket is `Done` only when:
 - required tests exist and pass;
 - every feature ticket has a dedicated executable example with a passing `--self-test`;
 - no newly introduced compiler errors/warnings attributable to NativeUI remain on the tested platform;
-- relevant review passes are complete;
+- all applicable review passes are complete;
+- the mandatory `CODE_REVIEW.md` review record is present in the issue or PR and all blocking findings are corrected;
+- multi-instance/global-state impact is explicitly assessed for every code change;
+- Objective-C runtime naming/prefix strategy is recorded whenever Objective-C/Objective-C++ code is touched;
 - docs/API examples are updated when behavior changed;
 - the GitHub issue is marked `Done` with `status:done` and closed as completed; optional local ticket copies are synchronized if present;
 - `CONTEXT.md` is updated with current state and next recommended ticket;
@@ -280,6 +312,7 @@ For each ticket:
 - commit tests with the implementation they validate;
 - avoid drive-by formatting or unrelated refactors;
 - before merge, run the complete relevant test set;
+- perform and record the mandatory `CODE_REVIEW.md` review before merge;
 - update ticket/context docs in the final commit for that ticket.
 
 Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
@@ -300,7 +333,7 @@ platform: harden embedded Pugl lifecycle
 Do not guess around a platform/API uncertainty.
 
 1. isolate the uncertainty in a minimal test or probe;
-2. inspect the pinned Pugl/Skia API/source;
+2. inspect the pinned Pugl/Skia API/source and current VST3/CLAP/Objective-C runtime documentation when the uncertainty concerns plug-in embedding;
 3. document the blocker in the ticket and `CONTEXT.md`;
 4. continue another independent `Ready` ticket if possible.
 
@@ -316,7 +349,7 @@ At the end of every completed iteration:
 
 1. finish the ticket completion protocol;
 2. update the GitHub issue, `ROADMAP.md` when relevant, and `CONTEXT.md`;
-3. include `AGENTS.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
+3. include `AGENTS.md`, `CODE_REVIEW.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
 4. exclude build directories, downloaded dependencies and generated binaries;
 5. create a versioned/recoverable ZIP named with the completed ticket, for example `nativeui_T011.zip`;
 6. provide that ZIP to the user as the recovery snapshot for that iteration.
