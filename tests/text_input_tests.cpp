@@ -59,6 +59,27 @@ void focus_loss_cancels_active_composition() {
     NUI_CHECK(value.get() == "hello");
 }
 
+void pointer_edit_cancels_active_composition() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    // Pointer editing takes ownership of the selection/caret, so it must cancel
+    // any transient composition before moving the committed-text cursor.
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 50.0f), platform);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 50.0f), platform);
+
+    // A stale native commit from the cancelled composition must be inert.
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello");
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -129,6 +150,7 @@ void suite() {
 
     synthetic_ime_composition_is_transient_and_single_commit();
     focus_loss_cancels_active_composition();
+    pointer_edit_cancels_active_composition();
 }
 
 } // namespace
