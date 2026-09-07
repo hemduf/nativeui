@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -48,54 +49,70 @@ int main() {
         stage = "clipboard";
         window.set_clipboard_text("NativeUI clipboard smoke");
 
-        // CODE_REVIEW.md requires platform changes to prove instance isolation.
-        // Keep the primary window alive while a second independent window owns
-        // active text-input state, uses the clipboard, and is then destroyed.
-        // The surviving window must remain fully functional afterwards.
-        stage = "multi-instance";
-        {
-            ui::State<std::string> sibling_text{"Sibling"};
-            ui::UI sibling_ui{ui::TextInput{"Sibling text", sibling_text}};
-            ui::StandaloneWindow sibling{
-                sibling_ui,
-                ui::WindowDesc{.title = "NativeUI sibling smoke",
-                               .size = {300.0f, 120.0f},
-                               .resizable = true}};
-            if (!sibling.native_handle()) return fail(stage, "sibling native handle is zero");
-            sibling.set_clipboard_text("NativeUI sibling clipboard smoke");
-            for (int i = 0; i < 4 && !sibling.should_close(); ++i) {
-                (void)sibling.poll(0.0);
+        // CODE_REVIEW.md requires platform changes to prove plug-in/editor
+        // instance isolation. Use independent PUGL_MODULE EmbeddedView objects
+        // under one host window: this models multiple editors in one host
+        // process without conflating the separate multi-PUGL_PROGRAM issue #64.
+        stage = "embedded-multi-instance";
+        ui::State<std::string> child_a_text{"Child A"};
+        ui::State<std::string> child_b_text{"Child B"};
+        ui::UI child_a_ui{ui::TextInput{"Child A text", child_a_text}};
+        ui::UI child_b_ui{ui::TextInput{"Child B text", child_b_text}};
+        auto child_a = std::make_unique<ui::EmbeddedView>(
+            child_a_ui, window.native_handle(), ui::Size{250.0f, 100.0f});
+        ui::EmbeddedView child_b{
+            child_b_ui, window.native_handle(), ui::Size{250.0f, 100.0f}};
+
+        if (!child_a->native_handle() || !child_b.native_handle()) {
+            return fail(stage, "embedded native handle is zero");
+        }
+        child_a->set_clipboard_text("NativeUI embedded A clipboard smoke");
+        child_b.set_clipboard_text("NativeUI embedded B clipboard smoke");
+        for (int i = 0; i < 4; ++i) {
+            (void)window.poll(0.0);
+            (void)child_a->poll();
+            (void)child_b.poll();
+        }
+        if (!child_a->last_error().empty()) return fail(stage, child_a->last_error());
+        if (!child_b.last_error().empty()) return fail(stage, child_b.last_error());
+
+        stage = "embedded-survivor";
+        child_a.reset();
+        child_b.set_clipboard_text("NativeUI embedded clipboard after sibling destruction");
+        if (!child_b.set_size({260.0f, 110.0f})) {
+            return fail(stage, "surviving embedded view set_size failed");
+        }
+        for (int i = 0; i < 4; ++i) {
+            (void)window.poll(0.0);
+            (void)child_b.poll();
+        }
+        if (!child_b.last_error().empty()) return fail(stage, child_b.last_error());
+
+        // Repeated embedded construction/destruction checks teardown while a
+        // host window remains alive. TextInput exercises text-input/timer
+        // lifecycle rather than only inert child views.
+        stage = "embedded-repeat-create-destroy";
+        for (int iteration = 0; iteration < 3; ++iteration) {
+            ui::State<std::string> text{"Cycle"};
+            ui::UI cycle_ui{ui::TextInput{"Cycle text", text}};
+            ui::EmbeddedView cycle{
+                cycle_ui, window.native_handle(), ui::Size{240.0f, 96.0f}};
+            if (!cycle.native_handle()) return fail(stage, "cycle native handle is zero");
+            cycle.set_clipboard_text("NativeUI embedded lifecycle " + std::to_string(iteration));
+            for (int i = 0; i < 3; ++i) {
+                (void)window.poll(0.0);
+                (void)cycle.poll();
             }
-            if (!sibling.last_error().empty()) return fail(stage, sibling.last_error());
+            if (!cycle.last_error().empty()) return fail(stage, cycle.last_error());
         }
 
-        stage = "surviving-instance";
-        window.set_clipboard_text("NativeUI clipboard after sibling destruction");
+        stage = "surviving-standalone";
+        window.set_clipboard_text("NativeUI clipboard after embedded lifecycle");
         if (!window.set_size({340.0f, 190.0f})) {
             return fail(stage, "surviving window set_size failed");
         }
         (void)window.poll(0.0);
         if (!window.last_error().empty()) return fail(stage, window.last_error());
-
-        // Repeated construction/destruction catches process-global or teardown
-        // coupling. TextInput ensures active text-input/timer lifecycle is part
-        // of the exercised platform path rather than only inert windows.
-        stage = "repeat-create-destroy";
-        for (int iteration = 0; iteration < 3; ++iteration) {
-            ui::State<std::string> text{"Cycle"};
-            ui::UI cycle_ui{ui::TextInput{"Cycle text", text}};
-            ui::StandaloneWindow cycle{
-                cycle_ui,
-                ui::WindowDesc{.title = "NativeUI lifecycle smoke",
-                               .size = {280.0f, 110.0f},
-                               .resizable = false}};
-            if (!cycle.native_handle()) return fail(stage, "cycle native handle is zero");
-            cycle.set_clipboard_text("NativeUI lifecycle clipboard " + std::to_string(iteration));
-            for (int i = 0; i < 3 && !cycle.should_close(); ++i) {
-                (void)cycle.poll(0.0);
-            }
-            if (!cycle.last_error().empty()) return fail(stage, cycle.last_error());
-        }
 
         stage = "poll";
         for (int i = 0; i < 8 && !window.should_close(); ++i) {
