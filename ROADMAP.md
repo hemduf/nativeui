@@ -84,7 +84,7 @@ Tickets: `T013`–`T018`.
 
 ## Milestone 3 — Rendering and graphics
 
-**Status: In progress (T019 and T024 complete; T020/T022 ready)**
+**Status: In progress (T019, T020 and T024 complete; T021 next)**
 
 **Goal:** turn `Painter`/`CanvasContext2D` into a capable but compact 2D API over Skia.
 
@@ -108,9 +108,11 @@ Exit gate:
 
 Tickets: `T019`–`T024`.
 
+Progress: T020 adds a backend-neutral `Path` command builder with move/line/quad/cubic/close, fill and styled stroke, dedicated degenerate-path tests, transform-local rendering coverage, a path golden and `t020_paths --self-test`. Review passes A/B/C are complete. Code head `c4a3881ce2f85886ea6ad432e2e172110a0abccc` passed CI run #58 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; the exact completion-documentation head remains the final merge gate. After T020 merges, strict numeric sequencing advances to T021, then T022 and T023.
+
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T027 complete; T028 next)**
+**Status: In progress (T025–T027 complete; T028 paused behind T020–T023 recovery)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -132,7 +134,7 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. Strict sequencing now advances to `T028 — Add multiline TextArea`.
+Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. A later recovery pass found unfinished lower-numbered T020–T023, so draft T028 PR #56 is intentionally paused until those tickets are completed in order.
 
 ## Milestone 5 — Standard widget set
 
