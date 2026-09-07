@@ -24,7 +24,9 @@ void draw_svg(Painter& painter, const SvgIcon& icon, Rect destination);
 ///
 /// Parsing copies the encoded SVG bytes into the private Skia-backed DOM, so
 /// callers do not retain source-buffer lifetime obligations. No Skia type is
-/// exposed by this public API.
+/// exposed by this public API. Parsing may allocate and perform XML work; it is
+/// a resource-preparation/UI-domain operation, never a real-time audio callback
+/// operation.
 class SvgIcon {
 public:
     SvgIcon() = default;
@@ -65,7 +67,12 @@ struct SvgLoadResult {
 ///
 /// Successful icons and failures are cached by resource identifier so widget
 /// paint paths never perform resource I/O or XML parsing repeatedly. `clear()`
-/// explicitly invalidates the cache.
+/// explicitly invalidates this cache only; caches owned by other UI/plugin
+/// instances are unaffected.
+///
+/// The provider is borrowed and **must outlive the SvgCache**. `load()` and
+/// `clear()` are not synchronized and belong to the UI/resource-preparation
+/// domain. Do not call them from a real-time audio callback.
 class SvgCache {
 public:
     explicit SvgCache(ResourceProvider& provider);
