@@ -99,6 +99,10 @@ public:
         painter_.fill_rounded_rect(rect, 0.0f, gradient);
     }
 
+    void fill_rect(Rect rect, const RadialGradient& gradient) {
+        painter_.fill_rounded_rect(rect, 0.0f, gradient);
+    }
+
     void stroke_rect(Rect rect, float width, Color color) {
         painter_.stroke_rounded_rect(rect, 0.0f, width, color);
     }
@@ -108,6 +112,10 @@ public:
     }
 
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient) {
+        painter_.fill_rounded_rect(rect, radius, gradient);
+    }
+
+    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient) {
         painter_.fill_rounded_rect(rect, radius, gradient);
     }
 
