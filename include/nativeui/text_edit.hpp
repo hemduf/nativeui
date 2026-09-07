@@ -407,6 +407,7 @@ public:
     }
 
     [[nodiscard]] bool backspace(TextMotion motion = TextMotion::Codepoint) {
+        if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ == 0) return false;
         checkpoint();
         if (has_selection()) {
@@ -428,6 +429,7 @@ public:
     }
 
     [[nodiscard]] bool delete_forward(TextMotion motion = TextMotion::Codepoint) {
+        if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ >= text_.size()) return false;
         checkpoint();
         if (has_selection()) {
