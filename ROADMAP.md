@@ -84,7 +84,7 @@ Tickets: `T013`–`T018`.
 
 ## Milestone 3 — Rendering and graphics
 
-**Status: In progress (T019, T020 and T024 complete; T021 next)**
+**Status: In progress (T019–T021 and T024 complete; T022 next)**
 
 **Goal:** turn `Painter`/`CanvasContext2D` into a capable but compact 2D API over Skia.
 
@@ -108,11 +108,11 @@ Exit gate:
 
 Tickets: `T019`–`T024`.
 
-Progress: T020 adds a backend-neutral `Path` command builder with move/line/quad/cubic/close, fill and styled stroke, dedicated degenerate-path tests, transform-local rendering coverage, a path golden and `t020_paths --self-test`. Review passes A/B/C are complete. Code head `c4a3881ce2f85886ea6ad432e2e172110a0abccc` passed CI run #58 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; the exact completion-documentation head remains the final merge gate. After T020 merges, strict numeric sequencing advances to T021, then T022 and T023.
+Progress: T020 added the backend-neutral `Path` builder and styled path rendering. T021 PR #58 adds backend-neutral linear/radial gradients, multi-stop paint descriptions, clamped opacity and compact blend modes while keeping existing `Color` overloads unchanged. Dedicated headless paint tests, isolated `paint_style.hpp` compilation, a stable gradient golden and `t021_gradients --self-test` are included. Review passes A/B/C are complete. Implementation head `5b23b4609f4fad7d6963b4600f93bc09b999973e` passed CI run #82 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. The exact completion-documentation head is the final merge gate; after merge/closure and recovery snapshot/ref, strict numeric sequencing advances to T022 and then T023.
 
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T027 complete; T028 paused behind T020–T023 recovery)**
+**Status: In progress (T025–T027 complete; T028 paused behind T022–T023 recovery)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -134,7 +134,7 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. A later recovery pass found unfinished lower-numbered T020–T023, so draft T028 PR #56 is intentionally paused until those tickets are completed in order.
+Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. A recovery pass found unfinished lower-numbered rendering tickets, so draft T028 PR #56 remains intentionally paused until T022 and T023 are completed in order.
 
 ## Milestone 5 — Standard widget set
 
