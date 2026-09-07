@@ -50,6 +50,41 @@ if(APPLE AND NATIVEUI_BUILD_PLATFORM)
   )
 endif()
 
+# T023 consumes the SVG module shipped beside the pinned skia-builder archive.
+# Skia's SVG DOM references text shaping even for SVGs without text nodes, and
+# skshaper in turn references the packaged SkUnicode ICU implementation. Keep
+# the Unix static-link dependency order from users toward providers.
+find_library(NATIVEUI_SKIA_SVG_LIBRARY
+  NAMES svg
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(NATIVEUI_SKIA_SHAPER_LIBRARY
+  NAMES skshaper
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(NATIVEUI_SKIA_UNICODE_ICU_LIBRARY
+  NAMES skunicode_icu
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(NATIVEUI_SKIA_UNICODE_CORE_LIBRARY
+  NAMES skunicode_core
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+add_library(SkiaBuilder::svg STATIC IMPORTED GLOBAL)
+set_target_properties(SkiaBuilder::svg PROPERTIES
+  IMPORTED_LOCATION "${NATIVEUI_SKIA_SVG_LIBRARY}"
+)
+set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+  "${NATIVEUI_SKIA_SHAPER_LIBRARY};${NATIVEUI_SKIA_UNICODE_ICU_LIBRARY};${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY};SkiaBuilder::skia")
+
 function(nativeui_enable_project_warnings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W4 /permissive-)
@@ -90,6 +125,7 @@ endfunction()
 add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
+  src/skia_svg.cpp
   src/headless.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
@@ -98,7 +134,7 @@ target_include_directories(nativeui_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 target_compile_features(nativeui_core PUBLIC cxx_std_20)
-target_link_libraries(nativeui_core PUBLIC SkiaBuilder::skia)
+target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
 
@@ -148,6 +184,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t020_paths
   t021_gradients
   t022_images
+  t023_svg_icons
   t024_goldens
   t025_text_edit_model
   t026_label
@@ -215,6 +252,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
+  nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
   nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
   nativeui_add_core_test(nativeui_layout_alignment_tests tests/layout_alignment_tests.cpp)
   nativeui_add_core_test(nativeui_layout_flex_tests tests/layout_flex_tests.cpp)
@@ -271,7 +309,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path image paint_style paint component command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

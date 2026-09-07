@@ -18,10 +18,10 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 ## Current execution snapshot — 2026-09-07
 
-The merged baseline is complete through T028 except for T023, which is still active.
+The merged baseline is complete through T028, including T023.
 
 - **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete**. Exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the macOS two-consumer Objective-C runtime-isolation and multi-instance lifecycle smokes. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
-- **T023 — SVG/icon resources / PR #60:** `Doing`. Its previous exact head was green across Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. Now that #63 is merged, PR #60 must be synchronized with current `main`, preserve the new plugin-host/runtime-prefix contracts, and rerun the exact final-head matrix before merge.
+- **T023 — SVG/icon resources / PR #60:** **Complete**. NativeUI now exposes backend-neutral `SvgIcon` handles, centered contain-fit SVG drawing, application-owned `ResourceProvider` loading and per-instance `SvgCache` reuse/failure caching. ViewBox-only SVGs, malformed input, invalid destinations, transforms/gradients, cache isolation, deterministic path golden coverage, isolated public-header compilation and `t023_svg_icons --self-test` are covered. The implementation preserves the #62/#63 plugin-host/runtime-prefix contracts.
 - **#64 — multiple `StandaloneWindow` instances crash on macOS:** `Ready`, P1. This is a separate `PUGL_PROGRAM` application-world lifecycle defect; independent `EmbeddedView`/`PUGL_MODULE` multi-instance validation is green.
 - **Ready P0 lanes:** **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, and **T053** consumer-scoped macOS Pugl/Objective-C bridge (unblocked by #62 completion).
 - **New M8 CMake/resource chain:** T053 is now `Ready`. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
@@ -30,7 +30,6 @@ The merged baseline is complete through T028 except for T023, which is still act
 Recommended near-term execution:
 
 ```text
-T023 / PR #60 -> sync with current main -> exact-head CI -> merge
 T053           -> consumer-scoped macOS platform bridge
 
 in parallel when branches do not conflict:
@@ -121,7 +120,7 @@ Tickets: `T013`–`T018`.
 
 ## Milestone 3 — Rendering and graphics
 
-**Status: In progress (T019–T022 and T024 complete; T023 Doing)**
+**Status: Complete (T019–T024)**
 
 **Goal:** turn `Painter`/`CanvasContext2D` into a capable but compact 2D API over Skia.
 
@@ -147,7 +146,7 @@ Tickets: `T019`–`T024`.
 
 Progress: T020 added backend-neutral path drawing and T021 added gradients/paint styles. T022 PR #59 added backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, application-owned `ResourceProvider` loading, reusable decoded-image/failure caching, isolated `image.hpp` compilation, deterministic image scaling coverage and `t022_images --self-test`.
 
-T023 PR #60 now implements the backend-neutral `SvgIcon`, arbitrary logical-size SVG rendering, provider-backed `SvgCache`, headless/cache/public-header coverage and `t023_svg_icons --self-test`. Its previous CI matrix was green; following the #62/#63 safety merge it remains `Doing` until synchronized with current `main` and the exact final synchronized head passes the required matrix.
+T023 PR #60 completes SVG/icon resources with a backend-neutral `SvgIcon`, centered aspect-preserving contain rendering, provider-backed per-instance `SvgCache`, viewBox-only support and static/self-contained SVG resource semantics. The completion coverage includes path/transform/gradient rendering, malformed SVGs, invalid rectangles, cache hit/failure reuse, two-cache same-ID isolation, deterministic path golden comparison, public-header compilation and `t023_svg_icons --self-test`.
 
 ## Milestone 4 — Text system
 

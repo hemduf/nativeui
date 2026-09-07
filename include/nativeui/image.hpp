@@ -1,14 +1,13 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/resource.hpp>
 
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace ui {
 
@@ -25,21 +24,6 @@ enum class ImageLoadError {
     None,
     NotFound,
     DecodeFailed,
-};
-
-/// Supplies encoded resource bytes by application-defined identifier.
-///
-/// NativeUI deliberately does not expose filesystem loading through widgets or
-/// ImageCache. Applications can source bytes from files, bundles, archives or
-/// generated memory while keeping that policy outside the UI toolkit.
-/// Implementations are called from the UI/resource-preparation domain unless a
-/// concrete provider explicitly documents a stronger thread-safety contract.
-class ResourceProvider {
-public:
-    virtual ~ResourceProvider() = default;
-
-    [[nodiscard]] virtual std::optional<std::vector<std::byte>> load(
-        std::string_view resource_id) = 0;
 };
 
 namespace detail {

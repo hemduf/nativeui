@@ -52,7 +52,7 @@ NativeUI uses dependency-driven scheduling. GitHub `Dependencies:` are the only 
 
 Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
 
-Rendering includes backend-neutral paths, gradients/paint styles and decoded image resources. T022 provides backend-neutral `Image`, source-rectangle drawing, `Fill`/`Contain`/`Cover`, an application-supplied `ResourceProvider` and reusable `ImageCache`; no widget performs filesystem I/O. Skia conversion/ownership stays private to Core.
+Rendering includes backend-neutral paths, gradients/paint styles, decoded image resources and SVG/icon resources. T022 provides backend-neutral `Image`, source-rectangle drawing, `Fill`/`Contain`/`Cover`, an application-supplied `ResourceProvider` and reusable `ImageCache`. T023 provides backend-neutral `SvgIcon`, centered contain-fit rendering and per-instance `SvgCache` reuse/failure caching over the same application-owned provider model. Widgets do not perform filesystem I/O, and Skia conversion/ownership stays private to Core.
 
 Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior.
 
@@ -65,10 +65,10 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 ## Current work and DAG frontier
 
 - Last completed cross-cutting safety ticket: **#62 — plugin-host CODE_REVIEW revalidation**. PR #63 exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 (`34103924635`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. macOS additionally passed the two-consumer Objective-C runtime-isolation check and the clipboard/multi-instance lifecycle smoke. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
-- Last completed feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
+- Last completed rendering feature: **T023 — SVG/icon resources**. PR #60 adds backend-neutral parsed SVG handles, aspect-preserving centered contain rendering, viewBox-only support, per-instance provider-backed caching and explicit static/self-contained SVG semantics while preserving the #62 plugin-host/runtime-prefix contracts.
+- Last completed text feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
 - T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
 - The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
-- **T023 — SVG/icon resources** remains `Doing` in draft PR #60. Its prior exact head was green; after #63 it must now be synchronized with current `main`, preserving the plugin-host/runtime-prefix contracts, then rerun the exact final-head matrix before merge.
 
 Ready now:
 
@@ -92,7 +92,7 @@ T047 + T053 -> T054
 T047 -> T056 -> T057
 ```
 
-Recommended next increment: synchronize **T023 / PR #60** with current `main`, resolve any overlap with the #62 safety changes without weakening its `CODE_REVIEW.md` record, and let the exact synchronized head run the required CI matrix. If that PR is waiting only on CI afterward, use an independent Ready P0 lane (T042, T047 or T053) on a later run.
+Recommended next increment: take one of the independent Ready P0 lanes — T053 for the consumer-scoped macOS platform bridge, T042 for lifecycle stress coverage, or T047 for install/export packaging — according to downstream unblock value and branch availability.
 
 ## T022 implementation notes retained for recovery
 
@@ -102,6 +102,17 @@ Recommended next increment: synchronize **T023 / PR #60** with current `main`, r
 - Invalid images and non-positive/non-finite draw rectangles are safe no-ops.
 - `ResourceProvider` resolves application-defined IDs to encoded byte vectors; filesystem/bundle/archive policy stays in the application layer.
 - `ImageCache` caches successful images and explicit `NotFound`/`DecodeFailed` results; `clear()` invalidates the cache.
+
+## T023 implementation notes retained for recovery
+
+- `SvgIcon` is a copyable backend-neutral handle; Skia SVG DOM types remain private to Core.
+- SVG source bytes are parsed during resource preparation and are not retained by callers; parsing/loading is not a real-time audio-thread API.
+- `CanvasContext2D::draw_svg` uses a centered aspect-preserving contain fit, clips to the destination and treats non-positive/non-finite destinations as no-ops.
+- ViewBox-only icons derive intrinsic dimensions from root `viewBox` source metadata without reading inline Skia SVG members across the prebuilt ABI boundary.
+- V1 SVG resources are static and self-contained; NativeUI does not fetch external file/network resources or drive SVG animation.
+- `SvgCache` borrows its `ResourceProvider`, which must outlive it; parsed successes and explicit failures are cached per cache instance and `clear()` affects only that instance.
+- SVG linkage uses the pinned skia-builder SVG module plus its required shaper/unicode static dependencies.
+- Completion coverage includes paths, transforms, gradients, malformed input, invalid destinations, viewBox-only resources, cache reuse/failure reuse, same-ID isolation across two caches, deterministic path golden comparison, isolated public headers and `t023_svg_icons --self-test`.
 
 ## T027 portability notes retained for recovery
 
@@ -115,7 +126,6 @@ Recommended next increment: synchronize **T023 / PR #60** with current `main`, r
 
 ## Current limitations
 
-- T023 SVG/icon resources are not merged yet.
 - T029 advanced IME composition remains to be implemented.
 - Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
