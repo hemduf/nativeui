@@ -94,6 +94,20 @@ Before coding:
 - write a short implementation note in the ticket if the approach is not obvious;
 - do not broaden scope to neighboring tickets unless required to keep the code buildable.
 
+### 3.2 Mandatory merge requirement in every ticket
+
+Every GitHub issue/ticket must end with this merge requirement (or an equivalent stricter wording):
+
+```markdown
+## Merge requirement
+
+**Mandatory:** when the implementation for this ticket is merged, update `ROADMAP.md` in the same merge/completion cycle so it reflects the ticket's final status, delivered scope, dependency frontier and milestone progress.
+```
+
+This requirement is unconditional for ticket merges. Do not skip the `ROADMAP.md` update because the milestone number appears unchanged or because the implementation is small. The roadmap is the project-level execution snapshot and must stay synchronized with every merged ticket.
+
+When creating or editing a ticket, preserve this section as the final section of the issue body.
+
 ## 4. Development workflow — TDD and small units
 
 For every behavioral change:
@@ -286,7 +300,10 @@ A ticket is `Done` only when:
 - docs/API examples are updated when behavior changed;
 - the GitHub issue is marked `Done` with `status:done` and closed as completed; optional local ticket copies are synchronized if present;
 - `CONTEXT.md` is updated with current state and next recommended ticket;
-- `ROADMAP.md` is updated if milestone scope/status changed.
+- `ROADMAP.md` is updated in the same merge/completion cycle for **every merged ticket**, including final status, delivered scope, dependency-frontier changes and milestone progress;
+- the issue body still ends with the mandatory `## Merge requirement` section.
+
+A ticket must not be considered complete merely because code and CI are green if the roadmap synchronization step has not been performed.
 
 ## 12. End-of-session compaction
 
@@ -313,7 +330,8 @@ For each ticket:
 - avoid drive-by formatting or unrelated refactors;
 - before merge, run the complete relevant test set;
 - perform and record the mandatory `CODE_REVIEW.md` review before merge;
-- update ticket/context docs in the final commit for that ticket.
+- update the GitHub issue, `CONTEXT.md` and `ROADMAP.md` in the final merge/completion cycle;
+- do not merge/close the ticket with a stale roadmap.
 
 Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
 
@@ -348,7 +366,7 @@ For this project, one completed ticket is one development iteration unless expli
 At the end of every completed iteration:
 
 1. finish the ticket completion protocol;
-2. update the GitHub issue, `ROADMAP.md` when relevant, and `CONTEXT.md`;
+2. update the GitHub issue, `ROADMAP.md` and `CONTEXT.md`; the roadmap update is mandatory for every merged ticket, not only when milestone scope changes;
 3. include `AGENTS.md`, `CODE_REVIEW.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
 4. exclude build directories, downloaded dependencies and generated binaries;
 5. create a versioned/recoverable ZIP named with the completed ticket, for example `nativeui_T011.zip`;
