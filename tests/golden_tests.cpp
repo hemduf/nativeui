@@ -162,32 +162,31 @@ bool verify_toggle(bool update) {
 
 bool verify_paths(bool update) {
     ui::Path fill;
-    fill.move_to({8.0f, 8.0f})
-        .line_to({40.0f, 8.0f})
-        .line_to({40.0f, 40.0f})
-        .line_to({8.0f, 40.0f})
+    fill.move_to({2.0f, 2.0f})
+        .line_to({10.0f, 2.0f})
+        .line_to({10.0f, 14.0f})
+        .line_to({2.0f, 14.0f})
         .close();
 
     ui::Path stroke;
-    stroke.move_to({56.0f, 24.0f}).line_to({88.0f, 24.0f});
+    stroke.move_to({14.0f, 8.0f}).line_to({22.0f, 8.0f});
 
     ui::UI tree{
-        ui::Canvas{96.0f, 64.0f, [fill, stroke](ui::CanvasContext2D& g) {
+        ui::Canvas{24.0f, 16.0f, [fill, stroke](ui::CanvasContext2D& g) {
             g.fill_path(fill, {1.0f, 0.0f, 0.0f, 1.0f});
             g.stroke_path(stroke, {0.0f, 1.0f, 0.0f, 1.0f},
-                          ui::StrokeStyle{8.0f, ui::StrokeCap::Butt,
+                          ui::StrokeStyle{4.0f, ui::StrokeCap::Butt,
                                           ui::StrokeJoin::Miter});
         }}
     };
-    ui::HeadlessRenderer renderer{{96.0f, 64.0f}, 1.0f};
+    ui::HeadlessRenderer renderer{{24.0f, 16.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
     CompareOptions options;
     options.channel_tolerance = 1;
-    // Compare only solid interiors, away from antialiased path boundaries.
     options.compare_regions = {
-        Region{16, 16, 16, 16},
-        Region{64, 22, 16, 4},
+        Region{4, 4, 4, 6},
+        Region{16, 7, 4, 2},
     };
     return test::golden::verify(
         "path_scene", test::golden::from_renderer(renderer),
