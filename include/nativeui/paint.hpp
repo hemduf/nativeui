@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/paint_style.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/text.hpp>
 
@@ -15,6 +16,7 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
+#include "include/effects/SkGradientShader.h"
 
 #include <algorithm>
 #include <cassert>
@@ -119,6 +121,28 @@ public:
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
     }
 
+    void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+
+        const auto start = gradient.start();
+        const auto end = gradient.end();
+        const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
+        const SkColor4f colors[2] = {
+            to_sk_color(gradient.start_color()),
+            to_sk_color(gradient.end_color()),
+        };
+        auto shader = SkGradientShader::MakeLinear(
+            points, colors, nullptr, nullptr, 2, SkTileMode::kClamp);
+        if (shader) {
+            paint.setShader(std::move(shader));
+        } else {
+            paint.setColor4f(colors[0]);
+        }
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+    }
+
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -195,7 +219,7 @@ public:
         for (const auto& run : layout.runs) {
             SkFont font(run.typeface, std::max(0.0f, style.size));
             font.setEdging(SkFont::Edging::kAntiAlias);
-            font.setEmbolden(run.synthetic_bold);
+            font.setEmolden(run.synthetic_bold);
             canvas_.drawSimpleText(text.data() + run.byte_offset,
                                    run.byte_count,
                                    SkTextEncoding::kUTF8,
