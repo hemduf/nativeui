@@ -36,14 +36,15 @@ include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
 if(APPLE AND NATIVEUI_BUILD_PLATFORM)
-  # Pugl's pinned macOS implementation defines fixed Objective-C classes
-  # PuglWindow, PuglWrapperView and PuglOpenGLView. Objective-C runtime class
-  # names are process-global, while NativeUI/Pugl is linked statically and can
-  # therefore be duplicated across several plug-in bundles in one host. Rename
-  # the private Pugl runtime classes at preprocessing time with a prefix that is
-  # unique to the final consumer binary.
+  # Pugl's pinned macOS sources compiled by NativeUI define the fixed runtime
+  # classes PuglWindow, PuglWindowDelegate, PuglWrapperView and PuglOpenGLView.
+  # Objective-C runtime class names are process-global, while NativeUI/Pugl is
+  # linked statically and can therefore be duplicated across several plug-in
+  # bundles in one host. Rename every compiled private Pugl runtime class at
+  # preprocessing time with a prefix unique to the final consumer binary.
   target_compile_definitions(nativeui_pugl PRIVATE
     "PuglWindow=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWindow"
+    "PuglWindowDelegate=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWindowDelegate"
     "PuglWrapperView=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWrapperView"
     "PuglOpenGLView=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglOpenGLView"
   )
