@@ -59,6 +59,7 @@ endfunction()
 # OpenGL dependency so retained-mode behavior can be tested without a window.
 add_library(nativeui_core STATIC
   src/skia_core.cpp
+  src/skia_image.cpp
   src/headless.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
@@ -114,10 +115,14 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t017_commands
   t018_drop
   t019_transforms
+  t020_paths
+  t021_gradients
+  t022_images
   t024_goldens
   t025_text_edit_model
   t026_label
   t027_fonts
+  t028_text_area
   t041_smoke_harness
 )
 
@@ -158,19 +163,28 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_command_tests tests/command_tests.cpp)
   nativeui_add_core_test(nativeui_drop_tests tests/drop_tests.cpp)
   nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
+  nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
+  nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
   nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
+  nativeui_add_core_test(nativeui_gradient_golden_tests tests/gradient_golden_tests.cpp)
   target_compile_definitions(nativeui_golden_tests PRIVATE
+    NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
+    NATIVEUI_GOLDEN_ARTIFACT_DIR="${CMAKE_CURRENT_BINARY_DIR}/golden-artifacts"
+  )
+  target_compile_definitions(nativeui_gradient_golden_tests PRIVATE
     NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
     NATIVEUI_GOLDEN_ARTIFACT_DIR="${CMAKE_CURRENT_BINARY_DIR}/golden-artifacts"
   )
   add_custom_target(nativeui_update_goldens
     COMMAND $<TARGET_FILE:nativeui_golden_tests> --update-goldens
-    DEPENDS nativeui_golden_tests
+    COMMAND $<TARGET_FILE:nativeui_gradient_golden_tests> --update-goldens
+    DEPENDS nativeui_golden_tests nativeui_gradient_golden_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Explicitly update NativeUI golden image baselines"
   )
   nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
+  nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
   nativeui_add_core_test(nativeui_layout_alignment_tests tests/layout_alignment_tests.cpp)
   nativeui_add_core_test(nativeui_layout_flex_tests tests/layout_flex_tests.cpp)
@@ -212,7 +226,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text paint component command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path image paint_style paint component command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
