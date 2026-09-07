@@ -39,36 +39,36 @@ Pugl OpenGL view / event bridge
 
 Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
 
-Rendering includes backend-neutral `Path`, move/line/quad/cubic/close commands, fill and styled stroke with cap/join/miter settings. Public path state contains only NativeUI geometry/enums; conversion to the pinned Skia `SkPathBuilder` stays inside `Painter`.
+Rendering now includes backend-neutral paths plus paint styles. `Path` supports move/line/quad/cubic/close, fill and styled stroke. T021 adds immutable/copyable `LinearGradient` and `RadialGradient` descriptions, ordered `GradientStop`s, clamped opacity and compact SourceOver/Multiply/Screen/Plus blending while preserving the existing simple `Color` overloads. All Skia path/shader/blend conversion stays private to `Painter`.
 
-Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel and interactive Canvas. T027 adds a platform-neutral font service with named family/weight/slant, embedded font aliases, ordered explicit fallback families and platform Unicode fallback. Measurement and painting share the same UTF-8 resolved-run path.
+Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel and interactive Canvas. T027 provides a platform-neutral font service with named family/weight/slant, embedded font aliases, ordered explicit fallback families and platform Unicode fallback. Measurement and painting share the same UTF-8 resolved-run path.
 
 Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context.
 
-Every feature ticket must ship `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
+Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
 ## Current sequential status
 
-Strict sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 found unfinished lower-numbered M3 tickets T020–T023, so T028 is paused until they are completed in numeric order.
+Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 found unfinished lower-numbered M3 tickets T020–T023; T028 remains intentionally paused until those rendering tickets are complete.
 
-- Current ticket: **T020 — generic path drawing API**.
-- Draft PR #57 implements T020 with dedicated unit, transform, degenerate-path, golden and feature-example coverage.
+- Last completed ticket: **T021 — gradients and richer paint styles** (implementation/review complete on PR #58; merge only after this exact documentation head passes the final matrix).
+- T021 implementation head `5b23b4609f4fad7d6963b4600f93bc09b999973e` passed CI run #82 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including 27/27 sanitizer tests.
 - Review passes A/B/C are complete with no unresolved thread.
-- Code head `c4a3881ce2f85886ea6ad432e2e172110a0abccc` passed CI run #58 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
-- A review cleanup restored unrelated golden-test rationale comments; completion documentation is now being added on top of that green code head. The exact final documentation head must pass the same matrix before merge.
-- After T020 is merged/closed, the next sequential ticket is **T021 — gradients and richer paint styles**, then T022 and T023. Only then resume T028.
-- Draft PR #56 for T028 is intentionally paused and must not be merged ahead of T020–T023.
+- Next sequential ticket after T021 merge/closure and recovery snapshot/ref: **T022 — image/resource drawing**, then T023.
+- Draft PR #56 for T028 must not be merged ahead of T022–T023.
 
-## T020 implementation notes
+## T021 implementation notes
 
-- `ui::Path` is copyable, backend-neutral and stores a compact command stream using NativeUI `Point` only.
-- `Painter::fill_path()` and `Painter::stroke_path()` translate the command stream through Skia m149 `SkPathBuilder`; no `SkPath` appears in the public API.
-- `StrokeStyle` supports width, butt/round/square caps, miter/round/bevel joins and miter limit.
-- Empty paths and non-positive stroke widths are safe no-ops.
-- Canvas transform coverage verifies path geometry remains local to the Canvas coordinate system.
-- Dedicated `nativeui_path_tests` covers move/line/quad/cubic/close, fill/stroke, cap/join style use, empty paths and degenerate geometry.
-- `path_scene` golden compares stable solid interiors away from anti-aliased edges.
-- `nativeui_example_t020_paths` provides interactive usage and deterministic `--self-test` rendering probes.
+- Public gradient values contain only NativeUI `Point`, `Color`, stop vectors and enums; no Skia/Pugl/platform type leaks into the value API.
+- Existing solid-color `fill_rect` / `fill_rounded_rect` overloads are unchanged.
+- Linear gradients support the two-color convenience form and arbitrary ordered stops; radial gradients support the same stop model.
+- Stops must be finite, strictly increasing and inside `[0, 1]`; malformed lists fall back deterministically instead of being passed unchecked to Skia.
+- Invalid/non-positive radial radius falls back safely.
+- `PaintOptions::opacity` is finite/clamped to `[0, 1]`; blend modes map explicitly to pinned Skia m149.
+- `nativeui_paint_style_tests` covers two-stop/multi-stop/radial rendering plus opacity and multiply behavior.
+- `nativeui_gradient_golden_tests` uses stable constant plateau regions away from interpolation boundaries; the fixture is a compact exact-size P6 PPM.
+- `nativeui_example_t021_gradients` provides interactive usage and a deterministic headless `--self-test`.
+- `paint_style.hpp` has isolated public-header compile coverage.
 
 ## T027 portability notes retained for recovery
 
@@ -83,8 +83,8 @@ Strict sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 foun
 
 ## Current limitations / next work
 
-- T021–T023 still need gradients/richer paints, image resources and SVG/icon resources.
-- T028/T029 still need multiline text/TextArea and advanced IME composition work after the lower-numbered rendering tickets are done.
+- T022/T023 still need image resources and SVG/icon resources.
+- T028/T029 still need multiline text/TextArea and advanced IME composition after the lower-numbered rendering tickets are done.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain later milestones.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 
