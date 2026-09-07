@@ -39,7 +39,7 @@ Pugl OpenGL view / event bridge
 
 Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
 
-Rendering includes backend-neutral paths, paint styles and images. `Path` supports move/line/quad/cubic/close, fill and styled stroke. T021 adds immutable/copyable linear/radial gradients, ordered stops, opacity and compact blend modes. T022 adds backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, and an application-supplied `ResourceProvider` with reusable `ImageCache`; no widget performs filesystem I/O. Skia conversion/ownership remains private to Core.
+Rendering includes backend-neutral paths, paint styles and images. `Path` supports move/line/quad/cubic/close, fill and styled stroke. T021 provides linear/radial gradients, ordered stops, opacity and compact blend modes. T022 provides backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, and an application-supplied `ResourceProvider` with reusable `ImageCache`; no widget performs filesystem I/O. Skia conversion/ownership stays private to Core.
 
 Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel and interactive Canvas. T027 provides a platform-neutral font service with named family/weight/slant, embedded font aliases, ordered explicit fallback families and platform Unicode fallback. Measurement and painting share the same UTF-8 resolved-run path.
 
@@ -49,15 +49,14 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 
 ## Current sequential status
 
-Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 found unfinished lower-numbered M3 tickets T020–T023; T028 remains intentionally paused until those rendering tickets are complete.
+Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 found unfinished lower-numbered M3 tickets; T028 remains paused until rendering tickets through T023 are complete.
 
-- Last completed ticket: **T021 — gradients and richer paint styles**, squash-merged to `main` as `8064fc9546be83189716058112dd432f0661f981`; issue #21 is closed and recovery ref `recovery/nativeui_T021` exists.
-- Current ticket: **T022 — image/resource drawing**, PR #59 on `feature/t022-images`.
-- T022 behavior is implemented and covered: in-memory decode/render, source rectangles, Fill/Contain/Cover scaling, explicit missing/decode errors, reusable provider-backed cache, isolated public-header compile, scaling golden-style comparison and `t022_images --self-test`.
-- TDD evidence for the cache unit: commit `df034109a4671f8d959557d08e065f8f6b4a7666` failed as expected because ResourceProvider/ImageCache/ImageLoadError did not exist; implementation commits followed and passed the full matrix at `2efc649dd620def9987a9ea0699ea8a75496a07f`.
-- Review A passed. Review B found image services textually included from `headless.cpp`; the implementation was moved to standalone `src/skia_image.cpp` and wired directly into `nativeui_core`.
-- Final merge is gated on the exact completion head passing Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then Review C, issue closure and recovery ref.
-- Next sequential ticket after T022: **T023 — SVG/icon resources**. Draft PR #56 for T028 must remain paused until T023 is complete.
+- Last completed ticket: **T022 — image/resource drawing**.
+- PR #59 exact head `cd87e463b680bbbd7c9d8112adab14519d34c3ac` passed CI run #106 (`34086535149`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `317c9d94c217a423b9843ff7eb066b6c8c6559c7`.
+- Review A/B/C are complete with no unresolved review thread. Review B's only finding was corrected by moving image services into standalone `src/skia_image.cpp`.
+- T022 coverage includes in-memory decode/render, source rectangles, Fill/Contain/Cover, explicit missing/decode errors, reusable provider-backed caching, isolated `image.hpp` compilation, deterministic scaling comparison and `t022_images --self-test`.
+- Next sequential ticket: **T023 — SVG/icon resources**.
+- Draft PR #56 for T028 must remain paused until T023 is Done.
 
 ## T022 implementation notes
 
@@ -67,13 +66,9 @@ Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T
 - Invalid images and non-positive/non-finite draw rectangles are safe no-ops.
 - `ResourceProvider` resolves application-defined IDs to encoded byte vectors; filesystem/bundle/archive policy stays in the application layer.
 - `ImageCache` caches successful images and explicit `NotFound`/`DecodeFailed` results; `clear()` invalidates the cache.
-- `nativeui_image_tests` covers decode/render, source rectangles, fit modes, deterministic scaling comparison, provider/cache reuse and failure paths.
-- `image.hpp` has isolated public-header compile coverage.
-- `nativeui_example_t022_images` provides interactive Fill/Contain/Cover usage and deterministic `--self-test` behavior.
 
 ## T027 portability notes retained for recovery
 
-- `TextStyle` adds `family`, `fallback_families`, `FontSlant`, and numeric Skia-compatible weights.
 - `FontManager` is public and platform-neutral; CoreText/DirectWrite/Fontconfig construction remains private in `src/skia_core.cpp`.
 - Embedded font registration owns/copies bytes and publishes immutable registry snapshots; normal measure/paint reads do not acquire the registration mutex.
 - UBSan `vptr` alone is disabled at the pinned prebuilt Skia ABI boundary; ASan and remaining UBSan checks stay enabled.
