@@ -44,6 +44,36 @@ void unicode_and_word_navigation() {
     NUI_CHECK(model.selected_text() == "élan");
 }
 
+void multiline_navigation_preserves_visual_column() {
+    // Byte layout: "ab\né🙂x\nq"
+    // line starts: 0, 3, 11. The second line has 3 Unicode scalars.
+    ui::TextEditModel model{"ab\né🙂x\nq"};
+
+    model.move_to(10); // end of the second line, visual column 3
+    model.move_up();
+    NUI_CHECK(model.cursor() == 2); // first line clamps at visual column 2
+
+    // A clamped vertical move must retain the preferred visual column so the
+    // reverse move returns to column 3 rather than the clamped column 2.
+    model.move_down();
+    NUI_CHECK(model.cursor() == 10);
+
+    model.move_line_start();
+    NUI_CHECK(model.cursor() == 3);
+    model.move_line_end();
+    NUI_CHECK(model.cursor() == 10);
+
+    model.move_up(true);
+    NUI_CHECK(model.anchor() == 10);
+    NUI_CHECK(model.cursor() == 2);
+    NUI_CHECK(model.selected_text() == "\né🙂x");
+
+    model.move_down(true);
+    NUI_CHECK(model.anchor() == 10);
+    NUI_CHECK(model.cursor() == 10);
+    NUI_CHECK(!model.has_selection());
+}
+
 void deletion_and_history() {
     ui::TextEditModel model{"alpha beta"};
     model.move_to(model.text().size());
@@ -82,6 +112,7 @@ void utf8_boundaries_are_never_split() {
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
+    multiline_navigation_preserves_visual_column();
     deletion_and_history();
     utf8_boundaries_are_never_split();
 }
