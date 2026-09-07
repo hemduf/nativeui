@@ -56,6 +56,37 @@ public:
 
         caret_visible_ = true;
 
+        if (event.type == InputType::Composition) {
+            switch (event.composition.type) {
+                case CompositionType::Start:
+                    model_.begin_composition();
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+                case CompositionType::Update:
+                    model_.update_composition(
+                        event.composition.text,
+                        event.composition.cursor_byte,
+                        event.composition.selection_bytes);
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+                case CompositionType::Commit:
+                    if (model_.commit_composition(event.composition.text)) {
+                        commit(ctx);
+                    } else {
+                        ensure_cursor_visible(ctx);
+                        ctx.invalidate();
+                    }
+                    return EventResult::Handled;
+                case CompositionType::Cancel:
+                    model_.cancel_composition();
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+            }
+        }
+
         if (event.type == InputType::TextInput) {
             if (event.text.empty()) return EventResult::Ignored;
             insert_text(event.text, ctx);

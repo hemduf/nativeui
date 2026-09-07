@@ -2,6 +2,7 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -42,12 +43,27 @@ enum class Command {
     Redo
 };
 
+enum class CompositionType {
+    Start,
+    Update,
+    Commit,
+    Cancel
+};
+
+struct CompositionEvent {
+    CompositionType type{CompositionType::Start};
+    std::string text;
+    std::size_t cursor_byte{};
+    std::size_t selection_bytes{};
+};
+
 enum class InputType {
     None,
     KeyDown,
     KeyUp,
     Command,
     TextInput,
+    Composition,
     Tick,
     PointerDown,
     PointerMove,
@@ -82,6 +98,7 @@ struct InputEvent {
     Point position{};
     Point delta{};
     std::string text;
+    CompositionEvent composition{};
     // Drag-and-drop payload. `drop_types` is populated for DropOffer, while
     // `drop_type` + `drop_data` are populated for DropData. Clipboard paste
     // continues to use TextInput and never populates these fields.
