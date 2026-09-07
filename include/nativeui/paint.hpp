@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/path.hpp>
 #include <nativeui/text.hpp>
 
 #include "include/core/SkCanvas.h"
@@ -9,6 +10,7 @@
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
@@ -155,6 +157,28 @@ public:
         canvas_.drawLine(a.x, a.y, b.x, b.y, paint);
     }
 
+    void fill_path(const Path& path, Color color) {
+        if (path.empty()) return;
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        paint.setColor4f(to_sk_color(color));
+        canvas_.drawPath(to_sk_path(path), paint);
+    }
+
+    void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
+        if (path.empty() || style.width <= 0.0f) return;
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kStroke_Style);
+        paint.setStrokeWidth(style.width);
+        paint.setStrokeCap(to_sk_cap(style.cap));
+        paint.setStrokeJoin(to_sk_join(style.join));
+        paint.setStrokeMiter(std::max(0.0f, style.miter_limit));
+        paint.setColor4f(to_sk_color(color));
+        canvas_.drawPath(to_sk_path(path), paint);
+    }
+
     void text(Point position, std::string_view text, const TextStyle& style) {
         const auto layout = detail::resolve_text_layout(text, style);
         SkPaint paint;
@@ -209,6 +233,51 @@ private:
 
     [[nodiscard]] static SkColor4f to_sk_color(Color c) {
         return SkColor4f{c.r, c.g, c.b, c.a};
+    }
+
+    [[nodiscard]] static SkPaint::Cap to_sk_cap(StrokeCap cap) {
+        switch (cap) {
+            case StrokeCap::Butt: return SkPaint::kButt_Cap;
+            case StrokeCap::Round: return SkPaint::kRound_Cap;
+            case StrokeCap::Square: return SkPaint::kSquare_Cap;
+        }
+        return SkPaint::kButt_Cap;
+    }
+
+    [[nodiscard]] static SkPaint::Join to_sk_join(StrokeJoin join) {
+        switch (join) {
+            case StrokeJoin::Miter: return SkPaint::kMiter_Join;
+            case StrokeJoin::Round: return SkPaint::kRound_Join;
+            case StrokeJoin::Bevel: return SkPaint::kBevel_Join;
+        }
+        return SkPaint::kMiter_Join;
+    }
+
+    [[nodiscard]] static SkPath to_sk_path(const Path& path) {
+        SkPath result;
+        for (const auto& command : path.commands_) {
+            switch (command.verb) {
+                case Path::Verb::Move:
+                    result.moveTo(command.a.x, command.a.y);
+                    break;
+                case Path::Verb::Line:
+                    result.lineTo(command.a.x, command.a.y);
+                    break;
+                case Path::Verb::Quad:
+                    result.quadTo(command.a.x, command.a.y,
+                                  command.b.x, command.b.y);
+                    break;
+                case Path::Verb::Cubic:
+                    result.cubicTo(command.a.x, command.a.y,
+                                   command.b.x, command.b.y,
+                                   command.c.x, command.c.y);
+                    break;
+                case Path::Verb::Close:
+                    result.close();
+                    break;
+            }
+        }
+        return result;
     }
 
     void restore_unchecked() {
