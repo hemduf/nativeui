@@ -5,16 +5,28 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <utility>
 
 namespace ui {
 
 class Painter;
 class Image;
 
+enum class ImageFit {
+    Fill,
+    Contain,
+    Cover,
+};
+
 namespace detail {
 struct ImageData;
 struct ImageAccess;
-void draw_image(Painter& painter, const Image& image, Rect destination);
+void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit);
+void draw_image(Painter& painter,
+                const Image& image,
+                Rect source,
+                Rect destination,
+                ImageFit fit);
 } // namespace detail
 
 /// Copyable backend-neutral handle to a decoded image resource.
