@@ -35,30 +35,64 @@ Pugl OpenGL view / event bridge
 - Windows: x64 MSVC `/MD` default, `/MT` selectable.
 - Linux: x64 GPU release.
 
+## Scheduling model
+
+NativeUI now uses dependency-driven scheduling. GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are not implicit dependencies.
+
+- `Ready`: all explicit dependencies are Done and no real external blocker exists.
+- `Doing`: implementation/review/validation is active.
+- `Blocked`: an explicit dependency is unfinished or a real external blocker is documented.
+- Keep at most three implementation lanes active by default.
+- A branch waiting only on CI does not globally block the project and need not consume an implementation lane.
+- Independent PRs start from `main` and may merge as soon as their own Definition of Done is satisfied.
+
+`AGENTS.md` is the source of truth for these rules.
+
 ## Implemented baseline
 
 Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
 
-Rendering includes backend-neutral paths, paint styles and images. `Path` supports move/line/quad/cubic/close, fill and styled stroke. T021 provides linear/radial gradients, ordered stops, opacity and compact blend modes. T022 provides backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, and an application-supplied `ResourceProvider` with reusable `ImageCache`; no widget performs filesystem I/O. Skia conversion/ownership stays private to Core.
+Rendering includes backend-neutral paths, gradients/paint styles and decoded image resources. T022 provides backend-neutral `Image`, source-rectangle drawing, `Fill`/`Contain`/`Cover`, an application-supplied `ResourceProvider` and reusable `ImageCache`; no widget performs filesystem I/O. Skia conversion/ownership stays private to Core.
 
-Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel and interactive Canvas. T027 provides a platform-neutral font service with named family/weight/slant, embedded font aliases, ordered explicit fallback families and platform Unicode fallback. Measurement and painting share the same UTF-8 resolved-run path.
+Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior.
 
 Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context.
 
 Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
-## Current sequential status
+## Current work and DAG frontier
 
-Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T027 found unfinished lower-numbered M3 tickets; T028 remains paused until rendering tickets through T023 are complete.
+- Last completed feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
+- **T023 — SVG/icon resources** remains `Doing` in draft PR #60. Current head is `b36896641c30c4b8debea2ed669a22ed9ca2e5d6`; CI run #137 is pending on that head. T023 is independent and must not block other Ready work.
 
-- Last completed ticket: **T022 — image/resource drawing**.
-- PR #59 exact head `cd87e463b680bbbd7c9d8112adab14519d34c3ac` passed CI run #106 (`34086535149`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `317c9d94c217a423b9843ff7eb066b6c8c6559c7`.
-- Review A/B/C are complete with no unresolved review thread. Review B's only finding was corrected by moving image services into standalone `src/skia_image.cpp`.
-- T022 coverage includes in-memory decode/render, source rectangles, Fill/Contain/Cover, explicit missing/decode errors, reusable provider-backed caching, isolated `image.hpp` compilation, deterministic scaling comparison and `t022_images --self-test`.
-- Next sequential ticket: **T023 — SVG/icon resources**.
-- Draft PR #56 for T028 must remain paused until T023 is Done.
+Ready now:
 
-## T022 implementation notes
+- P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package.
+- P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
+- Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation.
+- P2: **T046** Wayland strategy/prototype.
+
+Important explicit dependency chains:
+
+```text
+T030 -> T031
+T030 + T032 -> T037 -> T038 -> T039 / T040
+T034 -> T035 / T036
+T030 + T031 + T032 + T036 -> T045
+T030 + T032 + T034 + T035 + T036 -> T049
+T042 -> T051 -> T052
+T047 -> T048 -> T052
+```
+
+Recommended lane allocation while T023 is only waiting on CI:
+
+1. widget critical path: T030, then T032/T034 according to merge/conflict state;
+2. release path: T047 -> T048;
+3. robustness/performance path: T042 -> T051.
+
+T029/T033/T043/T044/T046 are valid independent fallback work whenever a lane is free or another branch is waiting on external validation.
+
+## T022 implementation notes retained for recovery
 
 - `Image` is a copyable platform-neutral handle whose public header contains no Skia/Pugl/platform type.
 - `Image::decode` copies encoded bytes into Skia-owned data; callers do not retain source-buffer lifetime obligations.
@@ -77,11 +111,11 @@ Strict numeric sequencing from `AGENTS.md` is mandatory. A recovery pass after T
 - macOS uses the universal Skia artifact on `macos-15-intel`.
 - Xcode 16.4 libc++ portability uses `std::atomic<std::shared_ptr<T>>` only when supported, otherwise the standard shared_ptr atomic load/store API.
 
-## Current limitations / next work
+## Current limitations
 
-- T023 still needs SVG/icon resources.
-- T028/T029 still need multiline text/TextArea and advanced IME composition after T023.
-- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain later milestones.
+- T023 SVG/icon resources are not merged yet.
+- T029 advanced IME composition remains to be implemented.
+- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 
 ## Build commands
