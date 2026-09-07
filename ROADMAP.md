@@ -24,17 +24,20 @@ The merged baseline is complete through T028 except for T023, which is still act
 - **T023 — SVG/icon resources / PR #60:** `Doing`. The current head has a green Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan CI matrix. After #63 lands, it must be synchronized with the new `main` safety/runtime baseline and then rerun the exact final-head matrix before merge.
 - **#64 — multiple `StandaloneWindow` instances crash on macOS:** `Ready`, P1. This is a separate `PUGL_PROGRAM` application-world lifecycle defect; independent `EmbeddedView`/`PUGL_MODULE` multi-instance validation is green.
 - **Ready P0 lanes after/alongside the safety merge:** T042 multi-instance/attach-detach stress tests and T047 install/export CMake package.
+- **New M8 CMake/resource chain:** T053 is `Blocked` on #62 and will make the macOS Objective-C/Pugl bridge consumer-scoped. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
 - **Ready high-unblock widget lane:** T030 Button, T032 Slider/RangeSlider and T034 ScrollView. T033 ProgressBar/Meter and T029 advanced IME remain independent Ready work.
 
 Recommended near-term execution:
 
 ```text
-#62 / PR #63  -> merge safety/runtime baseline
+#62 / PR #63  -> merge safety/runtime baseline -> T053
 T023 / PR #60 -> sync with main -> exact-head CI -> merge
 
 in parallel when branches do not conflict:
 T042 -> T051
 T047 -> T048
+     -> T056 -> T057
+T047 + T053 -> T054
 T030 -> T031
 T032
 T034 -> T035 / T036
@@ -275,7 +278,7 @@ The #62/PR #63 safety work is a baseline gate rather than a new numbered milesto
 
 ## Milestone 8 — Packaging, tooling and v1 release
 
-**Status: T047 Ready; downstream release chain partially blocked by explicit dependencies**
+**Status: T047 Ready; T053/T054/T056/T057 added; downstream work follows explicit dependencies; T055 Not planned**
 
 **Goal:** make the toolkit easy to consume and maintain.
 
@@ -283,6 +286,11 @@ Deliverables:
 
 - `install()` / exported CMake package;
 - `NativeUI::NativeUI` consumer target;
+- JUCE-style `nativeui_add_application()` helper for concise application target creation;
+- real macOS `.app` bundle generation with bundle metadata and automatic consumer-specific Objective-C runtime prefixing;
+- consumer-scoped macOS Pugl/Objective-C bridge so multiple final bundles never share one fixed runtime namespace;
+- `nativeui_add_binary_data()` for deterministic resource packaging directly into binaries;
+- public embedded `ResourceManager` with zero-copy immutable lookup and `ResourceProvider` compatibility;
 - dependency lock/version diagnostics;
 - examples gallery;
 - component inspector/debug overlay;
@@ -295,24 +303,44 @@ Exit gate:
 
 ```cmake
 find_package(NativeUI CONFIG REQUIRED)
-target_link_libraries(MyApp PRIVATE NativeUI::NativeUI)
+
+nativeui_add_application(MyApp
+    PRODUCT_NAME "My App"
+    BUNDLE_ID "com.example.myapp"
+    VERSION "1.0.0"
+    SOURCES src/main.cpp
+)
+
+nativeui_add_binary_data(MyResources
+    SOURCES resources/logo.svg resources/theme.json
+)
+
+target_link_libraries(MyApp PRIVATE MyResources)
 ```
 
-works on supported platforms with documented prerequisites.
+works on supported platforms with documented prerequisites, with resources available from the embedded runtime resource API and no required runtime filesystem lookup.
 
-On macOS, packaging must not publish one generic precompiled static platform archive whose Objective-C runtime names collide when copied into unrelated plug-in bundles. `NativeUI::Core` may remain generic; the Pugl/Objective-C platform bridge must preserve per-consumer runtime naming.
+On macOS, packaging must not publish one generic precompiled static platform archive whose Objective-C runtime names collide when copied into unrelated application or plug-in bundles. `NativeUI::Core` may remain generic; the Pugl/Objective-C platform bridge must preserve per-consumer runtime naming. High-level CMake helpers must derive and apply the consumer-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` automatically from stable final-target identity rather than requiring a global manual configure flag.
 
-Tickets: `T047`–`T052`.
+Tickets: `T047`–`T054`, `T056`–`T057`. `T055` is closed as **Not planned** and deliberately excluded from the current v1 scope.
 
-Release dependency chain:
+Release/package dependency chain:
 
 ```text
-T047 -> T048 --\
-                +-> T052
-T042 -> T051 --/
+#62 / PR #63 -> T053 -----------\
+                                  +-> T054
+T047 ---------------------------/
+  |\
+  | +-> T048 -------------------\
+  |                              +-> T052
+  +-> T056 -> T057               |
+                                 |
+T042 -> T051 -------------------/
+
+T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T047 and T042 can therefore progress in parallel and should be favored as P0/high-unblock-value work once the #62 baseline safety contract is merged.
+T047 and T042 remain the existing P0/high-unblock-value release lanes. Once #62 is complete, T053 becomes a P0 packaging/runtime prerequisite. T056 can start after T047 independently of T053, and T054 starts when both T047 and T053 are complete. T057 follows T056. The plug-in target helper is explicitly deferred; NativeUI continues to support embedded views without owning plug-in target creation or plug-in SDK semantics.
 
 ## Prioritization rule
 
