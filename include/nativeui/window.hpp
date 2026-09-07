@@ -18,6 +18,11 @@ struct WindowDesc {
     bool resizable{true};
 };
 
+/// Standalone native window for one UI instance.
+///
+/// Construction, use and destruction are confined to the platform/UI thread.
+/// The wrapper is intentionally non-movable: its platform implementation keeps
+/// a stable non-owning PlatformServices reference to this exact object.
 class StandaloneWindow final : public PlatformServices {
 public:
     StandaloneWindow(UI& ui, WindowDesc desc = {});
@@ -25,8 +30,8 @@ public:
 
     StandaloneWindow(const StandaloneWindow&) = delete;
     StandaloneWindow& operator=(const StandaloneWindow&) = delete;
-    StandaloneWindow(StandaloneWindow&&) noexcept;
-    StandaloneWindow& operator=(StandaloneWindow&&) noexcept;
+    StandaloneWindow(StandaloneWindow&&) = delete;
+    StandaloneWindow& operator=(StandaloneWindow&&) = delete;
 
     int run();
     bool poll(double timeout_seconds = -1.0);
@@ -50,6 +55,12 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// Embedded native child view for one UI/plugin-editor instance.
+///
+/// Construction, polling, native-view mutation and destruction are confined to
+/// the host UI/main thread. `poll()` is non-blocking and this wrapper is
+/// intentionally non-movable because the implementation stores a reference to
+/// this PlatformServices object.
 class EmbeddedView final : public PlatformServices {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
@@ -57,8 +68,8 @@ public:
 
     EmbeddedView(const EmbeddedView&) = delete;
     EmbeddedView& operator=(const EmbeddedView&) = delete;
-    EmbeddedView(EmbeddedView&&) noexcept;
-    EmbeddedView& operator=(EmbeddedView&&) noexcept;
+    EmbeddedView(EmbeddedView&&) = delete;
+    EmbeddedView& operator=(EmbeddedView&&) = delete;
 
     bool poll(); // always non-blocking
     void request_close();
@@ -80,7 +91,5 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-
-
 
 } // namespace ui
