@@ -38,6 +38,42 @@ namespace {
            size.w > 0.0f && size.h > 0.0f;
 }
 
+[[nodiscard]] Size resolved_intrinsic_size(SkSVGDOM& dom) noexcept {
+    const auto sk_size = dom.containerSize();
+    Size intrinsic{sk_size.width(), sk_size.height()};
+    if (drawable_size(intrinsic)) return intrinsic;
+
+    const auto* root = dom.getRoot();
+    if (!root) return {};
+
+    const auto& view_box = root->getViewBox();
+    if (!view_box || view_box->isEmpty() ||
+        !std::isfinite(view_box->width()) || !std::isfinite(view_box->height()) ||
+        view_box->width() <= 0.0f || view_box->height() <= 0.0f) {
+        return {};
+    }
+
+    const float aspect = view_box->width() / view_box->height();
+    const bool width_valid = std::isfinite(intrinsic.w) && intrinsic.w > 0.0f;
+    const bool height_valid = std::isfinite(intrinsic.h) && intrinsic.h > 0.0f;
+
+    if (width_valid && !height_valid) {
+        intrinsic.h = intrinsic.w / aspect;
+    } else if (!width_valid && height_valid) {
+        intrinsic.w = intrinsic.h * aspect;
+    } else {
+        intrinsic = Size{view_box->width(), view_box->height()};
+    }
+
+    if (!drawable_size(intrinsic)) return {};
+
+    // Root SVGs with omitted/percentage dimensions need a concrete viewport.
+    // Set it once at parse time so the cached DOM remains immutable while it is
+    // reused from paint paths at arbitrary destination sizes.
+    dom.setContainerSize(SkSize::Make(intrinsic.w, intrinsic.h));
+    return intrinsic;
+}
+
 } // namespace
 
 void draw_svg(Painter& painter, const SvgIcon& icon, Rect destination) {
@@ -68,12 +104,8 @@ SvgIcon SvgIcon::parse(std::span<const std::byte> encoded) {
     auto dom = SkSVGDOM::MakeFromStream(stream);
     if (!dom) return {};
 
-    const auto sk_size = dom->containerSize();
-    const Size intrinsic{sk_size.width(), sk_size.height()};
-    if (!std::isfinite(intrinsic.w) || !std::isfinite(intrinsic.h) ||
-        intrinsic.w <= 0.0f || intrinsic.h <= 0.0f) {
-        return {};
-    }
+    const Size intrinsic = detail::resolved_intrinsic_size(*dom);
+    if (!detail::drawable_size(intrinsic)) return {};
 
     auto data = std::make_shared<detail::SvgData>();
     data->dom = std::move(dom);
