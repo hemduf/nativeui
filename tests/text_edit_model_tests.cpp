@@ -222,6 +222,33 @@ void directional_deletion_cancels_active_composition() {
     NUI_CHECK(forward_delete.text() == "hllo");
 }
 
+void history_navigation_cancels_active_composition() {
+    ui::TextEditModel undo_model{"hello"};
+    NUI_CHECK(undo_model.insert("!"));
+    undo_model.begin_composition();
+    undo_model.update_composition("仮", 3, 0);
+
+    NUI_CHECK(undo_model.undo());
+    NUI_CHECK(!undo_model.composition_active());
+    NUI_CHECK(undo_model.composition_text().empty());
+    NUI_CHECK(undo_model.text() == "hello");
+    NUI_CHECK(!undo_model.commit_composition("日本"));
+    NUI_CHECK(undo_model.text() == "hello");
+
+    ui::TextEditModel redo_model{"hello"};
+    NUI_CHECK(redo_model.insert("!"));
+    NUI_CHECK(redo_model.undo());
+    redo_model.begin_composition();
+    redo_model.update_composition("仮", 3, 0);
+
+    NUI_CHECK(redo_model.redo());
+    NUI_CHECK(!redo_model.composition_active());
+    NUI_CHECK(redo_model.composition_text().empty());
+    NUI_CHECK(redo_model.text() == "hello!");
+    NUI_CHECK(!redo_model.commit_composition("日本"));
+    NUI_CHECK(redo_model.text() == "hello!");
+}
+
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
@@ -233,6 +260,7 @@ void suite() {
     external_edit_cancels_active_composition();
     selection_erase_cancels_active_composition();
     directional_deletion_cancels_active_composition();
+    history_navigation_cancels_active_composition();
 }
 
 } // namespace
