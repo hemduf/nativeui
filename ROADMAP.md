@@ -2,7 +2,13 @@
 
 This roadmap turns the current POC into a reusable desktop UI toolkit while preserving the simple architecture: Pugl for native views/events, Skia for rendering, NativeUI for UI behavior.
 
-The nine milestones are also available in [GitHub](https://github.com/hemduf/nativeui/milestones?state=all); ticket details and status live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue).
+The nine milestones are also available in [GitHub](https://github.com/hemduf/nativeui/milestones?state=all); ticket details, explicit dependencies and status live in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue).
+
+## Execution rule
+
+Milestones describe architectural progression; they are **not** global execution gates. GitHub `Dependencies:` are the only hard ticket-to-ticket blockers.
+
+Ready work is selected by priority, then downstream unblock value / critical-path impact, with ticket number only as a tie-breaker. Independent tickets may progress in parallel in separate branches. A PR waiting on CI/platform validation does not block unrelated Ready work. See `AGENTS.md` for the operational rules and status semantics.
 
 ## Feature delivery rule
 
@@ -84,7 +90,7 @@ Tickets: `T013`–`T018`.
 
 ## Milestone 3 — Rendering and graphics
 
-**Status: In progress (T019–T022 and T024 complete; T023 next)**
+**Status: In progress (T019–T022 and T024 complete; T023 Doing)**
 
 **Goal:** turn `Painter`/`CanvasContext2D` into a capable but compact 2D API over Skia.
 
@@ -108,11 +114,11 @@ Exit gate:
 
 Tickets: `T019`–`T024`.
 
-Progress: T020 added backend-neutral path drawing and T021 added gradients/paint styles. T022 PR #59 added backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, application-owned `ResourceProvider` loading, reusable decoded-image/failure caching, isolated `image.hpp` compilation, deterministic image scaling coverage and `t022_images --self-test`. Exact head `cd87e463b680bbbd7c9d8112adab14519d34c3ac` passed CI run #106 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan and was squash-merged as `317c9d94c217a423b9843ff7eb066b6c8c6559c7`. Strict numeric sequencing now advances to T023 SVG/icon resources.
+Progress: T020 added backend-neutral path drawing and T021 added gradients/paint styles. T022 PR #59 added backend-neutral decoded `Image` handles, source-rectangle drawing, `Fill`/`Contain`/`Cover`, application-owned `ResourceProvider` loading, reusable decoded-image/failure caching, isolated `image.hpp` compilation, deterministic image scaling coverage and `t022_images --self-test`. T023 is active in PR #60 and remains independent from Ready text/widget/platform/release work; its CI/review must not act as a global project gate.
 
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T027 complete; T028 paused behind T023)**
+**Status: In progress (T025–T028 complete; T029 Ready)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -134,9 +140,11 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: `T025`, `T026` and `T027` are complete. T027 PR #55 final head `51564ab84f8c6a31c1165ac0904ad30f902916c3` passed GitHub Actions run #33 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, then squash-merged to `main` as `e18c5238257d8a1505b062c8afa711e11d47a36d`; issue #27 is closed with `status:done`. Draft T028 PR #56 remains intentionally paused until T023 is completed in strict numeric order.
+Progress: T025–T027 are complete. T028 PR #56 added multiline `TextArea`, UTF-8-aware vertical navigation, cross-line selection, viewport scrolling, caret/selection painting and the mandatory feature self-test. Final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`. With T028 complete, T029 is now Ready.
 
 ## Milestone 5 — Standard widget set
+
+**Status: Ready frontier available (T030, T032, T033, T034 Ready)**
 
 **Goal:** cover most desktop/plugin UI needs without requiring Canvas implementations.
 
@@ -163,6 +171,15 @@ Exit gate:
 
 Tickets: `T030`–`T036`.
 
+Dependency frontier:
+
+```text
+T030 -> T031
+T034 -> T035 / T036
+```
+
+T030, T032 and T034 have the highest downstream unblock value because they also feed later theme/accessibility/gallery tickets. T033 is independently Ready.
+
 ## Milestone 6 — Styling, theme and animation
 
 **Goal:** style complete applications without CSS or per-widget callback boilerplate.
@@ -185,7 +202,15 @@ Exit gate:
 
 Tickets: `T037`–`T040`.
 
+Dependency frontier:
+
+```text
+T030 + T032 -> T037 -> T038 -> T039 / T040
+```
+
 ## Milestone 7 — Platform and embedded robustness
+
+**Status: T041 complete; T042/T043/T044/T046 Ready**
 
 **Goal:** make NativeUI dependable inside real hosts and standalone applications.
 
@@ -209,7 +234,11 @@ Exit gate:
 
 Tickets: `T041`–`T046`.
 
+T042 is P0 and feeds the benchmark/release path. T043, T044 and T046 are independent Ready fallback work. T045 remains explicitly blocked on the standard-widget dependency chain.
+
 ## Milestone 8 — Packaging, tooling and v1 release
+
+**Status: T047 Ready; downstream release chain partially blocked by explicit dependencies**
 
 **Goal:** make the toolkit easy to consume and maintain.
 
@@ -235,9 +264,19 @@ works on supported platforms with documented prerequisites.
 
 Tickets: `T047`–`T052`.
 
+Release dependency chain:
+
+```text
+T047 -> T048 --\
+                +-> T052
+T042 -> T051 --/
+```
+
+T047 and T042 can therefore progress in parallel and should be favored as P0/high-unblock-value work.
+
 ## Prioritization rule
 
-Do not jump directly to a large widget catalog. The efficient sequence is:
+Preserve the architectural direction:
 
 ```text
 core correctness
@@ -250,4 +289,4 @@ core correctness
   -> packaging/release
 ```
 
-This minimizes rewrites because widgets are built only after the generic primitives they need are stable.
+This sequence minimizes rewrites, but it is an architectural roadmap rather than a serialized work queue. Once a ticket's explicit dependencies are satisfied, it may proceed independently. Prefer critical-path/unblock-value work and keep unrelated lanes moving while another PR waits on CI or platform validation.
