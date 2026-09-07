@@ -39,6 +39,26 @@ void synthetic_ime_composition_is_transient_and_single_commit() {
     NUI_CHECK(value.get() == "hello");
 }
 
+void focus_loss_cancels_active_composition() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    tree.deactivate(platform);
+    NUI_CHECK(!platform.text_input_active);
+    tree.activate(platform);
+
+    // A native commit arriving after focus loss must be stale and inert.
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello");
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -108,6 +128,7 @@ void suite() {
     NUI_CHECK(platform.clipboard == "Pasted");
 
     synthetic_ime_composition_is_transient_and_single_commit();
+    focus_loss_cancels_active_composition();
 }
 
 } // namespace
