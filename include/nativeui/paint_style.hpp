@@ -12,6 +12,18 @@ struct GradientStop {
     Color color{};
 };
 
+enum class BlendMode {
+    SourceOver,
+    Multiply,
+    Screen,
+    Plus,
+};
+
+struct PaintOptions {
+    float opacity{1.0f};
+    BlendMode blend{BlendMode::SourceOver};
+};
+
 class LinearGradient {
 public:
     LinearGradient(Point start, Point end, Color start_color, Color end_color)
