@@ -159,6 +159,25 @@ void composition_cancel_preserves_committed_text() {
     NUI_CHECK(!model.can_undo());
 }
 
+void external_edit_cancels_active_composition() {
+    ui::TextEditModel model{"hello"};
+    model.select_range(1, 4);
+    model.begin_composition();
+    model.update_composition("仮", 3, 0);
+
+    // Ordinary committed editing (typing/paste) must use the same deterministic
+    // cancel path before mutating the committed buffer. Otherwise stale preedit
+    // state survives until a later IME callback and can target an obsolete range.
+    NUI_CHECK(model.insert("X"));
+    NUI_CHECK(!model.composition_active());
+    NUI_CHECK(model.composition_text().empty());
+    NUI_CHECK(model.text() == "hXo");
+
+    // A stale platform commit after the external edit must not be able to apply.
+    NUI_CHECK(!model.commit_composition("日本"));
+    NUI_CHECK(model.text() == "hXo");
+}
+
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
@@ -167,6 +186,7 @@ void suite() {
     utf8_boundaries_are_never_split();
     composition_is_transient_until_single_commit();
     composition_cancel_preserves_committed_text();
+    external_edit_cancels_active_composition();
 }
 
 } // namespace
