@@ -109,12 +109,64 @@ void utf8_boundaries_are_never_split() {
     NUI_CHECK(model.text() == "é🙂");
 }
 
+void composition_is_transient_until_single_commit() {
+    ui::TextEditModel model{"hello"};
+    model.select_range(1, 4);
+
+    model.begin_composition();
+    NUI_CHECK(model.composition_active());
+    NUI_CHECK(model.text() == "hello");
+
+    model.update_composition("é🙂", 1, 5);
+    NUI_CHECK(model.text() == "hello");
+    NUI_CHECK(model.composition_text() == "é🙂");
+    // Both supplied offsets point into UTF-8 sequences. The model must clamp
+    // them to code-point boundaries inside the transient preedit payload.
+    NUI_CHECK(model.composition_cursor_byte() == 0);
+    NUI_CHECK(model.composition_selection_bytes() == 2);
+
+    model.update_composition("Ω", 2, 0);
+    NUI_CHECK(model.text() == "hello");
+    NUI_CHECK(model.composition_text() == "Ω");
+    NUI_CHECK(model.composition_cursor_byte() == 2);
+    NUI_CHECK(model.composition_selection_bytes() == 0);
+
+    NUI_CHECK(model.commit_composition("日本"));
+    NUI_CHECK(!model.composition_active());
+    NUI_CHECK(model.text() == "h日本o");
+
+    // One IME commit is one logical edit transaction.
+    NUI_CHECK(model.undo());
+    NUI_CHECK(model.text() == "hello");
+    NUI_CHECK(!model.can_undo());
+}
+
+void composition_cancel_preserves_committed_text() {
+    ui::TextEditModel model{"alpha"};
+    model.select_range(1, 4);
+
+    model.begin_composition();
+    model.update_composition("仮", 3, 0);
+    NUI_CHECK(model.composition_active());
+    NUI_CHECK(model.text() == "alpha");
+
+    model.cancel_composition();
+    NUI_CHECK(!model.composition_active());
+    NUI_CHECK(model.composition_text().empty());
+    NUI_CHECK(model.text() == "alpha");
+    NUI_CHECK(model.selection_begin() == 1);
+    NUI_CHECK(model.selection_end() == 4);
+    NUI_CHECK(!model.can_undo());
+}
+
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
     multiline_navigation_preserves_visual_column();
     deletion_and_history();
     utf8_boundaries_are_never_split();
+    composition_is_transient_until_single_commit();
+    composition_cancel_preserves_committed_text();
 }
 
 } // namespace
