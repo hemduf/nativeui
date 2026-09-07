@@ -1,0 +1,27 @@
+name: T027 Recovery Snapshot
+
+on:
+  push:
+    branches:
+      - recovery/t027-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create recovery ZIP
+        run: |
+          zip -r nativeui_T027.zip . \
+            -x '.git/*' \
+            -x 'build/*' \
+            -x 'build-*/*' \
+            -x '*.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nativeui_T027
+          path: nativeui_T027.zip
+          if-no-files-found: error
