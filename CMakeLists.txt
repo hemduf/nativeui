@@ -122,6 +122,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t025_text_edit_model
   t026_label
   t027_fonts
+  t028_text_area
   t041_smoke_harness
 )
 
@@ -194,6 +195,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
   nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
   nativeui_add_core_test(nativeui_font_tests tests/font_tests.cpp)
