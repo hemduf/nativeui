@@ -56,16 +56,34 @@ ctest --test-dir build --output-on-failure
 
 If dependencies are already available locally, prefer the documented `NATIVEUI_PUGL_SOURCE` / `NATIVEUI_SKIA_ROOT` overrides rather than changing the dependency model.
 
-## 3. Ticket selection
+## 3. Ticket selection and parallelism
 
-Work on one small ticket at a time.
+Keep each branch/PR scoped to one small ticket or one independently reviewable sub-unit. Independent tickets may be active concurrently when they do not depend on each other.
 
-Selection order:
+Explicit GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are planning aids, not implicit dependencies.
 
-1. follow ticket numbers strictly (`T026`, then `T027`, then `T028`, ...);
-2. never skip a lower-numbered unfinished ticket because a later ticket has higher priority;
-3. if the next numeric ticket is blocked, resolve its listed dependency first only when that dependency has a lower ticket number; otherwise document the blocker and stop advancement;
-4. do not start a later ticket until the current numeric ticket is `Done`.
+Selection order for available work:
+
+1. a ticket is `Ready` when all explicitly listed dependencies are `Done`;
+2. prefer higher priority (`P0`, then `P1`, then `P2`);
+3. among equal priorities, prefer work with the greatest downstream unblock value / critical-path impact;
+4. use ticket number only as a tie-breaker;
+5. if active work is waiting on CI, platform validation, review infrastructure or another external condition, document the wait and continue another independent `Ready` ticket;
+6. never stack a branch on another feature branch unless the downstream ticket explicitly depends on that upstream ticket;
+7. merge an independent PR as soon as its own Definition of Done is satisfied; a lower-numbered open ticket is not a reason to delay the merge.
+
+Default concurrency limit: keep at most three implementation lanes in active coding/review at once to reduce rebase conflicts. A PR that is merely waiting on CI does not consume an implementation lane if another independent ticket can progress safely.
+
+### 3.1 Ticket status semantics
+
+Use status labels consistently:
+
+- `Ready`: every explicit dependency is `Done` and no external blocker prevents starting;
+- `Doing`: implementation, review, rebase or required validation is actively in progress;
+- `Blocked`: at least one explicit dependency is not `Done`, or a real external blocker is documented in the issue;
+- `Done`: the ticket satisfies the Definition of Done and is closed as completed.
+
+Do not use `Blocked` merely because a lower-numbered ticket remains open.
 
 Before coding:
 
@@ -264,6 +282,8 @@ For each ticket:
 - before merge, run the complete relevant test set;
 - update ticket/context docs in the final commit for that ticket.
 
+Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
+
 Suggested commit style:
 
 ```text
@@ -284,6 +304,8 @@ Do not guess around a platform/API uncertainty.
 3. document the blocker in the ticket and `CONTEXT.md`;
 4. continue another independent `Ready` ticket if possible.
 
+A CI/platform wait on one branch must not become a global project stop when independent `Ready` work exists.
+
 Do not redesign the whole toolkit to work around a single unverified platform issue.
 
 ## 15. Iteration ZIP artifact
@@ -297,6 +319,6 @@ At the end of every completed iteration:
 3. include `AGENTS.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
 4. exclude build directories, downloaded dependencies and generated binaries;
 5. create a versioned/recoverable ZIP named with the completed ticket, for example `nativeui_T011.zip`;
-6. provide that ZIP to the user before advancing past the next independently reviewable iteration.
+6. provide that ZIP to the user as the recovery snapshot for that iteration.
 
-The ZIP is a recovery snapshot, not a substitute for Git history. It must be sufficient for another agent to resume by following section 2.
+The ZIP is a recovery snapshot, not a substitute for Git history and not a dependency gate for unrelated `Ready` work. It must be sufficient for another agent to resume by following section 2.
