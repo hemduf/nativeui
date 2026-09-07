@@ -450,6 +450,7 @@ public:
     }
 
     [[nodiscard]] bool undo() {
+        if (composition_active_) cancel_composition();
         if (undo_.empty()) return false;
         redo_.push_back(snapshot());
         restore(undo_.back());
@@ -459,6 +460,7 @@ public:
     }
 
     [[nodiscard]] bool redo() {
+        if (composition_active_) cancel_composition();
         if (redo_.empty()) return false;
         undo_.push_back(snapshot());
         restore(redo_.back());
