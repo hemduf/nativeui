@@ -7,8 +7,6 @@ struct StandaloneWindow::Impl {
 StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>(ui, *this, std::move(desc))) {}
 StandaloneWindow::~StandaloneWindow() = default;
-StandaloneWindow::StandaloneWindow(StandaloneWindow&&) noexcept = default;
-StandaloneWindow& StandaloneWindow::operator=(StandaloneWindow&&) noexcept = default;
 
 int StandaloneWindow::run() {
     while (!should_close()) poll(-1.0);
@@ -45,8 +43,6 @@ struct EmbeddedView::Impl {
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
     : impl_(std::make_unique<Impl>(ui, *this, parent, size)) {}
 EmbeddedView::~EmbeddedView() = default;
-EmbeddedView::EmbeddedView(EmbeddedView&&) noexcept = default;
-EmbeddedView& EmbeddedView::operator=(EmbeddedView&&) noexcept = default;
 
 bool EmbeddedView::poll() { return impl_->core.poll(0.0); }
 void EmbeddedView::request_close() { impl_->core.request_close(); }

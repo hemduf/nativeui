@@ -57,6 +57,15 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+On macOS, any platform build must additionally provide a **consumer/application/plugin-specific** Objective-C runtime prefix, normally derived from the final bundle identifier:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
+```
+
+There is deliberately no generic NativeUI/Pugl fallback prefix: a static platform library with one framework-level Objective-C class prefix can still collide when copied into several plug-in bundles loaded by the same host. Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) do not require the prefix.
+
 If dependencies are already available locally, prefer the documented `NATIVEUI_PUGL_SOURCE` / `NATIVEUI_SKIA_ROOT` overrides rather than changing the dependency model.
 
 ## 3. Ticket selection and parallelism
@@ -303,7 +312,9 @@ CMake + CPM is mandatory.
 - source dependency;
 - exact pinned commit;
 - compiled statically inside NativeUI;
-- only required platform + OpenGL backend sources.
+- only required platform + OpenGL backend sources;
+- on macOS, every compiled Objective-C runtime class from the Pugl bridge must be renamed with `NATIVEUI_OBJC_RUNTIME_PREFIX`, and that prefix must be unique to the final consumer/plugin binary;
+- never publish a generic precompiled static macOS platform archive whose Objective-C runtime prefix cannot vary per final plug-in consumer.
 
 ### Skia
 
