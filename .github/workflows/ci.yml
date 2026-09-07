@@ -53,6 +53,7 @@ jobs:
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+          -DNATIVEUI_OBJC_RUNTIME_PREFIX=HemdufNativeUICITest_
 
       # skia-builder's Windows archive is built with the MSVC ABI. Do not use
       # Ninja from Git Bash here: on hosted runners that can select MinGW and
