@@ -146,8 +146,17 @@ public:
         painter_.stroke_path(path, color, style);
     }
 
-    void draw_image(const Image& image, Rect destination) {
-        detail::draw_image(painter_, image, destination);
+    void draw_image(const Image& image,
+                    Rect destination,
+                    ImageFit fit = ImageFit::Fill) {
+        detail::draw_image(painter_, image, destination, fit);
+    }
+
+    void draw_image(const Image& image,
+                    Rect source,
+                    Rect destination,
+                    ImageFit fit = ImageFit::Fill) {
+        detail::draw_image(painter_, image, source, destination, fit);
     }
 
     void text(Point position, std::string_view text, const TextStyle& style) {
