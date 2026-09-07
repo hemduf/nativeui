@@ -219,7 +219,7 @@ public:
         for (const auto& run : layout.runs) {
             SkFont font(run.typeface, std::max(0.0f, style.size));
             font.setEdging(SkFont::Edging::kAntiAlias);
-            font.setEmolden(run.synthetic_bold);
+            font.setEmbolden(run.synthetic_bold);
             canvas_.drawSimpleText(text.data() + run.byte_offset,
                                    run.byte_count,
                                    SkTextEncoding::kUTF8,
