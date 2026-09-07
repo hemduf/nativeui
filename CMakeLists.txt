@@ -12,13 +12,43 @@ option(NATIVEUI_BUILD_EXAMPLES "Build NativeUI examples" ON)
 option(NATIVEUI_BUILD_TESTS "Build NativeUI core tests" ON)
 option(NATIVEUI_ENABLE_SANITIZERS "Enable ASan+UBSan on NativeUI-owned code/tests" OFF)
 option(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS "Register native standalone/embedded smoke tests with CTest" OFF)
+set(NATIVEUI_OBJC_RUNTIME_PREFIX "" CACHE STRING
+    "Consumer/plugin-specific Objective-C runtime prefix required for macOS platform builds")
 
 if(NATIVEUI_BUILD_EXAMPLES AND NOT NATIVEUI_BUILD_PLATFORM)
   message(FATAL_ERROR "NATIVEUI_BUILD_EXAMPLES requires NATIVEUI_BUILD_PLATFORM=ON")
 endif()
 
+if(APPLE AND NATIVEUI_BUILD_PLATFORM)
+  if(NATIVEUI_OBJC_RUNTIME_PREFIX STREQUAL "")
+    message(FATAL_ERROR
+      "macOS platform builds require -DNATIVEUI_OBJC_RUNTIME_PREFIX=<unique_prefix>. "
+      "The prefix must be unique to the final application/plugin binary (normally derived from its bundle identifier). "
+      "A generic NativeUI/Pugl prefix is not safe when the static library is embedded in multiple plug-ins loaded by one host.")
+  endif()
+  if(NOT NATIVEUI_OBJC_RUNTIME_PREFIX MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+    message(FATAL_ERROR
+      "NATIVEUI_OBJC_RUNTIME_PREFIX must be a valid Objective-C identifier prefix: ${NATIVEUI_OBJC_RUNTIME_PREFIX}")
+  endif()
+endif()
+
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
+
+if(APPLE AND NATIVEUI_BUILD_PLATFORM)
+  # Pugl's pinned macOS sources compiled by NativeUI define the fixed runtime
+  # classes PuglWindow, PuglWindowDelegate, PuglWrapperView and PuglOpenGLView.
+  # Objective-C runtime class names are process-global, while NativeUI/Pugl is
+  # linked statically and can therefore be duplicated across several plug-in
+  # bundles in one host. Rename every compiled private Pugl runtime class at
+  # preprocessing time with a prefix unique to the final consumer binary.
+  target_compile_definitions(nativeui_pugl PRIVATE
+    "PuglWindow=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWindow"
+    "PuglWindowDelegate=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWindowDelegate"
+    "PuglWrapperView=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglWrapperView"
+    "PuglOpenGLView=${NATIVEUI_OBJC_RUNTIME_PREFIX}PuglOpenGLView"
+  )
+endif()
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
@@ -159,6 +189,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t025_text_edit_model
   t026_label
   t027_fonts
+  t028_text_area
   t041_smoke_harness
 )
 
@@ -232,6 +263,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
   nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
   nativeui_add_core_test(nativeui_font_tests tests/font_tests.cpp)
@@ -249,6 +281,21 @@ if(NATIVEUI_BUILD_TESTS)
     target_link_libraries(nativeui_smoke_embedded PRIVATE NativeUI::NativeUI)
     nativeui_enable_project_warnings(nativeui_smoke_embedded)
     nativeui_enable_sanitizers(nativeui_smoke_embedded)
+
+    if(APPLE)
+      add_test(
+        NAME nativeui_objc_runtime_prefix
+        COMMAND ${CMAKE_COMMAND}
+          "-DARCHIVE=$<TARGET_FILE:nativeui_pugl>"
+          "-DNM=${CMAKE_NM}"
+          "-DPREFIX=${NATIVEUI_OBJC_RUNTIME_PREFIX}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_objc_runtime_prefix.cmake"
+      )
+      set_tests_properties(nativeui_objc_runtime_prefix PROPERTIES
+        LABELS "integration;platform;macos;objc-runtime"
+        TIMEOUT 20
+      )
+    endif()
 
     if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
       add_test(NAME nativeui_smoke_standalone COMMAND nativeui_smoke_standalone)

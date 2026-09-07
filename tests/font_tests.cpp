@@ -59,6 +59,21 @@ void suite() {
     NUI_CHECK(!ui::FontManager::register_embedded_font("NativeUI Invalid", invalid));
 
     NUI_CHECK(ui::FontManager::register_embedded_font("NativeUI Test Latin", latin));
+
+    // The process-shared registry is immutable by alias. Independent UI/plugin
+    // instances may repeat the same registration, but a second consumer must
+    // never be able to replace an already-published alias with different data.
+    NUI_CHECK(ui::FontManager::register_embedded_font("NativeUI Test Latin", latin));
+    NUI_CHECK(!ui::FontManager::register_embedded_font("NativeUI Test Latin", fallback));
+
+    ui::TextStyle latin_only{};
+    latin_only.family = "NativeUI Test Latin";
+    const auto still_latin = ui::FontManager::match(latin_only, U'A');
+    NUI_CHECK(still_latin);
+    NUI_CHECK(still_latin.embedded);
+    NUI_CHECK(still_latin.glyph_available);
+    NUI_CHECK(still_latin.family == "NativeUI Test Latin");
+
     NUI_CHECK(ui::FontManager::register_embedded_font("NativeUI Test Fallback", fallback));
     NUI_CHECK(ui::FontManager::has_family("NativeUI Test Latin"));
     NUI_CHECK(ui::FontManager::has_family("NativeUI Test Fallback"));

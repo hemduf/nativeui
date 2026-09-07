@@ -33,6 +33,7 @@ namespace {
 
 struct EmbeddedFace {
     std::string alias;
+    std::vector<std::byte> source;
     sk_sp<SkTypeface> typeface;
 };
 
@@ -42,6 +43,10 @@ using EmbeddedFaces = std::vector<EmbeddedFace>;
 using EmbeddedFacesStorage = std::atomic<std::shared_ptr<const EmbeddedFaces>>;
 
 EmbeddedFacesStorage& embedded_faces_storage() {
+    // This registry is intentionally process-shared, but published snapshots
+    // are immutable. An alias can be registered only once (or repeated with
+    // byte-identical data), so one UI/plugin instance cannot replace another
+    // live instance's font resource.
     static EmbeddedFacesStorage faces{std::make_shared<const EmbeddedFaces>()};
     return faces;
 }
@@ -61,6 +66,8 @@ void publish_embedded_faces(std::shared_ptr<const EmbeddedFaces> faces) {
 using EmbeddedFacesStorage = std::shared_ptr<const EmbeddedFaces>;
 
 EmbeddedFacesStorage& embedded_faces_storage() {
+    // See the atomic specialization above: sharing is process-wide by contract,
+    // while existing aliases are immutable after their first registration.
     static EmbeddedFacesStorage faces = std::make_shared<const EmbeddedFaces>();
     return faces;
 }
@@ -76,11 +83,20 @@ void publish_embedded_faces(std::shared_ptr<const EmbeddedFaces> faces) {
 #endif
 
 std::mutex& embedded_faces_mutex() {
+    // Serializes publication only. Readers use immutable snapshots and never
+    // hold this lock while measuring or painting text.
     static std::mutex mutex;
     return mutex;
 }
 
+bool same_font_bytes(const EmbeddedFace& face, std::span<const std::byte> data) {
+    return face.source.size() == data.size() &&
+           std::equal(data.begin(), data.end(), face.source.begin());
+}
+
 sk_sp<SkFontMgr> platform_font_manager() {
+    // Immutable process-wide platform service. It contains no NativeUI
+    // instance state and is safe to share by contract.
     static const sk_sp<SkFontMgr> manager = [] {
 #if defined(__APPLE__)
         return SkFontMgr_New_CoreText(nullptr);
@@ -378,6 +394,19 @@ namespace ui {
 bool FontManager::register_embedded_font(std::string_view family_alias,
                                          std::span<const std::byte> data) {
     if (family_alias.empty() || data.empty()) return false;
+
+    const std::string alias{family_alias};
+    {
+        std::lock_guard lock(detail::embedded_faces_mutex());
+        const auto current = detail::embedded_faces_snapshot();
+        const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
+            return face.alias == alias;
+        });
+        if (found != current->end()) {
+            return detail::same_font_bytes(*found, data);
+        }
+    }
+
     auto manager = detail::platform_font_manager();
     if (!manager) return false;
 
@@ -386,18 +415,22 @@ bool FontManager::register_embedded_font(std::string_view family_alias,
     auto typeface = manager->makeFromData(std::move(bytes), 0);
     if (!typeface) return false;
 
+    std::vector<std::byte> source{data.begin(), data.end()};
+
     std::lock_guard lock(detail::embedded_faces_mutex());
     const auto current = detail::embedded_faces_snapshot();
-    auto updated = std::make_shared<detail::EmbeddedFaces>(*current);
-    const std::string alias{family_alias};
-    const auto found = std::find_if(updated->begin(), updated->end(), [&](const auto& face) {
+    const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
         return face.alias == alias;
     });
-    if (found == updated->end()) {
-        updated->push_back({alias, std::move(typeface)});
-    } else {
-        found->typeface = std::move(typeface);
+    if (found != current->end()) {
+        // Another instance may have won the registration race while this
+        // instance decoded the font. Equal content is idempotent; conflicting
+        // content must never replace the already-published resource.
+        return detail::same_font_bytes(*found, data);
     }
+
+    auto updated = std::make_shared<detail::EmbeddedFaces>(*current);
+    updated->push_back({alias, std::move(source), std::move(typeface)});
     std::shared_ptr<const detail::EmbeddedFaces> published = std::move(updated);
     detail::publish_embedded_faces(std::move(published));
     return true;
