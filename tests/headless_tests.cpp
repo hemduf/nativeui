@@ -2,6 +2,9 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -100,6 +103,58 @@ void image_source_rect_and_fit_modes() {
     NUI_CHECK(cover_right.b > cover_right.r && cover_right.b > cover_right.g);
 }
 
+class TestResourceProvider final : public ui::ResourceProvider {
+public:
+    std::optional<std::vector<std::byte>> load(std::string_view resource_id) override {
+        ++load_count;
+        if (resource_id == "tiny") {
+            return std::vector<std::byte>{kTinyRgbaPng.begin(), kTinyRgbaPng.end()};
+        }
+        if (resource_id == "broken") {
+            return std::vector<std::byte>{std::byte{0x00}, std::byte{0x01}};
+        }
+        return std::nullopt;
+    }
+
+    int load_count{};
+};
+
+void image_resource_cache_behavior() {
+    TestResourceProvider provider;
+    ui::ImageCache cache{provider};
+
+    const auto first = cache.load("tiny");
+    NUI_CHECK(first);
+    NUI_CHECK(first.error == ui::ImageLoadError::None);
+    NUI_CHECK(first.image.valid());
+    NUI_CHECK(provider.load_count == 1);
+    NUI_CHECK(cache.size() == 1U);
+
+    const auto second = cache.load("tiny");
+    NUI_CHECK(second);
+    NUI_CHECK(second.image == first.image);
+    NUI_CHECK(provider.load_count == 1);
+
+    const auto missing = cache.load("missing");
+    NUI_CHECK(!missing);
+    NUI_CHECK(missing.error == ui::ImageLoadError::NotFound);
+    NUI_CHECK(provider.load_count == 2);
+
+    const auto missing_again = cache.load("missing");
+    NUI_CHECK(!missing_again);
+    NUI_CHECK(missing_again.error == ui::ImageLoadError::NotFound);
+    NUI_CHECK(provider.load_count == 2);
+
+    const auto broken = cache.load("broken");
+    NUI_CHECK(!broken);
+    NUI_CHECK(broken.error == ui::ImageLoadError::DecodeFailed);
+    NUI_CHECK(provider.load_count == 3);
+    NUI_CHECK(cache.size() == 3U);
+
+    cache.clear();
+    NUI_CHECK(cache.size() == 0U);
+}
+
 void suite() {
     ui::State<bool> enabled{true};
     ui::UI tree{
@@ -136,6 +191,7 @@ void suite() {
 
     in_memory_image_decode_and_draw();
     image_source_rect_and_fit_modes();
+    image_resource_cache_behavior();
 }
 
 } // namespace
