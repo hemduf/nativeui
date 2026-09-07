@@ -76,6 +76,18 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
+      # CODE_REVIEW.md requires proof that two independently built plug-in
+      # consumers do not register the same Objective-C runtime class names.
+      # Configure and build the pinned Pugl bridge twice with distinct consumer
+      # prefixes, then inspect both archives for isolated runtime namespaces.
+      - name: macOS two-consumer Objective-C runtime isolation
+        if: runner.os == 'macOS'
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DOUTER_BUILD=${{ github.workspace }}/build
+          -P tests/check_objc_two_consumers.cmake
+
       # The real AppKit/Pugl path validates both the T028 clipboard regression
       # and CODE_REVIEW.md's lifecycle requirement: simultaneous PUGL_MODULE
       # editor instances, sibling destruction, survivor use and repeated cycles.
