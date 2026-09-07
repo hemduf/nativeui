@@ -2,6 +2,20 @@
 
 namespace {
 
+ui::InputEvent composition(
+    ui::CompositionType type,
+    std::string text = {},
+    std::size_t cursor_byte = 0,
+    std::size_t selection_bytes = 0) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::Composition;
+    event.composition.type = type;
+    event.composition.text = std::move(text);
+    event.composition.cursor_byte = cursor_byte;
+    event.composition.selection_bytes = selection_bytes;
+    return event;
+}
+
 void enter_and_committed_text_preserve_newlines() {
     test::MockPlatform platform;
     ui::State<std::string> value{"one\ntwo"};
@@ -87,10 +101,36 @@ void viewport_scroll_and_caret_rendering() {
     NUI_CHECK(bottom_again == bottom_view);
 }
 
+void synthetic_ime_composition_uses_shared_text_model() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+
+    tree.dispatch(composition(ui::CompositionType::Cancel), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 6, 0), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "one\ntwo日本");
+
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+}
+
 void suite() {
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
     viewport_scroll_and_caret_rendering();
+    synthetic_ime_composition_uses_shared_text_model();
 }
 
 } // namespace
