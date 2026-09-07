@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace ui::detail {
@@ -150,6 +152,54 @@ Image Image::decode(std::span<const std::byte> encoded) {
 
 Size Image::size() const noexcept {
     return data_ ? data_->size : Size{};
+}
+
+struct ImageCache::Impl {
+    explicit Impl(ResourceProvider& provider_in)
+        : provider(&provider_in) {}
+
+    ResourceProvider* provider{};
+    std::unordered_map<std::string, ImageLoadResult> entries;
+};
+
+ImageCache::ImageCache(ResourceProvider& provider)
+    : impl_(std::make_unique<Impl>(provider)) {}
+
+ImageCache::~ImageCache() = default;
+ImageCache::ImageCache(ImageCache&&) noexcept = default;
+ImageCache& ImageCache::operator=(ImageCache&&) noexcept = default;
+
+ImageLoadResult ImageCache::load(std::string_view resource_id) {
+    if (!impl_ || !impl_->provider) {
+        return {{}, ImageLoadError::NotFound};
+    }
+
+    const std::string key{resource_id};
+    if (const auto existing = impl_->entries.find(key); existing != impl_->entries.end()) {
+        return existing->second;
+    }
+
+    ImageLoadResult result;
+    const auto encoded = impl_->provider->load(resource_id);
+    if (!encoded) {
+        result.error = ImageLoadError::NotFound;
+    } else {
+        result.image = Image::decode(*encoded);
+        if (!result.image.valid()) {
+            result.error = ImageLoadError::DecodeFailed;
+        }
+    }
+
+    impl_->entries.emplace(key, result);
+    return result;
+}
+
+std::size_t ImageCache::size() const noexcept {
+    return impl_ ? impl_->entries.size() : 0U;
+}
+
+void ImageCache::clear() {
+    if (impl_) impl_->entries.clear();
 }
 
 } // namespace ui
