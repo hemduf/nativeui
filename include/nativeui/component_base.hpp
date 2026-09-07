@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/constraints.hpp>
+#include <nativeui/image.hpp>
 #include <nativeui/input.hpp>
 #include <nativeui/invalidation.hpp>
 #include <nativeui/paint.hpp>
@@ -143,6 +144,19 @@ public:
 
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
         painter_.stroke_path(path, color, style);
+    }
+
+    void draw_image(const Image& image,
+                    Rect destination,
+                    ImageFit fit = ImageFit::Fill) {
+        detail::draw_image(painter_, image, destination, fit);
+    }
+
+    void draw_image(const Image& image,
+                    Rect source,
+                    Rect destination,
+                    ImageFit fit = ImageFit::Fill) {
+        detail::draw_image(painter_, image, source, destination, fit);
     }
 
     void text(Point position, std::string_view text, const TextStyle& style) {
