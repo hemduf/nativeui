@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <version>
 
 #include "include/core/SkData.h"
 #include "include/core/SkFont.h"
@@ -37,19 +38,46 @@ struct EmbeddedFace {
 
 using EmbeddedFaces = std::vector<EmbeddedFace>;
 
-std::atomic<std::shared_ptr<const EmbeddedFaces>>& embedded_faces_storage() {
-    static std::atomic<std::shared_ptr<const EmbeddedFaces>> faces{
-        std::make_shared<const EmbeddedFaces>()};
-    return faces;
-}
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+using EmbeddedFacesStorage = std::atomic<std::shared_ptr<const EmbeddedFaces>>;
 
-std::mutex& embedded_faces_mutex() {
-    static std::mutex mutex;
-    return mutex;
+EmbeddedFacesStorage& embedded_faces_storage() {
+    static EmbeddedFacesStorage faces{std::make_shared<const EmbeddedFaces>()};
+    return faces;
 }
 
 std::shared_ptr<const EmbeddedFaces> embedded_faces_snapshot() {
     return embedded_faces_storage().load(std::memory_order_acquire);
+}
+
+void publish_embedded_faces(std::shared_ptr<const EmbeddedFaces> faces) {
+    embedded_faces_storage().store(std::move(faces), std::memory_order_release);
+}
+#else
+// Some supported libc++ versions (including the Xcode 16.4 toolchain) do not
+// provide the C++20 atomic<shared_ptr<T>> specialization. The standard
+// shared_ptr atomic access functions remain available in C++20 and preserve
+// the same lock-free-read snapshot contract used by the font registry.
+using EmbeddedFacesStorage = std::shared_ptr<const EmbeddedFaces>;
+
+EmbeddedFacesStorage& embedded_faces_storage() {
+    static EmbeddedFacesStorage faces = std::make_shared<const EmbeddedFaces>();
+    return faces;
+}
+
+std::shared_ptr<const EmbeddedFaces> embedded_faces_snapshot() {
+    return std::atomic_load_explicit(&embedded_faces_storage(), std::memory_order_acquire);
+}
+
+void publish_embedded_faces(std::shared_ptr<const EmbeddedFaces> faces) {
+    std::atomic_store_explicit(
+        &embedded_faces_storage(), std::move(faces), std::memory_order_release);
+}
+#endif
+
+std::mutex& embedded_faces_mutex() {
+    static std::mutex mutex;
+    return mutex;
 }
 
 sk_sp<SkFontMgr> platform_font_manager() {
@@ -371,7 +399,7 @@ bool FontManager::register_embedded_font(std::string_view family_alias,
         found->typeface = std::move(typeface);
     }
     std::shared_ptr<const detail::EmbeddedFaces> published = std::move(updated);
-    detail::embedded_faces_storage().store(std::move(published), std::memory_order_release);
+    detail::publish_embedded_faces(std::move(published));
     return true;
 }
 
