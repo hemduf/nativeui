@@ -14,8 +14,15 @@ int fail(std::string_view stage, std::string_view message) {
 } // namespace
 
 int main() {
-    const char* stage = "construct-ui";
+    const char* stage = "font-manager";
     try {
+        ui::TextStyle font_style{};
+        const auto default_face = ui::FontManager::match(font_style, U'A');
+        if (!default_face || !default_face.glyph_available) {
+            return fail(stage, "platform font manager could not resolve Latin text");
+        }
+
+        stage = "construct-ui";
         ui::State<bool> enabled{true};
         ui::UI app{
             ui::Column{

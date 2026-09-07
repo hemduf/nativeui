@@ -13,15 +13,35 @@
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
 
+#include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ui {
 
 namespace detail {
-[[nodiscard]] sk_sp<SkTypeface> default_typeface();
-}
+
+struct ResolvedTextRun {
+    std::size_t byte_offset{};
+    std::size_t byte_count{};
+    sk_sp<SkTypeface> typeface;
+    float width{};
+    bool synthetic_bold{};
+};
+
+struct ResolvedTextLayout {
+    TextMetrics metrics;
+    std::vector<ResolvedTextRun> runs;
+};
+
+[[nodiscard]] ResolvedTextLayout resolve_text_layout(
+    std::string_view text,
+    const TextStyle& style);
+
+} // namespace detail
 
 
 class Painter {
@@ -136,19 +156,30 @@ public:
     }
 
     void text(Point position, std::string_view text, const TextStyle& style) {
-        SkFont font(detail::default_typeface(), style.size);
-        font.setEdging(SkFont::Edging::kAntiAlias);
-        font.setEmbolden(style.weight == FontWeight::Bold);
+        const auto layout = detail::resolve_text_layout(text, style);
         SkPaint paint;
         paint.setAntiAlias(true);
         paint.setColor4f(to_sk_color(style.color));
-        const auto metrics = TextService::measure(text, style);
+
         float x = position.x;
-        if (style.align == TextAlign::Center) x -= metrics.width * 0.5f;
-        if (style.align == TextAlign::Right) x -= metrics.width;
-        const float baseline = position.y - (metrics.ascent + metrics.descent) * 0.5f;
-        canvas_.drawSimpleText(text.data(), text.size(), SkTextEncoding::kUTF8,
-                               x, baseline, font, paint);
+        if (style.align == TextAlign::Center) x -= layout.metrics.width * 0.5f;
+        if (style.align == TextAlign::Right) x -= layout.metrics.width;
+        const float baseline = position.y -
+                               (layout.metrics.ascent + layout.metrics.descent) * 0.5f;
+
+        for (const auto& run : layout.runs) {
+            SkFont font(run.typeface, std::max(0.0f, style.size));
+            font.setEdging(SkFont::Edging::kAntiAlias);
+            font.setEmbolden(run.synthetic_bold);
+            canvas_.drawSimpleText(text.data() + run.byte_offset,
+                                   run.byte_count,
+                                   SkTextEncoding::kUTF8,
+                                   x,
+                                   baseline,
+                                   font,
+                                   paint);
+            x += run.width;
+        }
     }
 
     void text(Point position, std::string_view text, float size, Color color,

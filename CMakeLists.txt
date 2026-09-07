@@ -34,8 +34,13 @@ function(nativeui_enable_sanitizers target)
   endif()
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # The pinned skia-builder binaries are consumed as a third-party ABI
+    # boundary. UBSan's vptr instrumentation emits RTTI references for Skia
+    # polymorphic types which these prebuilt archives do not provide. Disable
+    # only that check while retaining ASan and the remaining UBSan coverage.
     target_compile_options(${target} PRIVATE
       -fsanitize=address,undefined
+      -fno-sanitize=vptr
       -fno-omit-frame-pointer
     )
     target_link_options(${target} PRIVATE
@@ -74,6 +79,13 @@ if(NATIVEUI_BUILD_PLATFORM)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
+  if(WIN32)
+    # windows.h defines function-like min/max macros unless NOMINMAX is set.
+    # The C++ platform bridge intentionally uses std::min/std::max throughout;
+    # keep the Win32 macros out of this target instead of rewriting portable
+    # code around macro expansion. Pugl's C target is intentionally unchanged.
+    target_compile_definitions(nativeui PRIVATE NOMINMAX)
+  endif()
   if(APPLE)
     target_compile_definitions(nativeui PRIVATE GL_SILENCE_DEPRECATION)
   endif()
@@ -105,6 +117,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t024_goldens
   t025_text_edit_model
   t026_label
+  t027_fonts
   t041_smoke_harness
 )
 
@@ -170,6 +183,10 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
   nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
+  nativeui_add_core_test(nativeui_font_tests tests/font_tests.cpp)
+  target_compile_definitions(nativeui_font_tests PRIVATE
+    NATIVEUI_TEST_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/resources"
+  )
 
   if(NATIVEUI_BUILD_PLATFORM)
     add_executable(nativeui_smoke_standalone tests/smoke_standalone.cpp)

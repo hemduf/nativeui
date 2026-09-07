@@ -15,8 +15,15 @@ int fail(std::string_view stage, std::string_view message) {
 } // namespace
 
 int main() {
-    const char* stage = "construct-parent-ui";
+    const char* stage = "font-manager";
     try {
+        ui::TextStyle font_style{};
+        const auto default_face = ui::FontManager::match(font_style, U'A');
+        if (!default_face || !default_face.glyph_available) {
+            return fail(stage, "platform font manager could not resolve Latin text");
+        }
+
+        stage = "construct-parent-ui";
         ui::UI parent_ui{
             ui::Column{
                 ui::Header{"NativeUI embedded smoke parent"},

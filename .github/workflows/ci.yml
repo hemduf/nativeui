@@ -21,8 +21,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The standard arm64 macOS pool has been persistently queued for this
+          # repository while Linux/Windows jobs complete. The pinned Skia
+          # artifact is universal, so use the standard Intel macOS 15 runner to
+          # retain macOS/CoreText/AppKit coverage without depending on scarce
+          # arm64 runner capacity.
           - name: macOS
-            os: macos-latest
+            os: macos-15-intel
           - name: Windows
             os: windows-latest
           - name: Linux X11
@@ -39,8 +44,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
-      - name: Configure
-        shell: bash
+      - name: Configure Unix
+        if: runner.os != 'Windows'
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
@@ -49,8 +54,23 @@ jobs:
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
 
+      # skia-builder's Windows archive is built with the MSVC ABI. Do not use
+      # Ninja from Git Bash here: on hosted runners that can select MinGW and
+      # cannot link the supplied Skia.lib. The native default Visual Studio
+      # generator discovers the installed MSVC toolchain without relying on
+      # shell PATH ordering.
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -A x64
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
       - name: Build
-        run: cmake --build build --parallel 2
+        run: cmake --build build --config Release --parallel 2
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
@@ -84,4 +104,9 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          # Skia's Linux fallback path calls Fontconfig FcFontRenderPrepare,
+          # whose process-lifetime caches are reported as leaks by LSan on the
+          # hosted image. Keep leak detection enabled and suppress only this
+          # known third-party allocation path; NativeUI/Skia leaks remain fatal.
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
         run: ctest --test-dir build-sanitize --output-on-failure

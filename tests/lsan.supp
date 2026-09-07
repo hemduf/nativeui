@@ -1,0 +1,5 @@
+# Fontconfig keeps allocations created by FcFontRenderPrepare in process-lifetime
+# caches on Linux. Skia's platform fallback path reaches this code through
+# SkFontMgr_fontconfig::matchFamilyStyleCharacter(). Suppress only this known
+# third-party stack while keeping LeakSanitizer enabled for all other leaks.
+leak:FcFontRenderPrepare
