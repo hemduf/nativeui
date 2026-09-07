@@ -6,9 +6,12 @@
 #include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 
+#include <charconv>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -38,40 +41,100 @@ namespace {
            size.w > 0.0f && size.h > 0.0f;
 }
 
-[[nodiscard]] Size resolved_intrinsic_size(SkSVGDOM& dom) noexcept {
+[[nodiscard]] bool xml_space(char ch) noexcept {
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+[[nodiscard]] std::optional<Size> parse_viewbox_size(std::span<const std::byte> encoded) noexcept {
+    const std::string_view xml{reinterpret_cast<const char*>(encoded.data()), encoded.size()};
+    std::size_t svg_pos = 0;
+    for (;;) {
+        svg_pos = xml.find("<svg", svg_pos);
+        if (svg_pos == std::string_view::npos) return std::nullopt;
+        const std::size_t after_name = svg_pos + 4;
+        if (after_name == xml.size() || xml_space(xml[after_name]) ||
+            xml[after_name] == '>' || xml[after_name] == '/') {
+            break;
+        }
+        svg_pos = after_name;
+    }
+
+    std::size_t tag_end = svg_pos + 4;
+    char quote = '\0';
+    for (; tag_end < xml.size(); ++tag_end) {
+        const char ch = xml[tag_end];
+        if (quote != '\0') {
+            if (ch == quote) quote = '\0';
+            continue;
+        }
+        if (ch == '\'' || ch == '"') {
+            quote = ch;
+        } else if (ch == '>') {
+            break;
+        }
+    }
+    if (tag_end == xml.size()) return std::nullopt;
+
+    const std::string_view tag = xml.substr(svg_pos + 4, tag_end - (svg_pos + 4));
+    std::size_t attr_pos = 0;
+    while ((attr_pos = tag.find("viewBox", attr_pos)) != std::string_view::npos) {
+        const bool left_boundary = attr_pos == 0 || xml_space(tag[attr_pos - 1]);
+        const std::size_t name_end = attr_pos + 7;
+        const bool right_boundary = name_end == tag.size() || xml_space(tag[name_end]) || tag[name_end] == '=';
+        if (!left_boundary || !right_boundary) {
+            attr_pos = name_end;
+            continue;
+        }
+
+        std::size_t value_pos = name_end;
+        while (value_pos < tag.size() && xml_space(tag[value_pos])) ++value_pos;
+        if (value_pos == tag.size() || tag[value_pos] != '=') return std::nullopt;
+        ++value_pos;
+        while (value_pos < tag.size() && xml_space(tag[value_pos])) ++value_pos;
+        if (value_pos == tag.size() || (tag[value_pos] != '\'' && tag[value_pos] != '"')) {
+            return std::nullopt;
+        }
+
+        const char value_quote = tag[value_pos++];
+        const std::size_t value_end = tag.find(value_quote, value_pos);
+        if (value_end == std::string_view::npos) return std::nullopt;
+        const std::string_view value = tag.substr(value_pos, value_end - value_pos);
+
+        const char* cursor = value.data();
+        const char* end = cursor + value.size();
+        float components[4]{};
+        for (float& component : components) {
+            while (cursor < end && (xml_space(*cursor) || *cursor == ',')) ++cursor;
+            if (cursor == end) return std::nullopt;
+            const auto parsed = std::from_chars(cursor, end, component, std::chars_format::general);
+            if (parsed.ec != std::errc{} || parsed.ptr == cursor) return std::nullopt;
+            cursor = parsed.ptr;
+        }
+        while (cursor < end && (xml_space(*cursor) || *cursor == ',')) ++cursor;
+        if (cursor != end || !std::isfinite(components[0]) || !std::isfinite(components[1]) ||
+            !std::isfinite(components[2]) || !std::isfinite(components[3]) ||
+            components[2] <= 0.0f || components[3] <= 0.0f) {
+            return std::nullopt;
+        }
+        return Size{components[2], components[3]};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] Size resolved_intrinsic_size(SkSVGDOM& dom,
+                                           std::span<const std::byte> encoded) noexcept {
     const auto sk_size = dom.containerSize();
-    Size intrinsic{sk_size.width(), sk_size.height()};
+    const Size intrinsic{sk_size.width(), sk_size.height()};
     if (drawable_size(intrinsic)) return intrinsic;
 
-    const auto* root = dom.getRoot();
-    if (!root) return {};
-
-    const auto& view_box = root->getViewBox();
-    if (!view_box || view_box->isEmpty() ||
-        !std::isfinite(view_box->width()) || !std::isfinite(view_box->height()) ||
-        view_box->width() <= 0.0f || view_box->height() <= 0.0f) {
-        return {};
-    }
-
-    const float aspect = view_box->width() / view_box->height();
-    const bool width_valid = std::isfinite(intrinsic.w) && intrinsic.w > 0.0f;
-    const bool height_valid = std::isfinite(intrinsic.h) && intrinsic.h > 0.0f;
-
-    if (width_valid && !height_valid) {
-        intrinsic.h = intrinsic.w / aspect;
-    } else if (!width_valid && height_valid) {
-        intrinsic.w = intrinsic.h * aspect;
-    } else {
-        intrinsic = Size{view_box->width(), view_box->height()};
-    }
-
-    if (!drawable_size(intrinsic)) return {};
-
-    // Root SVGs with omitted/percentage dimensions need a concrete viewport.
-    // Set it once at parse time so the cached DOM remains immutable while it is
-    // reused from paint paths at arbitrary destination sizes.
-    dom.setContainerSize(SkSize::Make(intrinsic.w, intrinsic.h));
-    return intrinsic;
+    // Avoid reading SkSVGSVG inline data members across the prebuilt Skia ABI
+    // boundary. The packaged SVG implementation and client compiler can differ
+    // in STL layout details. Extract only root viewBox metadata from the source
+    // bytes, then give the parsed DOM a stable container once at load time.
+    const auto viewbox = parse_viewbox_size(encoded);
+    if (!viewbox || !drawable_size(*viewbox)) return {};
+    dom.setContainerSize(SkSize::Make(viewbox->w, viewbox->h));
+    return *viewbox;
 }
 
 } // namespace
@@ -104,7 +167,7 @@ SvgIcon SvgIcon::parse(std::span<const std::byte> encoded) {
     auto dom = SkSVGDOM::MakeFromStream(stream);
     if (!dom) return {};
 
-    const Size intrinsic = detail::resolved_intrinsic_size(*dom);
+    const Size intrinsic = detail::resolved_intrinsic_size(*dom, encoded);
     if (!detail::drawable_size(intrinsic)) return {};
 
     auto data = std::make_shared<detail::SvgData>();
