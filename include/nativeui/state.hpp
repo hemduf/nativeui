@@ -12,6 +12,12 @@ namespace ui {
 // -----------------------------------------------------------------------------
 // Generic observable UI state (no plugin/audio semantics)
 // -----------------------------------------------------------------------------
+//
+// State<T> is intentionally a retained-UI/main-thread abstraction. It does not
+// synchronize value/listener access and must not be used as an audio-thread or
+// cross-thread transport. Plug-in adapters must hand data into the UI domain
+// with an explicitly reviewed thread-safe bridge (atomics/queues/snapshots as
+// appropriate) and call State<T>::set()/observe() on the UI thread.
 
 template <class T>
 class State {
@@ -92,6 +98,5 @@ private:
     T value_{};
     std::shared_ptr<Registry> registry_;
 };
-
 
 } // namespace ui
