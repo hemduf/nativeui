@@ -42,9 +42,9 @@ void vertical_navigation_and_selection_cross_lines() {
 
 void viewport_scroll_and_caret_rendering() {
     std::string document;
-    for (int i = 0; i < 24; ++i) {
+    for (int i = 0; i < 64; ++i) {
         document += "line " + std::to_string(i) + " / nativeui textarea";
-        if (i != 23) document += '\n';
+        if (i != 63) document += '\n';
     }
 
     test::MockPlatform platform;
@@ -68,22 +68,23 @@ void viewport_scroll_and_caret_rendering() {
     const auto top_view = renderer.rgba_pixels();
     NUI_CHECK(top_view != bottom_view);
 
-    // Caret blink changes only paint state; it must not require changing the text/layout model.
+    // A caret blink is paint-only. In particular, a large multiline document
+    // must not be marked for layout/rebuild merely because the caret toggled.
+    NUI_CHECK(!tree.layout_dirty());
     tree.dispatch(tick, platform);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
     NUI_CHECK(renderer.render(tree));
     const auto caret_view = renderer.rgba_pixels();
     NUI_CHECK(caret_view != top_view);
 
-    // Hide the caret again, then request a wheel scroll. The rendered viewport must advance.
+    // Moving the caret back to the document end must restore the scrolled
+    // viewport independently of caret visibility.
+    tree.dispatch(test::key(ui::Key::End, false, true), platform);
     tree.dispatch(tick, platform);
-    ui::InputEvent wheel{};
-    wheel.type = ui::InputType::PointerWheel;
-    wheel.position = {120.0f, 70.0f};
-    wheel.delta = {0.0f, 3.0f};
-    tree.dispatch(wheel, platform);
     NUI_CHECK(renderer.render(tree));
-    const auto wheel_view = renderer.rgba_pixels();
-    NUI_CHECK(wheel_view != top_view);
+    const auto bottom_again = renderer.rgba_pixels();
+    NUI_CHECK(bottom_again == bottom_view);
 }
 
 void suite() {
