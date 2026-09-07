@@ -42,9 +42,17 @@ struct FontMatch {
 
 class FontManager {
 public:
-    /// Register or replace an in-memory font under a platform-neutral family
-    /// alias. The byte buffer is copied/retained by the Skia typeface and may be
-    /// released by the caller after this function returns.
+    /// Register an in-memory font under a platform-neutral family alias.
+    ///
+    /// Embedded registrations are intentionally process-shared within one
+    /// NativeUI image and immutable by alias. Repeating an alias with identical
+    /// bytes succeeds idempotently. Reusing the alias with different bytes
+    /// fails and never replaces the font already visible to other UI/plugin
+    /// instances. The caller may release the source buffer after this call.
+    ///
+    /// Plug-in consumers should therefore use collision-resistant aliases
+    /// (normally namespaced by vendor/product) unless process-wide sharing of a
+    /// font resource is explicitly intended.
     [[nodiscard]] static bool register_embedded_font(
         std::string_view family_alias,
         std::span<const std::byte> data);
