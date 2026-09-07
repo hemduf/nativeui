@@ -27,21 +27,21 @@ bool verify_gradient(bool update) {
 
     const ui::LinearGradient gradient{
         {0.0f, 0.0f},
-        {32.0f, 0.0f},
+        {8.0f, 0.0f},
         {
             ui::GradientStop{0.0f, left},
-            ui::GradientStop{0.45f, left},
-            ui::GradientStop{0.55f, right},
+            ui::GradientStop{0.375f, left},
+            ui::GradientStop{0.625f, right},
             ui::GradientStop{1.0f, right},
         },
     };
 
     ui::UI tree{
-        ui::Canvas{32.0f, 8.0f, [gradient](ui::CanvasContext2D& g) {
-            g.fill_rect({0.0f, 0.0f, 32.0f, 8.0f}, gradient);
+        ui::Canvas{8.0f, 2.0f, [gradient](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 8.0f, 2.0f}, gradient);
         }}
     };
-    ui::HeadlessRenderer renderer{{32.0f, 8.0f}, 1.0f};
+    ui::HeadlessRenderer renderer{{8.0f, 2.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
     test::golden::CompareOptions options;
@@ -50,8 +50,8 @@ bool verify_gradient(bool update) {
     // keeps the snapshot deterministic while still proving that a gradient
     // shader, not a single solid fallback, reaches the headless renderer.
     options.compare_regions = {
-        test::golden::Region{2, 2, 10, 4},
-        test::golden::Region{20, 2, 10, 4},
+        test::golden::Region{0, 0, 3, 2},
+        test::golden::Region{5, 0, 3, 2},
     };
 
     return test::golden::verify(
