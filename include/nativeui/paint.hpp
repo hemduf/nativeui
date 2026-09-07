@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <string_view>
 #include <utility>
@@ -129,17 +130,25 @@ public:
         const auto start = gradient.start();
         const auto end = gradient.end();
         const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
-        const SkColor4f colors[2] = {
-            to_sk_color(gradient.start_color()),
-            to_sk_color(gradient.end_color()),
-        };
-        const SkGradient sk_gradient{{{colors, 2}, SkTileMode::kClamp}, {}};
-        auto shader = SkShaders::LinearGradient(points, sk_gradient);
-        if (shader) {
-            paint.setShader(std::move(shader));
-        } else {
-            paint.setColor4f(colors[0]);
-        }
+        apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
+            return SkShaders::LinearGradient(points, sk_gradient);
+        });
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+    }
+
+    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+
+        const auto center = gradient.center();
+        const SkPoint sk_center{center.x, center.y};
+        apply_gradient(paint, gradient.stops(), [sk_center, &gradient](const SkGradient& sk_gradient) {
+            if (!(gradient.radius() > 0.0f) || !std::isfinite(gradient.radius())) {
+                return sk_sp<SkShader>{};
+            }
+            return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
+        });
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
     }
 
@@ -258,6 +267,54 @@ private:
 
     [[nodiscard]] static SkColor4f to_sk_color(Color c) {
         return SkColor4f{c.r, c.g, c.b, c.a};
+    }
+
+    [[nodiscard]] static bool valid_gradient_stops(const std::vector<GradientStop>& stops) {
+        if (stops.size() < 2) return false;
+        float previous = -1.0f;
+        for (const auto& stop : stops) {
+            if (!std::isfinite(stop.offset) || stop.offset < 0.0f || stop.offset > 1.0f ||
+                stop.offset <= previous) {
+                return false;
+            }
+            previous = stop.offset;
+        }
+        return true;
+    }
+
+    template <class Factory>
+    static void apply_gradient(SkPaint& paint,
+                               const std::vector<GradientStop>& stops,
+                               Factory&& factory) {
+        if (stops.empty()) {
+            paint.setColor4f(to_sk_color(Color{}));
+            return;
+        }
+        if (!valid_gradient_stops(stops)) {
+            paint.setColor4f(to_sk_color(stops.front().color));
+            return;
+        }
+
+        std::vector<SkColor4f> colors;
+        std::vector<float> positions;
+        colors.reserve(stops.size());
+        positions.reserve(stops.size());
+        for (const auto& stop : stops) {
+            colors.push_back(to_sk_color(stop.color));
+            positions.push_back(stop.offset);
+        }
+
+        const SkGradient sk_gradient{
+            {{colors.data(), colors.size()},
+             {positions.data(), positions.size()},
+             SkTileMode::kClamp},
+            {}};
+        auto shader = std::forward<Factory>(factory)(sk_gradient);
+        if (shader) {
+            paint.setShader(std::move(shader));
+        } else {
+            paint.setColor4f(colors.front());
+        }
     }
 
     [[nodiscard]] static SkPaint::Cap to_sk_cap(StrokeCap cap) {
