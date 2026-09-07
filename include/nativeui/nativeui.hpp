@@ -10,6 +10,7 @@
 #include <nativeui/text.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/image.hpp>
+#include <nativeui/svg.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/component.hpp>
 #include <nativeui/command.hpp>
