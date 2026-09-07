@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/resource.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -11,7 +12,6 @@
 namespace ui {
 
 class Painter;
-class ResourceProvider;
 class SvgIcon;
 
 namespace detail {
