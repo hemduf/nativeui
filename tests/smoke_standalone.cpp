@@ -41,6 +41,12 @@ int main() {
         if (!window.native_handle()) return fail(stage, "native handle is zero");
         if (!(window.scale_factor() > 0.0f)) return fail(stage, "invalid scale factor");
 
+        // Exercise the native clipboard bridge directly. This is intentionally
+        // part of the real platform smoke test rather than a mocked TextArea
+        // test, since the macOS regression occurred inside Pugl/NSPasteboard.
+        stage = "clipboard";
+        window.set_clipboard_text("NativeUI clipboard smoke");
+
         stage = "poll";
         for (int i = 0; i < 8 && !window.should_close(); ++i) {
             if (!window.poll(0.0) && !window.should_close()) {
