@@ -16,7 +16,7 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
-#include "include/effects/SkGradientShader.h"
+#include "include/effects/SkGradient.h"
 
 #include <algorithm>
 #include <cassert>
@@ -133,8 +133,8 @@ public:
             to_sk_color(gradient.start_color()),
             to_sk_color(gradient.end_color()),
         };
-        auto shader = SkGradientShader::MakeLinear(
-            points, colors, nullptr, nullptr, 2, SkTileMode::kClamp);
+        const SkGradient sk_gradient{{{colors, 2}, SkTileMode::kClamp}, {}};
+        auto shader = SkShaders::LinearGradient(points, sk_gradient);
         if (shader) {
             paint.setShader(std::move(shader));
         } else {
