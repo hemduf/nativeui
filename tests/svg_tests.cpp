@@ -1,4 +1,5 @@
 #include "test_support.hpp"
+#include "golden/golden.hpp"
 
 #include <nativeui/image.hpp>
 #include <nativeui/svg.hpp>
@@ -109,6 +110,32 @@ void parse_and_render_at_logical_size() {
     ui::HeadlessRenderer renderer{{16.0f, 16.0f}, 1.0f};
     NUI_CHECK(renderer.render(tree));
     check_quadrants(renderer);
+}
+
+void path_icon_matches_golden_pixels() {
+    const auto icon = ui::SvgIcon::parse(as_bytes(kRedSvg));
+    NUI_CHECK(icon.valid());
+
+    ui::UI tree{ui::Canvas{8.0f, 8.0f, [icon](ui::CanvasContext2D& canvas) {
+        canvas.draw_svg(icon, {0.0f, 0.0f, 8.0f, 8.0f});
+    }}};
+    ui::HeadlessRenderer renderer{{8.0f, 8.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    test::golden::Image expected{8, 8, {}};
+    expected.rgb.resize(8U * 8U * 3U);
+    for (std::size_t offset = 0; offset < expected.rgb.size(); offset += 3U) {
+        expected.rgb[offset + 0U] = 255U;
+        expected.rgb[offset + 1U] = 0U;
+        expected.rgb[offset + 2U] = 0U;
+    }
+
+    test::golden::CompareOptions options;
+    options.channel_tolerance = 1;
+    options.compare_regions = {test::golden::Region{2, 2, 4, 4}};
+    const auto result = test::golden::compare(
+        expected, test::golden::from_renderer(renderer), options);
+    NUI_CHECK(result.matched);
 }
 
 void default_fit_preserves_intrinsic_aspect_ratio() {
@@ -275,6 +302,7 @@ void independent_caches_can_reuse_the_same_resource_id() {
 
 void suite() {
     parse_and_render_at_logical_size();
+    path_icon_matches_golden_pixels();
     default_fit_preserves_intrinsic_aspect_ratio();
     path_transform_and_gradient_render_headlessly();
     malformed_and_empty_svg_fail_deterministically();
