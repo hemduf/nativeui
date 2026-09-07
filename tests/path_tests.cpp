@@ -39,7 +39,8 @@ void suite() {
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(red(renderer.pixel(25, 25)));
     NUI_CHECK(!red(renderer.pixel(72, 25)));
-    NUI_CHECK(green(renderer.pixel(30, 62)));
+    // Sample the center of the first stroked segment, well away from the join.
+    NUI_CHECK(green(renderer.pixel(25, 61)));
 
     // Empty and degenerate paths are valid no-ops and must never crash.
     ui::Path empty;
