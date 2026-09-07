@@ -1,10 +1,12 @@
 #include "test_support.hpp"
 
+#include <nativeui/image.hpp>
 #include <nativeui/svg.hpp>
 
-#include <array>
 #include <cstddef>
+#include <optional>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -18,6 +20,24 @@ constexpr std::string_view kQuadrantSvg = R"svg(<svg xmlns="http://www.w3.org/20
 std::span<const std::byte> as_bytes(std::string_view text) {
     return {reinterpret_cast<const std::byte*>(text.data()), text.size()};
 }
+
+std::vector<std::byte> byte_vector(std::string_view text) {
+    const auto bytes = as_bytes(text);
+    return {bytes.begin(), bytes.end()};
+}
+
+class CountingProvider final : public ui::ResourceProvider {
+public:
+    [[nodiscard]] std::optional<std::vector<std::byte>> load(
+        std::string_view resource_id) override {
+        ++calls;
+        if (resource_id == "good") return byte_vector(kQuadrantSvg);
+        if (resource_id == "bad") return std::vector<std::byte>{};
+        return std::nullopt;
+    }
+
+    int calls{};
+};
 
 void parse_and_render_at_logical_size() {
     const auto icon = ui::SvgIcon::parse(as_bytes(kQuadrantSvg));
@@ -41,8 +61,46 @@ void parse_and_render_at_logical_size() {
     NUI_CHECK(white.r > 220 && white.g > 220 && white.b > 220);
 }
 
+void cache_reuses_parsed_resources_and_failures() {
+    CountingProvider provider;
+    ui::SvgCache cache{provider};
+
+    const auto first = cache.load("good");
+    NUI_CHECK(first);
+    NUI_CHECK(first.error == ui::SvgLoadError::None);
+    NUI_CHECK(provider.calls == 1);
+    NUI_CHECK(cache.size() == 1);
+
+    const auto second = cache.load("good");
+    NUI_CHECK(second);
+    NUI_CHECK(second.icon == first.icon);
+    NUI_CHECK(provider.calls == 1);
+    NUI_CHECK(cache.size() == 1);
+
+    const auto missing = cache.load("missing");
+    NUI_CHECK(!missing);
+    NUI_CHECK(missing.error == ui::SvgLoadError::NotFound);
+    NUI_CHECK(provider.calls == 2);
+    NUI_CHECK(cache.load("missing").error == ui::SvgLoadError::NotFound);
+    NUI_CHECK(provider.calls == 2);
+
+    const auto malformed = cache.load("bad");
+    NUI_CHECK(!malformed);
+    NUI_CHECK(malformed.error == ui::SvgLoadError::ParseFailed);
+    NUI_CHECK(provider.calls == 3);
+    NUI_CHECK(cache.load("bad").error == ui::SvgLoadError::ParseFailed);
+    NUI_CHECK(provider.calls == 3);
+    NUI_CHECK(cache.size() == 3);
+
+    cache.clear();
+    NUI_CHECK(cache.size() == 0);
+    NUI_CHECK(cache.load("good"));
+    NUI_CHECK(provider.calls == 4);
+}
+
 void suite() {
     parse_and_render_at_logical_size();
+    cache_reuses_parsed_resources_and_failures();
 }
 
 } // namespace
