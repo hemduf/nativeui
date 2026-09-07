@@ -196,6 +196,32 @@ void selection_erase_cancels_active_composition() {
     NUI_CHECK(model.text() == "ho");
 }
 
+void directional_deletion_cancels_active_composition() {
+    ui::TextEditModel backspace{"hello"};
+    backspace.move_to(4);
+    backspace.begin_composition();
+    backspace.update_composition("仮", 3, 0);
+
+    NUI_CHECK(backspace.backspace());
+    NUI_CHECK(!backspace.composition_active());
+    NUI_CHECK(backspace.composition_text().empty());
+    NUI_CHECK(backspace.text() == "helo");
+    NUI_CHECK(!backspace.commit_composition("日本"));
+    NUI_CHECK(backspace.text() == "helo");
+
+    ui::TextEditModel forward_delete{"hello"};
+    forward_delete.move_to(1);
+    forward_delete.begin_composition();
+    forward_delete.update_composition("仮", 3, 0);
+
+    NUI_CHECK(forward_delete.delete_forward());
+    NUI_CHECK(!forward_delete.composition_active());
+    NUI_CHECK(forward_delete.composition_text().empty());
+    NUI_CHECK(forward_delete.text() == "hllo");
+    NUI_CHECK(!forward_delete.commit_composition("日本"));
+    NUI_CHECK(forward_delete.text() == "hllo");
+}
+
 void suite() {
     insertion_selection_and_limits();
     unicode_and_word_navigation();
@@ -206,6 +232,7 @@ void suite() {
     composition_cancel_preserves_committed_text();
     external_edit_cancels_active_composition();
     selection_erase_cancels_active_composition();
+    directional_deletion_cancels_active_composition();
 }
 
 } // namespace
