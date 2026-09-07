@@ -76,6 +76,14 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
+      # CODE_REVIEW.md requires real multi-instance/lifecycle evidence for
+      # platform changes. macOS runners provide a usable AppKit session, so run
+      # the standalone host smoke with simultaneous PUGL_MODULE child editors,
+      # sibling destruction and repeated attach/destroy cycles.
+      - name: macOS multi-instance lifecycle smoke
+        if: runner.os == 'macOS'
+        run: ./build/nativeui_smoke_standalone
+
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
