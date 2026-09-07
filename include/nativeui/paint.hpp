@@ -5,6 +5,7 @@
 #include <nativeui/path.hpp>
 #include <nativeui/text.hpp>
 
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkFont.h"
@@ -122,7 +123,8 @@ public:
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
     }
 
-    void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient) {
+    void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
+                           PaintOptions options = {}) {
         SkPaint paint;
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kFill_Style);
@@ -133,10 +135,12 @@ public:
         apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
             return SkShaders::LinearGradient(points, sk_gradient);
         });
+        apply_paint_options(paint, options);
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
     }
 
-    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient) {
+    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
+                           PaintOptions options = {}) {
         SkPaint paint;
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kFill_Style);
@@ -149,6 +153,7 @@ public:
             }
             return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
         });
+        apply_paint_options(paint, options);
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
     }
 
@@ -315,6 +320,24 @@ private:
         } else {
             paint.setColor4f(colors.front());
         }
+    }
+
+    [[nodiscard]] static SkBlendMode to_sk_blend_mode(BlendMode mode) noexcept {
+        switch (mode) {
+            case BlendMode::SourceOver: return SkBlendMode::kSrcOver;
+            case BlendMode::Multiply: return SkBlendMode::kMultiply;
+            case BlendMode::Screen: return SkBlendMode::kScreen;
+            case BlendMode::Plus: return SkBlendMode::kPlus;
+        }
+        return SkBlendMode::kSrcOver;
+    }
+
+    static void apply_paint_options(SkPaint& paint, PaintOptions options) {
+        const float opacity = std::isfinite(options.opacity)
+            ? std::clamp(options.opacity, 0.0f, 1.0f)
+            : 1.0f;
+        paint.setAlphaf(opacity);
+        paint.setBlendMode(to_sk_blend_mode(options.blend));
     }
 
     [[nodiscard]] static SkPaint::Cap to_sk_cap(StrokeCap cap) {

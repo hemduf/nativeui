@@ -95,12 +95,12 @@ public:
         painter_.fill_rounded_rect(rect, 0.0f, color);
     }
 
-    void fill_rect(Rect rect, const LinearGradient& gradient) {
-        painter_.fill_rounded_rect(rect, 0.0f, gradient);
+    void fill_rect(Rect rect, const LinearGradient& gradient, PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, 0.0f, gradient, options);
     }
 
-    void fill_rect(Rect rect, const RadialGradient& gradient) {
-        painter_.fill_rounded_rect(rect, 0.0f, gradient);
+    void fill_rect(Rect rect, const RadialGradient& gradient, PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, 0.0f, gradient, options);
     }
 
     void stroke_rect(Rect rect, float width, Color color) {
@@ -111,12 +111,14 @@ public:
         painter_.fill_rounded_rect(rect, radius, color);
     }
 
-    void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient) {
-        painter_.fill_rounded_rect(rect, radius, gradient);
+    void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
+                           PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, radius, gradient, options);
     }
 
-    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient) {
-        painter_.fill_rounded_rect(rect, radius, gradient);
+    void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
+                           PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, radius, gradient, options);
     }
 
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
