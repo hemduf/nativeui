@@ -1,3 +1,4 @@
+#include <nativeui/image.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/svg.hpp>
 
@@ -7,6 +8,9 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
 
 namespace ui::detail {
 
@@ -79,6 +83,54 @@ SvgIcon SvgIcon::parse(std::span<const std::byte> encoded) {
 
 Size SvgIcon::intrinsic_size() const noexcept {
     return data_ ? data_->intrinsic : Size{};
+}
+
+struct SvgCache::Impl {
+    explicit Impl(ResourceProvider& provider_in)
+        : provider(&provider_in) {}
+
+    ResourceProvider* provider{};
+    std::unordered_map<std::string, SvgLoadResult> entries;
+};
+
+SvgCache::SvgCache(ResourceProvider& provider)
+    : impl_(std::make_unique<Impl>(provider)) {}
+
+SvgCache::~SvgCache() = default;
+SvgCache::SvgCache(SvgCache&&) noexcept = default;
+SvgCache& SvgCache::operator=(SvgCache&&) noexcept = default;
+
+SvgLoadResult SvgCache::load(std::string_view resource_id) {
+    if (!impl_ || !impl_->provider) {
+        return {{}, SvgLoadError::NotFound};
+    }
+
+    const std::string key{resource_id};
+    if (const auto existing = impl_->entries.find(key); existing != impl_->entries.end()) {
+        return existing->second;
+    }
+
+    SvgLoadResult result;
+    const auto encoded = impl_->provider->load(resource_id);
+    if (!encoded) {
+        result.error = SvgLoadError::NotFound;
+    } else {
+        result.icon = SvgIcon::parse(*encoded);
+        if (!result.icon.valid()) {
+            result.error = SvgLoadError::ParseFailed;
+        }
+    }
+
+    impl_->entries.emplace(key, result);
+    return result;
+}
+
+std::size_t SvgCache::size() const noexcept {
+    return impl_ ? impl_->entries.size() : 0U;
+}
+
+void SvgCache::clear() {
+    if (impl_) impl_->entries.clear();
 }
 
 } // namespace ui
