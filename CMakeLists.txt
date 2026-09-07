@@ -21,10 +21,16 @@ include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
-# Keep it as an imported target with Skia as its transitive dependency so static
-# link order is `svg` then `skia` on Unix-like toolchains.
+# Skia's SVG DOM also references primitive text shaping even for SVGs without
+# text nodes, so keep static link order `svg`, `skshaper`, then `skia`.
 find_library(NATIVEUI_SKIA_SVG_LIBRARY
   NAMES svg
+  PATHS "${_skia_lib_dir}"
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+find_library(NATIVEUI_SKIA_SHAPER_LIBRARY
+  NAMES skshaper
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
   REQUIRED
@@ -34,7 +40,7 @@ set_target_properties(SkiaBuilder::svg PROPERTIES
   IMPORTED_LOCATION "${NATIVEUI_SKIA_SVG_LIBRARY}"
 )
 set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-  SkiaBuilder::skia)
+  "${NATIVEUI_SKIA_SHAPER_LIBRARY};SkiaBuilder::skia")
 
 function(nativeui_enable_project_warnings target)
   if(MSVC)
