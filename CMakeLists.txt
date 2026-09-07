@@ -59,6 +59,7 @@ endfunction()
 # OpenGL dependency so retained-mode behavior can be tested without a window.
 add_library(nativeui_core STATIC
   src/skia_core.cpp
+  src/skia_image.cpp
   src/headless.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
