@@ -119,6 +119,14 @@ public:
         painter_.line(a, b, width, color);
     }
 
+    void fill_path(const Path& path, Color color) {
+        painter_.fill_path(path, color);
+    }
+
+    void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
+        painter_.stroke_path(path, color, style);
+    }
+
     void text(Point position, std::string_view text, const TextStyle& style) {
         painter_.text(position, text, style);
     }
