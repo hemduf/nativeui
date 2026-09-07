@@ -76,11 +76,10 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
-      # CODE_REVIEW.md requires real multi-instance/lifecycle evidence for
-      # platform changes. macOS runners provide a usable AppKit session, so run
-      # the standalone host smoke with simultaneous PUGL_MODULE child editors,
-      # sibling destruction and repeated attach/destroy cycles.
-      - name: macOS multi-instance lifecycle smoke
+      # The real AppKit/Pugl path validates both the T028 clipboard regression
+      # and CODE_REVIEW.md's lifecycle requirement: simultaneous PUGL_MODULE
+      # editor instances, sibling destruction, survivor use and repeated cycles.
+      - name: macOS clipboard and multi-instance lifecycle smoke
         if: runner.os == 'macOS'
         run: ./build/nativeui_smoke_standalone
 

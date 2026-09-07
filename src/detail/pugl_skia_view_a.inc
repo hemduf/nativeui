@@ -153,9 +153,13 @@ public:
 
     void set_clipboard_text(std::string_view text) {
         if (!view_) return;
+
+        // Pugl's macOS backend maps the canonical text/plain MIME type to
+        // public.utf8-plain-text. Parameterized MIME strings can resolve to a
+        // nil UTI and crash inside NSPasteboard on recent macOS releases.
         puglSetClipboard(view_,
                          PUGL_CLIPBOARD_GENERAL,
-                         "text/plain;charset=utf-8",
+                         "text/plain",
                          text.data(),
                          text.size());
     }
