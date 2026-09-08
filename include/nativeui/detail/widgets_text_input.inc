@@ -397,8 +397,22 @@ private:
     void ensure_cursor_visible(Context& ctx) {
         const auto field = field_rect(ctx.bounds());
         const auto content = content_rect(field);
-        const float caret = ctx.text_width(prefix(model_.cursor()), kTextSize);
-        const float total = ctx.text_width(model_.text(), kTextSize);
+
+        float caret = ctx.text_width(prefix(model_.cursor()), kTextSize);
+        float total = ctx.text_width(model_.text(), kTextSize);
+        if (model_.composition_active()) {
+            const auto committed = std::string_view{model_.text()};
+            const auto before = committed.substr(0, model_.selection_begin());
+            const auto after = committed.substr(model_.selection_end());
+            const auto preedit = std::string_view{model_.composition_text()};
+            const auto preedit_cursor = preedit.substr(
+                0,
+                std::min(model_.composition_cursor_byte(), preedit.size()));
+
+            caret = ctx.text_width(before, kTextSize) + ctx.text_width(preedit_cursor, kTextSize);
+            total = ctx.text_width(before, kTextSize) + ctx.text_width(preedit, kTextSize) +
+                    ctx.text_width(after, kTextSize);
+        }
         constexpr float margin = 4.0f;
 
         if (caret - scroll_x_ < margin) scroll_x_ = std::max(0.0f, caret - margin);
