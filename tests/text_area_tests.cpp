@@ -155,6 +155,26 @@ void pointer_edit_cancels_active_composition() {
     NUI_CHECK(value.get() == "one\ntwo");
 }
 
+void composition_candidate_tracks_preedit_cursor_on_current_line() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    NUI_CHECK_NEAR(platform.text_input_cursor_offset, 34.5f, 0.001f);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+
+    // The committed caret sits after "two" (3 ASCII bytes). MockPlatform
+    // measures each UTF-8 byte as half the 15 px font size, so advancing the
+    // preedit cursor through the first 3-byte code point adds 22.5 px. The
+    // native candidate offset must follow that transient preedit cursor.
+    NUI_CHECK_NEAR(platform.text_input_cursor_offset, 57.0f, 0.001f);
+}
+
 void suite() {
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
@@ -162,6 +182,7 @@ void suite() {
     synthetic_ime_composition_uses_shared_text_model();
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
+    composition_candidate_tracks_preedit_cursor_on_current_line();
 }
 
 } // namespace
