@@ -1,5 +1,10 @@
 #include "test_support.hpp"
 
+namespace ui::detail {
+[[nodiscard]] std::pair<Rect, float> scale_text_input_geometry(
+    Rect logical_area, float logical_cursor_offset, float scale_factor);
+} // namespace ui::detail
+
 namespace {
 
 ui::InputEvent composition(
@@ -143,6 +148,32 @@ void composition_candidate_tracks_preedit_cursor() {
     NUI_CHECK_NEAR(platform.text_input_cursor_offset, 72.0f, 0.001f);
 }
 
+void composition_candidate_geometry_scales_at_platform_boundary() {
+    const ui::Rect logical_area{12.5f, 8.0f, 120.0f, 24.0f};
+    constexpr float logical_cursor_offset = 37.25f;
+
+    const auto at_1x = ui::detail::scale_text_input_geometry(
+        logical_area, logical_cursor_offset, 1.0f);
+    NUI_CHECK_NEAR(at_1x.first.x, 12.5f, 0.001f);
+    NUI_CHECK_NEAR(at_1x.first.y, 8.0f, 0.001f);
+    NUI_CHECK_NEAR(at_1x.first.w, 120.0f, 0.001f);
+    NUI_CHECK_NEAR(at_1x.first.h, 24.0f, 0.001f);
+    NUI_CHECK_NEAR(at_1x.second, 37.25f, 0.001f);
+
+    const auto at_2x = ui::detail::scale_text_input_geometry(
+        logical_area, logical_cursor_offset, 2.0f);
+    NUI_CHECK_NEAR(at_2x.first.x, 25.0f, 0.001f);
+    NUI_CHECK_NEAR(at_2x.first.y, 16.0f, 0.001f);
+    NUI_CHECK_NEAR(at_2x.first.w, 240.0f, 0.001f);
+    NUI_CHECK_NEAR(at_2x.first.h, 48.0f, 0.001f);
+    NUI_CHECK_NEAR(at_2x.second, 74.5f, 0.001f);
+
+    // The editor-facing geometry remains logical. A scale change affects only
+    // the platform conversion and must not feed physical values back into it.
+    NUI_CHECK_NEAR(logical_area.x, 12.5f, 0.001f);
+    NUI_CHECK_NEAR(logical_cursor_offset, 37.25f, 0.001f);
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -217,6 +248,7 @@ void suite() {
     pointer_edit_cancels_active_composition();
     preedit_is_visually_distinct_without_committing_state();
     composition_candidate_tracks_preedit_cursor();
+    composition_candidate_geometry_scales_at_platform_boundary();
 }
 
 } // namespace
