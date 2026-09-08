@@ -32,29 +32,25 @@ void unicode_and_word_navigation() {
 
     model.move_to(model.text().size());
     model.move_left(ui::TextMotion::Word);
-    NUI_CHECK(model.cursor() == 8); // byte offset of UTF-8 "élan"
+    NUI_CHECK(model.cursor() == 8);
     model.move_left(ui::TextMotion::Word);
-    NUI_CHECK(model.cursor() == 4); // "two"
+    NUI_CHECK(model.cursor() == 4);
 
     model.move_right(ui::TextMotion::Word, true);
     NUI_CHECK(model.selection_begin() == 4);
     NUI_CHECK(model.selection_end() == 8);
 
-    model.select_word_at(9); // inside the UTF-8 word "élan"
+    model.select_word_at(9);
     NUI_CHECK(model.selected_text() == "élan");
 }
 
 void multiline_navigation_preserves_visual_column() {
-    // Byte layout: "ab\né🙂x\nq"
-    // line starts: 0, 3, 11. The second line has 3 Unicode scalars.
     ui::TextEditModel model{"ab\né🙂x\nq"};
 
-    model.move_to(10); // end of the second line, visual column 3
+    model.move_to(10);
     model.move_up();
-    NUI_CHECK(model.cursor() == 2); // first line clamps at visual column 2
+    NUI_CHECK(model.cursor() == 2);
 
-    // A clamped vertical move must retain the preferred visual column so the
-    // reverse move returns to column 3 rather than the clamped column 2.
     model.move_down();
     NUI_CHECK(model.cursor() == 10);
 
@@ -97,10 +93,10 @@ void deletion_and_history() {
 
 void utf8_boundaries_are_never_split() {
     ui::TextEditModel model{"é🙂x"};
-    model.move_to(1); // continuation byte inside é: must clamp to a valid boundary
+    model.move_to(1);
     NUI_CHECK(model.cursor() == 0);
 
-    model.select_range(1, 5); // both indices are potentially inside code points
+    model.select_range(1, 5);
     NUI_CHECK(model.selection_begin() == 0);
     NUI_CHECK(model.selection_end() == 2 || model.selection_end() == 6);
 
@@ -120,10 +116,15 @@ void composition_is_transient_until_single_commit() {
     model.update_composition("é🙂", 1, 5);
     NUI_CHECK(model.text() == "hello");
     NUI_CHECK(model.composition_text() == "é🙂");
-    // Both supplied offsets point into UTF-8 sequences. The model must clamp
-    // them to code-point boundaries inside the transient preedit payload.
     NUI_CHECK(model.composition_cursor_byte() == 0);
     NUI_CHECK(model.composition_selection_bytes() == 2);
+
+    // selection_bytes is a byte length relative to the preedit cursor. It must
+    // never extend beyond the remaining payload, even when the native side
+    // provides an oversized but otherwise boundary-aligned selection length.
+    model.update_composition("日本", 3, 99);
+    NUI_CHECK(model.composition_cursor_byte() == 3);
+    NUI_CHECK(model.composition_selection_bytes() == 3);
 
     model.update_composition("Ω", 2, 0);
     NUI_CHECK(model.text() == "hello");
@@ -135,7 +136,6 @@ void composition_is_transient_until_single_commit() {
     NUI_CHECK(!model.composition_active());
     NUI_CHECK(model.text() == "h日本o");
 
-    // One IME commit is one logical edit transaction.
     NUI_CHECK(model.undo());
     NUI_CHECK(model.text() == "hello");
     NUI_CHECK(!model.can_undo());
@@ -165,15 +165,11 @@ void external_edit_cancels_active_composition() {
     model.begin_composition();
     model.update_composition("仮", 3, 0);
 
-    // Ordinary committed editing (typing/paste) must use the same deterministic
-    // cancel path before mutating the committed buffer. Otherwise stale preedit
-    // state survives until a later IME callback and can target an obsolete range.
     NUI_CHECK(model.insert("X"));
     NUI_CHECK(!model.composition_active());
     NUI_CHECK(model.composition_text().empty());
     NUI_CHECK(model.text() == "hXo");
 
-    // A stale platform commit after the external edit must not be able to apply.
     NUI_CHECK(!model.commit_composition("日本"));
     NUI_CHECK(model.text() == "hXo");
 }
@@ -184,14 +180,11 @@ void selection_erase_cancels_active_composition() {
     model.begin_composition();
     model.update_composition("仮", 3, 0);
 
-    // Selection deletion is another committed edit path. It must first cancel
-    // transient preedit state using the same deterministic composition path.
     NUI_CHECK(model.erase_selection());
     NUI_CHECK(!model.composition_active());
     NUI_CHECK(model.composition_text().empty());
     NUI_CHECK(model.text() == "ho");
 
-    // A stale native commit after the deletion must remain inert.
     NUI_CHECK(!model.commit_composition("日本"));
     NUI_CHECK(model.text() == "ho");
 }
