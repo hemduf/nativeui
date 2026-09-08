@@ -118,6 +118,26 @@ void synthetic_ime_composition_uses_shared_text_model() {
     NUI_CHECK(value.get() == "one\ntwo");
 }
 
+void duplicate_text_delivery_after_ime_commit_is_suppressed() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 6, 0), platform);
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "one\ntwo日本");
+
+    // Native IME bridges can deliver the just-committed payload again through
+    // the ordinary committed-text path. The immediate identical follow-up must
+    // be consumed once rather than creating a second edit/history transaction.
+    tree.dispatch(test::text("日本"), platform);
+    NUI_CHECK(value.get() == "one\ntwo日本");
+}
+
 void focus_loss_cancels_active_composition() {
     test::MockPlatform platform;
     ui::State<std::string> value{"one\ntwo"};
@@ -200,6 +220,7 @@ void suite() {
     vertical_navigation_and_selection_cross_lines();
     viewport_scroll_and_caret_rendering();
     synthetic_ime_composition_uses_shared_text_model();
+    duplicate_text_delivery_after_ime_commit_is_suppressed();
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
     composition_candidate_tracks_preedit_cursor_on_current_line();
