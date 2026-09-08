@@ -124,6 +124,27 @@ void preedit_is_visually_distinct_without_committing_state() {
     NUI_CHECK(renderer.rgba_pixels() != committed_only);
 }
 
+void ime_owned_navigation_does_not_cancel_preedit() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    // Arrow/navigation keys are commonly consumed by the platform candidate
+    // UI while composition is active. The retained editor must not execute a
+    // second navigation path that cancels or moves the composition snapshot.
+    tree.dispatch(test::key(ui::Key::Left), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello日本");
+}
+
 void composition_candidate_tracks_preedit_cursor() {
     test::MockPlatform platform;
     ui::State<std::string> value{"hello"};
@@ -242,6 +263,7 @@ void suite() {
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
     preedit_is_visually_distinct_without_committing_state();
+    ime_owned_navigation_does_not_cancel_preedit();
     composition_candidate_tracks_preedit_cursor();
     composition_candidate_geometry_scales_at_platform_boundary();
 }
