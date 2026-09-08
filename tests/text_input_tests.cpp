@@ -100,6 +100,25 @@ void preedit_is_visually_distinct_without_committing_state() {
     NUI_CHECK(renderer.rgba_pixels() != committed_only);
 }
 
+void composition_candidate_tracks_preedit_cursor() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+    NUI_CHECK_NEAR(platform.text_input_cursor_offset, 49.5f, 0.001f);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    // MockPlatform measures one UTF-8 byte as half the font size. The candidate
+    // cursor must therefore follow the first 3-byte preedit code point, rather
+    // than remaining at the committed-text caret.
+    NUI_CHECK_NEAR(platform.text_input_cursor_offset, 72.0f, 0.001f);
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -172,6 +191,7 @@ void suite() {
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
     preedit_is_visually_distinct_without_committing_state();
+    composition_candidate_tracks_preedit_cursor();
 }
 
 } // namespace
