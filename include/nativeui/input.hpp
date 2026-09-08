@@ -139,8 +139,8 @@ struct InputEvent {
 
 namespace detail {
 
-[[nodiscard]] inline std::pair<Rect, float> scale_text_input_geometry(
-    Rect logical_area, float logical_cursor_offset, float scale_factor) {
+[[nodiscard]] constexpr std::pair<Rect, float> scale_text_input_geometry(
+    Rect logical_area, float logical_cursor_offset, float scale_factor) noexcept {
     const float scale = scale_factor > 0.0f ? scale_factor : 1.0f;
     return {
         Rect{
@@ -149,6 +149,29 @@ namespace detail {
             logical_area.w * scale,
             logical_area.h * scale},
         logical_cursor_offset * scale};
+}
+
+[[nodiscard]] constexpr bool text_input_boundary_needs_update(
+    bool current_active,
+    Rect current_physical_area,
+    float current_physical_cursor_offset,
+    bool requested_active,
+    Rect requested_logical_area,
+    float requested_logical_cursor_offset,
+    float scale_factor) noexcept {
+    if (current_active != requested_active) return true;
+    if (!requested_active) return false;
+
+    const auto scaled = scale_text_input_geometry(
+        requested_logical_area, requested_logical_cursor_offset, scale_factor);
+    const Rect requested_physical_area = scaled.first;
+    const float requested_physical_cursor_offset = scaled.second;
+
+    return current_physical_area.x != requested_physical_area.x ||
+           current_physical_area.y != requested_physical_area.y ||
+           current_physical_area.w != requested_physical_area.w ||
+           current_physical_area.h != requested_physical_area.h ||
+           current_physical_cursor_offset != requested_physical_cursor_offset;
 }
 
 struct NormalizedTabKey {
