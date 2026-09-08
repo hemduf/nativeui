@@ -178,9 +178,12 @@ T026 remains `Doing` until the corrected suite is rerun on real macOS/Skia.
 
 ## #86 Pugl drag-and-drop fork integration — 2026-09-08
 
-- NativeUI pins `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`.
-- The fork fixes the macOS Cocoa offer → accept → actual-drop → data lifecycle, implements `puglRejectOffer()` on macOS and Windows, and fixes Windows `WM_DROPFILES` UTF-8 byte accounting.
-- NativeUI removes the old macOS/Windows rejection compatibility wrapper and calls `puglRejectOffer()` directly on all supported desktop backends.
-- Pugl post-merge CI is green on macOS, Windows, Linux and WebAssembly, including native `pugl:mac_drag_drop` and `pugl:win_drop` regressions.
-- NativeUI CI #242 exposed one remaining wrapper call in `pugl_skia_view_a.inc`; this integration error was corrected before the next exact-head CI run.
-- NativeUI cross-platform exact-head CI and the real macOS Finder drop smoke remain required before #86 is marked Done.
+- NativeUI pins `hemduf/pugl` commit `7665c96763a64a77cfc01009fb3e69adb0eee586`.
+- The fork fixes the macOS Cocoa offer → accept → actual-drop → data lifecycle and implements `puglRejectOffer()` on macOS and Windows.
+- NativeUI removes the old macOS/Windows rejection compatibility wrapper, calls `puglRejectOffer()` directly on all supported desktop backends and enables `PUGL_ACCEPT_DROP` before realization.
+- Review found that the first Win32 fork pin still bypassed the portable offer contract by dispatching `PUGL_DATA` directly from `WM_DROPFILES`. Pugl #34/#35 corrected this in TDD order: the test-only head failed `pugl:win_drop` on Windows while the other platforms stayed green, then the implementation restored `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` before payload exposure.
+- The reviewed Win32 correction keeps actual drop coordinates, suppresses rejected data, avoids re-entrant data delivery from `puglAcceptOffer()`, preserves multi-file/non-ASCII UTF-8 payload accounting, resets decision state per view, releases `HDROP` on all paths and frees owned drop/clipboard buffers at view teardown.
+- The associated generic blob clear/allocation-failure paths were hardened so teardown cannot encounter stale ownership.
+- Pugl exact-tree CI is green on Windows, Linux, macOS and WebAssembly. The repository's automation-identity sanitation rewrites only commit metadata; the sanitized head has the same tree SHA as the tested head.
+- NativeUI CI #242 exposed one remaining old wrapper call during the first integration pass; it was corrected. CI #247 on the previous reviewed Pugl pin was green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the macOS Objective-C isolation and clipboard/multi-instance smokes.
+- A fresh exact-head NativeUI matrix on the final Pugl pin is required after this review. The real macOS Finder → T018 drop smoke remains the final manual gate before #86 is marked Done.
