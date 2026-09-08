@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ui {
@@ -137,6 +138,18 @@ struct InputEvent {
 }
 
 namespace detail {
+
+[[nodiscard]] inline std::pair<Rect, float> scale_text_input_geometry(
+    Rect logical_area, float logical_cursor_offset, float scale_factor) {
+    const float scale = scale_factor > 0.0f ? scale_factor : 1.0f;
+    return {
+        Rect{
+            logical_area.x * scale,
+            logical_area.y * scale,
+            logical_area.w * scale,
+            logical_area.h * scale},
+        logical_cursor_offset * scale};
+}
 
 struct NormalizedTabKey {
     bool is_tab{};
