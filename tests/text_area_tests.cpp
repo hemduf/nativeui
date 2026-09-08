@@ -175,6 +175,26 @@ void composition_candidate_tracks_preedit_cursor_on_current_line() {
     NUI_CHECK_NEAR(platform.text_input_cursor_offset, 57.0f, 0.001f);
 }
 
+void composition_candidate_tracks_visible_line_after_vertical_scroll() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"zero\none\ntwo\nthree\nfour\nfive\nsix\nseven"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+
+    tree.resize({240.0f, 116.0f});
+    tree.activate(platform);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日", 3, 0), platform);
+    NUI_CHECK(value.get() == "zero\none\ntwo\nthree\nfour\nfive\nsix\nseven");
+
+    // Eight 22 px lines need 176 px of content height. In this 116 px widget,
+    // the text viewport is 76 px high, so the last-line caret scrolls to a
+    // visible logical top of y=86. The platform candidate rectangle must
+    // describe that visible caret line rather than the whole TextArea field.
+    NUI_CHECK_NEAR(platform.text_input_area.y, 86.0f, 0.001f);
+    NUI_CHECK_NEAR(platform.text_input_area.h, 22.0f, 0.001f);
+}
+
 void suite() {
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
@@ -183,6 +203,7 @@ void suite() {
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
     composition_candidate_tracks_preedit_cursor_on_current_line();
+    composition_candidate_tracks_visible_line_after_vertical_scroll();
 }
 
 } // namespace
