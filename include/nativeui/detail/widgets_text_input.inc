@@ -104,6 +104,14 @@ public:
             return EventResult::Handled;
         }
 
+        // Native input methods own editing/navigation keys while marked text is
+        // active. Swallow the translated KeyDown here so the platform can
+        // update its candidate/preedit state without a second retained-editor
+        // command cancelling or moving the composition snapshot.
+        if (event.type == InputType::KeyDown && model_.composition_active()) {
+            return EventResult::Handled;
+        }
+
         if (event.type == InputType::PointerDown) {
             pending_ime_commit_.clear();
             model_.cancel_composition();
