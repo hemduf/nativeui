@@ -1,10 +1,5 @@
 #include "test_support.hpp"
 
-namespace ui::detail {
-[[nodiscard]] std::pair<Rect, float> scale_text_input_geometry(
-    Rect logical_area, float logical_cursor_offset, float scale_factor);
-} // namespace ui::detail
-
 namespace {
 
 ui::InputEvent composition(
