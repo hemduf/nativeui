@@ -29,7 +29,7 @@ Pugl OpenGL view / event bridge
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`.
+- Pugl: `hemduf/pugl` commit `7665c96763a64a77cfc01009fb3e69adb0eee586`.
 - Skia: `olilarkin/skia-builder` release `chrome/m149`.
 - macOS Skia asset: `skia-build-mac-universal-gpu-release.zip`.
 - Windows: x64 MSVC `/MD` default, `/MT` selectable.
@@ -70,7 +70,7 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 - T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
 - The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
 - **T029 / PR #85** is active for advanced IME composition and remains draft while the platform bridge work and final validation are completed.
-- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI now targets reviewed `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`, removes its platform-specific reject wrapper and uses the public `puglRejectOffer()` API directly. Exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
+- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI targets reviewed `hemduf/pugl` commit `7665c96763a64a77cfc01009fb3e69adb0eee586`, removes its platform-specific reject wrapper, enables `PUGL_ACCEPT_DROP` before realization and uses the public `puglRejectOffer()` API directly. The dependency review additionally restored the Win32 `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract, hardened actual drop coordinates/UTF-8/lifetime and kept all drop decision state per view. A fresh exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
 
 Ready now:
 
@@ -130,7 +130,8 @@ Recommended next increment: complete the active T029 and #86 validation lanes wh
 
 - T029 advanced IME composition is in progress.
 - Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
-- Real macOS Finder drag/drop validation for the new Pugl pin remains pending under #86 even though the fork's native drag/drop regressions are green.
+- Real macOS Finder drag/drop validation for the final Pugl pin remains pending under #86 even though the fork's native drag/drop regressions and dependency review are green.
+- Windows `WM_DROPFILES` preserves NativeUI's logical offer/accept/reject contract only after the OS-level drop; native hover-time acceptance feedback would require a different Windows backend mechanism such as OLE `IDropTarget`.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 
@@ -174,4 +175,4 @@ cmake -S . -B build \
 
 ## Pugl drag-and-drop portability note
 
-The pinned `hemduf/pugl` commit implements `puglRejectOffer()` on macOS, Windows and X11, so portable NativeUI code calls that public API directly. The previous macOS/Windows compatibility no-op is removed. Cocoa now delivers accepted drag data exactly once at the actual drop boundary. On Windows, `WM_DROPFILES` has no negotiable pre-drop offer, so explicit rejection of a valid drag offer is intentionally a successful no-op; the backend additionally uses correct UTF-8 byte accounting when constructing dropped URI lists.
+The pinned `hemduf/pugl` commit implements `puglRejectOffer()` on macOS, Windows and X11, so portable NativeUI code calls that public API directly. The previous macOS/Windows compatibility no-op is removed. Cocoa delivers accepted drag data exactly once at the actual drop boundary. On Windows, `WM_DROPFILES` has no native hover-time negotiation, but the reviewed backend now emits `PUGL_DATA_OFFER` after the OS drop and before exposing the payload, so NativeUI's generic accept/reject path is preserved. Rejected data is suppressed, accepted data is delivered once at the actual drop coordinates, and all decision/payload state remains scoped to the concrete view.
