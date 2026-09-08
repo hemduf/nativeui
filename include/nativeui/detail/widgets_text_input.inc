@@ -25,6 +25,7 @@ public:
         subscription_ = state_.observe(
             [this, invalidate = std::move(invalidate)](const std::string& value) {
                 if (value == model_.text()) return;
+                pending_ime_commit_.clear();
                 model_.set_text(value, true, true);
                 scroll_x_ = 0.0f;
                 caret_visible_ = true;
@@ -40,6 +41,7 @@ public:
             if (!was_focused) focus_snapshot_ = model_.text();
             ensure_cursor_visible(ctx);
         } else {
+            pending_ime_commit_.clear();
             model_.cancel_composition();
             drag_select_ = false;
             ctx.set_text_input(false);
@@ -60,11 +62,13 @@ public:
         if (event.type == InputType::Composition) {
             switch (event.composition.type) {
                 case CompositionType::Start:
+                    pending_ime_commit_.clear();
                     model_.begin_composition();
                     ensure_cursor_visible(ctx);
                     ctx.invalidate();
                     return EventResult::Handled;
                 case CompositionType::Update:
+                    pending_ime_commit_.clear();
                     model_.update_composition(
                         event.composition.text,
                         event.composition.cursor_byte,
@@ -74,13 +78,16 @@ public:
                     return EventResult::Handled;
                 case CompositionType::Commit:
                     if (model_.commit_composition(event.composition.text)) {
+                        pending_ime_commit_ = event.composition.text;
                         commit(ctx);
                     } else {
+                        pending_ime_commit_.clear();
                         ensure_cursor_visible(ctx);
                         ctx.invalidate();
                     }
                     return EventResult::Handled;
                 case CompositionType::Cancel:
+                    pending_ime_commit_.clear();
                     model_.cancel_composition();
                     ensure_cursor_visible(ctx);
                     ctx.invalidate();
@@ -90,11 +97,15 @@ public:
 
         if (event.type == InputType::TextInput) {
             if (event.text.empty()) return EventResult::Ignored;
-            insert_text(event.text, ctx);
+            const bool duplicate_commit =
+                !pending_ime_commit_.empty() && event.text == pending_ime_commit_;
+            pending_ime_commit_.clear();
+            if (!duplicate_commit) insert_text(event.text, ctx);
             return EventResult::Handled;
         }
 
         if (event.type == InputType::PointerDown) {
+            pending_ime_commit_.clear();
             model_.cancel_composition();
             const auto clicked = index_from_x(ctx, event.position.x);
             if (event.clicks >= 3) {
@@ -138,6 +149,7 @@ public:
         }
 
         if (event.type == InputType::Command) {
+            pending_ime_commit_.clear();
             switch (event.command) {
                 case Command::SelectAll:
                     model_.select_all();
@@ -168,6 +180,7 @@ public:
         }
 
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
+        pending_ime_commit_.clear();
 
         switch (event.key) {
             case Key::Left:
@@ -443,5 +456,6 @@ private:
     bool caret_visible_{true};
     float scroll_x_{};
     std::string focus_snapshot_;
+    std::string pending_ime_commit_;
     State<std::string>::Subscription subscription_;
 };
