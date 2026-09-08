@@ -175,6 +175,52 @@ void pointer_edit_cancels_active_composition() {
     NUI_CHECK(value.get() == "one\ntwo");
 }
 
+void preedit_is_visually_distinct_without_committing_state() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    const auto committed_only = renderer.rgba_pixels();
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(renderer.rgba_pixels() != committed_only);
+}
+
+void composition_state_is_isolated_between_views() {
+    test::MockPlatform first_platform;
+    test::MockPlatform second_platform;
+    ui::State<std::string> first_value{"first"};
+    ui::State<std::string> second_value{"second"};
+    ui::UI first{ui::TextArea{"First", first_value}};
+    ui::UI second{ui::TextArea{"Second", second_value}};
+
+    first.resize({320.0f, 180.0f});
+    second.resize({320.0f, 180.0f});
+    first.activate(first_platform);
+    second.activate(second_platform);
+
+    first.dispatch(composition(ui::CompositionType::Start), first_platform);
+    first.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), first_platform);
+    second.dispatch(composition(ui::CompositionType::Start), second_platform);
+    second.dispatch(composition(ui::CompositionType::Update, "日", 3, 0), second_platform);
+
+    first.dispatch(composition(ui::CompositionType::Commit, "仮"), first_platform);
+    NUI_CHECK(first_value.get() == "first仮");
+    NUI_CHECK(second_value.get() == "second");
+
+    second.dispatch(composition(ui::CompositionType::Cancel), second_platform);
+    NUI_CHECK(first_value.get() == "first仮");
+    NUI_CHECK(second_value.get() == "second");
+}
+
 void composition_candidate_tracks_preedit_cursor_on_current_line() {
     test::MockPlatform platform;
     ui::State<std::string> value{"one\ntwo"};
@@ -223,6 +269,8 @@ void suite() {
     duplicate_text_delivery_after_ime_commit_is_suppressed();
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
+    preedit_is_visually_distinct_without_committing_state();
+    composition_state_is_isolated_between_views();
     composition_candidate_tracks_preedit_cursor_on_current_line();
     composition_candidate_tracks_visible_line_after_vertical_scroll();
 }
