@@ -45,6 +45,7 @@ public:
         puglSetViewHint(view_, PUGL_DOUBLE_BUFFER, PUGL_TRUE);
         puglSetViewHint(view_, PUGL_STENCIL_BITS, 8);
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
+        puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
         puglSetHandle(view_, this);
         puglSetEventFunc(view_, &ViewCore::event_thunk);
