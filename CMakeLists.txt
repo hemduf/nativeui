@@ -190,6 +190,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t026_label
   t027_fonts
   t028_text_area
+  t029_ime_composition
   t041_smoke_harness
 )
 
