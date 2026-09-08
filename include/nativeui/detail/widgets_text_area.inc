@@ -378,8 +378,29 @@ private:
     void ensure_cursor_visible(Context& ctx) {
         if (lines_.empty()) rebuild_lines();
         const auto content = content_rect(field_rect(ctx.bounds()));
-        const auto line_index = line_index_for_cursor(model_.cursor());
-        const float caret_x = ctx.text_width(line_prefix(line_index, model_.cursor()), kTextSize);
+        const auto cursor = model_.composition_active() ? model_.selection_begin() : model_.cursor();
+        const auto line_index = line_index_for_cursor(cursor);
+        float caret_x = ctx.text_width(line_prefix(line_index, cursor), kTextSize);
+        float line_width = ctx.text_width(line_text(line_index), kTextSize);
+
+        if (model_.composition_active()) {
+            const auto& line = lines_[line_index];
+            const auto replace_begin = std::clamp(model_.selection_begin(), line.begin, line.end);
+            const auto replace_end = std::clamp(model_.selection_end(), line.begin, line.end);
+            const auto committed = std::string_view{model_.text()};
+            const auto before = committed.substr(line.begin, replace_begin - line.begin);
+            const auto after = committed.substr(replace_end, line.end - replace_end);
+            const auto preedit = std::string_view{model_.composition_text()};
+            const auto preedit_cursor = preedit.substr(
+                0,
+                std::min(model_.composition_cursor_byte(), preedit.size()));
+
+            const float before_width = ctx.text_width(before, kTextSize);
+            caret_x = before_width + ctx.text_width(preedit_cursor, kTextSize);
+            line_width = before_width + ctx.text_width(preedit, kTextSize) +
+                         ctx.text_width(after, kTextSize);
+        }
+
         const float caret_y = static_cast<float>(line_index) * kLineHeight;
         constexpr float margin = 4.0f;
 
@@ -387,7 +408,6 @@ private:
         if (caret_x - scroll_x_ > content.w - margin) {
             scroll_x_ = caret_x - content.w + margin;
         }
-        const float line_width = ctx.text_width(line_text(line_index), kTextSize);
         scroll_x_ = std::clamp(scroll_x_, 0.0f, std::max(0.0f, line_width - content.w));
 
         if (caret_y - scroll_y_ < 0.0f) scroll_y_ = caret_y;
