@@ -27,7 +27,7 @@ The environment used here has no external network or native desktop display, so 
 - Targeted vertical/horizontal/both-axis offset, clamp and measurement tests pass.
 - Release core suite: 15/15 passed.
 - ASan/UBSan core suite: 15/15 passed.
-- Public layout/nativeui headers and standalone consumer source compile.
+- Public layout/nativeui headers and standalone consumer source compile with the new API.
 - Review: Scroll is non-focusable and contains no wheel/platform behavior; it reuses T011 clipping and performs no paint-time allocation.
 
 ## T013 — handled/bubble input routing
