@@ -29,7 +29,7 @@ Pugl OpenGL view / event bridge
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `7665c96763a64a77cfc01009fb3e69adb0eee586`.
+- Pugl: `hemduf/pugl` commit `0187a800276776c50a4d4890b3e6de7a100ff876`.
 - Skia: `olilarkin/skia-builder` release `chrome/m149`.
 - macOS Skia asset: `skia-build-mac-universal-gpu-release.zip`.
 - Windows: x64 MSVC `/MD` default, `/MT` selectable.
@@ -70,7 +70,7 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 - T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
 - The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
 - **T029 / PR #85** is active for advanced IME composition and remains draft while the platform bridge work and final validation are completed.
-- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI targets reviewed `hemduf/pugl` commit `7665c96763a64a77cfc01009fb3e69adb0eee586`, removes its platform-specific reject wrapper, enables `PUGL_ACCEPT_DROP` before realization and uses the public `puglRejectOffer()` API directly. The dependency review additionally restored the Win32 `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract, hardened actual drop coordinates/UTF-8/lifetime and kept all drop decision state per view. A fresh exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
+- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI targets reviewed `hemduf/pugl` commit `0187a800276776c50a4d4890b3e6de7a100ff876`, removes its platform-specific reject wrapper, enables `PUGL_ACCEPT_DROP` before realization and uses the public `puglRejectOffer()` API directly. The dependency review additionally restored the Win32 `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract, hardened actual drop coordinates/UTF-8/lifetime and kept all drop decision state per view. A fresh exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
 
 Ready now:
 
