@@ -183,28 +183,3 @@ void apply_modifiers(InputEvent& out, PuglMods state) {
     out.primary = platform_primary_modifier(state);
 }
 
-// Pugl 0.5.7 at the pinned commit declares puglRejectOffer() publicly, but
-// only the X11 backend currently defines the symbol. On macOS and Windows an
-// unaccepted drag offer is already rejected by the native backend, so calling
-// the declared-but-missing function would only create an unresolved linker
-// reference. Keep explicit rejection on X11 and use the native default
-// rejection semantics everywhere else.
-PuglStatus reject_pugl_drop_offer(PuglView* view,
-                                  const PuglDataOfferEvent* offer,
-                                  int x,
-                                  int y,
-                                  unsigned width,
-                                  unsigned height) noexcept {
-#if defined(__APPLE__) || defined(_WIN32)
-    (void)view;
-    (void)offer;
-    (void)x;
-    (void)y;
-    (void)width;
-    (void)height;
-    return PUGL_SUCCESS;
-#else
-    return puglRejectOffer(view, offer, x, y, width, height);
-#endif
-}
-
