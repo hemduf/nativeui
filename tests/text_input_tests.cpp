@@ -34,7 +34,6 @@ void synthetic_ime_composition_is_transient_and_single_commit() {
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello日本");
 
-    // A committed IME composition is one logical history transaction.
     tree.dispatch(test::key(ui::Key::Z, false, true), platform);
     NUI_CHECK(value.get() == "hello");
 }
@@ -52,13 +51,9 @@ void ime_commit_is_not_duplicated_by_followup_text_input() {
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello日本");
 
-    // Some native IME paths deliver the same committed payload through their
-    // composition callback and then through the ordinary committed-text path.
-    // NativeUI must consume that follow-up exactly once instead of appending it.
     tree.dispatch(test::text("日本"), platform);
     NUI_CHECK(value.get() == "hello日本");
 
-    // Suppressing the duplicate must not create an extra history transaction.
     tree.dispatch(test::key(ui::Key::Z, false, true), platform);
     NUI_CHECK(value.get() == "hello");
 }
@@ -78,7 +73,6 @@ void focus_loss_cancels_active_composition() {
     NUI_CHECK(!platform.text_input_active);
     tree.activate(platform);
 
-    // A native commit arriving after focus loss must be stale and inert.
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello");
 }
@@ -94,12 +88,9 @@ void pointer_edit_cancels_active_composition() {
     tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
     NUI_CHECK(value.get() == "hello");
 
-    // Pointer editing takes ownership of the selection/caret, so it must cancel
-    // any transient composition before moving the committed-text cursor.
     tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 50.0f), platform);
     tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 50.0f), platform);
 
-    // A stale native commit from the cancelled composition must be inert.
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello");
 }
@@ -134,12 +125,11 @@ void ime_owned_navigation_does_not_cancel_preedit() {
     tree.dispatch(composition(ui::CompositionType::Start), platform);
     tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
     NUI_CHECK(value.get() == "hello");
+    const float candidate_before_key = platform.text_input_cursor_offset;
 
-    // Arrow/navigation keys are commonly consumed by the platform candidate
-    // UI while composition is active. The retained editor must not execute a
-    // second navigation path that cancels or moves the composition snapshot.
     tree.dispatch(test::key(ui::Key::Left), platform);
     NUI_CHECK(value.get() == "hello");
+    NUI_CHECK_NEAR(platform.text_input_cursor_offset, candidate_before_key, 0.001f);
 
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello日本");
@@ -158,9 +148,6 @@ void composition_candidate_tracks_preedit_cursor() {
     tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
     NUI_CHECK(value.get() == "hello");
 
-    // MockPlatform measures one UTF-8 byte as half the font size. The candidate
-    // cursor must therefore follow the first 3-byte preedit code point, rather
-    // than remaining at the committed-text caret.
     NUI_CHECK_NEAR(platform.text_input_cursor_offset, 72.0f, 0.001f);
 }
 
@@ -184,8 +171,6 @@ void composition_candidate_geometry_scales_at_platform_boundary() {
     NUI_CHECK_NEAR(at_2x.first.h, 48.0f, 0.001f);
     NUI_CHECK_NEAR(at_2x.second, 74.5f, 0.001f);
 
-    // The editor-facing geometry remains logical. A scale change affects only
-    // the platform conversion and must not feed physical values back into it.
     NUI_CHECK_NEAR(logical_area.x, 12.5f, 0.001f);
     NUI_CHECK_NEAR(logical_cursor_offset, 37.25f, 0.001f);
 }
@@ -213,7 +198,6 @@ void suite() {
     tree.dispatch(test::text(" X"), platform);
     NUI_CHECK(value.get() == "Init X");
 
-    // Select all/copy, cut, and asynchronous paste request.
     tree.dispatch(test::key(ui::Key::A, false, true), platform);
     tree.dispatch(test::key(ui::Key::C, false, true), platform);
     NUI_CHECK(platform.clipboard == "Init X");
@@ -224,11 +208,9 @@ void suite() {
     NUI_CHECK(platform.paste_requested);
     NUI_CHECK(platform.paste_request_count == 1);
 
-    // Simulate committed paste text coming back from the platform.
     tree.dispatch(test::text("Pasted"), platform);
     NUI_CHECK(value.get() == "Pasted");
 
-    // Undo/redo use the generic primary shortcut path.
     tree.dispatch(test::key(ui::Key::Z, false, true), platform);
     NUI_CHECK(value.get().empty());
     tree.dispatch(test::key(ui::Key::Z, true, true), platform);
@@ -238,13 +220,11 @@ void suite() {
     NUI_CHECK(submit_count == 1);
     NUI_CHECK(submitted == "Pasted");
 
-    // Escape reverts edits performed since the last submit/focus snapshot.
     tree.dispatch(test::text("!"), platform);
     NUI_CHECK(value.get() == "Pasted!");
     tree.dispatch(test::key(ui::Key::Escape), platform);
     NUI_CHECK(value.get() == "Pasted");
 
-    // UTF-8 max length is measured in code points, not bytes.
     ui::State<std::string> unicode{""};
     ui::UI unicode_tree{ui::TextInput{"Unicode", unicode}.max_length(3)};
     unicode_tree.resize({320.0f, 90.0f});
@@ -252,7 +232,6 @@ void suite() {
     unicode_tree.dispatch(test::text("éééé"), platform);
     NUI_CHECK(unicode.get() == "ééé");
 
-    // Triple click selects all; copy proves the selection extent.
     tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 50.0f, 3), platform);
     tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 50.0f, 3), platform);
     tree.dispatch(test::key(ui::Key::C, false, true), platform);
