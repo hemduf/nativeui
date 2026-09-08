@@ -39,6 +39,30 @@ void synthetic_ime_composition_is_transient_and_single_commit() {
     NUI_CHECK(value.get() == "hello");
 }
 
+void ime_commit_is_not_duplicated_by_followup_text_input() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 6, 0), platform);
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello日本");
+
+    // Some native IME paths deliver the same committed payload through their
+    // composition callback and then through the ordinary committed-text path.
+    // NativeUI must consume that follow-up exactly once instead of appending it.
+    tree.dispatch(test::text("日本"), platform);
+    NUI_CHECK(value.get() == "hello日本");
+
+    // Suppressing the duplicate must not create an extra history transaction.
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "hello");
+}
+
 void focus_loss_cancels_active_composition() {
     test::MockPlatform platform;
     ui::State<std::string> value{"hello"};
@@ -188,6 +212,7 @@ void suite() {
     NUI_CHECK(platform.clipboard == "Pasted");
 
     synthetic_ime_composition_is_transient_and_single_commit();
+    ime_commit_is_not_duplicated_by_followup_text_input();
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
     preedit_is_visually_distinct_without_committing_state();
