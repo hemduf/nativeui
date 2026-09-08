@@ -5,6 +5,7 @@
 #import <objc/runtime.h>
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,42 +23,29 @@ struct NativeUIImeBridge {
   float cursorOffset;
 };
 
-static const char kBridgeIvarName[] = "_nativeuiImeBridge";
-
-static uint8_t
-alignmentLog2(const size_t alignment)
-{
-  uint8_t result = 0;
-  size_t value = 1;
-  while (value < alignment) {
-    value <<= 1U;
-    ++result;
-  }
-  return result;
-}
+// Per-object associated state only. The key is immutable and carries no
+// instance-dependent state; each Pugl view owns its own retained NSValue box.
+static const char kBridgeAssociationKey = 0;
 
 static NativeUIImeBridge*
 bridgeForObject(id object)
 {
-  const Ivar ivar = class_getInstanceVariable(object_getClass(object), kBridgeIvarName);
-  if (!ivar) {
-    return NULL;
-  }
-
-  const ptrdiff_t offset = ivar_getOffset(ivar);
-  return *(NativeUIImeBridge**)((uint8_t*)(void*)object + offset);
+  NSValue* const value = objc_getAssociatedObject(object, &kBridgeAssociationKey);
+  return value ? (NativeUIImeBridge*)[value pointerValue] : NULL;
 }
 
 static void
 setBridgeForObject(id object, NativeUIImeBridge* bridge)
 {
-  const Ivar ivar = class_getInstanceVariable(object_getClass(object), kBridgeIvarName);
-  if (!ivar) {
-    return;
+  if (bridge) {
+    objc_setAssociatedObject(object,
+                             &kBridgeAssociationKey,
+                             [NSValue valueWithPointer:bridge],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  } else {
+    objc_setAssociatedObject(
+      object, &kBridgeAssociationKey, nil, OBJC_ASSOCIATION_ASSIGN);
   }
-
-  const ptrdiff_t offset = ivar_getOffset(ivar);
-  *(NativeUIImeBridge**)((uint8_t*)(void*)object + offset) = bridge;
 }
 
 static NSString*
@@ -215,8 +203,7 @@ nativeuiInsertText(id self, SEL selector, id string, NSRange replacement)
   // Keep Pugl's NSTextInputClient bookkeeping in sync without forwarding the
   // committed text as PUGL_TEXT. The composition event above is the single
   // authoritative commit path for marked-text input.
-  const SEL unmark = sel_registerName("unmarkText");
-  callSuperUnmarkText(self, unmark);
+  callSuperUnmarkText(self, sel_registerName("unmarkText"));
 }
 
 static void
@@ -272,6 +259,9 @@ addOverride(Class subclass, Class original, const char* selectorName, IMP implem
 static Class
 bridgeSubclass(Class original)
 {
+  // The original Pugl class name already includes NATIVEUI_OBJC_RUNTIME_PREFIX
+  // from the static-library build contract. Deriving from it keeps this helper
+  // class consumer-specific as required for plugin-host coexistence.
   const char* const originalName = class_getName(original);
   const size_t nameSize = strlen(originalName) + sizeof("_NativeUIImeView");
   char* const name = (char*)calloc(nameSize, 1U);
@@ -292,12 +282,7 @@ bridgeSubclass(Class original)
     return Nil;
   }
 
-  if (!class_addIvar(subclass,
-                     kBridgeIvarName,
-                     sizeof(NativeUIImeBridge*),
-                     alignmentLog2(_Alignof(NativeUIImeBridge*)),
-                     "^v") ||
-      !addOverride(subclass,
+  if (!addOverride(subclass,
                    original,
                    "setMarkedText:selectedRange:replacementRange:",
                    (IMP)nativeuiSetMarkedText) ||
@@ -384,9 +369,11 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
     return;
   }
 
+  // TextInput/TextArea cancel their model before disabling the native boundary.
+  // Do not dispatch back into the tree here: focus teardown is intentionally
+  // one-way and non-reentrant.
   if (!active && bridge->composing) {
     bridge->composing = false;
-    emitEvent(bridge, NATIVEUI_IME_CANCEL, NULL, 0U, 0U, 0U);
   }
 
   bridge->active = active;
@@ -397,10 +384,7 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
   bridge->cursorOffset = physicalCursorOffset;
 
   if (!active && bridge->view) {
-    const SEL unmark = sel_registerName("unmarkText");
-    struct objc_super superInfo = {
-      bridge->view, class_getSuperclass(object_getClass(bridge->view))};
-    ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superInfo, unmark);
+    callSuperUnmarkText(bridge->view, sel_registerName("unmarkText"));
   }
 }
 
@@ -413,4 +397,10 @@ nativeuiImeConsumePuglText(NativeUIImeBridge* bridge,
   (void)utf8;
   (void)utf8Size;
   return false;
+}
+
+void
+nativeuiImeFlushPendingCancel(NativeUIImeBridge* bridge)
+{
+  (void)bridge;
 }
