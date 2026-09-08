@@ -145,12 +145,34 @@ void focus_loss_cancels_active_composition() {
     NUI_CHECK(value.get() == "one\ntwo");
 }
 
+void pointer_edit_cancels_active_composition() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+
+    // Pointer editing takes ownership of the multiline selection/caret, so it
+    // must cancel transient composition before moving the committed cursor.
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 50.0f), platform);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 50.0f), platform);
+
+    // A stale native commit from the cancelled composition must be inert.
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+}
+
 void suite() {
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
     viewport_scroll_and_caret_rendering();
     synthetic_ime_composition_uses_shared_text_model();
     focus_loss_cancels_active_composition();
+    pointer_edit_cancels_active_composition();
 }
 
 } // namespace
