@@ -36,16 +36,19 @@ if(NATIVEUI_BUILD_PLATFORM)
     list(APPEND _pugl_sources
       "${pugl_src_SOURCE_DIR}/src/mac.m"
       "${pugl_src_SOURCE_DIR}/src/mac_gl.m"
+      "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_macos.m"
     )
   elseif(WIN32)
     list(APPEND _pugl_sources
       "${pugl_src_SOURCE_DIR}/src/win.c"
       "${pugl_src_SOURCE_DIR}/src/win_gl.c"
+      "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_windows.c"
     )
   elseif(UNIX)
     list(APPEND _pugl_sources
       "${pugl_src_SOURCE_DIR}/src/x11.c"
       "${pugl_src_SOURCE_DIR}/src/x11_gl.c"
+      "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_x11.c"
     )
   else()
     message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows and Linux/X11")
@@ -55,7 +58,10 @@ if(NATIVEUI_BUILD_PLATFORM)
   add_library(NativeUI::Pugl ALIAS nativeui_pugl)
   set_target_properties(nativeui_pugl PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui_pugl PUBLIC c_std_99)
-  target_include_directories(nativeui_pugl PUBLIC "${pugl_src_SOURCE_DIR}/include")
+  target_include_directories(nativeui_pugl
+    PUBLIC "${pugl_src_SOURCE_DIR}/include"
+    PRIVATE "${pugl_src_SOURCE_DIR}/src"
+  )
   target_compile_definitions(nativeui_pugl
     PUBLIC PUGL_STATIC
     PRIVATE PUGL_INTERNAL
@@ -93,7 +99,7 @@ if(NATIVEUI_BUILD_PLATFORM)
       WINVER=0x0601 _WIN32_WINNT=0x0601
     )
     target_link_libraries(nativeui_pugl PUBLIC
-      dwmapi gdi32 shell32 shlwapi user32
+      dwmapi gdi32 imm32 shell32 shlwapi user32
     )
   else()
     find_package(X11 REQUIRED)
