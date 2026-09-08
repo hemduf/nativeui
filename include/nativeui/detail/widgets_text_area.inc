@@ -377,7 +377,8 @@ private:
     template <class Context>
     void ensure_cursor_visible(Context& ctx) {
         if (lines_.empty()) rebuild_lines();
-        const auto content = content_rect(field_rect(ctx.bounds()));
+        const auto field = field_rect(ctx.bounds());
+        const auto content = content_rect(field);
         const auto cursor = model_.composition_active() ? model_.selection_begin() : model_.cursor();
         const auto line_index = line_index_for_cursor(cursor);
         float caret_x = ctx.text_width(line_prefix(line_index, cursor), kTextSize);
@@ -419,7 +420,12 @@ private:
 
         const float cursor_offset =
             kHorizontalPadding + std::clamp(caret_x - scroll_x_, 0.0f, content.w);
-        ctx.set_text_input(true, field_rect(ctx.bounds()), cursor_offset);
+        const Rect candidate_area{
+            field.x,
+            content.y + caret_y - scroll_y_,
+            field.w,
+            kLineHeight};
+        ctx.set_text_input(true, candidate_area, cursor_offset);
     }
 
     void cursor_moved(InputContext& ctx) {
