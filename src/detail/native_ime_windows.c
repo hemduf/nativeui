@@ -29,6 +29,8 @@ struct NativeUIImeBridge {
   float cursorOffset;
 };
 
+// The property is scoped to the NativeUI-owned child HWND. It stores no
+// process-global instance state and does not touch Pugl's GWLP_USERDATA slot.
 static const wchar_t kBridgeProperty[] = L"NativeUI.ImeBridge";
 
 static void
@@ -50,28 +52,21 @@ utf8FromWide(const wchar_t* wide, int wideLength, size_t* utf8Size)
 {
   *utf8Size = 0U;
   if (!wide || wideLength <= 0) {
-    char* empty = (char*)calloc(1U, 1U);
-    return empty;
+    return (char*)calloc(1U, 1U);
   }
 
   const int bytes = WideCharToMultiByte(
     CP_UTF8, WC_ERR_INVALID_CHARS, wide, wideLength, NULL, 0, NULL, NULL);
-  if (bytes <= 0) {
-    return NULL;
-  }
+  if (bytes <= 0) return NULL;
 
   char* const utf8 = (char*)calloc((size_t)bytes + 1U, 1U);
-  if (!utf8) {
-    return NULL;
-  }
-
+  if (!utf8) return NULL;
   if (WideCharToMultiByte(
         CP_UTF8, WC_ERR_INVALID_CHARS, wide, wideLength, utf8, bytes, NULL, NULL) !=
       bytes) {
     free(utf8);
     return NULL;
   }
-
   *utf8Size = (size_t)bytes;
   return utf8;
 }
@@ -79,9 +74,7 @@ utf8FromWide(const wchar_t* wide, int wideLength, size_t* utf8Size)
 static size_t
 utf8BytesForWidePrefix(const wchar_t* wide, int wideLength)
 {
-  if (!wide || wideLength <= 0) {
-    return 0U;
-  }
+  if (!wide || wideLength <= 0) return 0U;
   const int bytes = WideCharToMultiByte(
     CP_UTF8, WC_ERR_INVALID_CHARS, wide, wideLength, NULL, 0, NULL, NULL);
   return bytes > 0 ? (size_t)bytes : 0U;
@@ -92,25 +85,18 @@ getCompositionWide(HIMC context, DWORD index, int* wideLength)
 {
   *wideLength = 0;
   const LONG byteCount = ImmGetCompositionStringW(context, index, NULL, 0U);
-  if (byteCount < 0) {
-    return NULL;
-  }
+  if (byteCount < 0) return NULL;
 
   const size_t wideCount = (size_t)byteCount / sizeof(wchar_t);
   wchar_t* const result = (wchar_t*)calloc(wideCount + 1U, sizeof(wchar_t));
-  if (!result) {
+  if (!result) return NULL;
+
+  if (byteCount > 0 &&
+      ImmGetCompositionStringW(
+        context, index, result, (DWORD)((wideCount + 1U) * sizeof(wchar_t))) < 0) {
+    free(result);
     return NULL;
   }
-
-  if (byteCount > 0) {
-    const LONG copied = ImmGetCompositionStringW(
-      context, index, result, (DWORD)((wideCount + 1U) * sizeof(wchar_t)));
-    if (copied < 0) {
-      free(result);
-      return NULL;
-    }
-  }
-
   *wideLength = (int)wideCount;
   return result;
 }
@@ -120,9 +106,7 @@ emitCompositionUpdate(NativeUIImeBridge* bridge, HIMC context)
 {
   int wideLength = 0;
   wchar_t* const wide = getCompositionWide(context, GCS_COMPSTR, &wideLength);
-  if (!wide) {
-    return;
-  }
+  if (!wide) return;
 
   size_t utf8Size = 0U;
   char* const utf8 = utf8FromWide(wide, wideLength, &utf8Size);
@@ -138,7 +122,7 @@ emitCompositionUpdate(NativeUIImeBridge* bridge, HIMC context)
 
   size_t selectionBytes = 0U;
   const LONG attrCount = ImmGetCompositionStringW(context, GCS_COMPATTR, NULL, 0U);
-  if (attrCount > 0 && cursor < attrCount) {
+  if (attrCount > 0 && cursor >= 0 && cursor < attrCount) {
     BYTE* const attrs = (BYTE*)calloc((size_t)attrCount, sizeof(BYTE));
     if (attrs) {
       const LONG copied = ImmGetCompositionStringW(
@@ -169,9 +153,7 @@ emitCompositionCommit(NativeUIImeBridge* bridge, HIMC context)
 {
   int wideLength = 0;
   wchar_t* const wide = getCompositionWide(context, GCS_RESULTSTR, &wideLength);
-  if (!wide) {
-    return;
-  }
+  if (!wide) return;
 
   size_t utf8Size = 0U;
   char* const utf8 = utf8FromWide(wide, wideLength, &utf8Size);
@@ -192,14 +174,10 @@ emitCompositionCommit(NativeUIImeBridge* bridge, HIMC context)
 static void
 updateCandidatePosition(NativeUIImeBridge* bridge)
 {
-  if (!bridge || !bridge->active || !bridge->hwnd) {
-    return;
-  }
+  if (!bridge || !bridge->active || !bridge->hwnd) return;
 
   HIMC const context = ImmGetContext(bridge->hwnd);
-  if (!context) {
-    return;
-  }
+  if (!context) return;
 
   const LONG caretX = (LONG)lroundf(bridge->x + bridge->cursorOffset);
   const LONG top = (LONG)lroundf(bridge->y);
@@ -232,10 +210,7 @@ nativeuiImeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
   NativeUIImeBridge* const bridge =
     (NativeUIImeBridge*)GetPropW(hwnd, kBridgeProperty);
-  if (!bridge) {
-    return DefWindowProcW(hwnd, message, wParam, lParam);
-  }
-
+  if (!bridge) return DefWindowProcW(hwnd, message, wParam, lParam);
   if (!bridge->active) {
     return CallWindowProcW(bridge->previousProc, hwnd, message, wParam, lParam);
   }
@@ -259,9 +234,7 @@ nativeuiImeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         emitCompositionUpdate(bridge, context);
       }
-      if (lParam & GCS_RESULTSTR) {
-        emitCompositionCommit(bridge, context);
-      }
+      if (lParam & GCS_RESULTSTR) emitCompositionCommit(bridge, context);
       ImmReleaseContext(hwnd, context);
     }
     return 0;
@@ -276,9 +249,8 @@ nativeuiImeWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 
   case WM_IME_CHAR:
-    // DefWindowProc translates WM_IME_CHAR into WM_CHAR. NativeUI already
-    // commits GCS_RESULTSTR above, so consuming it here prevents duplicate
-    // PUGL_TEXT insertion after an IME commit.
+    // DefWindowProc converts this into WM_CHAR. GCS_RESULTSTR above is the
+    // authoritative commit, so swallowing WM_IME_CHAR prevents double insert.
     return 0;
 
   default:
@@ -293,20 +265,14 @@ nativeuiImeCreate(PuglWorld* world,
                   NativeUIImeCallback callback)
 {
   (void)world;
-  if (!view || !callback) {
-    return NULL;
-  }
+  if (!view || !callback) return NULL;
 
   HWND const hwnd = (HWND)(uintptr_t)puglGetNativeView(view);
-  if (!hwnd) {
-    return NULL;
-  }
+  if (!hwnd) return NULL;
 
   NativeUIImeBridge* const bridge =
     (NativeUIImeBridge*)calloc(1U, sizeof(NativeUIImeBridge));
-  if (!bridge) {
-    return NULL;
-  }
+  if (!bridge) return NULL;
 
   bridge->hwnd = hwnd;
   bridge->userData = userData;
@@ -333,9 +299,7 @@ nativeuiImeCreate(PuglWorld* world,
 void
 nativeuiImeDestroy(NativeUIImeBridge* bridge)
 {
-  if (!bridge) {
-    return;
-  }
+  if (!bridge) return;
 
   nativeuiImeUpdate(bridge, false, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F);
   if (bridge->hwnd && bridge->previousProc) {
@@ -355,14 +319,11 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
                   float physicalHeight,
                   float physicalCursorOffset)
 {
-  if (!bridge) {
-    return;
-  }
+  if (!bridge) return;
 
   if (!active && bridge->active) {
-    if (bridge->composing) {
-      emitEvent(bridge, NATIVEUI_IME_CANCEL, NULL, 0U, 0U, 0U);
-    }
+    // The focused editor cancels its model before disabling native text input.
+    // Avoid dispatching back into Tree::deactivate_focus() from this boundary.
     bridge->composing = false;
     bridge->committed = false;
     bridge->active = false;
@@ -381,9 +342,7 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
   bridge->width = physicalWidth;
   bridge->height = physicalHeight;
   bridge->cursorOffset = physicalCursorOffset;
-  if (active) {
-    updateCandidatePosition(bridge);
-  }
+  if (active) updateCandidatePosition(bridge);
 }
 
 bool
@@ -395,4 +354,10 @@ nativeuiImeConsumePuglText(NativeUIImeBridge* bridge,
   (void)utf8;
   (void)utf8Size;
   return false;
+}
+
+void
+nativeuiImeFlushPendingCancel(NativeUIImeBridge* bridge)
+{
+  (void)bridge;
 }
