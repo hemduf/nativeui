@@ -7,7 +7,7 @@ if(NATIVEUI_BUILD_PLATFORM)
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
   set(NATIVEUI_PUGL_COMMIT
-      "7665c96763a64a77cfc01009fb3e69adb0eee586"
+      "0187a800276776c50a4d4890b3e6de7a100ff876"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
