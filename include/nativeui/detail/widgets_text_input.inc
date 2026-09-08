@@ -240,7 +240,7 @@ public:
         const float base_x = content.x - scroll_x_;
         const float center_y = field.y + field.h * 0.5f;
 
-        if (model_.has_selection()) {
+        if (model_.has_selection() && !model_.composition_active()) {
             const auto begin = model_.selection_begin();
             const auto end = model_.selection_end();
             const float x1 = base_x + p.text_width(prefix(begin), text_size);
@@ -251,7 +251,36 @@ public:
                 colors::selection);
         }
 
-        if (model_.text().empty() && !placeholder_.empty()) {
+        if (model_.composition_active()) {
+            const auto committed = std::string_view{model_.text()};
+            const auto replace_begin = model_.selection_begin();
+            const auto replace_end = model_.selection_end();
+            const auto before = committed.substr(0, replace_begin);
+            const auto after = committed.substr(replace_end);
+            const auto& preedit = model_.composition_text();
+
+            float x = base_x;
+            if (!before.empty()) {
+                dl.text(Point{x, center_y}, before, text_size, colors::text, TextAlign::Left);
+                x += p.text_width(before, text_size);
+            }
+
+            if (!preedit.empty()) {
+                dl.text(Point{x, center_y}, preedit, text_size, colors::text, TextAlign::Left);
+                const float preedit_width = p.text_width(preedit, text_size);
+                const float underline_y = field.y + field.h - 9.0f;
+                dl.line(
+                    Point{x, underline_y},
+                    Point{x + std::max(1.0f, preedit_width), underline_y},
+                    1.5f,
+                    colors::borderFocus);
+                x += preedit_width;
+            }
+
+            if (!after.empty()) {
+                dl.text(Point{x, center_y}, after, text_size, colors::text, TextAlign::Left);
+            }
+        } else if (model_.text().empty() && !placeholder_.empty()) {
             dl.text(
                 Point{base_x, center_y},
                 placeholder_,
@@ -268,7 +297,14 @@ public:
         }
 
         if (p.focused() && caret_visible_) {
-            const float caret_x = base_x + p.text_width(prefix(model_.cursor()), text_size);
+            float caret_x = base_x + p.text_width(prefix(model_.cursor()), text_size);
+            if (model_.composition_active()) {
+                const auto before = std::string_view{model_.text()}.substr(0, model_.selection_begin());
+                const auto preedit_cursor = std::string_view{model_.composition_text()}.substr(
+                    0,
+                    std::min(model_.composition_cursor_byte(), model_.composition_text().size()));
+                caret_x = base_x + p.text_width(before, text_size) + p.text_width(preedit_cursor, text_size);
+            }
             dl.line(
                 Point{caret_x, field.y + 9.0f},
                 Point{caret_x, field.y + field.h - 9.0f},
