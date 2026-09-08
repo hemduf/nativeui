@@ -95,6 +95,7 @@ public:
         }
 
         if (event.type == InputType::PointerDown) {
+            model_.cancel_composition();
             const auto clicked = index_from_x(ctx, event.position.x);
             if (event.clicks >= 3) {
                 model_.select_all();
