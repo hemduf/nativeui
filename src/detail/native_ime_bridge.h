@@ -54,6 +54,14 @@ nativeuiImeConsumePuglText(NativeUIImeBridge* bridge,
                            const char* utf8,
                            size_t utf8_size);
 
+/**
+ * Resolve a platform composition that ended without a committed Pugl text
+ * event. X11 needs this deferred boundary because XIM reports preedit-done
+ * before Xutf8LookupString returns the result. Other platforms are no-ops.
+ */
+void
+nativeuiImeFlushPendingCancel(NativeUIImeBridge* bridge);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
