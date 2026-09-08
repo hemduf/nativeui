@@ -80,6 +80,26 @@ void pointer_edit_cancels_active_composition() {
     NUI_CHECK(value.get() == "hello");
 }
 
+void preedit_is_visually_distinct_without_committing_state() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::TextInput{"Name", value}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{320.0f, 90.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    const auto committed_only = renderer.rgba_pixels();
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "仮", 3, 0), platform);
+    NUI_CHECK(value.get() == "hello");
+
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(renderer.rgba_pixels() != committed_only);
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -151,6 +171,7 @@ void suite() {
     synthetic_ime_composition_is_transient_and_single_commit();
     focus_loss_cancels_active_composition();
     pointer_edit_cancels_active_composition();
+    preedit_is_visually_distinct_without_committing_state();
 }
 
 } // namespace
