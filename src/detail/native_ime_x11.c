@@ -123,16 +123,20 @@ wideFromXimText(const XIMText* text, size_t* wideLength)
     return result;
   }
 
-  char* const bytes = (char*)calloc((size_t)text->length + 1U, 1U);
+  // XIMText.length is measured in characters, not bytes. The multibyte string
+  // is NUL-terminated, so measure its byte extent instead of truncating a UTF-8
+  // preedit at the first multibyte character boundary.
+  const size_t byteLength = text->string.multi_byte ? strlen(text->string.multi_byte) : 0U;
+  char* const bytes = (char*)calloc(byteLength + 1U, 1U);
   if (!bytes) return NULL;
-  memcpy(bytes, text->string.multi_byte, text->length);
+  if (byteLength) memcpy(bytes, text->string.multi_byte, byteLength);
 
   size_t required = mbstowcs(NULL, bytes, 0U);
   if (required == (size_t)-1) {
-    // XIMs used with Xutf8LookupString normally deliver UTF-8 here. If the
-    // process locale conversion is unavailable, retain ASCII bytes rather
-    // than mutating global locale state from an embeddable UI library.
-    required = text->length;
+    // Do not mutate the process locale from an embeddable library. Preserve
+    // the complete byte sequence as a deterministic fallback instead of
+    // reading only XIMText.length bytes (which is a character count).
+    required = byteLength;
     wchar_t* const fallback =
       (wchar_t*)calloc(required + 1U, sizeof(wchar_t));
     if (fallback) {
@@ -500,11 +504,17 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
 {
   if (!bridge) return;
 
-  if (!active && bridge->active && (bridge->composing || bridge->awaitingCommit)) {
-    emitEvent(bridge, NATIVEUI_IME_CANCEL, NULL, 0U, 0U, 0U);
+  if (!active && bridge->active) {
+    // The retained editor cancels its model before disabling the platform
+    // text-input service. Never dispatch a second cancel back into the tree
+    // from this teardown path: focus/deactivation must stay non-reentrant.
     bridge->composing = false;
     bridge->awaitingCommit = false;
     resetPreedit(bridge);
+    if (bridge->xic) {
+      char* const resetText = XmbResetIC(bridge->xic);
+      if (resetText) XFree(resetText);
+    }
   }
 
   bridge->active = active;
