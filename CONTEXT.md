@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-07
+**Updated:** 2026-09-08
 
 ## Mission and architecture
 
@@ -29,7 +29,7 @@ Pugl OpenGL view / event bridge
 
 ## Pinned dependencies
 
-- Pugl: `lv2/pugl` commit `b7637149ebe53124e5be90559e02a0185bbcbd73`.
+- Pugl: `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`.
 - Skia: `olilarkin/skia-builder` release `chrome/m149`.
 - macOS Skia asset: `skia-build-mac-universal-gpu-release.zip`.
 - Windows: x64 MSVC `/MD` default, `/MT` selectable.
@@ -69,12 +69,14 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 - Last completed text feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
 - T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
 - The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
+- **T029 / PR #85** is active for advanced IME composition and remains draft while the platform bridge work and final validation are completed.
+- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI now targets reviewed `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`, removes its platform-specific reject wrapper and uses the public `puglRejectOffer()` API directly. Exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
 
 Ready now:
 
 - P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, **T053** consumer-scoped macOS Pugl/Objective-C bridge.
 - P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
-- Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
+- Other P1: **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
 - P2: **T046** Wayland strategy/prototype.
 
 Important explicit dependency chains:
@@ -92,7 +94,7 @@ T047 + T053 -> T054
 T047 -> T056 -> T057
 ```
 
-Recommended next increment: take one of the independent Ready P0 lanes — T053 for the consumer-scoped macOS platform bridge, T042 for lifecycle stress coverage, or T047 for install/export packaging — according to downstream unblock value and branch availability.
+Recommended next increment: complete the active T029 and #86 validation lanes while continuing an independent Ready P0 lane when concurrency permits.
 
 ## T022 implementation notes retained for recovery
 
@@ -126,8 +128,9 @@ Recommended next increment: take one of the independent Ready P0 lanes — T053 
 
 ## Current limitations
 
-- T029 advanced IME composition remains to be implemented.
+- T029 advanced IME composition is in progress.
 - Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
+- Real macOS Finder drag/drop validation for the new Pugl pin remains pending under #86 even though the fork's native drag/drop regressions are green.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 
@@ -169,6 +172,6 @@ cmake -S . -B build \
 - mutable instance-dependent process-global/singleton/thread-local state is forbidden;
 - macOS runtime-visible classes in the statically linked platform bridge must use a consumer/plugin-specific collision-resistant prefix.
 
-## Pugl reject-offer portability note
+## Pugl drag-and-drop portability note
 
-Pinned Pugl declares `puglRejectOffer()` but only X11 defines it. Portable NativeUI code must use `reject_pugl_drop_offer()` in `pugl_skia_setup.inc`: X11 rejects explicitly; macOS/Windows rely on native unaccepted-offer semantics.
+The pinned `hemduf/pugl` commit implements `puglRejectOffer()` on macOS, Windows and X11, so portable NativeUI code calls that public API directly. The previous macOS/Windows compatibility no-op is removed. Cocoa now delivers accepted drag data exactly once at the actual drop boundary. On Windows, `WM_DROPFILES` has no negotiable pre-drop offer, so explicit rejection of a valid drag offer is intentionally a successful no-op; the backend additionally uses correct UTF-8 byte accounting when constructing dropped URI lists.
