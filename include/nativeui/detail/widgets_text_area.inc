@@ -107,6 +107,13 @@ public:
             return EventResult::Handled;
         }
 
+        // The platform IME owns navigation/editing keys while marked text is
+        // active. Native callbacks will subsequently update, commit or cancel
+        // composition; the retained editor must not run a second command path.
+        if (event.type == InputType::KeyDown && model_.composition_active()) {
+            return EventResult::Handled;
+        }
+
         if (event.type == InputType::PointerDown) {
             pending_ime_commit_.clear();
             model_.cancel_composition();
@@ -259,7 +266,7 @@ public:
         const auto content = content_rect(field);
         painter.push_clip(content);
 
-        if (model_.text().empty() && !placeholder_.empty()) {
+        if (model_.text().empty() && !model_.composition_active() && !placeholder_.empty()) {
             painter.text(
                 Point{content.x, content.y + kLineHeight * 0.5f},
                 placeholder_,
@@ -460,6 +467,46 @@ private:
         ctx.invalidate();
     }
 
+    void paint_composition_line(
+        PaintContext& p,
+        std::size_t line_index,
+        float base_x,
+        float top,
+        float center_y) const {
+        const auto& line = lines_[line_index];
+        const auto replace_begin = std::clamp(model_.selection_begin(), line.begin, line.end);
+        const auto replace_end = std::clamp(model_.selection_end(), line.begin, line.end);
+        const auto committed = std::string_view{model_.text()};
+        const auto before = committed.substr(line.begin, replace_begin - line.begin);
+        const auto after = committed.substr(replace_end, line.end - replace_end);
+        const auto preedit = std::string_view{model_.composition_text()};
+
+        float x = base_x;
+        if (!before.empty()) {
+            p.painter().text(
+                Point{x, center_y}, before, kTextSize, colors::text, TextAlign::Left);
+            x += p.text_width(before, kTextSize);
+        }
+
+        if (!preedit.empty()) {
+            p.painter().text(
+                Point{x, center_y}, preedit, kTextSize, colors::text, TextAlign::Left);
+            const float preedit_width = p.text_width(preedit, kTextSize);
+            const float underline_y = top + kLineHeight - 3.0f;
+            p.painter().line(
+                Point{x, underline_y},
+                Point{x + std::max(1.0f, preedit_width), underline_y},
+                1.5f,
+                colors::borderFocus);
+            x += preedit_width;
+        }
+
+        if (!after.empty()) {
+            p.painter().text(
+                Point{x, center_y}, after, kTextSize, colors::text, TextAlign::Left);
+        }
+    }
+
     void paint_visible_lines(PaintContext& p, Rect content) const {
         if (lines_.empty()) return;
         const auto first = std::min(
@@ -468,13 +515,16 @@ private:
         const auto visible_count = static_cast<std::size_t>(content.h / kLineHeight) + 2;
         const auto last = std::min(lines_.size(), first + visible_count);
         const float base_x = content.x - scroll_x_;
+        const auto composition_line = model_.composition_active()
+                                          ? line_index_for_cursor(model_.selection_begin())
+                                          : lines_.size();
 
         for (std::size_t i = first; i < last; ++i) {
             const auto& line = lines_[i];
             const float top = content.y + static_cast<float>(i) * kLineHeight - scroll_y_;
             const float center_y = top + kLineHeight * 0.5f;
 
-            if (model_.has_selection()) {
+            if (model_.has_selection() && !model_.composition_active()) {
                 const auto selection_begin = model_.selection_begin();
                 const auto selection_end = model_.selection_end();
                 const auto begin = std::max(selection_begin, line.begin);
@@ -492,20 +542,36 @@ private:
                 }
             }
 
-            p.painter().text(
-                Point{base_x, center_y},
-                line_text(i),
-                kTextSize,
-                colors::text,
-                TextAlign::Left);
+            if (i == composition_line) {
+                paint_composition_line(p, i, base_x, top, center_y);
+            } else {
+                p.painter().text(
+                    Point{base_x, center_y},
+                    line_text(i),
+                    kTextSize,
+                    colors::text,
+                    TextAlign::Left);
+            }
         }
     }
 
     void paint_caret(PaintContext& p, Rect content) const {
         if (lines_.empty()) return;
-        const auto line_index = line_index_for_cursor(model_.cursor());
-        const float x = content.x - scroll_x_ +
-                        p.text_width(line_prefix(line_index, model_.cursor()), kTextSize);
+
+        std::size_t cursor = model_.cursor();
+        if (model_.composition_active()) cursor = model_.selection_begin();
+        const auto line_index = line_index_for_cursor(cursor);
+        float x = content.x - scroll_x_ +
+                  p.text_width(line_prefix(line_index, cursor), kTextSize);
+
+        if (model_.composition_active()) {
+            const auto preedit = std::string_view{model_.composition_text()};
+            const auto preedit_cursor = preedit.substr(
+                0,
+                std::min(model_.composition_cursor_byte(), preedit.size()));
+            x += p.text_width(preedit_cursor, kTextSize);
+        }
+
         const float top = content.y + static_cast<float>(line_index) * kLineHeight - scroll_y_;
         p.painter().line(
             Point{x, top + 2.0f},
