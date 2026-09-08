@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-07
+**Updated:** 2026-09-08
 
 ## Mission and architecture
 
@@ -54,11 +54,13 @@ Core/runtime includes observable `State<T>`, declarative DSL/runtime component t
 
 Rendering includes backend-neutral paths, gradients/paint styles, decoded image resources and SVG/icon resources. T022 provides backend-neutral `Image`, source-rectangle drawing, `Fill`/`Contain`/`Cover`, an application-supplied `ResourceProvider` and reusable `ImageCache`. T023 provides backend-neutral `SvgIcon`, centered contain-fit rendering and per-instance `SvgCache` reuse/failure caching over the same application-owned provider model. Widgets do not perform filesystem I/O, and Skia conversion/ownership stays private to Core.
 
-Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior.
+Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior. T029 adds a shared platform-neutral IME composition model for TextInput/TextArea, transient underlined preedit rendering, single-transaction commit/cancel semantics, UTF-8-safe preedit offsets, candidate geometry under editor scrolling/scale changes, duplicate committed-text suppression, and private native bridges for Cocoa, Win32 IMM32 and X11 XIM.
 
 Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context. General text clipboard writes use canonical `text/plain`; this is required by the pinned Pugl macOS MIME→UTI mapping and avoids passing a nil UTI to `NSPasteboard`.
 
 The cross-cutting plugin-host safety baseline from #62/PR #63 is now merged. `StandaloneWindow` and `EmbeddedView` are non-movable because their internals retain stable back-references; embedded-font aliases are immutable-by-alias within the process-shared registry; retained UI/platform/resource APIs have explicit UI/resource-preparation thread contracts; and macOS platform builds require a consumer/plugin-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` so the statically linked Pugl Objective-C runtime classes do not collide between plug-in/application consumers.
+
+T029 preserves those host-safety rules: composition ownership is per editor/view, no mutable current-editor global or `thread_local` exists, the macOS runtime helper subclasses the already consumer-prefixed Pugl view class and stores only per-object associated state, and native callbacks never expose platform types through public headers.
 
 Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
 
@@ -66,15 +68,15 @@ Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interacti
 
 - Last completed cross-cutting safety ticket: **#62 — plugin-host CODE_REVIEW revalidation**. PR #63 exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 (`34103924635`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. macOS additionally passed the two-consumer Objective-C runtime-isolation check and the clipboard/multi-instance lifecycle smoke. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
 - Last completed rendering feature: **T023 — SVG/icon resources**. PR #60 adds backend-neutral parsed SVG handles, aspect-preserving centered contain rendering, viewBox-only support, per-instance provider-backed caching and explicit static/self-contained SVG semantics while preserving the #62 plugin-host/runtime-prefix contracts.
-- Last completed text feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
-- T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
-- The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
+- Last completed text feature ticket: **T029 — advanced IME composition bridge**. PR #85 delivers the shared composition state machine, transient preedit rendering for both editors, candidate geometry, duplicate-commit protection, multi-view isolation coverage, the mandatory `t029_ime_composition --self-test`, and native Cocoa/IMM32/XIM bridges. Exact-head platform/sanitizer evidence and the mandatory final review are recorded on PR #85 before merge.
+- T028 post-merge macOS clipboard regression remains fixed by PR #61. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
+- The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and is not an IME/T029 regression.
 
 Ready now:
 
 - P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, **T053** consumer-scoped macOS Pugl/Objective-C bridge.
 - P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
-- Other P1: **T029** advanced IME, **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
+- Other P1: **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
 - P2: **T046** Wayland strategy/prototype.
 
 Important explicit dependency chains:
@@ -124,10 +126,20 @@ Recommended next increment: take one of the independent Ready P0 lanes — T053 
 - macOS uses the universal Skia artifact on `macos-15-intel`.
 - Xcode 16.4 libc++ portability uses `std::atomic<std::shared_ptr<T>>` only when supported, otherwise the standard shared_ptr atomic load/store API.
 
+## T029 implementation notes retained for recovery
+
+- `CompositionType`/`CompositionEvent` are public and platform-neutral; native Cocoa, Win32 and X11 objects stay in private platform sources.
+- `TextEditModel` snapshots the composition-start selection; preedit is transient, commit is one undo transaction, cancel leaves committed text unchanged, and stale commits after edit/focus loss are inert.
+- Both TextInput and TextArea render underlined preedit without mutating bound state. Candidate geometry follows the transient cursor after horizontal/vertical scrolling and is converted from logical to physical coordinates exactly once in `ViewCore`.
+- Immediate identical ordinary committed-text delivery after a composition commit is suppressed once to prevent duplicate insertion.
+- Platform bridges are per view. macOS uses a consumer-prefixed runtime subclass plus associated per-object state; Windows uses a per-HWND property/window-proc bridge; X11 replaces the Pugl XIC only when the active XIM advertises preedit callbacks and otherwise preserves ordinary committed-text behavior.
+- X11 preedit conversion treats `XIMText.length` as a character count rather than a byte count, so multibyte preedit is not truncated.
+- Focus/deactivation teardown is one-way: editors cancel retained composition before disabling native text input, and native bridge teardown does not dispatch a second reentrant cancel.
+
 ## Current limitations
 
-- T029 advanced IME composition remains to be implemented.
 - Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
+- X11 advanced preedit callbacks depend on the installed XIM advertising `XIMPreeditCallbacks`; ordinary committed text remains available when that style is unavailable.
 - Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
 - Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
 

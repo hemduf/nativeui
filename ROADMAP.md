@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-07
+**Updated:** 2026-09-08
 
 This roadmap turns the current POC into a reusable desktop UI toolkit while preserving the simple architecture: Pugl for native views/events, Skia for rendering, NativeUI for UI behavior.
 
@@ -16,16 +16,17 @@ Ready work is selected by priority, then downstream unblock value / critical-pat
 
 Feature examples are mandatory: every feature ticket ships a dedicated executable example with an interactive mode and a `--self-test` mode. T049 remains the later **gallery/aggregation** milestone, not the first point where examples are created.
 
-## Current execution snapshot — 2026-09-07
+## Current execution snapshot — 2026-09-08
 
-The merged baseline is complete through T028, including T023.
+The merged baseline is complete through T029, including T023.
 
+- **T029 — advanced IME composition bridge / PR #85:** **Complete in this merge cycle**. NativeUI now has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe preedit offsets, composition-start selection replacement with one undo transaction, deterministic cancel/stale-commit handling, one-shot duplicate committed-text suppression, logical candidate geometry that follows editor scrolling and scale changes, and private Cocoa/Win32 IMM32/X11 XIM bridges. Multi-view isolation, candidate geometry, duplicate delivery and both editor rendering paths are covered; `t029_ime_composition` provides interactive and deterministic `--self-test` modes. Final exact-head platform/sanitizer validation and the mandatory review record are attached to PR #85 before merge.
 - **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete**. Exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the macOS two-consumer Objective-C runtime-isolation and multi-instance lifecycle smokes. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
 - **T023 — SVG/icon resources / PR #60:** **Complete**. NativeUI now exposes backend-neutral `SvgIcon` handles, centered contain-fit SVG drawing, application-owned `ResourceProvider` loading and per-instance `SvgCache` reuse/failure caching. ViewBox-only SVGs, malformed input, invalid destinations, transforms/gradients, cache isolation, deterministic path golden coverage, isolated public-header compilation and `t023_svg_icons --self-test` are covered. The implementation preserves the #62/#63 plugin-host/runtime-prefix contracts.
 - **#64 — multiple `StandaloneWindow` instances crash on macOS:** `Ready`, P1. This is a separate `PUGL_PROGRAM` application-world lifecycle defect; independent `EmbeddedView`/`PUGL_MODULE` multi-instance validation is green.
 - **Ready P0 lanes:** **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, and **T053** consumer-scoped macOS Pugl/Objective-C bridge (unblocked by #62 completion).
 - **New M8 CMake/resource chain:** T053 is now `Ready`. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
-- **Ready high-unblock widget lane:** T030 Button, T032 Slider/RangeSlider and T034 ScrollView. T033 ProgressBar/Meter and T029 advanced IME remain independent Ready work.
+- **Ready high-unblock widget lane:** T030 Button, T032 Slider/RangeSlider and T034 ScrollView. T033 ProgressBar/Meter remains independent Ready work.
 
 Recommended near-term execution:
 
@@ -42,7 +43,7 @@ T032
 T034 -> T035 / T036
 ```
 
-#64, T029, T033, T043, T044 and T046 remain valid independent fallback work when a lane is free or another branch is waiting on external validation.
+#64, T033, T043, T044 and T046 remain valid independent fallback work when a lane is free or another branch is waiting on external validation.
 
 ## Milestone 0 — Baseline hardening
 
@@ -150,7 +151,7 @@ T023 PR #60 completes SVG/icon resources with a backend-neutral `SvgIcon`, cente
 
 ## Milestone 4 — Text system
 
-**Status: In progress (T025–T028 complete; T029 Ready)**
+**Status: Complete (T025–T029)**
 
 **Goal:** make text reliable enough for editors, forms and plugin UIs.
 
@@ -172,7 +173,9 @@ Exit gate:
 
 Tickets: `T025`–`T029`.
 
-Progress: T025–T027 are complete. T028 PR #56 added multiline `TextArea`, UTF-8-aware vertical navigation, cross-line selection, viewport scrolling, caret/selection painting and the mandatory feature self-test. Final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`. The post-merge macOS clipboard regression was fixed by PR #61 and validated with real clipboard plus multi-`EmbeddedView` lifecycle coverage. With T028 complete, T029 is Ready.
+Progress: T025–T027 are complete. T028 PR #56 added multiline `TextArea`, UTF-8-aware vertical navigation, cross-line selection, viewport scrolling, caret/selection painting and the mandatory feature self-test. Final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`. The post-merge macOS clipboard regression was fixed by PR #61 and validated with real clipboard plus multi-`EmbeddedView` lifecycle coverage.
+
+T029 PR #85 completes the text milestone with a neutral `CompositionEvent` stream shared by `TextInput`/`TextArea`, transient preedit rendering, candidate-window geometry after scrolling and scale conversion, single-transaction commit/cancel semantics, stale/duplicate commit protection, and private native bridges for Cocoa marked-text APIs, Win32 IMM32 and X11 XIM preedit callbacks. Platform implementation types remain private, composition ownership stays per editor/view, and the macOS helper preserves the existing consumer-specific Objective-C runtime namespace. The dedicated `t029_ime_composition --self-test` covers transient state, rendering, duplicate delivery and multi-view isolation.
 
 ## Milestone 5 — Standard widget set
 
