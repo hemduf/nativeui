@@ -234,8 +234,12 @@ public:
         composition_text_ = std::move(preedit);
         composition_cursor_byte_ =
             text::clamp_boundary(composition_text_, std::min(cursor_byte, composition_text_.size()));
-        composition_selection_bytes_ =
-            text::clamp_boundary(composition_text_, std::min(selection_bytes, composition_text_.size()));
+
+        const auto remaining = composition_text_.size() - composition_cursor_byte_;
+        const auto requested = std::min(selection_bytes, remaining);
+        const auto selection_end = text::clamp_boundary(
+            composition_text_, composition_cursor_byte_ + requested);
+        composition_selection_bytes_ = selection_end - composition_cursor_byte_;
     }
 
     [[nodiscard]] bool commit_composition(std::string_view committed) {
