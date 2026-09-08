@@ -27,7 +27,7 @@ The environment used here has no external network or native desktop display, so 
 - Targeted vertical/horizontal/both-axis offset, clamp and measurement tests pass.
 - Release core suite: 15/15 passed.
 - ASan/UBSan core suite: 15/15 passed.
-- Public layout/nativeui headers and standalone consumer source compile with the new API.
+- Public layout/nativeui headers and standalone consumer source compile.
 - Review: Scroll is non-focusable and contains no wheel/platform behavior; it reuses T011 clipping and performs no paint-time allocation.
 
 ## T013 — handled/bubble input routing
@@ -175,3 +175,12 @@ T026 remains `Doing` until the corrected suite is rerun on real macOS/Skia.
 - Regression coverage: changes inside the text/footer areas are ignored, but background/left-stripe/right-stripe changes must fail. Same-platform Label pixel tests require visible red glyphs and correct left/center/right placement using measured text width.
 - Targeted golden/Label/example checks: 3/3 pass. Full Release build and CTest: **40/40 pass**, including all 17 feature self-tests. All baseline SHA256 hashes remain unchanged during normal CTest; the other three baseline files match the original commit.
 - Review passes completed: API/runtime scope (test-only change), meaningful negative cases and cross-platform pixel policy, then documentation/CI coverage. No library code or CMake target changed. Existing CI jobs run the modified test targets; remote CI and merge are still pending, so T026 remains Doing.
+
+## #86 Pugl drag-and-drop fork integration — 2026-09-08
+
+- NativeUI pins `hemduf/pugl` commit `577efc8283281092d7bd96ace1c5d63c11ce0063`.
+- The fork fixes the macOS Cocoa offer → accept → actual-drop → data lifecycle, implements `puglRejectOffer()` on macOS and Windows, and fixes Windows `WM_DROPFILES` UTF-8 byte accounting.
+- NativeUI removes the old macOS/Windows rejection compatibility wrapper and calls `puglRejectOffer()` directly on all supported desktop backends.
+- Pugl post-merge CI is green on macOS, Windows, Linux and WebAssembly, including native `pugl:mac_drag_drop` and `pugl:win_drop` regressions.
+- NativeUI CI #242 exposed one remaining wrapper call in `pugl_skia_view_a.inc`; this integration error was corrected before the next exact-head CI run.
+- NativeUI cross-platform exact-head CI and the real macOS Finder drop smoke remain required before #86 is marked Done.
