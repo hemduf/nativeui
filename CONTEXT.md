@@ -26,49 +26,51 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` before the T051 benchmark integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
+Current `main` is `ce86c86e663ad5f8464224874039312143146300`, including merged T051 / PR #116.
 
-Completed foundations relevant to the release/lifecycle lane:
+Completed foundations relevant to the current widget lane:
 
-- #64 / PR #90: standalone ownership frozen as Decision B — one application-level `PUGL_PROGRAM` world; no hidden singleton/shared-world workaround in the legacy constructor path.
-- T042 / PR #93: deterministic headless/embedded/standalone lifecycle stress for every currently supported ownership path.
+- T059 / PR #89: generic inherited visibility/enabled/read-only availability model.
+- T030 / PR #94: Button.
+- T031 / PR #95: Checkbox + typed RadioGroup/RadioButton.
 - T024: deterministic headless raster/golden foundation.
-- T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
-- T056 / PR #111: deterministic binary resource packaging.
+- T042 / PR #93: deterministic lifecycle stress used as a cross-lane exact-head gate.
+- T051 / PR #116: reproducible Release performance benchmark/regression harness; T052 is now dependency-unblocked in the separate release lane.
 
-## T051 performance harness — PR #116
+## T033 ProgressBar / Meter — PR #123
 
-T051 is the current lifecycle/release-lane merge candidate. It provides one Release-only deterministic microbenchmark suite and the relative regression policy consumed by T052/T071.
+T033 is the current retained-widget completion candidate. It adds display-only bounded-value widgets driven by externally owned `State<float>`.
 
 Delivered contract:
 
-- fixed schema/workload versioning, compiler/OS/architecture/build/commit metadata and JSON round-trip support;
-- exact 5 warmup + 30 measured `steady_clock` sampling, median indices 14/15 and p95 index 28;
-- fixed batch counts for layout, deep hit testing, pointer/keyboard dispatch, short/multiline text editing, control/text headless paint and headless instance lifecycle;
-- deterministic `idle_invalidation` correctness gate: 1,000 logical 10 ms checkpoints (10 seconds logical idle) after the settled frame, requiring exactly zero framework invalidations;
-- benchmark-only allocation interception around measured operation scopes; it never changes `NativeUI::Core` or public allocator/lifetime APIs;
-- workload-contract coverage for exact node/action shapes plus known allocating and non-allocating counter scopes;
-- metadata-safe comparison entry point that rejects incompatible baseline/rerun environments before thresholds are evaluated;
-- timing gate: median >15% **and** p95 >20%, reproduced by two complete independent runs;
-- allocation gate: count or bytes/op >10% with two-run confirmation, or any recurring allocation for explicitly zero-allocation scenarios;
-- CI-generated immutable JSON artifacts; T052 selects/records the controlled v0.1 baseline artifact rather than committing universal machine-specific nanosecond constants.
+- `ProgressBar` and `Meter` share one bounded display domain with finite `minimum < maximum` validation;
+- finite external values clamp only for presentation; NaN/Inf display at the minimum fallback; application State is never normalized or rewritten by mount/paint;
+- horizontal fill is left-to-right and vertical fill is bottom-to-top;
+- widgets are non-focusable, ignore input, capture no pointer, schedule no timer and perform no hidden smoothing;
+- State observation produces paint invalidation only while geometry is unchanged and unmount releases the subscription;
+- optional formatter receives the effective presentation value and is presentation-only;
+- deterministic headless coverage exercises minimum, midpoint, maximum, finite out-of-range and NaN states in both orientations;
+- raster assertions compare semantic empty/full reference states captured by the same Skia surface, avoiding backend color-space byte assumptions;
+- dedicated `examples/features/t033_progress_meter.cpp` provides interactive controls plus deterministic `--self-test`.
 
-The benchmark and baseline contract is documented in `docs/performance-benchmarks.md`. Normal benchmark execution never rewrites baselines.
+The exact-head review found no mutable global/singleton/`thread_local` state, no platform header/runtime leakage, no lifetime/capture/timer hazard and no application-State writeback. Normal CI and T042 lifecycle stress remain the final exact-head gates after completion-document synchronization.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
-platform/package:  T053(done) -> T047(done) -> T048(done) ----^
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(ready)
+platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
                                        +-> T054
                                        +-> T056(done) -> T057
 state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        |
-                                       +-> T032 / T033 / T034 -> T035 / T036
+                                       +-> T032(in review)
+                                       +-> T033(completion candidate)
+                                       +-> T034(ready) -> T035 / T036
 ```
 
-When T051 merges cleanly, T052 becomes dependency-unblocked and is the next high-priority lifecycle/release ticket.
+T032 remains a separate existing widget stream and must be resumed rather than duplicated. T034 is the next currently Ready widget ticket once existing in-progress widget work is resolved according to `AGENTS.md`.
 
 ## Build / validation
 
@@ -80,24 +82,11 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T051 Release benchmark validation:
-
-```bash
-cmake -S tests/t051 -B build-t051 -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_SOURCE_DIR="$PWD" \
-  -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)"
-cmake --build build-t051 --parallel
-ctest --test-dir build-t051 --output-on-failure
-./build-t051/nativeui_benchmarks --self-test
-./build-t051/nativeui_benchmarks --json t051-results.json
-```
-
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate gate.
+Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate exact-head gate.
 
 ## Next actions
 
-1. Require exact-head T051 contract, Release benchmark, normal CI and T042 lifecycle-stress workflows to complete green.
-2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Merge PR #116 only after current-main synchronization and exact-head validation are both satisfied.
-4. Mark #51 Done/`status:done`, close it, then move T052 / #52 from Blocked to Ready and continue that release/lifecycle dependency chain.
+1. Require exact-head normal CI and T042 lifecycle stress to complete green on the final T033 documentation-synchronized head.
+2. Record the final mandatory `CODE_REVIEW.md` pass against that exact head and resolve any Blocking/Important finding.
+3. Merge PR #123, mark #33 Done/closed, then re-evaluate the existing T032 stream before starting another widget ticket.
+4. If T032 remains blocked by unrelated platform integration state, preserve lane ownership and continue the next dependency-unblocked widget work without modifying platform scope.
