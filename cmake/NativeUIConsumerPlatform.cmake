@@ -135,11 +135,9 @@ function(_nativeui_prepare_macos_platform_common)
     return()
   endif()
 
-  if(NOT CMAKE_C_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  if(NOT CMAKE_OBJC_COMPILER_LOADED)
-    enable_language(OBJC)
+  if(NOT CMAKE_C_COMPILER_LOADED OR NOT CMAKE_OBJC_COMPILER_LOADED)
+    message(FATAL_ERROR
+      "NativeUI macOS platform attachment requires C and OBJC languages to be enabled at file scope before platform helpers are used")
   endif()
 
   _nativeui_platform_opengl_target(_nativeui_opengl_target)
@@ -208,11 +206,9 @@ function(_nativeui_prepare_package_platform out_var)
       "NativeUI package platform attachment requires imported target NativeUI::Core")
   endif()
 
-  if(NOT CMAKE_C_COMPILER_LOADED)
-    enable_language(C)
-  endif()
-  if(NOT CMAKE_CXX_COMPILER_LOADED)
-    enable_language(CXX)
+  if(NOT CMAKE_C_COMPILER_LOADED OR NOT CMAKE_CXX_COMPILER_LOADED)
+    message(FATAL_ERROR
+      "NativeUI package platform attachment requires C and CXX languages to be enabled at file scope")
   endif()
 
   _nativeui_platform_source_roots(_pugl_root _nativeui_root)
