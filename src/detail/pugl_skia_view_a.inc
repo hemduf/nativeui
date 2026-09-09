@@ -45,6 +45,7 @@ public:
         puglSetViewHint(view_, PUGL_DOUBLE_BUFFER, PUGL_TRUE);
         puglSetViewHint(view_, PUGL_STENCIL_BITS, 8);
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
+        puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
         puglSetHandle(view_, this);
         puglSetEventFunc(view_, &ViewCore::event_thunk);
@@ -238,7 +239,7 @@ public:
         const int y = static_cast<int>(std::floor(logical_region.y * scale));
         const unsigned width = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.w * scale)));
         const unsigned height = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.h * scale)));
-        (void)reject_pugl_drop_offer(view_, active_drop_offer_, x, y, width, height);
+        (void)puglRejectOffer(view_, active_drop_offer_, x, y, width, height);
         drop_offer_decided_ = true;
     }
 
