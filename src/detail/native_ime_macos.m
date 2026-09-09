@@ -262,12 +262,17 @@ nativeuiFirstRectForCharacterRange(id self,
     return NSMakeRect(bounds.origin.x, bounds.origin.y, 1.0, 1.0);
   }
 
-  const CGFloat scale = MAX((CGFloat)1.0, [window backingScaleFactor]);
+  const CGFloat backingScale = [window backingScaleFactor];
+  const CGFloat scale =
+    backingScale > (CGFloat)1.0 ? backingScale : (CGFloat)1.0;
+  const CGFloat logicalHeight = bridge->height / scale;
+  const CGFloat localHeight =
+    logicalHeight > (CGFloat)1.0 ? logicalHeight : (CGFloat)1.0;
   const NSRect local = NSMakeRect(
     (bridge->x + bridge->cursorOffset) / scale,
     bridge->y / scale,
     1.0 / scale,
-    MAX(1.0, bridge->height / scale));
+    localHeight);
   const NSRect windowRect = [view convertRect:local toView:nil];
   return [window convertRectToScreen:windowRect];
 }
