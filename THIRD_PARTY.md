@@ -2,7 +2,7 @@
 
 NativeUI does not vendor binary dependency outputs in this source package. They are acquired by CPM at configure time.
 
-- **Pugl** — `hemduf/pugl`, pinned to `d12d63815b8cfe3f36293d3791a418e8f558ff1b`, ISC license. NativeUI compiles the Pugl core and OpenGL backend statically. This fork retains the upstream Pugl codebase and carries reviewed desktop drag-and-drop fixes required by NativeUI.
+- **Pugl** — `hemduf/pugl`, pinned to `195f79b22644010c81a5e0c3231c591856787ec6`, ISC license. NativeUI compiles the Pugl core and OpenGL backend statically. This fork retains the upstream Pugl codebase and carries reviewed desktop drag-and-drop fixes required by NativeUI, including the X11 failed-selection guard used by the current lifecycle/release baseline.
 - **Skia** — binary static libraries from `olilarkin/skia-builder`, release `chrome/m149`. The builder project is MIT-licensed; Skia itself uses its upstream BSD-style license and bundled third-party licenses.
 - **CPM.cmake** — dependency manager bootstrap pinned to 0.43.1 and distributed under its upstream MIT licence.
 
@@ -17,3 +17,5 @@ When a dependency version or acquisition method changes, this file must be revie
 ## Pugl drag-and-drop integration note
 
 The pinned Pugl fork implements `puglRejectOffer()` on macOS, Windows and X11, so NativeUI calls the public API directly and no longer carries a platform-specific rejection workaround. The pin fixes the Cocoa drag lifecycle so accepted drag data is delivered once at the actual drop boundary, registers the macOS backend render view as a drag destination so real AppKit routing reaches the Pugl wrapper, fixes Windows `WM_DROPFILES` UTF-8 byte accounting and lifetime cleanup, and preserves the portable `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract on Windows before payload exposure. `WM_DROPFILES` still has no native hover-time negotiation phase, so Windows offer/reject decisions cannot change OS feedback before release, but rejected data is not delivered to NativeUI and accepted data keeps the actual drop coordinates.
+
+On X11, the current pin also treats `SelectionNotify.property == None` as a failed clipboard conversion instead of forwarding atom `None` to `XGetWindowProperty()`. This keeps empty/unavailable clipboard responses non-fatal during repeated lifecycle and multi-instance stress.

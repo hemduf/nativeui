@@ -18,11 +18,13 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
+- Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
+
+The current Pugl pin includes the reviewed X11 failed-selection guard so an empty/unavailable clipboard conversion (`SelectionNotify.property == None`) is handled as failure rather than passed to `XGetWindowProperty()` as atom `None`. The shared dependency integration is tracked independently by #124 / PR #125; T052 consumes the same reviewed pin for exact release qualification.
 
 ## Current baseline
 
