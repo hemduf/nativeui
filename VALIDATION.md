@@ -127,7 +127,6 @@ The environment used here has no external network or native desktop display, so 
 - Targeted ASan/UBSan: model + TextInput tests PASS.
 - Validation uses the local pinned Skia package and cached CPM bootstrap because external DNS is disabled in the artifact environment.
 
-
 ## T041 validation
 
 - Added `nativeui_smoke_standalone` and `nativeui_smoke_embedded` native executables.
@@ -228,3 +227,11 @@ T026 remains `Doing` until the corrected suite is rerun on real macOS/Skia.
 - Main `ed81a201ea459ea2443ae51f27dfcac7af5d7e63` is integrated with all T048 fixtures and CI gates preserved. The sole merge conflict was the roadmap execution snapshot; no production-code conflict resolution was needed. The exact final-head CI result, including relocated consumers, is recorded in PR #87 before merge.
 - Native macOS smoke tests require access to the graphical session. A sandboxed baseline run passed 62/63 but could not create the Cocoa window (non-finite frame before drop dispatch); the identical native test passed immediately with authorized graphical-session access. Run the full platform suite in that environment, not a display-isolated sandbox.
 - Main-integrated local Release build and full CTest in the graphical session: **63/63 PASS**, no compiler warnings. `nativeui_smoke_standalone` and the T048 external-consumer source contract also pass.
+
+## T052 Pugl X11 empty-clipboard pin — 2026-09-09
+
+- Current release-candidate Pugl pin: reachable `hemduf/pugl` `195f79b22644010c81a5e0c3231c591856787ec6`.
+- The pin adds the reviewed X11 failed-selection guard: `SelectionNotify.property == None` is treated as a failed clipboard conversion instead of forwarding atom `None` to `XGetWindowProperty()`. The shared dependency integration remains independently tracked by #124 / PR #125.
+- T052 RED evidence on head `66d741f944cd1fd85654fb0ac19b5c1b212147ce`, run `34399849848`: the only failed T052 job was `T052 release contract`, because release/dependency documentation still named the previous Pugl pin. The same head passed all three T052 clean-bootstrap jobs and its T051 comparative benchmark; normal CI `34399849892`, T042 lifecycle stress `34399850030` and T051 Release Benchmarks `34399849916` were also green.
+- The release notes, third-party inventory, compact context and this validation record are synchronized to the new pin before the next exact-head qualification run. No runtime behavior, threshold, timeout, fixture or #64 Decision-B ownership rule is weakened by this documentation correction.
+- The next exact source head must rerun T052, normal CI, T042 lifecycle stress and T051 Release Benchmarks before merge; prior green results remain diagnostic evidence only.
