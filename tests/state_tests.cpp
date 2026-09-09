@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <nativeui/component_state.hpp>
+
 #include <memory>
 
 namespace {
@@ -42,6 +44,11 @@ void suite() {
     }
     NUI_CHECK(!survivor.active());
     survivor.reset();
+
+    // T059 RED: generic component availability must become a public,
+    // platform-neutral state vocabulary before the retained tree can enforce it.
+    ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Visible};
+    NUI_CHECK(visibility.get() == ui::VisibilityMode::Visible);
 }
 
 } // namespace
