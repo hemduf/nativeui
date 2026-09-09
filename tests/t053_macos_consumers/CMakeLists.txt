@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
-project(NativeUIT053MacConsumers LANGUAGES C CXX)
+# The bridge targets are created in this directory by the T053 helper. CMake
+# versions supported by NativeUI require a language to be enabled in the
+# highest common directory that owns targets compiling that language, so this
+# fixture must enable Objective-C at its own project boundary rather than rely
+# on NativeUI's nested source-tree project to propagate it upward.
+project(NativeUIT053MacConsumers LANGUAGES C CXX OBJC)
 
 if(NOT DEFINED NATIVEUI_SOURCE OR NOT EXISTS "${NATIVEUI_SOURCE}/CMakeLists.txt")
   message(FATAL_ERROR "T053 fixture requires NATIVEUI_SOURCE")
