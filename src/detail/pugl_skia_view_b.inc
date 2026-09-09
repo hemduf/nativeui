@@ -160,12 +160,12 @@
                 drop_offer_decided_ = false;
                 (void)ui_.dispatch(input, services_);
                 if (!drop_offer_decided_) {
-                    (void)reject_pugl_drop_offer(view_,
-                                                   &event->offer,
-                                                   0,
-                                                   0,
-                                                   std::numeric_limits<uint32_t>::max(),
-                                                   std::numeric_limits<uint32_t>::max());
+                    (void)puglRejectOffer(view_,
+                                          &event->offer,
+                                          0,
+                                          0,
+                                          std::numeric_limits<uint32_t>::max(),
+                                          std::numeric_limits<uint32_t>::max());
                 }
                 active_drop_offer_ = nullptr;
                 drop_offer_decided_ = false;
