@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -35,6 +37,46 @@ inline SampleSummary summarize_samples(std::vector<double> samples) {
         .min_ns_per_op = samples.front(),
         .max_ns_per_op = samples.back(),
     };
+}
+
+struct ProtocolRun {
+    std::vector<double> measured_ns_per_op;
+    SampleSummary summary;
+};
+
+template <class BeforeSample, class Operation>
+ProtocolRun run_fixed_protocol(std::uint64_t operations_per_sample,
+                               BeforeSample&& before_sample,
+                               Operation&& operation) {
+    if (operations_per_sample == 0) {
+        throw std::invalid_argument("T051 operations_per_sample must be non-zero");
+    }
+
+    auto run_batch = [&] {
+        for (std::uint64_t operation_index = 0; operation_index < operations_per_sample;
+             ++operation_index) {
+            std::invoke(operation);
+        }
+    };
+
+    for (int sample = 0; sample < kWarmupSamples; ++sample) {
+        std::invoke(before_sample);
+        run_batch();
+    }
+
+    std::vector<double> measured;
+    measured.reserve(kMeasuredSamples);
+    for (int sample = 0; sample < kMeasuredSamples; ++sample) {
+        std::invoke(before_sample);
+        const auto start = std::chrono::steady_clock::now();
+        run_batch();
+        const auto end = std::chrono::steady_clock::now();
+        const auto elapsed = std::chrono::duration<double, std::nano>(end - start).count();
+        measured.push_back(elapsed / static_cast<double>(operations_per_sample));
+    }
+
+    return ProtocolRun{.measured_ns_per_op = measured,
+                       .summary = summarize_samples(std::move(measured))};
 }
 
 struct ComparisonMetadata {
