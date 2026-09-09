@@ -1,6 +1,30 @@
 include_guard(GLOBAL)
 include(CMakeParseArguments)
 
+# The source-tree copy of this module is included by NativeUI's top-level build
+# after GNUInstallDirs is loaded. Register the legal payload there so installed
+# packages carry the licensing/notices required by T047. Build-tree and installed
+# copies of this helper do not have these documents adjacent to the module and
+# therefore do not add install rules to consumer projects.
+get_filename_component(_nativeui_module_source_root
+  "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+if(DEFINED CMAKE_INSTALL_DATADIR AND
+   EXISTS "${_nativeui_module_source_root}/LICENSE.md" AND
+   EXISTS "${_nativeui_module_source_root}/NOTICE.md" AND
+   EXISTS "${_nativeui_module_source_root}/THIRD_PARTY.md")
+  install(FILES
+    "${_nativeui_module_source_root}/LICENSE.md"
+    "${_nativeui_module_source_root}/NOTICE.md"
+    "${_nativeui_module_source_root}/THIRD_PARTY.md"
+    "${_nativeui_module_source_root}/EULA.md"
+    "${_nativeui_module_source_root}/PRIVACY.md"
+    "${_nativeui_module_source_root}/TERMS.md"
+    "${_nativeui_module_source_root}/LEGAL.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/nativeui/legal"
+  )
+endif()
+unset(_nativeui_module_source_root)
+
 if(NOT COMMAND _nativeui_attach_consumer_platform)
   include("${CMAKE_CURRENT_LIST_DIR}/NativeUIConsumerPlatform.cmake")
 endif()
