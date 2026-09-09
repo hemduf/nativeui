@@ -44,6 +44,12 @@ jobs:
           -DSOURCE_DIR=${{ github.workspace }}
           -P tests/t047_attach_contract_tests.cmake
 
+      - name: T048 external consumer source contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t048_external_consumer_contract_tests.cmake
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -122,6 +128,12 @@ jobs:
           cmake
           -DSOURCE_DIR=${{ github.workspace }}
           -P tests/t047_attach_contract_tests.cmake
+
+      - name: T048 external consumer source contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t048_external_consumer_contract_tests.cmake
 
       - name: Install dependencies
         run: |
