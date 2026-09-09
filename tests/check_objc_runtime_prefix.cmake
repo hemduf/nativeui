@@ -28,14 +28,23 @@ foreach(_class IN ITEMS PuglWindow PuglWindowDelegate PuglWrapperView PuglOpenGL
     message(FATAL_ERROR
       "Expected prefixed Objective-C runtime class ${PREFIX}${_class} in ${ARCHIVE}")
   endif()
-
-  string(FIND "${_nm_output}" "OBJC_CLASS_$_${_class}" _unprefixed_class_index)
-  string(FIND "${_nm_output}" "OBJC_METACLASS_$_${_class}" _unprefixed_meta_index)
-  if(NOT _unprefixed_class_index EQUAL -1 OR NOT _unprefixed_meta_index EQUAL -1)
-    message(FATAL_ERROR
-      "Unprefixed Objective-C runtime class ${_class} is still exported by ${ARCHIVE}")
-  endif()
 endforeach()
 
+# Pattern-based future-proof gate: every Objective-C class/metaclass emitted by
+# Pugl must have the consumer prefix before the literal Pugl class stem. This
+# deliberately does not enumerate known classes, so a newly added Pugl runtime
+# class in a future pinned source update fails until it is covered by T053's
+# compile-time rename contract.
+string(REGEX MATCHALL
+  "OBJC_(CLASS|METACLASS)_\\$_Pugl[A-Za-z0-9_]*"
+  _unprefixed_pugl_runtime_symbols
+  "${_nm_output}")
+if(_unprefixed_pugl_runtime_symbols)
+  list(REMOVE_DUPLICATES _unprefixed_pugl_runtime_symbols)
+  list(JOIN _unprefixed_pugl_runtime_symbols ", " _unprefixed_summary)
+  message(FATAL_ERROR
+    "Unprefixed Pugl Objective-C runtime symbols are still exported by ${ARCHIVE}: ${_unprefixed_summary}")
+endif()
+
 message(STATUS
-  "NativeUI Objective-C runtime classes use consumer prefix '${PREFIX}'")
+  "NativeUI Objective-C runtime classes use consumer prefix '${PREFIX}' and no unprefixed Pugl class/metaclass symbols remain")
