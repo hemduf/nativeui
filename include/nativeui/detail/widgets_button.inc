@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/widgets_activation.inc>
 
 #include <algorithm>
 #include <functional>
@@ -36,125 +37,29 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
-        if (focused) return;
-        if (!pointer_armed_ && !space_down_ && !space_armed_ && !enter_down_ && !hovered_) {
-            return;
-        }
-        pointer_armed_ = false;
-        pointer_inside_ = false;
-        hovered_ = false;
-        space_down_ = false;
-        space_armed_ = false;
-        enter_down_ = false;
-        context.invalidate();
+        interaction_.focus_changed(focused, context);
     }
 
     void deactivate(LifecycleContext& context) override {
-        const bool dirty = pointer_armed_ || pointer_inside_ || hovered_ || space_down_ ||
-                           space_armed_ || enter_down_;
-        pointer_armed_ = false;
-        pointer_inside_ = false;
-        hovered_ = false;
-        space_down_ = false;
-        space_armed_ = false;
-        enter_down_ = false;
-        if (dirty) context.invalidate();
+        interaction_.deactivate(context);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        switch (event.type) {
-            case InputType::PointerDown:
-                pointer_armed_ = true;
-                pointer_inside_ = true;
-                hovered_ = true;
-                context.capture_pointer();
-                context.invalidate();
-                return EventResult::Handled;
+        const auto outcome = interaction_.input(event, context, true);
+        if (!outcome.activate) return outcome.result;
 
-            case InputType::PointerMove: {
-                const bool inside = context.bounds().contains(event.position);
-                const bool changed = hovered_ != inside ||
-                                     (pointer_armed_ && pointer_inside_ != inside);
-                hovered_ = inside;
-                if (pointer_armed_) pointer_inside_ = inside;
-                if (changed) context.invalidate();
-                return EventResult::Handled;
-            }
-
-            case InputType::PointerUp: {
-                if (!pointer_armed_) return EventResult::Ignored;
-                const bool inside = context.bounds().contains(event.position);
-                const bool activate = pointer_inside_ && inside;
-                auto callback = activate ? on_activate_ : ActivateCallback{};
-
-                pointer_armed_ = false;
-                pointer_inside_ = false;
-                hovered_ = inside;
-                context.release_pointer();
-                context.invalidate();
-
-                // The activation callback may synchronously disable/hide/remove
-                // this Button. Invoke a detached callback copy only after all
-                // component/context work is complete and do not touch `this` or
-                // `context` after the call.
-                if (callback) callback();
-                return EventResult::Handled;
-            }
-
-            case InputType::PointerCancel:
-                if (!pointer_armed_) return EventResult::Ignored;
-                pointer_armed_ = false;
-                pointer_inside_ = false;
-                hovered_ = false;
-                context.invalidate();
-                return EventResult::Handled;
-
-            case InputType::KeyDown:
-                if (event.key == Key::Space) {
-                    if (!space_down_) {
-                        space_down_ = true;
-                        space_armed_ = true;
-                        context.invalidate();
-                    }
-                    return EventResult::Handled;
-                }
-                if (event.key == Key::Enter) {
-                    if (enter_down_) return EventResult::Handled;
-                    enter_down_ = true;
-                    auto callback = on_activate_;
-                    if (callback) callback();
-                    return EventResult::Handled;
-                }
-                return EventResult::Ignored;
-
-            case InputType::KeyUp:
-                if (event.key == Key::Space) {
-                    if (!space_down_) return EventResult::Handled;
-                    const bool activate = space_armed_;
-                    auto callback = activate ? on_activate_ : ActivateCallback{};
-                    space_down_ = false;
-                    space_armed_ = false;
-                    context.invalidate();
-                    if (callback) callback();
-                    return EventResult::Handled;
-                }
-                if (event.key == Key::Enter) {
-                    enter_down_ = false;
-                    return EventResult::Handled;
-                }
-                return EventResult::Ignored;
-
-            default:
-                return EventResult::Ignored;
-        }
+        // User code may synchronously disable/hide/remove this component. Copy
+        // the callback only after the shared interaction machine has completed
+        // all component/context work, then never touch `this` or `context`.
+        auto callback = on_activate_;
+        if (callback) callback();
+        return outcome.result;
     }
 
     [[nodiscard]] ButtonVisualState visual_state(bool focused) const noexcept {
         if (!effective_enabled()) return ButtonVisualState::Disabled;
-        if ((pointer_armed_ && pointer_inside_) || space_armed_) {
-            return ButtonVisualState::Pressed;
-        }
-        if (hovered_) return ButtonVisualState::Hover;
+        if (interaction_.pressed()) return ButtonVisualState::Pressed;
+        if (interaction_.hovered()) return ButtonVisualState::Hover;
         if (focused) return ButtonVisualState::Focused;
         return ButtonVisualState::Normal;
     }
@@ -200,12 +105,7 @@ public:
 private:
     std::string label_;
     ActivateCallback on_activate_;
-    bool pointer_armed_{};
-    bool pointer_inside_{};
-    bool hovered_{};
-    bool space_down_{};
-    bool space_armed_{};
-    bool enter_down_{};
+    PressActivationState interaction_;
 };
 
 } // namespace detail

@@ -149,3 +149,11 @@ The user's image drop reached painting but crashed in macOS Skia text-to-glyph c
 - On 2026-09-09 the user explicitly confirmed real Finder `/tmp/hello.txt` content display, including after an image drop, and requested merging #87. This is user-reported interactive evidence, not a claim that direct Cocoa callbacks reproduce Finder's drag session.
 
 This merge completes #86 after the exact-head CI gate; no blocking code finding remains in the three-pass/CODE_REVIEW.md record in #87. The last independent completion is T048 / PR #99 (`ed81a20`). Next recommended platform/package work is the highest-priority Ready item among T054/T056 after checking current GitHub status; #86 changes neither that frontier nor milestone completion.
+
+## State/widget lane update — T031 completion candidate
+
+T031 / PR #95 is the active state/widget completion candidate after merged T030. Its reviewed implementation provides `Checkbox`, typed `RadioGroup<T>` / `RadioButton<T>`, one-Tab-stop radio groups, wrapped arrow navigation that skips unavailable options, T059 availability/read-only behavior, reentrancy-safe activation, and per-group weak duplicate-live-value bookkeeping with no global/singleton/`thread_local` state.
+
+Current `main` includes #86 / PR #87 and #107 / PR #108. This completion documentation preserves those merged platform/lifecycle records and adds only the T031 state/widget completion record. The final PR merge result must include the current main tree plus the reviewed T031 code/tests/CMake registrations.
+
+The prior mandatory review is clean after the duplicate-live-value RED→GREEN correction. This completion-document update is part of the final T031 merge cycle; the resulting exact PR merge head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before PR #95 is merged.

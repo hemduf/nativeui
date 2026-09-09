@@ -401,3 +401,11 @@ PR #108 adds one private show-status classifier. Only `PUGL_SHOW_RAISE + PUGL_FA
 The RED stacked T042 workflow `34344854224` failed Windows cycle 0 with `puglShow failed: Non-fatal failure`. Exact #107 code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`. The identical policy in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e` passed workflow `34348551067` on Windows, Linux/X11, macOS and Linux ASan+UBSan, including all 50 process-isolated standalone lifetimes. CODE_REVIEW.md review `5154415827` has no blocking finding.
 
 The branch was refreshed from current `main` before this completion-doc pass. After the new exact-head CI is green, merge PR #108 and close #107. Then refresh T042/PR #93 from that main, remove the now-upstream production fix from its diff, rerun the complete stress matrix and complete T042's own final review/ROADMAP/CONTEXT merge gate.
+
+## State/widget completion candidate — T031
+
+T031 / PR #95 completes Checkbox and RadioButton on top of the merged T030/T059 interaction and availability contracts. The implementation keeps the shared Button-family activation seam, binds `Checkbox` to `State<bool>`, provides typed `RadioGroup<T>` / `RadioButton<T>`, treats each radio group as one Tab stop, wraps arrow navigation while skipping unavailable options, preserves externally supplied no-match selection, and keeps ReadOnly navigation without value mutation.
+
+Group identity and duplicate-live-value bookkeeping remain owned by each `RadioGroup<T>`; duplicate simultaneously-live values are rejected deterministically and weak bookkeeping permits reuse after prior components are destroyed/remounted. No process-global registry, singleton, `thread_local` state or platform/Pugl dependency enters the widget implementation.
+
+Current `main` includes #86 / PR #87 and #107 / PR #108. The final PR merge result must preserve those current-main changes and contain only the reviewed T031 code/tests/CMake additions plus this completion record relative to that base. The mandatory review remains clean after the duplicate-live-value RED→GREEN correction. The resulting exact PR merge head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before merge.
