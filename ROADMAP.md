@@ -370,3 +370,19 @@ core correctness
 ```
 
 This sequence minimizes rewrites, but it is an architectural roadmap rather than a serialized work queue. Once a ticket's explicit dependencies are satisfied, it may proceed independently. Prefer critical-path/unblock-value work and keep unrelated lanes moving while another PR waits on CI or platform validation.
+
+## Lifecycle completion note — #105
+
+T042 lifecycle stress exposed #105, a constructor-time callback lifetime defect in the public wrapper-to-platform bridge. PR #106 keeps the public API intact while moving the `PlatformServices` bridge into each private per-instance `StandaloneWindow::Impl` / `EmbeddedView::Impl`, so synchronous native callbacks during `ViewCore` construction cannot observe an unassigned public-wrapper `impl_`.
+
+The exact #105 code head `bf8e2ff055b4fe5ed2c2bd415bb3818f925f366b` passed Linux X11, Windows/MSVC, macOS (including Objective-C two-consumer and clipboard/multi-instance lifecycle validation), and Linux ASan+UBSan in CI `34344755454`. A stacked T042 validation candidate also turns the original macOS `embedded_sequential_100` crash GREEN. No global/singleton/`thread_local` ownership state or #64 Decision-B workaround is introduced.
+
+T042 remains the lifecycle frontier after this focused fix. Its Windows stress subsequently exposed independent issue #107, where Pugl's documented `PUGL_SHOW_RAISE + PUGL_FAILURE` means the window was shown but could not be raised; that separate production integration defect must be resolved independently before the final T042 exact-head matrix and merge.
+
+## Lifecycle completion note — #103
+
+T042 also exposed #103 before the intended stress interaction: the first Linux/X11 real renderer exposure under Xvfb/Mesa llvmpipe could crash in `GrGLExtensions::init` while building Skia's assembled GL interface. PR #104 keeps the correction in production platform integration rather than suppressing exposure in the stress harness.
+
+Linux now uses Skia's desktop-native GL interface while Pugl owns the current GLX context, and deliberately does not fall back to the assembled resolver that caused the crash. Interface/context/surface ownership remains per `SkiaGlRenderer`; macOS and Windows preserve the existing assembled Pugl-proc path. CI `34343547392` passed the code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, and the Linux merge gate now permanently exercises a real Xvfb/Mesa llvpipe renderer/lifecycle smoke.
+
+This fix does not change #64 Decision B or add mutable context globals. Once #103 and #107 are complete, T042 must be refreshed from current `main` and rerun as the exact supported-path lifecycle matrix before merge.
