@@ -5,13 +5,12 @@
 
 namespace {
 
-bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 4) {
-    const auto channel = [](float value) {
-        return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+bool pixels_match(ui::Rgba8 lhs, ui::Rgba8 rhs, int tolerance = 4) {
+    const auto close = [tolerance](std::uint8_t a, std::uint8_t b) {
+        return std::abs(static_cast<int>(a) - static_cast<int>(b)) <= tolerance;
     };
-    return std::abs(static_cast<int>(pixel.r) - channel(color.r)) <= tolerance &&
-           std::abs(static_cast<int>(pixel.g) - channel(color.g)) <= tolerance &&
-           std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
+    return close(lhs.r, rhs.r) && close(lhs.g, rhs.g) && close(lhs.b, rhs.b) &&
+           close(lhs.a, rhs.a);
 }
 
 void value_widgets_respect_effective_read_only_state() {
@@ -126,32 +125,78 @@ void progress_meter_contract() {
 }
 
 void progress_meter_visual_and_idle_contract() {
+    // Compare semantic raster states captured by the same Skia surface rather
+    // than converting linear Color floats to bytes in the test. This keeps the
+    // golden contract independent of backend color-space encoding while still
+    // proving min/mid/max/out-of-range/NaN and fill direction.
     {
-        ui::State<float> value{0.5f};
+        ui::State<float> value{0.0f};
         ui::UI tree{ui::ProgressBar{value}};
         ui::HeadlessRenderer renderer{{200.0f, 40.0f}, 1.0f};
+
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(40, 20), ui::colors::accent));
-        NUI_CHECK(pixel_matches(renderer.pixel(160, 20), ui::colors::input));
+        const auto empty_left = renderer.pixel(40, 20);
+        const auto empty_right = renderer.pixel(160, 20);
+        NUI_CHECK(pixels_match(empty_left, empty_right));
+
+        value.set(1.0f);
+        NUI_CHECK(renderer.render(tree));
+        const auto filled_left = renderer.pixel(40, 20);
+        const auto filled_right = renderer.pixel(160, 20);
+        NUI_CHECK(pixels_match(filled_left, filled_right));
+        NUI_CHECK(!pixels_match(filled_left, empty_left));
+
+        value.set(0.5f);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixels_match(renderer.pixel(40, 20), filled_left));
+        NUI_CHECK(pixels_match(renderer.pixel(160, 20), empty_right));
 
         value.set(2.0f);
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(160, 20), ui::colors::accent));
+        NUI_CHECK(pixels_match(renderer.pixel(40, 20), filled_left));
+        NUI_CHECK(pixels_match(renderer.pixel(160, 20), filled_right));
         NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
 
         value.set(std::numeric_limits<float>::quiet_NaN());
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(100, 20), ui::colors::input));
+        NUI_CHECK(pixels_match(renderer.pixel(40, 20), empty_left));
+        NUI_CHECK(pixels_match(renderer.pixel(160, 20), empty_right));
         NUI_CHECK(std::isnan(value.get()));
     }
 
     {
-        ui::State<float> value{0.5f};
+        ui::State<float> value{0.0f};
         ui::UI tree{ui::Meter{value}.orientation(ui::ProgressOrientation::Vertical)};
         ui::HeadlessRenderer renderer{{40.0f, 200.0f}, 1.0f};
+
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(20, 160), ui::colors::accent));
-        NUI_CHECK(pixel_matches(renderer.pixel(20, 40), ui::colors::input));
+        const auto empty_bottom = renderer.pixel(20, 160);
+        const auto empty_top = renderer.pixel(20, 40);
+        NUI_CHECK(pixels_match(empty_bottom, empty_top));
+
+        value.set(1.0f);
+        NUI_CHECK(renderer.render(tree));
+        const auto filled_bottom = renderer.pixel(20, 160);
+        const auto filled_top = renderer.pixel(20, 40);
+        NUI_CHECK(pixels_match(filled_bottom, filled_top));
+        NUI_CHECK(!pixels_match(filled_bottom, empty_bottom));
+
+        value.set(0.5f);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 160), filled_bottom));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 40), empty_top));
+
+        value.set(2.0f);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 160), filled_bottom));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 40), filled_top));
+        NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
+
+        value.set(std::numeric_limits<float>::quiet_NaN());
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 160), empty_bottom));
+        NUI_CHECK(pixels_match(renderer.pixel(20, 40), empty_top));
+        NUI_CHECK(std::isnan(value.get()));
     }
 
     // Meter owns no animation/timer source: ignored input does not invalidate;
