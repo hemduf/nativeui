@@ -75,6 +75,16 @@ def main() -> int:
     require('URL_HASH "${_skia_hash}"' in dependencies, "Skia CPM acquisition must enforce URL_HASH")
     require(len(re.findall(r'SHA256=[0-9a-f]{64}', dependencies)) >= 5,
             "supported Skia assets must carry explicit SHA-256 pins")
+    require_all(
+        dependencies,
+        (
+            "NativeUI/Pugl supports macOS, Windows and Linux/X11",
+            "The pinned skia-builder release currently provides Linux x64 only",
+            "NATIVEUI_SKIA_WINDOWS_CRT must be MD or MT",
+            "publishes the macOS universal artifact as Release",
+        ),
+        "unsupported dependency diagnostics",
+    )
     exercise_hash_mismatch_diagnostic()
 
     normal_ci = text(".github/workflows/ci.yml")
@@ -120,6 +130,8 @@ def main() -> int:
             "BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}",
             "Checkout benchmark baseline",
             "Capture one approved-base run and two candidate runs",
+            "Prepare release-doc consumer from exact snippet",
+            "Build release-doc consumer",
         ),
         "T052 release workflow",
     )
