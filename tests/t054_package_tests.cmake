@@ -32,6 +32,37 @@ else()
   list(APPEND _generator_args -G Ninja "-DCMAKE_BUILD_TYPE=${CONFIG}")
 endif()
 
+# Review coverage for the byte-level PRODUCT_NAME validation. Build the invalid
+# input inside the child CMake process so control bytes and deliberately malformed
+# UTF-8 are not normalized by command-line/cache argument transport.
+function(_t054_expect_invalid_product_bytes label expected_diagnostic)
+  set(_codes ${ARGN})
+  string(JOIN " " _codes_text ${_codes})
+  set(_script "${_root}/product-${label}.cmake")
+  file(WRITE "${_script}"
+    "include([==[${SOURCE_DIR}/cmake/NativeUIApplication.cmake]==])\n"
+    "string(ASCII ${_codes_text} _invalid_bytes)\n"
+    "_nativeui_validate_application_product_name(\"Bad\${_invalid_bytes}Name\")\n")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -P "${_script}"
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _stdout
+    ERROR_VARIABLE _stderr)
+  set(_combined "${_stdout}\n${_stderr}")
+  if(_result EQUAL 0)
+    _t054_package_fail("PRODUCT_NAME ${label}"
+      "invalid byte sequence unexpectedly passed validation")
+  endif()
+  string(FIND "${_combined}" "${expected_diagnostic}" _diagnostic_index)
+  if(_diagnostic_index EQUAL -1)
+    _t054_package_fail("PRODUCT_NAME ${label} diagnostic"
+      "missing '${expected_diagnostic}' in:\n${_combined}")
+  endif()
+endfunction()
+
+_t054_expect_invalid_product_bytes(ascii-control "ASCII control byte" 31)
+_t054_expect_invalid_product_bytes(invalid-utf8 "not valid UTF-8" 195 40)
+
 function(_t054_write_consumer source_dir)
   file(MAKE_DIRECTORY "${source_dir}")
   file(WRITE "${source_dir}/main.cpp" [=[
@@ -109,6 +140,18 @@ if(APPLE)
   if(NOT _bundle)
     message(FATAL_ERROR "T054 macOS app is not MACOSX_BUNDLE")
   endif()
+  get_target_property(_bridge_a T054App NATIVEUI_OBJC_BRIDGE_TARGET)
+  get_target_property(_bridge_b T054Sibling NATIVEUI_OBJC_BRIDGE_TARGET)
+  if(NOT _bridge_a OR NOT _bridge_b OR _bridge_a STREQUAL _bridge_b)
+    message(FATAL_ERROR "T054 two-app macOS bridge targets are missing or shared")
+  endif()
+  if(NOT CMAKE_NM)
+    message(FATAL_ERROR "T054 macOS bridge audit requires CMAKE_NM")
+  endif()
+  file(GENERATE
+    OUTPUT "${CMAKE_BINARY_DIR}/t054-objc-artifacts-$<CONFIG>.cmake"
+    CONTENT
+"set(T054_BRIDGE_A \"$<TARGET_FILE:${_bridge_a}>\")\nset(T054_BRIDGE_B \"$<TARGET_FILE:${_bridge_b}>\")\nset(T054_PREFIX_A \"${_prefix_a}\")\nset(T054_PREFIX_B \"${_prefix_b}\")\nset(T054_NM \"${CMAKE_NM}\")\n")
 elseif(WIN32)
   if(NOT _win32)
     message(FATAL_ERROR "T054 Windows app is not WIN32_EXECUTABLE")
@@ -187,6 +230,43 @@ function(_t054_run_consumer label nativeui_dir out_contract out_plist)
     _t054_package_fail("${label} runtime" "${_run_output}\n${_run_error}")
   endif()
 
+  if(APPLE)
+    set(_objc_artifacts "${_build}/t054-objc-artifacts-${CONFIG}.cmake")
+    if(NOT EXISTS "${_objc_artifacts}")
+      _t054_package_fail("${label} Objective-C artifacts"
+        "missing ${_objc_artifacts}")
+    endif()
+    include("${_objc_artifacts}")
+    foreach(_required IN ITEMS T054_BRIDGE_A T054_BRIDGE_B T054_NM)
+      if(NOT DEFINED ${_required} OR NOT EXISTS "${${_required}}")
+        _t054_package_fail("${label} Objective-C artifacts"
+          "missing ${_required}: ${${_required}}")
+      endif()
+    endforeach()
+    if(NOT DEFINED T054_PREFIX_A OR T054_PREFIX_A STREQUAL "" OR
+       NOT DEFINED T054_PREFIX_B OR T054_PREFIX_B STREQUAL "" OR
+       T054_PREFIX_A STREQUAL T054_PREFIX_B OR
+       T054_BRIDGE_A STREQUAL T054_BRIDGE_B)
+      _t054_package_fail("${label} Objective-C isolation"
+        "two application targets did not retain distinct bridge archives/prefixes")
+    endif()
+    foreach(_consumer IN ITEMS A B)
+      execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+          "-DARCHIVE=${T054_BRIDGE_${_consumer}}"
+          "-DNM=${T054_NM}"
+          "-DPREFIX=${T054_PREFIX_${_consumer}}"
+          -P "${SOURCE_DIR}/tests/check_objc_runtime_prefix.cmake"
+        RESULT_VARIABLE _prefix_result
+        OUTPUT_VARIABLE _prefix_output
+        ERROR_VARIABLE _prefix_error)
+      if(NOT _prefix_result EQUAL 0)
+        _t054_package_fail("${label} consumer ${_consumer} Objective-C symbol audit"
+          "${_prefix_output}\n${_prefix_error}")
+      endif()
+    endforeach()
+  endif()
+
   set(_contract "${_build}/t054-contract.txt")
   if(NOT EXISTS "${_contract}")
     _t054_package_fail("${label} contract" "missing ${_contract}")
@@ -249,6 +329,31 @@ nativeui_add_application(T054IconApp
   endif()
 
   if(APPLE)
+    # The acceptance contract is the built .app resource, not only a generated
+    # plist reference. Ninja copies arbitrary .icns bytes as a bundle resource,
+    # so this deterministic fixture does not depend on icon authoring tools.
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" --build "${_build}"
+        --target T054IconApp --config "${CONFIG}" --parallel 2
+      RESULT_VARIABLE _icon_build_result
+      OUTPUT_VARIABLE _icon_build_output
+      ERROR_VARIABLE _icon_build_error)
+    if(NOT _icon_build_result EQUAL 0)
+      _t054_package_fail("${label} icon build"
+        "${_icon_build_output}\n${_icon_build_error}")
+    endif()
+    set(_resource
+      "${_build}/T054 Icon App.app/Contents/Resources/nativeui-test.icns")
+    if(NOT EXISTS "${_resource}")
+      _t054_package_fail("${label} icon resource"
+        "built .app is missing exact resource ${_resource}")
+    endif()
+    file(READ "${_src}/nativeui-test.icns" _source_icon_bytes)
+    file(READ "${_resource}" _bundle_icon_bytes)
+    if(NOT _source_icon_bytes STREQUAL _bundle_icon_bytes)
+      _t054_package_fail("${label} icon resource"
+        "built .app icon resource bytes differ from caller-owned input")
+    endif()
     file(GLOB _metadata "${_build}/nativeui_application/*/Info.plist")
   elseif(WIN32)
     file(GLOB _metadata "${_build}/nativeui_application/*/application.rc")
@@ -341,4 +446,4 @@ foreach(_forbidden IN ITEMS "${SOURCE_DIR}" "${BUILD_DIR}")
 endforeach()
 
 message(STATUS
-  "T054 build-tree/relocated application contract passed: runnable final apps, caller composability, exact consumer identities, two-app isolation, platform metadata and deterministic package output")
+  "T054 build-tree/relocated application contract passed: runnable final apps, caller composability, exact consumer identities, two-app Objective-C bridge symbol isolation, platform metadata/resources and deterministic package output")
