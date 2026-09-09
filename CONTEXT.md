@@ -58,7 +58,7 @@ PR #99 is merged as `ed81a201ea459ea2443ae51f27dfcac7af5d7e63`; issue #48 is clo
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042 -> T051 -> T052
+lifecycle:        #64(done) -> #107(done by PR #108) -> T042 -> T051 -> T052
 platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                       |
                                       +-> T054
@@ -66,7 +66,7 @@ platform/package: T053(done) -> T047(done) -> T048(done) -> T052
 state/widgets:    T059(done) -> T030(done) -> T031
 ```
 
-With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. This lane must not take T059, T030, #64 or T042.
+With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. The lifecycle lane must finish #107/PR #108 before refreshing and completing T042; #64 Decision B remains the ownership boundary.
 
 ## Platform ownership reminders
 
@@ -121,6 +121,19 @@ T042 also exposed a production Linux/X11 renderer crash before stress-specific l
 - No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
 
 After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
+
+## Lifecycle/stress lane completion — #107 / PR #108
+
+T042's Windows `standalone_sequential_50` fixture exposed a production integration bug rather than a stress-harness defect: pinned Pugl documents `PUGL_FAILURE` from `puglShow(..., PUGL_SHOW_RAISE)` as the non-fatal case where the view is shown but could not be raised. NativeUI previously treated every non-zero show status as fatal and destroyed that already-live standalone view during construction.
+
+PR #108 introduces one translation-unit-private show-status policy. It normalizes only `PUGL_SHOW_RAISE + PUGL_FAILURE` to success; every other Pugl status remains unchanged and therefore follows the existing cleanup/throw path. Embedded `PUGL_SHOW_PASSIVE` is unchanged. The correction introduces no mutable global/singleton/registry/`thread_local` state and does not alter #64 Decision B.
+
+- RED evidence: T042 stacked workflow `34344854224` failed Windows `standalone_sequential_50` at cycle 0 with `puglShow failed: Non-fatal failure` while the headless and embedded stress fixtures passed.
+- GREEN evidence: exact code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`; the identical show-policy blob is present in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e`.
+- Full lifecycle evidence: T042 workflow `34348551067` is green on Windows, Linux/X11, macOS and Linux ASan+UBSan, with all 50 Windows process-isolated standalone lifetimes completing.
+- Mandatory CODE_REVIEW.md review `5154415827` found no blocking issue. The branch was then refreshed from current main before this completion documentation pass.
+
+Once PR #108's documentation head passes fresh exact-head CI and merges, #107 closes as Done and T042/PR #93 must be refreshed from that main so the production fix disappears from the stress PR diff. Then rerun the exact T042 lifecycle matrix and complete its own CODE_REVIEW.md record before merge.
 
 ## Drag-and-drop completion — #86 / PR #87
 
