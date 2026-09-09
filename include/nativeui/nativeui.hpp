@@ -14,6 +14,7 @@
 #include <nativeui/svg.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/component.hpp>
+#include <nativeui/component_state.hpp>
 #include <nativeui/command.hpp>
 #include <nativeui/focus.hpp>
 #include <nativeui/layout.hpp>

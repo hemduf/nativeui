@@ -192,6 +192,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t028_text_area
   t029_ime_composition
   t041_smoke_harness
+  t059_component_state
 )
 
 if(NATIVEUI_BUILD_EXAMPLES)
@@ -224,6 +225,7 @@ if(NATIVEUI_BUILD_TESTS)
   endfunction()
 
   nativeui_add_core_test(nativeui_state_tests tests/state_tests.cpp)
+  nativeui_add_core_test(nativeui_component_state_tests tests/component_state_tests.cpp)
   nativeui_add_core_test(nativeui_focus_tests tests/focus_tests.cpp)
   nativeui_add_core_test(nativeui_routing_tests tests/routing_tests.cpp)
   nativeui_add_core_test(nativeui_pointer_capture_tests tests/pointer_capture_tests.cpp)
@@ -310,7 +312,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
