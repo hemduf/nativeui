@@ -140,6 +140,8 @@ void progress_meter_visual_and_idle_contract() {
         NUI_CHECK(pixels_match(empty_left, empty_right));
 
         value.set(1.0f);
+        NUI_CHECK(tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
         NUI_CHECK(renderer.render(tree));
         const auto filled_left = renderer.pixel(40, 20);
         const auto filled_right = renderer.pixel(160, 20);
