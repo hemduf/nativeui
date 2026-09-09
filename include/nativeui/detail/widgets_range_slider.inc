@@ -178,38 +178,31 @@ private:
         return effective;
     }
 
-    [[nodiscard]] float pointer_fraction(
+    [[nodiscard]] float raw_value_from_pointer(
         const InputEvent& event, const InputContext& context) const noexcept {
         const auto bounds = context.bounds();
         if (orientation_ == SliderOrientation::Horizontal) {
-            if (bounds.w <= 0.0f) return 0.0f;
-            return std::clamp((event.position.x - bounds.x) / bounds.w, 0.0f, 1.0f);
+            if (bounds.w <= 0.0f) return domain_.minimum();
+            return domain_.raw_value_from_fraction((event.position.x - bounds.x) / bounds.w);
         }
-        if (bounds.h <= 0.0f) return 0.0f;
-        return std::clamp(
-            1.0f - (event.position.y - bounds.y) / bounds.h,
-            0.0f,
-            1.0f);
-    }
-
-    [[nodiscard]] float value_from_pointer(
-        const InputEvent& event, const InputContext& context) const noexcept {
-        return domain_.value_from_fraction(pointer_fraction(event, context));
+        if (bounds.h <= 0.0f) return domain_.minimum();
+        return domain_.raw_value_from_fraction(
+            1.0f - (event.position.y - bounds.y) / bounds.h);
     }
 
     [[nodiscard]] RangeSliderThumb choose_thumb(
-        float raw_fraction, const RangeValue& effective) const noexcept {
-        const float lower_distance = std::abs(raw_fraction - domain_.fraction(effective.low));
-        const float upper_distance = std::abs(raw_fraction - domain_.fraction(effective.high));
+        float raw_target, const RangeValue& effective) const noexcept {
+        const float lower_distance = std::abs(raw_target - effective.low);
+        const float upper_distance = std::abs(raw_target - effective.high);
         if (lower_distance < upper_distance) return RangeSliderThumb::Lower;
         if (upper_distance < lower_distance) return RangeSliderThumb::Upper;
         return has_active_thumb_ ? active_thumb_ : RangeSliderThumb::Lower;
     }
 
-    [[nodiscard]] RangeValue edited_value(float target) const noexcept {
+    [[nodiscard]] RangeValue edited_value(float raw_target) const noexcept {
         const auto effective = effective_range(state_.get());
         RangeValue next = effective;
-        const float normalized = domain_.normalize(target);
+        const float normalized = domain_.normalize(raw_target);
         if (active_thumb_ == RangeSliderThumb::Lower) {
             next.low = std::min(normalized, effective.high);
         } else {
@@ -225,15 +218,14 @@ private:
     }
 
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
-        const float raw_fraction = pointer_fraction(event, context);
-        const float target = domain_.value_from_fraction(raw_fraction);
+        const float raw_target = raw_value_from_pointer(event, context);
         const auto effective = effective_range(state_.get());
-        active_thumb_ = choose_thumb(raw_fraction, effective);
+        active_thumb_ = choose_thumb(raw_target, effective);
         has_active_thumb_ = true;
         dragging_ = true;
         hovered_ = true;
         context.capture_pointer();
-        commit_value(edited_value(target), context);
+        commit_value(edited_value(raw_target), context);
         return EventResult::Handled;
     }
 
@@ -252,8 +244,8 @@ private:
 
     EventResult update_drag(
         const InputEvent& event, InputContext& context, bool release) {
-        const float target = value_from_pointer(event, context);
-        const auto next = edited_value(target);
+        const float raw_target = raw_value_from_pointer(event, context);
+        const auto next = edited_value(raw_target);
         if (release) {
             dragging_ = false;
             context.release_pointer();
