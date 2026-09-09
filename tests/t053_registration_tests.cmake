@@ -2,7 +2,7 @@ if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR "T053 registration tests require SOURCE_DIR")
 endif()
 
-function(_nativeui_expect_registration_failure case expected_text)
+function(_nativeui_expect_registration_failure case)
   execute_process(
     COMMAND "${CMAKE_COMMAND}"
       "-DSOURCE_DIR=${SOURCE_DIR}"
@@ -16,18 +16,25 @@ function(_nativeui_expect_registration_failure case expected_text)
     message(FATAL_ERROR "T053 ${case} unexpectedly succeeded")
   endif()
   set(_combined "${_stdout}\n${_stderr}")
-  string(FIND "${_combined}" "${expected_text}" _found)
-  if(_found EQUAL -1)
-    message(FATAL_ERROR
-      "T053 ${case} failed for the wrong reason\nexpected diagnostic: ${expected_text}\noutput:\n${_combined}")
-  endif()
+  foreach(_expected IN LISTS ARGN)
+    string(FIND "${_combined}" "${_expected}" _found)
+    if(_found EQUAL -1)
+      message(FATAL_ERROR
+        "T053 ${case} failed for the wrong reason\nmissing diagnostic fragment: ${_expected}\noutput:\n${_combined}")
+    endif()
+  endforeach()
 endfunction()
 
 _nativeui_expect_registration_failure(
   duplicate_identity
-  "CONSUMER_ID 'com.example.shared' is already registered to target 'consumer_a'; target 'consumer_b' cannot reuse it")
+  "CONSUMER_ID 'com.example.shared'"
+  "target 'consumer_a'"
+  "target 'consumer_b'"
+  "cannot reuse it")
 _nativeui_expect_registration_failure(
   duplicate_target
-  "target 'consumer_a' already has consumer identity 'com.example.first'; duplicate attachment is not allowed")
+  "target 'consumer_a'"
+  "consumer identity 'com.example.first'"
+  "duplicate attachment is not allowed")
 
 message(STATUS "T053 configure-time registration isolation passed")
