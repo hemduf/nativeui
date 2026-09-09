@@ -63,12 +63,23 @@ int self_test() {
     }
     tree.dispatch(key_up(ui::Key::Enter), platform);
 
-    state.enabled.set(false);
-    if (tree.dispatch(example::key(ui::Key::Enter), platform) != ui::EventResult::Ignored ||
-        state.activations != 3) {
+    // Validate Disabled on an isolated tree so focus fallback cannot activate
+    // one of the demo's state-control Toggles instead of the Button under test.
+    ui::State<bool> enabled{false};
+    int disabled_activations = 0;
+    ui::UI disabled_tree{
+        ui::Enabled{enabled,
+            ui::Button{"Disabled", [&disabled_activations] { ++disabled_activations; }}}
+    };
+    disabled_tree.resize({180.0f, 64.0f});
+    disabled_tree.activate(platform);
+    if (disabled_tree.dispatch(example::key(ui::Key::Enter), platform) !=
+            ui::EventResult::Ignored ||
+        disabled_activations != 0) {
         return example::fail("Disabled Button must be excluded from activation routing");
     }
 
+    state.enabled.set(false);
     ui::HeadlessRenderer renderer{{560.0f, 240.0f}, 1.0f};
     if (!renderer.render(tree)) return example::fail("headless Button render failed");
     return 0;
