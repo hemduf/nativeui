@@ -175,6 +175,57 @@ void composition_candidate_geometry_scales_at_platform_boundary() {
     NUI_CHECK_NEAR(logical_cursor_offset, 37.25f, 0.001f);
 }
 
+void read_only_preserves_navigation_and_copy_but_blocks_mutations() {
+    test::MockPlatform platform;
+    ui::State<bool> read_only{false};
+    ui::State<std::string> value{"hello"};
+    ui::UI tree{ui::ReadOnly{read_only, ui::TextInput{"Name", value}}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+    tree.dispatch(test::text("!"), platform);
+    NUI_CHECK(value.get() == "hello!");
+
+    read_only.set(true);
+    NUI_CHECK(platform.text_input_active);
+
+    // History, value edits and IME commits are mutating operations and must be
+    // consumed without changing either the bound State or editor history.
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "hello!");
+
+    tree.dispatch(test::key(ui::Key::A, false, true), platform);
+    tree.dispatch(test::key(ui::Key::C, false, true), platform);
+    NUI_CHECK(platform.clipboard == "hello!");
+
+    platform.clipboard = "sentinel";
+    tree.dispatch(test::key(ui::Key::X, false, true), platform);
+    NUI_CHECK(value.get() == "hello!");
+    NUI_CHECK(platform.clipboard == "sentinel");
+
+    const int paste_requests = platform.paste_request_count;
+    tree.dispatch(test::key(ui::Key::V, false, true), platform);
+    NUI_CHECK(platform.paste_request_count == paste_requests);
+
+    tree.dispatch(test::text("blocked"), platform);
+    tree.dispatch(test::key(ui::Key::Backspace), platform);
+    tree.dispatch(test::key(ui::Key::Delete), platform);
+    NUI_CHECK(value.get() == "hello!");
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "hello!");
+
+    tree.dispatch(test::key(ui::Key::Escape), platform);
+    NUI_CHECK(value.get() == "hello!");
+
+    // Re-enabling mutation must expose the untouched pre-read-only history.
+    read_only.set(false);
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "hello");
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -245,6 +296,7 @@ void suite() {
     ime_owned_navigation_does_not_cancel_preedit();
     composition_candidate_tracks_preedit_cursor();
     composition_candidate_geometry_scales_at_platform_boundary();
+    read_only_preserves_navigation_and_copy_but_blocks_mutations();
 }
 
 } // namespace
