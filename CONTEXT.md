@@ -10,7 +10,7 @@ Non-negotiable rules:
 
 - widgets/layout stay platform-neutral and public geometry uses logical pixels;
 - embedded polling is non-blocking;
-- mutable instance-dependent process globals/singletons/`thread_local` state are forbidden;
+- mutable instance-dependent production globals/singletons/`thread_local` state are forbidden;
 - retained UI state is UI/main-thread confined unless explicitly documented otherwise;
 - dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
 - macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
@@ -24,55 +24,55 @@ Non-negotiable rules:
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline and platform/package lane
+## Current baseline
 
-Current `main` before the T056 integration merge is `4cd904466d05e4b403eb2b61386868e7c498c719` and already contains T042 lifecycle stress plus the earlier platform/package foundation.
+Current `main` before the T051 benchmark integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
 
-Completed dependencies relevant to this lane:
+Completed foundations relevant to the release/lifecycle lane:
 
-- T053 / PR #88: consumer-scoped macOS platform bridge.
-- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`.
-- T048 / PR #99: relocated external Core/standalone/embedded consumer qualification.
-- T042 / PR #93: deterministic supported-path lifecycle stress, merged before this T056 refresh.
+- #64 / PR #90: standalone ownership frozen as Decision B — one application-level `PUGL_PROGRAM` world; no hidden singleton/shared-world workaround in the legacy constructor path.
+- T042 / PR #93: deterministic headless/embedded/standalone lifecycle stress for every currently supported ownership path.
+- T024: deterministic headless raster/golden foundation.
+- T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
+- T056 / PR #111: deterministic binary resource packaging.
 
-## T056 binary resources — PR #111
+## T051 performance harness — PR #116
 
-T056 is the current platform/package merge candidate. It adds:
+T051 is the current lifecycle/release-lane merge candidate. It provides one Release-only deterministic microbenchmark suite and the relative regression policy consumed by T052/T071.
 
-- installed/build-tree `nativeui_add_binary_data()` and `NativeUIEmbedResource.cmake` helpers;
-- backend-neutral `ui::EmbeddedResourceEntry` with immutable borrowed byte spans;
-- one deterministic generated resource object per source and one target-specific generated table/header;
-- exact SHA-256-derived payload symbols, sorted unique resource IDs, explicit aliases and symlink-aware BASE_DIR containment;
-- exact binary/NUL/empty-file round trips, deterministic clean-build output, incremental rebuild coverage, two-target namespace/symbol isolation and relocated installed-package consumers;
-- semicolon-safe handling for valid resource IDs and canonical source paths without relying on raw CMake list identity.
+Delivered contract:
 
-Review of pre-refresh head `4cc48ed083a493519b19e8481007a0a6315d0a71` completed all mandatory `CODE_REVIEW.md` categories. The review found one Important CMake-list identity defect for semicolon-containing IDs/paths; TDD regression coverage and the production correction are included in that head. Final pre-refresh review reports no remaining Blocking/Important finding.
+- fixed schema/workload versioning, compiler/OS/architecture/build/commit metadata and JSON round-trip support;
+- exact 5 warmup + 30 measured `steady_clock` sampling, median indices 14/15 and p95 index 28;
+- fixed batch counts for layout, deep hit testing, pointer/keyboard dispatch, short/multiline text editing, control/text headless paint and headless instance lifecycle;
+- deterministic `idle_invalidation` correctness gate: 1,000 logical 10 ms checkpoints (10 seconds logical idle) after the settled frame, requiring exactly zero framework invalidations;
+- benchmark-only allocation interception around measured operation scopes; it never changes `NativeUI::Core` or public allocator/lifetime APIs;
+- workload-contract coverage for exact node/action shapes plus known allocating and non-allocating counter scopes;
+- metadata-safe comparison entry point that rejects incompatible baseline/rerun environments before thresholds are evaluated;
+- timing gate: median >15% **and** p95 >20%, reproduced by two complete independent runs;
+- allocation gate: count or bytes/op >10% with two-run confirmation, or any recurring allocation for explicitly zero-allocation scenarios;
+- CI-generated immutable JSON artifacts; T052 selects/records the controlled v0.1 baseline artifact rather than committing universal machine-specific nanosecond constants.
 
-Pre-refresh exact-head validation is green:
-
-- normal CI run #451 (`34369151069`): Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan all passed, including T047/T048/T056 package/external-consumer checks;
-- T042 Lifecycle Stress run #23 passed on the same T056 head.
-
-The final T056 candidate is refreshed from current `main` rather than carrying the stale feature-branch `CMakeLists.txt`: it preserves merged T031 widget targets and the macOS drop smoke while applying only the T056 package/helper/header additions. `CONTEXT.md` and `ROADMAP.md` are synchronized in this same candidate. The refreshed exact head must rerun the required CI before merge; no earlier-SHA result substitutes for that gate.
+The benchmark and baseline contract is documented in `docs/performance-benchmarks.md`. Normal benchmark execution never rewrites baselines.
 
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042(done) -> T051 -> T052
-platform/package: T053(done) -> T047(done) -> T048(done) -> T052
-                                      |
-                                      +-> T054 (Ready)
-                                      +-> T056 (complete by this merge) -> T057
-state/widgets:    T059(done) -> T030(done) -> T031(done)
-                                      |
-                                      +-> T032 / T033 / T034 -> T035 / T036
+lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
+platform/package:  T053(done) -> T047(done) -> T048(done) ----^
+                                       |
+                                       +-> T054
+                                       +-> T056(done) -> T057
+state/widgets:     T059(done) -> T030(done) -> T031(done)
+                                       |
+                                       +-> T032 / T033 / T034 -> T035 / T036
 ```
 
-After T056 merges, T057 becomes Ready because T022 is already complete. T054 is independently Ready because T047 and T053 are complete. For the platform/package lane, select the next P1 by repository priority/dependency-unblock rules; with no existing in-progress platform/package PR, T054 is the next recommended ticket, then T057.
+When T051 merges cleanly, T052 becomes dependency-unblocked and is the next high-priority lifecycle/release ticket.
 
 ## Build / validation
 
-Source-tree Release:
+Normal source-tree Release validation:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -80,19 +80,24 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Offline dependency overrides:
+T051 Release benchmark validation:
 
 ```bash
-cmake -S . -B build \
-  -DNATIVEUI_PUGL_SOURCE=/path/to/pugl \
-  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
+cmake -S tests/t051 -B build-t051 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DNATIVEUI_SOURCE_DIR="$PWD" \
+  -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)"
+cmake --build build-t051 --parallel
+ctest --test-dir build-t051 --output-on-failure
+./build-t051/nativeui_benchmarks --self-test
+./build-t051/nativeui_benchmarks --json t051-results.json
 ```
 
-T047/T048/T056 package validation additionally exercises source/configure contracts, relocation, external consumers and deterministic generated-resource behavior. Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy.
+Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate gate.
 
 ## Next actions
 
-1. Require all required workflows on the refreshed T056 PR #111 head to complete green.
-2. Re-check the exact refreshed diff/review and merge PR #111 only if no Blocking/Important finding exists.
-3. Mark #68 Done/`status:done` and close it only after merge.
-4. Re-read the platform/package frontier; resume an existing platform/package PR if one appeared, otherwise take T054 / #66 next, with T057 / #69 Ready after T056.
+1. Require exact-head T051 contract, Release benchmark, normal CI and T042 lifecycle-stress workflows to complete green.
+2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
+3. Merge PR #116 only after current-main synchronization and exact-head validation are both satisfied.
+4. Mark #51 Done/`status:done`, close it, then move T052 / #52 from Blocked to Ready and continue that release/lifecycle dependency chain.
