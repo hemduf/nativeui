@@ -56,6 +56,12 @@ int main() {
         continuous.normalize(std::numeric_limits<float>::quiet_NaN()), -2.0f));
     check(near(
         continuous.normalize(std::numeric_limits<float>::infinity()), -2.0f));
+    check(near(continuous.effective_external(-3.0f), -2.0f));
+    check(near(continuous.effective_external(3.0f), 2.0f));
+    check(near(
+        continuous.effective_external(std::numeric_limits<float>::quiet_NaN()), -2.0f));
+    check(near(
+        continuous.effective_external(std::numeric_limits<float>::infinity()), -2.0f));
     check(near(continuous.fraction(-2.0f), 0.0f));
     check(near(continuous.fraction(0.0f), 0.5f));
     check(near(continuous.fraction(2.0f), 1.0f));
@@ -74,6 +80,12 @@ int main() {
     check(near(stepped.normalize(0.64f), 0.75f));
     check(near(stepped.keyboard_increment(false), 0.25f));
     check(near(stepped.keyboard_increment(true), 0.25f));
+
+    // External finite state is rendered from its clamped effective value, not
+    // silently snapped to the user's step grid. Quantization is only applied to
+    // values written by user interaction.
+    check(near(stepped.effective_external(0.14f), 0.14f));
+    check(near(stepped.fraction(0.14f), 0.14f));
 
     // The ticket fixes the order as quantize first, then clamp. With a step that
     // does not divide the range, the maximum can therefore quantize to the last
