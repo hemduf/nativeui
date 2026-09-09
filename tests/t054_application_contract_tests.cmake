@@ -23,30 +23,26 @@ function(_t054_run_case name expect_success body)
   set(_src "${_root}/${name}-src")
   set(_build "${_root}/${name}-build")
   file(MAKE_DIRECTORY "${_src}")
-  file(WRITE "${_src}/main.cpp" "int main() { return 0; }\n")
-  file(WRITE "${_src}/extra.cpp" "int t054_extra() { return 54; }\n")
+  file(WRITE "${_src}/main.c" "int main(void) { return 0; }\n")
+  file(WRITE "${_src}/extra.c" "int t054_extra(void) { return 54; }\n")
   file(WRITE "${_src}/icon.icns" "t054 deterministic icns fixture\n")
   file(WRITE "${_src}/icon.ico" "t054 deterministic ico fixture\n")
   file(WRITE "${_src}/wrong.txt" "wrong icon extension\n")
 
   set(_project [=[
 cmake_minimum_required(VERSION 3.24)
-project(T054ApplicationContract LANGUAGES CXX)
+project(T054ApplicationContract LANGUAGES NONE)
 add_library(nativeui_core_stub INTERFACE)
 add_library(NativeUI::Core ALIAS nativeui_core_stub)
 
-# Keep the contract fixture focused on T054. T047/T053 are already tested by
-# their own package/platform suites; this stub records the exact consumer
-# identity T054 delegates without pulling platform dependencies into each
-# configure-only validation case.
-macro(nativeui_attach_platform)
-  cmake_parse_arguments(NUI "" "TARGET;CONSUMER_ID" "" ${ARGN})
-  if(NOT TARGET "${NUI_TARGET}")
-    message(FATAL_ERROR "fixture attach target does not exist")
-  endif()
+# Keep the contract fixture focused on T054 while exercising the real T047
+# public validation wrapper. Stub only T053's private platform implementation so
+# configure-only cases do not pull native SDK dependencies.
+function(_nativeui_attach_consumer_platform)
+  cmake_parse_arguments(PARSE_ARGV 0 NUI "" "TARGET;CONSUMER_ID;OUT_BRIDGE" "")
   set_property(TARGET "${NUI_TARGET}" PROPERTY NATIVEUI_CONSUMER_ID "${NUI_CONSUMER_ID}")
-endmacro()
-
+endfunction()
+include("@SOURCE_DIR_CMAKE@/cmake/NativeUIAttachPlatform.cmake")
 include("@SOURCE_DIR_CMAKE@/cmake/NativeUIApplication.cmake")
 @CASE_BODY@
 ]=])
@@ -87,7 +83,7 @@ nativeui_add_application(App
   PRODUCT_NAME "NativeUI Café"
   BUNDLE_ID com.example.nativeui-test
   VERSION 001.02.0003
-  SOURCES main.cpp)
+  SOURCES main.c)
 get_target_property(_output App OUTPUT_NAME)
 get_target_property(_consumer App NATIVEUI_CONSUMER_ID)
 get_target_property(_type App TYPE)
@@ -118,7 +114,7 @@ else()
   endif()
 endif()
 # Caller remains free to extend the target after helper invocation.
-target_sources(App PRIVATE extra.cpp)
+target_sources(App PRIVATE extra.c)
 target_compile_definitions(App PRIVATE T054_CALLER_EXTENSION=1)
 ]=])
 _t054_run_case(valid TRUE "${_valid_body}")
@@ -131,7 +127,7 @@ nativeui_add_application(App
   PRODUCT_NAME "Semi;Colon"
   BUNDLE_ID com.example.semicolon
   VERSION 1.2.3
-  SOURCES main.cpp)
+  SOURCES main.c)
 get_target_property(_output App OUTPUT_NAME)
 if(NOT _output STREQUAL "Semi;Colon")
   message(FATAL_ERROR "semicolon PRODUCT_NAME was not preserved: '${_output}'")
@@ -140,7 +136,7 @@ endif()
 
 _t054_run_case(reordered_keywords TRUE [=[
 nativeui_add_application(App
-  SOURCES main.cpp
+  SOURCES main.c
   VERSION 1.2.3
   PRODUCT_NAME "Reordered App"
   BUNDLE_ID com.example.reordered)
@@ -162,102 +158,103 @@ else()
   set(_good_extension does-not-exist.ico)
 endif()
 _t054_run_case(icon_nonconsuming_missing TRUE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_ignored_keyword} does-not-exist.invalid)")
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_ignored_keyword} does-not-exist.invalid)")
 _t054_run_case(icon_consuming_valid TRUE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} ${_good_extension})")
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} ${_good_extension})")
 if(APPLE OR WIN32)
   _t054_run_case(icon_consuming_missing FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} missing.invalid)"
+    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} missing.invalid)"
     "does not exist")
   _t054_run_case(icon_consuming_wrong_extension FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} wrong.txt)"
+    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} wrong.txt)"
     "must use the")
 endif()
 
 _t054_run_case(missing_target FALSE
   "nativeui_add_application()" "target name is required")
 _t054_run_case(duplicate_target FALSE
-  "add_executable(App main.cpp)\nnativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp)"
+  "add_executable(App main.c)\nnativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c)"
   "already exists")
 _t054_run_case(missing_product FALSE
-  "nativeui_add_application(App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp)"
+  "nativeui_add_application(App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c)"
   "PRODUCT_NAME" "required")
 _t054_run_case(missing_bundle FALSE
-  "nativeui_add_application(App PRODUCT_NAME App VERSION 1.2.3 SOURCES main.cpp)"
+  "nativeui_add_application(App PRODUCT_NAME App VERSION 1.2.3 SOURCES main.c)"
   "BUNDLE_ID" "required")
 _t054_run_case(missing_version FALSE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app SOURCES main.cpp)"
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app SOURCES main.c)"
   "VERSION" "MAJOR.MINOR.PATCH")
 _t054_run_case(missing_sources FALSE
   "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3)"
   "SOURCES" "at least one")
 _t054_run_case(unknown_keyword FALSE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp ICON icon.ico)"
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c ICON icon.ico)"
   "unknown" "ICON")
 
-foreach(_case IN ITEMS dot dotdot slash backslash lt gt colon quote pipe question star trailing_space trailing_dot con con_ext prn aux nul com1 com9 lpt1 lpt9)
-  if(_case STREQUAL dot)
-    set(_value ".")
-  elseif(_case STREQUAL dotdot)
-    set(_value "..")
-  elseif(_case STREQUAL slash)
-    set(_value "Bad/Name")
-  elseif(_case STREQUAL backslash)
-    set(_value "Bad\\Name")
-  elseif(_case STREQUAL lt)
-    set(_value "Bad<Name")
-  elseif(_case STREQUAL gt)
-    set(_value "Bad>Name")
-  elseif(_case STREQUAL colon)
-    set(_value "Bad:Name")
-  elseif(_case STREQUAL quote)
-    set(_value "Bad\"Name")
-  elseif(_case STREQUAL pipe)
-    set(_value "Bad|Name")
-  elseif(_case STREQUAL question)
-    set(_value "Bad?Name")
-  elseif(_case STREQUAL star)
-    set(_value "Bad*Name")
-  elseif(_case STREQUAL trailing_space)
-    set(_value "Bad ")
-  elseif(_case STREQUAL trailing_dot)
-    set(_value "Bad.")
-  elseif(_case STREQUAL con)
-    set(_value "CON")
-  elseif(_case STREQUAL con_ext)
-    set(_value "con.txt")
-  elseif(_case STREQUAL prn)
-    set(_value "PrN")
-  elseif(_case STREQUAL aux)
-    set(_value "aux.log")
-  elseif(_case STREQUAL nul)
-    set(_value "NUL")
-  elseif(_case STREQUAL com1)
-    set(_value "COM1")
-  elseif(_case STREQUAL com9)
-    set(_value "com9.bin")
-  elseif(_case STREQUAL lpt1)
-    set(_value "LPT1")
-  elseif(_case STREQUAL lpt9)
-    set(_value "lpt9.out")
+# Validation matrices run in script mode so dozens of fatal cases stay isolated
+# without repeatedly detecting a compiler. Values are embedded with bracket
+# quoting rather than -D cache arguments so trailing spaces, semicolons and
+# backslashes are preserved exactly.
+function(_t054_validation_case mode name value expect_success)
+  set(_case_script "${_root}/validation_${mode}_${name}.cmake")
+  file(WRITE "${_case_script}"
+    "set(SOURCE_DIR [==[${SOURCE_DIR}]==])\n"
+    "set(MODE [==[${mode}]==])\n"
+    "set(VALUE [==[${value}]==])\n"
+    [=[
+include("${SOURCE_DIR}/cmake/NativeUIApplication.cmake")
+if(MODE STREQUAL "product")
+  _nativeui_validate_application_product_name("${VALUE}")
+elseif(MODE STREQUAL "version")
+  _nativeui_validate_application_version("${VALUE}")
+elseif(MODE STREQUAL "bundle")
+  function(_nativeui_attach_consumer_platform)
+  endfunction()
+  include("${SOURCE_DIR}/cmake/NativeUIAttachPlatform.cmake")
+  _nativeui_validate_consumer_id("${VALUE}")
+else()
+  message(FATAL_ERROR "unknown validation mode")
+endif()
+]=])
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -P "${_case_script}"
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _stdout
+    ERROR_VARIABLE _stderr)
+  if(expect_success)
+    if(NOT _result EQUAL 0)
+      message(FATAL_ERROR "T054 ${mode}/${name} unexpectedly failed\n${_stdout}\n${_stderr}")
+    endif()
+  elseif(_result EQUAL 0)
+    message(FATAL_ERROR "T054 ${mode}/${name} unexpectedly succeeded")
   endif()
-  _t054_run_case("product_${_case}" FALSE
-    "nativeui_add_application(App PRODUCT_NAME \"${_value}\" BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp)"
-    "PRODUCT_NAME")
+endfunction()
+
+foreach(_value IN ITEMS "NativeUI Café" "Semi;Colon" "A B" "名前")
+  string(MAKE_C_IDENTIFIER "${_value}" _case)
+  _t054_validation_case(product "valid_${_case}" "${_value}" TRUE)
+endforeach()
+foreach(_value IN ITEMS "." ".." "Bad/Name" "Bad\\Name" "Bad<Name" "Bad>Name" "Bad:Name" "Bad\"Name" "Bad|Name" "Bad?Name" "Bad*Name" "Bad " "Bad." CON con.txt PrN aux.log NUL COM1 com9.bin LPT1 lpt9.out)
+  string(MAKE_C_IDENTIFIER "${_value}" _case)
+  _t054_validation_case(product "invalid_${_case}" "${_value}" FALSE)
 endforeach()
 
+foreach(_value IN ITEMS com.example.app org.nativeui.product-one io.example.Shared2)
+  string(MAKE_C_IDENTIFIER "${_value}" _case)
+  _t054_validation_case(bundle "valid_${_case}" "${_value}" TRUE)
+endforeach()
 foreach(_value IN ITEMS example com_example.app "com.example_bad.app" "com.example bad" "com.example/app" "com.example:app" "com..app" "com.-example.app" "com.example-.app")
   string(MAKE_C_IDENTIFIER "${_value}" _case)
-  _t054_run_case("bundle_${_case}" FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID \"${_value}\" VERSION 1.2.3 SOURCES main.cpp)"
-    "BUNDLE_ID")
+  _t054_validation_case(bundle "invalid_${_case}" "${_value}" FALSE)
 endforeach()
 
+foreach(_value IN ITEMS 1.2.3 001.02.0003 999999999999999999999.0.1)
+  string(MAKE_C_IDENTIFIER "${_value}" _case)
+  _t054_validation_case(version "valid_${_case}" "${_value}" TRUE)
+endforeach()
 foreach(_value IN ITEMS v1.2.3 1.2 1.2.3.4 1.2.3-beta 1.2.3+meta)
   string(MAKE_C_IDENTIFIER "${_value}" _case)
-  _t054_run_case("version_${_case}" FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION \"${_value}\" SOURCES main.cpp)"
-    "VERSION" "MAJOR.MINOR.PATCH")
+  _t054_validation_case(version "invalid_${_case}" "${_value}" FALSE)
 endforeach()
 
 message(STATUS "T054 configure/public-helper contract passed")
