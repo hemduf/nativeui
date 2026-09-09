@@ -18,12 +18,37 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Merged baseline
 
-The baseline is complete through T030 plus T023, #62, T053, #64 Decision B and T059.
+The merged baseline is complete through T030 plus T023, #62, T053, #64 Decision B and T059. T031 is the current state/widget completion candidate.
 
 - T053 / PR #88 merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`: `NativeUI::Core` and portable Pugl C remain generic; the Cocoa Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and has no runtime registry.
 - #64 / PR #90 merged as `b52d53eee65e5de91697e2c1f0685728b9646575`: independent overlapping `PUGL_PROGRAM` worlds are not a supported macOS multi-window ownership model. Legacy `StandaloneWindow(UI&, ...)` remains pre-v1/single-window; T060 owns one explicit `ui::Application` PROGRAM owner with multiple top-level windows.
 - T059 / PR #89 merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`: the retained tree centrally resolves Visible/Hidden/Collapsed, inherited enabled/disabled and read-only state with focus/capture teardown, reentrancy handling and FocusScope restoration.
-- T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract and is owned by the separate state/widget lane. T031 is its next dependency-unblocked widget successor.
+- T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract with platform-neutral pointer/keyboard activation and reentrancy-safe callbacks.
+
+## T031 Checkbox / RadioButton — PR #95
+
+T031 extends the standard widget set on top of T030/T059 without adding platform or global-group state.
+
+Delivered contract:
+
+- two-state `Checkbox` binds one `State<bool>&`, uses T030 pointer/Space activation semantics and intentionally ignores Enter;
+- typed `RadioGroup<T>` / `RadioButton<T>` binds one selected `State<T>&`; option identity is the immutable value rather than component address;
+- radio groups behave as one Tab stop, entering at the selected available option or first available fallback, with wrapped Left/Right/Up/Down navigation that skips unavailable options;
+- T059 Disabled/Hidden/Collapsed behavior remains tree-owned; ReadOnly remains focusable/navigable while pointer/Space mutations are handled without capture/write and radio arrows move focus without changing selected state;
+- Button-family press/capture state is shared through one platform-neutral interaction helper rather than duplicated;
+- group identity and duplicate-live-value bookkeeping are group-owned only; there is no process-global registry, singleton, `thread_local` state or label/string group key;
+- simultaneously-live duplicate option values in one group are rejected deterministically, while weak bookkeeping permits reuse after earlier components are destroyed/remounted;
+- dedicated `nativeui_checkbox_radio_tests` and `examples/features/t031_checkbox_radio.cpp --self-test` cover typed values, no-match state, group isolation, reorder/remount, reentrancy, visual states and ReadOnly behavior.
+
+TDD/review evidence:
+
+- mandatory review found one Important exclusivity defect on an earlier head: duplicate live option values could both render selected;
+- RED `ce4c4a12208ff20cf9726842003ead6a8291c2e9` made the feature self-test fail specifically on duplicate live values;
+- GREEN code head `acf2176cb00accae2a78600ee1b68c136c7d2f26` added the group-owned weak live-option registry;
+- CI #382 is fully green for that code head on Linux X11, Windows, macOS and Linux ASan+UBSan, including feature self-test and existing platform/runtime-isolation smokes;
+- final `CODE_REVIEW.md` pass on the code head is clean with no remaining Blocking/Important finding.
+
+This documentation commit becomes the final completion candidate and must receive its own exact-head matrix before merge.
 
 ## T047 install/export package — PR #92
 
@@ -71,10 +96,11 @@ platform/package: T053(done) -> T047(this merge) -> T048 -> T052
                                            |
                                            +-> T054
                                            +-> T056 -> T057
-state/widgets:    T059(done) -> T030(done) -> T031
+state/widgets:    T059(done) -> T030(done) -> T031(this merge)
+                                         Ready independently: T032, T033, T034
 ```
 
-After T047 merges, T048, T054 and T056 are dependency-unblocked. T052 still additionally requires T048, T051 and T042; T057 requires T056. The active platform/package lane must not take T059, T030, #64 or T042.
+After T031 merges, T032, T033 and T034 remain the immediate Ready widget candidates; T032 and T034 have the strongest downstream unblock value. T045/T069/T071 consume T031 later but remain blocked by additional explicit dependencies. After T047 merges, T048, T054 and T056 are dependency-unblocked. T052 still additionally requires T048, T051 and T042; T057 requires T056.
 
 ## Platform ownership reminders
 
@@ -101,7 +127,15 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-T047 additionally runs public attach-contract CMake fixtures, build-tree and install-tree external consumers, relocated-install consumption, dependency-failure diagnostics, platform linkage and macOS two-consumer Objective-C isolation.
+T031 additionally requires its focused widget suite, feature self-test/goldens, the full relevant core suite and Linux ASan+UBSan. T047 additionally runs public attach-contract CMake fixtures, build-tree and install-tree external consumers, relocated-install consumption, dependency-failure diagnostics, platform linkage and macOS two-consumer Objective-C isolation.
+
+## Next state/widget action
+
+1. Require the exact documentation-complete T031 head to pass Linux X11, Windows, macOS and Linux ASan+UBSan.
+2. Refresh from `main` if it advances; preserve parallel-lane `CONTEXT.md`/`ROADMAP.md` changes and revalidate the exact merged candidate.
+3. Mark PR #95 ready and merge only with no blocking `CODE_REVIEW.md` finding.
+4. Close/update issue #31 as Done.
+5. Re-read explicit priorities/dependencies and continue the next Ready state/widget ticket, preferring T032 or T034 by downstream unblock value.
 
 ## Next platform/package action
 
