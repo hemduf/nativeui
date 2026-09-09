@@ -12,7 +12,7 @@ function(_nativeui_validate_application_product_name product_name)
 
   string(HEX "${product_name}" _nativeui_name_hex)
   string(LENGTH "${_nativeui_name_hex}" _nativeui_hex_length)
-  math(EXPR _nativeui_byte_count "${_nativeui_hex_length} / 2")
+  math(EXPR _nativeui_byte_count "${_nativeui_name_hex_length} / 2")
   set(_nativeui_byte_index 0)
   while(_nativeui_byte_index LESS _nativeui_byte_count)
     math(EXPR _nativeui_hex_index "${_nativeui_byte_index} * 2")
@@ -279,7 +279,7 @@ function(nativeui_add_application target)
       "${_nativeui_application_metadata_dir}/Info.plist")
     file(WRITE "${_nativeui_application_plist}"
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-"<!DOCTYPE plist PUBLIC \"-//Apple//DTD Plist 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
 "<plist version=\"1.0\">\n"
 "<dict>\n"
 "  <key>CFBundleIdentifier</key>\n"
@@ -341,14 +341,17 @@ function(nativeui_add_application target)
   # may enable C and Objective-C on CMake 3.24-4.4. Generate a tiny per-target
   # subdirectory and execute it synchronously. The target and consumer identity
   # are inherited as variables, so generated code contains no caller-controlled
-  # text and T047/T053 remain the sole platform/naming implementation.
+  # text and T047/T053 remain the sole platform/naming implementation. Keep this
+  # private configure machinery separate from application packaging metadata.
   set(_NATIVEUI_APPLICATION_ATTACH_TARGET "${target}")
   set(_NATIVEUI_APPLICATION_ATTACH_CONSUMER_ID
     "${_nativeui_application_BUNDLE_ID}")
+  set(_nativeui_application_attach_root
+    "${CMAKE_CURRENT_BINARY_DIR}/nativeui_platform_attach/${_nativeui_application_target_key}")
   set(_nativeui_application_attach_source_dir
-    "${_nativeui_application_metadata_dir}/platform-attach")
+    "${_nativeui_application_attach_root}/source")
   set(_nativeui_application_attach_binary_dir
-    "${_nativeui_application_metadata_dir}/platform-attach-build")
+    "${_nativeui_application_attach_root}/build")
   file(MAKE_DIRECTORY "${_nativeui_application_attach_source_dir}")
   file(WRITE "${_nativeui_application_attach_source_dir}/CMakeLists.txt" [=[
 if(NOT DEFINED _NATIVEUI_APPLICATION_ATTACH_TARGET OR
