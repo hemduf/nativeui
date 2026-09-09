@@ -389,3 +389,11 @@ T042 also exposed #103 before the intended stress interaction: the first Linux/X
 Linux now uses Skia's desktop-native GL interface while Pugl owns the current GLX context, and deliberately does not fall back to the assembled resolver that caused the crash. Interface/context/surface ownership remains per `SkiaGlRenderer`; macOS and Windows preserve the existing assembled Pugl-proc path. CI `34343547392` passed the code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, and the Linux merge gate now permanently exercises a real Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
 
 This fix does not change #64 Decision B or add mutable context globals. Once #103 and #107 are complete, T042 must be refreshed from current `main` and rerun as the exact supported-path lifecycle matrix before merge.
+
+## State/widget completion candidate — T031
+
+T031 / PR #95 completes Checkbox and RadioButton on top of the merged T030/T059 interaction and availability contracts. The implementation keeps the shared Button-family activation seam, binds `Checkbox` to `State<bool>`, provides typed `RadioGroup<T>` / `RadioButton<T>`, treats each radio group as one Tab stop, wraps arrow navigation while skipping unavailable options, preserves externally supplied no-match selection, and keeps ReadOnly navigation without value mutation.
+
+Group identity and duplicate-live-value bookkeeping remain owned by each `RadioGroup<T>`; duplicate simultaneously-live values are rejected deterministically and weak bookkeeping permits reuse after prior components are destroyed/remounted. No process-global registry, singleton, `thread_local` state or platform/Pugl dependency enters the widget implementation.
+
+After #86 / PR #87 advanced main, synchronization PR #113 merged current main `0c4778278c86d2b8946ece593e684f4203ba38db` into the T031 branch at `12e5945f6e50d9cb1250f08aa9a6c9ea9927c2fa`, preserving the full drag/drop/platform changes while retaining only the reviewed T031 scope. The mandatory review remains clean after the duplicate-live-value RED→GREEN correction. This documentation update completes the required tracking for the refreshed candidate; the resulting exact head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before merge.
