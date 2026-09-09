@@ -1,5 +1,15 @@
 include(CMakeFindDependencyMacro)
 
+# Platform attachment compiles package-owned Pugl C sources and, on macOS,
+# Objective-C bridge sources. CMake requires enable_language() at file scope,
+# not from the helper functions that later create those targets.
+if(NOT CMAKE_C_COMPILER_LOADED)
+  enable_language(C)
+endif()
+if(APPLE AND NOT CMAKE_OBJC_COMPILER_LOADED)
+  enable_language(OBJC)
+endif()
+
 set(_nativeui_skia_include "@_skia_include@")
 set(_nativeui_skia_lib "@_skia_lib@")
 set(_nativeui_svg_lib "@NATIVEUI_SKIA_SVG_LIBRARY@")
