@@ -10,7 +10,7 @@ public:
     virtual ~FocusGroupParticipant() = default;
 
     [[nodiscard]] virtual const void* focus_group_identity() const noexcept = 0;
-    [[nodiscard]] virtual bool focus_group_selected() const noexcept = 0;
+    [[nodiscard]] virtual bool focus_group_selected() const = 0;
     virtual void focus_group_select() = 0;
 };
 
