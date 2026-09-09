@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <cstdlib>
+
 namespace {
 
 ui::InputEvent key_up(ui::Key key) {
@@ -7,6 +9,19 @@ ui::InputEvent key_up(ui::Key key) {
     event.type = ui::InputType::KeyUp;
     event.key = key;
     return event;
+}
+
+bool pixel_near(ui::Rgba8 pixel, ui::Color color, int tolerance = 4) {
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(value * 255.0f));
+    };
+    return std::abs(static_cast<int>(pixel.r) - channel(color.r)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.g) - channel(color.g)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
+}
+
+bool same_pixel(ui::Rgba8 a, ui::Rgba8 b) {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
 void pointer_and_keyboard_activation() {
@@ -172,9 +187,45 @@ void availability_and_reentrancy() {
     }
 }
 
+void visual_state_goldens() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    ui::UI tree{ui::Button{"Visual", [] {}}};
+
+    // Solid interior samples are deliberately away from rounded edges/text and
+    // therefore form deterministic cross-platform golden checks for each fill.
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::panel));
+    const auto normal_edge = renderer.pixel(1, 32);
+
+    test::MockPlatform platform;
+    tree.resize(size);
+    tree.activate(platform);
+    NUI_CHECK(renderer.render(tree));
+    const auto focused_edge = renderer.pixel(1, 32);
+    NUI_CHECK(!same_pixel(normal_edge, focused_edge));
+
+    tree.dispatch(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::knob));
+
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::accent));
+    tree.dispatch(test::pointer(ui::InputType::PointerCancel, 20.0f, 20.0f), platform);
+
+    ui::State<bool> enabled{false};
+    ui::UI disabled_tree{
+        ui::Enabled{enabled, ui::Button{"Disabled", [] {}}}
+    };
+    NUI_CHECK(renderer.render(disabled_tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::input));
+}
+
 void suite() {
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
+    visual_state_goldens();
 }
 
 } // namespace
