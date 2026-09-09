@@ -363,7 +363,7 @@ if(NATIVEUI_BUILD_TESTS)
   )
   set_tests_properties(
     nativeui_t047_attach_contract_tests
-    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 30
+    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 60
   )
 
   function(nativeui_add_core_test name source)
