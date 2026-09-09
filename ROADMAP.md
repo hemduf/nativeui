@@ -17,7 +17,7 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` is `005a207237a98726573160b8f58c9a9ebff262f9` and includes the completed T054 native application package helper.
+Current `main` is `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` and includes the completed T057 ResourceManager.
 
 Recently completed foundations relevant to the dependency graph:
 
@@ -32,6 +32,7 @@ Recently completed foundations relevant to the dependency graph:
 - **T051 / PR #116:** reproducible Release benchmark harness and regression policy.
 - **T054 / PR #119:** high-level `nativeui_add_application()` package helper.
 - **T056 / PR #111:** deterministic binary-resource packaging and sorted immutable generated tables.
+- **T057 / PR #126:** embedded `ResourceManager` and explicit `ResourceManagerProvider` compatibility adapter.
 
 Current dependency frontier:
 
@@ -40,7 +41,7 @@ lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
                                        +-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057 (PR #126)
+                                       +-> T056(done) + T022(done) -> T057(done)
 state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        |
                                        +-> T032
@@ -48,7 +49,7 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        +-> T034 -> T035 / T036
 ```
 
-T057 / issue #69 / PR #126 is the active platform/package ticket. The independent P0 Pugl/X11 regression #124 / PR #125 and T042 are separate work; T059, T030 and #64 also belong to other lanes and must not be folded into T057.
+T057 / issue #69 / PR #126 is complete. The independent P0 Pugl/X11 regression #124 / PR #125 and T042 are separate work; T059, T030 and #64 belong to other lanes and are not part of the platform/package lane.
 
 ## Milestone 0 — Baseline hardening
 
@@ -102,11 +103,11 @@ Delivered safety includes:
 - #107 documented non-fatal standalone raise handling;
 - T042 deterministic headless/embedded/standalone lifecycle stress.
 
-The P0 Pugl/X11 regression is tracked independently as #124 / PR #125. It owns any shared Pugl pin change and associated dependency documentation; the platform/package resource lane does not absorb that change.
+The P0 Pugl/X11 regression is tracked independently as #124 / PR #125. It owns any shared Pugl pin change and associated dependency documentation; the platform/package lane does not absorb that change.
 
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: low-level packaging, external consumers, native application helper, benchmark harness and binary-data generation are complete; T057 ResourceManager is the active platform/package resource ticket.**
+**Status: low-level packaging, relocated consumers, native application helper, benchmark harness, binary-data generation and ResourceManager are complete.** Remaining M8 work proceeds through explicit dependencies and parallel lane ownership.
 
 ### Delivered package foundation
 
@@ -142,10 +143,13 @@ Delivered contracts:
 - **T048:** independent relocated Core/standalone/embedded consumers on supported platforms, including macOS two-consumer symbol/runtime isolation.
 - **T054:** validated build-tree/relocated `nativeui_add_application()` with macOS app bundles, Windows GUI resources and normal Linux executables, delegating platform attachment to T047/T053.
 - **T056:** deterministic `nativeui_add_binary_data()` resources with stable IDs, exact bytes, package relocation, sorted immutable generated tables and no runtime registry.
+- **T057:** non-owning validated `ResourceManager`, zero-copy binary-search lookup and explicit allocating `ResourceManagerProvider` adapter for existing cache/provider APIs.
 
 ### T057 — embedded `ResourceManager`
 
-PR #126 adds the resource lookup/adapter layer over T056 tables:
+T057 / issue #69 / PR #126 is merged.
+
+Delivered behavior:
 
 - constructor performs one allocation-free O(N) validation pass over borrowed entries;
 - valid IDs are non-empty, unique and strictly ascending by exact unsigned-byte lexicographic order;
@@ -158,7 +162,7 @@ PR #126 adds the resource lookup/adapter layer over T056 tables:
 - the real T056 generated table is consumed by build-tree and relocated install-tree external consumers;
 - the dedicated `t057_embedded_resources` example supports interactive use and deterministic `--self-test`.
 
-TDD/review corrections cover empty-resource provider semantics, exact generated-table ordering, allocation probes, extensible public-header contracts and SVG contain-fit sampling. The mandatory CODE_REVIEW.md pass on code head `2860f5ab7d1daa1e0aa2553f988a90b0f6b94ac9` reports no Blocking/Important T057 finding.
+TDD/review corrections covered empty-resource provider semantics, exact generated-table ordering, allocation probes, extensible public-header contracts and deterministic SVG contain-fit sampling. Final exact head `20ec256241c9419b5a4d60f8f68968f4433d2855` passed CI #600 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts. The final mandatory `CODE_REVIEW.md` pass reported no Blocking/Important finding. PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`; issue #69 is closed Done.
 
 ### T051 — reproducible performance regression contract
 
@@ -171,11 +175,12 @@ T024(done) + T042(done) -> T051(done) -> T052
 T047(done) + T048(done) -------------------^
 
 T047(done) + T053(done) -> T054(done)
-T056(done) + T022(done) -> T057 (PR #126)
+T056(done) + T022(done) -> T057(done)
+T065 -> T072 -> T064
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T052 belongs to the separate release/lifecycle lane. After T057 merges, live GitHub issue dependencies must be re-read before selecting any next platform/package ticket; readiness must not be inferred from milestone numbering.
+T052 belongs to the separate release/lifecycle lane. T064 and T072 remain blocked by T065. T065 is dependency-ready, but its standalone wake backend explicitly shares the event-loop integration seam that the active T060 work is changing; live branch/PR overlap must be re-evaluated before a competing implementation starts. Independent platform-hardening tickets T043/T044 remain separate scopes and are selected only according to current lane ownership and conflict risk.
 
 ## T057 completion protocol
 
@@ -184,13 +189,12 @@ T052 belongs to the separate release/lifecycle lane. After T057 merges, live Git
 - [x] generated T056 table integration covered in build-tree and relocated external consumer;
 - [x] validation, zero-copy, allocation, copy/move, concurrency, multi-manager, provider and cache integration tests covered;
 - [x] dedicated feature example + `--self-test` wired;
-- [x] first mandatory CODE_REVIEW.md pass on the exact code candidate has no Blocking/Important T057 finding;
-- [x] `CONTEXT.md` and `ROADMAP.md` reconciled with merged T054 and the active parallel lanes in the completion candidate;
-- [ ] exact final documentation-complete head Linux X11 / Windows / macOS / Linux ASan+UBSan matrix green;
-- [ ] final exact-head `CODE_REVIEW.md` pass clean;
-- [ ] refresh against current `main`, merge PR #126 and mark #69 Done/closed.
-
-The unchecked items are pre-merge gates. The unrelated T042/#124 workflow state is not a T057 acceptance gate unless repository policy explicitly makes it a required check for this PR.
+- [x] mandatory `CODE_REVIEW.md` passes report no Blocking/Important T057 finding;
+- [x] exact final documentation-complete head passed Linux X11 / Windows / macOS / Linux ASan+UBSan CI #600;
+- [x] final exact-head review clean;
+- [x] candidate refreshed against then-current `main` immediately before merge;
+- [x] PR #126 merged and #69 marked Done/closed;
+- [x] completion status synchronized into `CONTEXT.md` and this roadmap.
 
 ## Prioritization rule
 
