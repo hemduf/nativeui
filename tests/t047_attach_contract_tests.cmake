@@ -1,6 +1,7 @@
 if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR "T047 attach contract tests require SOURCE_DIR")
 endif()
+file(TO_CMAKE_PATH "${SOURCE_DIR}" SOURCE_DIR_CMAKE)
 
 if(NOT EXISTS "${SOURCE_DIR}/cmake/NativeUIAttachPlatform.cmake")
   message(FATAL_ERROR
@@ -21,8 +22,8 @@ function(_t047_run_case case expect_success body)
   set(_project [=[
 cmake_minimum_required(VERSION 3.24)
 project(T047AttachContract LANGUAGES CXX)
-include("@SOURCE_DIR@/cmake/NativeUIConsumerPlatform.cmake")
-include("@SOURCE_DIR@/cmake/NativeUIAttachPlatform.cmake")
+include("@SOURCE_DIR_CMAKE@/cmake/NativeUIConsumerPlatform.cmake")
+include("@SOURCE_DIR_CMAKE@/cmake/NativeUIAttachPlatform.cmake")
 add_library(nativeui_core_stub INTERFACE)
 add_library(NativeUI::Core ALIAS nativeui_core_stub)
 
