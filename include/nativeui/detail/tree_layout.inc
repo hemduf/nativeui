@@ -48,13 +48,23 @@
 
     [[nodiscard]] std::function<void()> availability_invalidator(Node& node) {
         return [this, &node] {
-            if (!root_ || !availability_differs(*root_)) return;
+            if (!root_) return;
+            // Any local availability mutation that occurs while a reconciliation
+            // snapshot is active invalidates that snapshot, even when the new
+            // local state happens to match the still-unapplied effective state.
+            // This is what makes focus/capture teardown callbacks safely able to
+            // reverse the transition that triggered them.
+            if (syncing_availability_) {
+                availability_structure_dirty_ = true;
+                return;
+            }
+            if (!availability_differs(*root_)) return;
             availability_structure_dirty_ = true;
             if (!active_) {
                 sync_availability_inactive();
                 return;
             }
-            if (active_platform_ && dispatch_depth_ == 0 && !syncing_availability_) {
+            if (active_platform_ && dispatch_depth_ == 0) {
                 sync_availability_structure(*active_platform_);
                 return;
             }
