@@ -14,6 +14,21 @@ bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 3) {
            std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
 }
 
+bool region_contains_color(
+    ui::HeadlessRenderer& renderer,
+    int left,
+    int top,
+    int right,
+    int bottom,
+    ui::Color color) {
+    for (int y = top; y <= bottom; ++y) {
+        for (int x = left; x <= right; ++x) {
+            if (pixel_matches(renderer.pixel(x, y), color)) return true;
+        }
+    }
+    return false;
+}
+
 void pure_visual_state_contract() {
     using ui::SliderVisualState;
     using ui::detail::slider_visual_state;
@@ -77,10 +92,13 @@ void deterministic_headless_interaction_states() {
     tree.activate(platform);
     ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
 
-    // Activation focuses the first focusable control. The focus ring is drawn
-    // behind the thumb, so a solid pixel just outside the 7px thumb proves it.
+    // Activation focuses the first focusable control. The ring is only 2px
+    // thick around the 7px thumb, so a single axis-aligned boundary pixel is
+    // antialiased. Require the exact focus color to appear in the local thumb
+    // region instead of coupling the contract to one raster edge sample.
     NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(108, 30), ui::colors::borderFocus));
+    NUI_CHECK(region_contains_color(
+        renderer, 90, 20, 110, 40, ui::colors::borderFocus));
 
     tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
     NUI_CHECK(renderer.render(tree));
