@@ -61,9 +61,16 @@
     void clear_focus(PlatformServices& platform) {
         if (!focus_active_ || focused_index_ >= focusables_.size()) {
             focus_active_ = false;
+            if (!syncing_availability_) availability_cleared_focus_ = nullptr;
             return;
         }
         auto* old = focusables_[focused_index_];
+        if (syncing_availability_) {
+            auto* trap = trapping_scope_for(old);
+            availability_cleared_focus_ = trap && trap->focus_restore ? old : nullptr;
+        } else {
+            availability_cleared_focus_ = nullptr;
+        }
         FocusContext context{
             old->bounds, platform, paint_invalidator(*old), layout_invalidator(*old)};
         old->component->focus_changed(false, context);
@@ -116,10 +123,14 @@
         const bool now = scope_effectively_active(node);
         if (node.focus_scope_active_cached && !now) {
             auto* focused = current_focus_node();
+            auto* transition_focus = availability_cleared_focus_ &&
+                    is_descendant_or_self(availability_cleared_focus_, &node)
+                ? availability_cleared_focus_
+                : focused;
             auto* restore = node.focus_restore;
             node.focus_scope_active_cached = false;
             node.focus_restore = nullptr;
-            if (focused && is_descendant_or_self(focused, &node)) {
+            if (transition_focus && is_descendant_or_self(transition_focus, &node)) {
                 if (restore && focus_target_available(restore)) {
                     set_focus(restore, platform);
                 } else if (auto* fallback = first_available_focusable()) {
@@ -153,6 +164,7 @@
             if (auto* fallback = first_available_focusable()) set_focus(fallback, platform);
             else clear_focus(platform);
         }
+        availability_cleared_focus_ = nullptr;
         focus_structure_dirty_ = false;
     }
 
@@ -179,6 +191,9 @@
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, new_context);
         invalidate_node_paint(*node);
+        if (!syncing_availability_ || !focus_structure_dirty_) {
+            availability_cleared_focus_ = nullptr;
+        }
     }
 
     [[nodiscard]] EventResult route_from(
