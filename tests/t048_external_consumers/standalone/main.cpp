@@ -18,14 +18,17 @@ int run_self_test() {
             ui::Toggle{"Enabled", enabled},
         }.padding(8.0f).gap(4.0f)};
 
-    // The fixture must exercise the relocated Core package at runtime while
-    // remaining deterministic on hosted CI workers that have no interactive
-    // desktop. The separately compiled native-smoke path below forces all
-    // StandaloneWindow platform symbols to resolve from the attached package.
-    ui::HeadlessRenderer renderer{{4.0f, 3.0f}};
-    (void)ui_tree;
-    if (renderer.pixel_width() != 4 || renderer.pixel_height() != 3) {
-        return fail(3, "self-test", "relocated Core renderer is unavailable");
+    // Exercise the relocated Core package at runtime while remaining
+    // deterministic on hosted workers that have no interactive desktop. The
+    // separately compiled native-smoke path below forces StandaloneWindow
+    // symbols to resolve from the attached package in this same executable.
+    ui::HeadlessRenderer renderer{{160.0f, 80.0f}};
+    if (!renderer.render(ui_tree)) return fail(3, "self-test", "headless render failed");
+    if (renderer.pixel_width() != 160 || renderer.pixel_height() != 80) {
+        return fail(3, "self-test", "unexpected headless surface size");
+    }
+    if (renderer.rgba_pixels().empty()) {
+        return fail(3, "self-test", "headless render produced no pixels");
     }
     return 0;
 }

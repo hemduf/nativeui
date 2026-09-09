@@ -20,13 +20,16 @@ int run_self_test() {
         }.padding(8.0f).gap(4.0f)};
 
     // Runtime-check the relocated Core package without requiring a real host
-    // window. The native-smoke path remains part of this same final executable,
-    // so EmbeddedView and StandaloneWindow symbols must still resolve through
+    // window. The native-smoke path remains part of this final executable, so
+    // EmbeddedView and StandaloneWindow symbols must still resolve through
     // nativeui_attach_platform() during the external consumer link.
-    ui::HeadlessRenderer renderer{{4.0f, 3.0f}};
-    (void)child_ui;
-    if (renderer.pixel_width() != 4 || renderer.pixel_height() != 3) {
-        return fail(3, "self-test", "relocated Core renderer is unavailable");
+    ui::HeadlessRenderer renderer{{160.0f, 80.0f}};
+    if (!renderer.render(child_ui)) return fail(3, "self-test", "headless render failed");
+    if (renderer.pixel_width() != 160 || renderer.pixel_height() != 80) {
+        return fail(3, "self-test", "unexpected headless surface size");
+    }
+    if (renderer.rgba_pixels().empty()) {
+        return fail(3, "self-test", "headless render produced no pixels");
     }
     return 0;
 }
