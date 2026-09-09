@@ -6,3 +6,4 @@
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/detail/widgets_button.inc>
 #include <nativeui/detail/widgets_checkbox_radio.inc>
+#include <nativeui/detail/widgets_progress_meter.inc>
