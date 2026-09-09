@@ -10,7 +10,7 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Pinned dependencies
 
-- Pugl: `lv2/pugl` commit `b7637149ebe53124e5be90559e02a0185bbcbd73`.
+- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -18,7 +18,7 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Merged baseline
 
-The merged baseline is complete through T030 plus T023, #62, T053, #64 Decision B, T059 and T047.
+The merged baseline is complete through T030 plus T023, #62, T053, #64 Decision B, T059, T047 and T048.
 
 - T053 / PR #88 merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`: `NativeUI::Core` and portable Pugl C remain generic; the Cocoa Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and has no runtime registry.
 - #64 / PR #90 merged as `b52d53eee65e5de91697e2c1f0685728b9646575`: independent overlapping `PUGL_PROGRAM` worlds are not a supported macOS multi-window ownership model. Legacy `StandaloneWindow(UI&, ...)` remains pre-v1/single-window; T060 owns one explicit `ui::Application` PROGRAM owner with multiple top-level windows.
@@ -53,20 +53,20 @@ TDD/review history:
 - CODE_REVIEW.md review is clean after correcting the earlier weak self-test and obsolete Linux diagnostic residue; no runtime globals, private package paths or Objective-C naming shortcuts were introduced;
 - before merge, PR #99 was refreshed onto current main `b6515836cd8bf571c66f5297a76fdb80d9924f83`, preserving #105 constructor-lifetime fixes, #103 Linux renderer integration and the permanent Linux X11 renderer smoke while retaining all T048 package gates.
 
-The refreshed exact head must pass the full required matrix before PR #99 is marked ready and merged.
+PR #99 is merged as `ed81a201ea459ea2443ae51f27dfcac7af5d7e63`; issue #48 is closed as Done. Its delivered fixtures and CI gates are preserved by the #86 integration below.
 
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042 -> T051 -> T052
-platform/package: T053(done) -> T047(done) -> T048(this merge) -> T052
+lifecycle:        #64(done) -> #107(done by PR #108) -> T042 -> T051 -> T052
+platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                       |
                                       +-> T054
                                       +-> T056 -> T057
 state/widgets:    T059(done) -> T030(done) -> T031
 ```
 
-After T048 merges, T054 and T056 are the dependency-unblocked platform/package items. T052 then has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. This lane must not take T059, T030, #64 or T042.
+With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. The lifecycle lane must finish #107/PR #108 before refreshing and completing T042; #64 Decision B remains the ownership boundary.
 
 ## Platform ownership reminders
 
@@ -97,11 +97,7 @@ T048 additionally runs the source-contract script, relocated install-tree Core/s
 
 ## Next platform/package action
 
-1. Require the refreshed exact T048 head CI green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
-2. Refresh current `main` immediately before merge; if it advances again, reconcile without dropping concurrent work and revalidate the new exact head.
-3. Mark PR #99 ready and merge only with no blocking CODE_REVIEW.md finding.
-4. Close/update issue #48 as Done.
-5. Re-read T054/T056 priorities/dependencies and continue the highest-unblock-value Ready platform/package ticket; do not enter the lifecycle or state/widget lanes.
+Re-read T054/T056 priorities/dependencies and continue the highest-unblock-value Ready platform/package ticket; do not enter the lifecycle or state/widget lanes. T048 / #48 completion is already recorded on GitHub.
 
 ## Lifecycle/stress lane update — #105
 
@@ -125,3 +121,31 @@ T042 also exposed a production Linux/X11 renderer crash before stress-specific l
 - No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
 
 After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
+
+## Lifecycle/stress lane completion — #107 / PR #108
+
+T042's Windows `standalone_sequential_50` fixture exposed a production integration bug rather than a stress-harness defect: pinned Pugl documents `PUGL_FAILURE` from `puglShow(..., PUGL_SHOW_RAISE)` as the non-fatal case where the view is shown but could not be raised. NativeUI previously treated every non-zero show status as fatal and destroyed that already-live standalone view during construction.
+
+PR #108 introduces one translation-unit-private show-status policy. It normalizes only `PUGL_SHOW_RAISE + PUGL_FAILURE` to success; every other Pugl status remains unchanged and therefore follows the existing cleanup/throw path. Embedded `PUGL_SHOW_PASSIVE` is unchanged. The correction introduces no mutable global/singleton/registry/`thread_local` state and does not alter #64 Decision B.
+
+- RED evidence: T042 stacked workflow `34344854224` failed Windows `standalone_sequential_50` at cycle 0 with `puglShow failed: Non-fatal failure` while the headless and embedded stress fixtures passed.
+- GREEN evidence: exact code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`; the identical show-policy blob is present in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e`.
+- Full lifecycle evidence: T042 workflow `34348551067` is green on Windows, Linux/X11, macOS and Linux ASan+UBSan, with all 50 Windows process-isolated standalone lifetimes completing.
+- Mandatory CODE_REVIEW.md review `5154415827` found no blocking issue. The branch was then refreshed from current main before this completion documentation pass.
+
+Once PR #108's documentation head passes fresh exact-head CI and merges, #107 closes as Done and T042/PR #93 must be refreshed from that main so the production fix disappears from the stress PR diff. Then rerun the exact T042 lifecycle matrix and complete its own CODE_REVIEW.md record before merge.
+
+## Drag-and-drop completion — #86 / PR #87
+
+Finder drops exposed a second integration defect after the Pugl backend-child destination fix: NativeUI discarded DropOffer/DropData whenever the window lost keyboard focus. The retained tree now routes drops while mounted but inactive, without reactivating focus or IME, preserving T059 availability and dispatch reconciliation. T018 now receives the first local regular file regardless of extension. Optional UTF-8 text preview is separate from successful file reception; a binary file shows its name and no preview. The read cap is 64 KiB plus three lookahead bytes; the displayed prefix is at most 120 complete-character bytes. Diagnostics log acceptance, drop size and preview size, never content.
+
+The user's image drop reached painting but crashed in macOS Skia text-to-glyph conversion: fallback decoded U+FFFD but still measured/rendered the original invalid bytes. The shared text layout now owns repaired UTF-8 only when needed. The subsequent `.txt` allow-list/duplicate example decoder were rejected by the user and removed; `ui::text::utf8_prefix` reuses the rendering decoder, and no filename or extension decides whether a drop succeeds.
+
+- TDD: the background-drop core test failed before the fix and passes after it; the malformed/NUL file-URI self-test likewise failed before hardening.
+- Main `ed81a201ea459ea2443ae51f27dfcac7af5d7e63` (merged T048 / PR #99) is integrated, preserving external-consumer fixtures/CI. The macOS drop fixture uses T053 consumer identity `org.nativeui.test.macos-drop`, not a manual runtime prefix; native coverage includes two embedded instances, sibling destruction and repeated cycles.
+- Image-crash TDD: four synthetic JPEG bytes reproduced SIGABRT (exit 134) in `nativeui_font_tests`, and T018's binary rejection test failed before correction. Headless pixel equivalence, malformed UTF-8 classes, byte-boundary truncation and image-to-text recovery now pass.
+- Cleanup TDD: a valid-text `.jpg` fixture failed under the allow-list, then passed after removal. The same contents now pass as `.txt`, `.md`, `.jpg` and extensionless files. Shared UTF-8 prefix checks cover all 256 single bytes, malformed sequences, borrowed lifetime and byte-limit boundaries. Local Release CTest is 63/63 PASS and targeted font/drop/example/native ASan+UBSan is 4/4 PASS, with no compiler warnings.
+- Cleanup head `696521fedda8488dd72f036c7c7c06c5d4812fbd` passed all four jobs in CI `34355603379`. The earlier Windows T047 timeout did not recur; no check was weakened. The exact main-integrated merge head must also pass the full matrix; final evidence is recorded in PR #87.
+- On 2026-09-09 the user explicitly confirmed real Finder `/tmp/hello.txt` content display, including after an image drop, and requested merging #87. This is user-reported interactive evidence, not a claim that direct Cocoa callbacks reproduce Finder's drag session.
+
+This merge completes #86 after the exact-head CI gate; no blocking code finding remains in the three-pass/CODE_REVIEW.md record in #87. The last independent completion is T048 / PR #99 (`ed81a20`). Next recommended platform/package work is the highest-priority Ready item among T054/T056 after checking current GitHub status; #86 changes neither that frontier nor milestone completion.
