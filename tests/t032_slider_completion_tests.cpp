@@ -125,6 +125,24 @@ void t059_hidden_and_collapsed_cancel_capture_once() {
     NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
 }
 
+void range_slider_nearest_thumb_uses_raw_pointer_position() {
+    ui::State<ui::RangeValue> value{ui::RangeValue{0.20f, 0.80f}};
+    ui::UI tree{ui::RangeSlider{value}.range(0.0f, 1.0f).step(0.50f)};
+    test::MockPlatform platform;
+    tree.resize({200.0f, 60.0f});
+    tree.activate(platform);
+
+    // The raw pointer value 0.55 is closer to the upper thumb (0.80) than the
+    // lower thumb (0.20). Quantizing the pointer to 0.50 before hit selection
+    // would manufacture an exact tie and incorrectly choose the lower thumb.
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 110.0f, 30.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK_NEAR(value.get().low, 0.20f, 0.0001f);
+    NUI_CHECK_NEAR(value.get().high, 0.50f, 0.0001f);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp, 110.0f, 30.0f), platform);
+}
+
 void formatter_is_display_only_and_uses_effective_value() {
     ui::State<float> value{2.0f};
     int calls = 0;
@@ -147,6 +165,7 @@ void suite() {
     external_invalid_state_is_render_only();
     observer_reentrancy_does_not_duplicate_widget_writes();
     t059_hidden_and_collapsed_cancel_capture_once();
+    range_slider_nearest_thumb_uses_raw_pointer_position();
     formatter_is_display_only_and_uses_effective_value();
 }
 
