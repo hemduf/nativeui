@@ -1,0 +1,20 @@
+if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "T053 registration case requires SOURCE_DIR")
+endif()
+if(NOT DEFINED CASE)
+  message(FATAL_ERROR "T053 registration case requires CASE")
+endif()
+
+include("${SOURCE_DIR}/cmake/NativeUIConsumerPlatform.cmake")
+
+if(CASE STREQUAL "duplicate_identity")
+  _nativeui_register_consumer_identity("consumer_a" "com.example.shared")
+  _nativeui_register_consumer_identity("consumer_b" "com.example.shared")
+elseif(CASE STREQUAL "duplicate_target")
+  _nativeui_register_consumer_identity("consumer_a" "com.example.first")
+  _nativeui_register_consumer_identity("consumer_a" "com.example.first")
+else()
+  message(FATAL_ERROR "unknown T053 registration CASE: ${CASE}")
+endif()
+
+message(FATAL_ERROR "T053 registration case unexpectedly succeeded: ${CASE}")

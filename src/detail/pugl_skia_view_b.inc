@@ -11,7 +11,18 @@
             logical_size_ = Size{physical_size_.w / scale_factor_,
                                  physical_size_.h / scale_factor_};
             ui_.resize(logical_size_);
+            // refresh_focus() replays focus_changed(true) on the focused text
+            // editor, which republishes its candidate rectangle using the new
+            // layout and scale factor exactly once at the platform boundary.
             ui_.refresh_focus(services_);
+            return PUGL_SUCCESS;
+
+        case PUGL_UPDATE:
+            // XIM signals preedit-done before Xutf8LookupString returns a
+            // possible commit. By the next Pugl update, any same-cycle text
+            // event has already been consumed, so a remaining pending end is
+            // a genuine composition cancellation.
+            nativeuiImeFlushPendingCancel(ime_bridge_);
             return PUGL_SUCCESS;
 
         case PUGL_EXPOSE:
@@ -56,9 +67,14 @@
         }
 
         case PUGL_TEXT: {
+            const std::string_view text{event->text.string};
+            if (nativeuiImeConsumePuglText(ime_bridge_, text.data(), text.size())) {
+                return PUGL_SUCCESS;
+            }
+
             InputEvent input{};
             input.type = InputType::TextInput;
-            input.text = event->text.string;
+            input.text.assign(text);
             apply_modifiers(input, event->text.state);
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
@@ -213,12 +229,17 @@
     PlatformServices& services_;
     PuglWorld* world_{};
     PuglView* view_{};
+    NativeUIImeBridge* ime_bridge_{};
     SkiaGlRenderer renderer_;
     Size logical_size_{};
     Size physical_size_{};
     float scale_factor_{1.0f};
     bool should_close_{};
     bool text_input_active_{};
+    Rect text_input_logical_area_{};
+    float text_input_logical_cursor_offset_{};
+    Rect text_input_physical_area_{};
+    float text_input_physical_cursor_offset_{};
     bool have_pointer_position_{};
     Point last_pointer_position_{};
     double last_click_time_{-1000.0};
@@ -230,4 +251,3 @@
 };
 
 } // namespace
-

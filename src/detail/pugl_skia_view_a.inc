@@ -56,6 +56,11 @@ public:
             cleanup_and_throw(status, "puglRealize failed");
         }
 
+        ime_bridge_ = nativeuiImeCreate(world_, view_, this, &ViewCore::ime_event_thunk);
+        if (!ime_bridge_) {
+            cleanup_and_throw(PUGL_FAILURE, "native IME bridge initialization failed");
+        }
+
         scale_factor_ = static_cast<float>(puglGetScaleFactor(view_));
         if (!(scale_factor_ > 0.0f)) scale_factor_ = 1.0f;
         ui_.resize(logical_size_);
@@ -77,6 +82,10 @@ public:
         ui_.deactivate(services_);
         set_text_input(false, {}, 0.0f);
         ui_.clear_invalidation_callback();
+        if (ime_bridge_) {
+            nativeuiImeDestroy(ime_bridge_);
+            ime_bridge_ = nullptr;
+        }
         if (view_) {
             // PUGL_UNREALIZE is the graphics-safe teardown point. Pugl enters
             // the backend context for this event before destroying the native
@@ -141,15 +150,46 @@ public:
                                 static_cast<unsigned>(std::max(1.0f, bottom - top)));
     }
 
+    void set_text_input(bool active, Rect logical_area, float logical_cursor_offset) {
+        if (!view_ || !ime_bridge_) return;
 
-    void set_text_input(bool active, Rect, float) {
-        if (!view_ || active == text_input_active_) return;
-        text_input_active_ = active;
-        if (active) {
-            puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
-        } else {
-            puglStopTimer(view_, kCaretTimerId);
+        const float scale = scale_factor_ > 0.0f ? scale_factor_ : 1.0f;
+        if (!detail::text_input_boundary_needs_update(
+                text_input_active_,
+                text_input_physical_area_,
+                text_input_physical_cursor_offset_,
+                active,
+                logical_area,
+                logical_cursor_offset,
+                scale)) {
+            return;
         }
+
+        const bool active_changed = active != text_input_active_;
+        text_input_active_ = active;
+        text_input_logical_area_ = active ? logical_area : Rect{};
+        text_input_logical_cursor_offset_ = active ? logical_cursor_offset : 0.0f;
+
+        const auto scaled = detail::scale_text_input_geometry(
+            text_input_logical_area_, text_input_logical_cursor_offset_, scale);
+        text_input_physical_area_ = scaled.first;
+        text_input_physical_cursor_offset_ = scaled.second;
+
+        if (active_changed) {
+            if (active) {
+                (void)puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
+            } else {
+                (void)puglStopTimer(view_, kCaretTimerId);
+            }
+        }
+
+        nativeuiImeUpdate(ime_bridge_,
+                          active,
+                          text_input_physical_area_.x,
+                          text_input_physical_area_.y,
+                          text_input_physical_area_.w,
+                          text_input_physical_area_.h,
+                          text_input_physical_cursor_offset_);
     }
 
     void set_clipboard_text(std::string_view text) {
@@ -205,6 +245,10 @@ public:
 
 private:
     void cleanup_and_throw(PuglStatus status, const char* what) {
+        if (ime_bridge_) {
+            nativeuiImeDestroy(ime_bridge_);
+            ime_bridge_ = nullptr;
+        }
         if (view_) {
             puglFreeView(view_);
             view_ = nullptr;
@@ -214,6 +258,33 @@ private:
             world_ = nullptr;
         }
         throw_pugl(status, what);
+    }
+
+    static void ime_event_thunk(void* user_data,
+                                NativeUIImeEventType type,
+                                const char* utf8,
+                                size_t utf8_size,
+                                size_t cursor_byte,
+                                size_t selection_bytes) noexcept {
+        auto* self = static_cast<ViewCore*>(user_data);
+        if (!self) return;
+        try {
+            InputEvent input{};
+            input.type = InputType::Composition;
+            switch (type) {
+                case NATIVEUI_IME_START: input.composition.type = CompositionType::Start; break;
+                case NATIVEUI_IME_UPDATE: input.composition.type = CompositionType::Update; break;
+                case NATIVEUI_IME_COMMIT: input.composition.type = CompositionType::Commit; break;
+                case NATIVEUI_IME_CANCEL: input.composition.type = CompositionType::Cancel; break;
+            }
+            if (utf8 && utf8_size) input.composition.text.assign(utf8, utf8_size);
+            input.composition.cursor_byte = cursor_byte;
+            input.composition.selection_bytes = selection_bytes;
+            (void)self->ui_.dispatch(input, self->services_);
+        } catch (...) {
+            // Never unwind through Cocoa, Win32, or XIM callbacks.
+            self->should_close_ = true;
+        }
     }
 
     static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {

@@ -33,16 +33,22 @@ jobs:
           - name: Linux X11
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: T047 public attachment contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t047_attach_contract_tests.cmake
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -53,7 +59,6 @@ jobs:
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-          -DNATIVEUI_OBJC_RUNTIME_PREFIX=HemdufNativeUICITest_
 
       # skia-builder's Windows archive is built with the MSVC ABI. Do not use
       # Ninja from Git Bash here: on hosted runners that can select MinGW and
@@ -73,13 +78,37 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 2
 
+      # Keep a real Linux/X11 renderer exposure in the normal merge gate. T042
+      # stress caught a production crash here that the previous compile/core
+      # coverage could not see. The native smoke uses one supported PROGRAM
+      # world and the existing embedded multi-instance lifecycle path.
+      - name: Linux X11 renderer and lifecycle smoke
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone'
+
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
-      # CODE_REVIEW.md requires proof that two independently built plug-in
-      # consumers do not register the same Objective-C runtime class names.
-      # Configure and build the pinned Pugl bridge twice with distinct consumer
-      # prefixes, then inspect both archives for isolated runtime namespaces.
+      - name: T047 external package contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t047_package_tests.cmake
+
+      # T053/CODE_REVIEW.md requires proof that two final consumers configured
+      # together derive different Objective-C runtime namespaces while sharing
+      # one generic Core/platform-C layer, and that both bridge images load in
+      # one process without duplicate runtime classes.
       - name: macOS two-consumer Objective-C runtime isolation
         if: runner.os == 'macOS'
         run: >-
@@ -101,6 +130,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: T047 public attachment contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t047_attach_contract_tests.cmake
 
       - name: Install dependencies
         run: |

@@ -44,6 +44,10 @@ public:
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
     }
+    [[nodiscard]] std::optional<ComponentAvailability> component_availability(
+        NodeId id) const noexcept {
+        return tree_.component_availability(id);
+    }
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }

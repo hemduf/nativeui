@@ -1,157 +1,97 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-08
+**Updated:** 2026-09-09
 
-## Mission and architecture
+## Mission and invariants
 
-NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. It owns declarative composition, component lifetime, layout, input/focus, generic state/binding, drawing/widgets, text editing, styling/invalidation/resources, packaging and tests. It does **not** own plugin APIs, audio/DSP, host parameter semantics or a custom native windowing layer.
+NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, generic state, drawing/widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio, host parameter semantics and a custom native windowing stack remain out of scope.
 
-```text
-Declarative C++ DSL
-        |
-        v
-Runtime Component Tree
-  | layout | input/focus | state
-        |
-        v
-     Skia paint
-        |
-        v
-Pugl OpenGL view / event bridge
-  | Win32 | Cocoa | X11
-```
-
-- Windowing/embedding: Pugl.
-- Rendering: Skia Ganesh/OpenGL plus headless Skia raster rendering.
-- Third-party acquisition: CMake + CPM only.
-- Public coordinates are logical pixels; native geometry/framebuffer is physical pixels.
-- Widgets/layout stay platform-neutral and do not include Pugl/Win32/AppKit/Xlib headers.
+Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is logical pixels; embedded polling is non-blocking; mutable instance-dependent process globals/singletons/thread-locals are forbidden; retained UI state is UI/main-thread confined; dependencies use CMake+CPM; Skia comes from pinned skia-builder binaries; macOS Objective-C runtime-visible platform classes must be consumer-specific.
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `0187a800276776c50a4d4890b3e6de7a100ff876`.
-- Skia: `olilarkin/skia-builder` release `chrome/m149`.
-- macOS Skia asset: `skia-build-mac-universal-gpu-release.zip`.
-- Windows: x64 MSVC `/MD` default, `/MT` selectable.
-- Linux: x64 GPU release.
+- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
+- Skia: `olilarkin/skia-builder` `chrome/m149`.
+- macOS: universal GPU Release asset.
+- Windows: x64 MSVC, `/MD` default and `/MT` selectable.
+- Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Scheduling model
+## Merged baseline
 
-NativeUI uses dependency-driven scheduling. GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are not implicit dependencies.
+The baseline is complete through T030 plus T023, #62, T053, #64 Decision B and T059.
 
-- `Ready`: all explicit dependencies are Done and no real external blocker exists.
-- `Doing`: implementation/review/validation is active.
-- `Blocked`: an explicit dependency is unfinished or a real external blocker is documented.
-- Keep at most three implementation lanes active by default.
-- A branch waiting only on CI does not globally block the project and need not consume an implementation lane.
-- Independent PRs start from `main` and may merge as soon as their own Definition of Done is satisfied.
+- T053 / PR #88 merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`: `NativeUI::Core` and portable Pugl C remain generic; the Cocoa Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and has no runtime registry.
+- #64 / PR #90 merged as `b52d53eee65e5de91697e2c1f0685728b9646575`: independent overlapping `PUGL_PROGRAM` worlds are not a supported macOS multi-window ownership model. Legacy `StandaloneWindow(UI&, ...)` remains pre-v1/single-window; T060 owns one explicit `ui::Application` PROGRAM owner with multiple top-level windows.
+- T059 / PR #89 merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`: the retained tree centrally resolves Visible/Hidden/Collapsed, inherited enabled/disabled and read-only state with focus/capture teardown, reentrancy handling and FocusScope restoration.
+- T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract and is owned by the separate state/widget lane. T031 is its next dependency-unblocked widget successor.
 
-`AGENTS.md` is the source of truth for these rules.
+## T047 install/export package — PR #92
 
-## Implemented baseline
+T047 completes the low-level package/install boundary after T053.
 
-Core/runtime includes observable `State<T>`, declarative DSL/runtime component tree, Row/Column/Stack/Padding/Spacer, constraints/alignment/flex/Grid/Scroll layout, clipping/transforms, focus scopes/traversal, logical pointer routing and toolkit pointer capture, command/gesture/drop primitives, bounded invalidation, generic Painter/Canvas, and headless/golden rendering support.
+Public install/build-tree contract:
 
-Rendering includes backend-neutral paths, gradients/paint styles, decoded image resources and SVG/icon resources. T022 provides backend-neutral `Image`, source-rectangle drawing, `Fill`/`Contain`/`Cover`, an application-supplied `ResourceProvider` and reusable `ImageCache`. T023 provides backend-neutral `SvgIcon`, centered contain-fit rendering and per-instance `SvgCache` reuse/failure caching over the same application-owned provider model. Widgets do not perform filesystem I/O, and Skia conversion/ownership stays private to Core.
+```cmake
+find_package(NativeUI CONFIG REQUIRED)
 
-Text/widgets include Header, Label/TextLabel, Knob, Toggle, TextInput, TextEditModel, multiline TextArea and interactive Canvas. T027 provides the platform-neutral font service. T028 provides UTF-8-aware multiline editing, cross-line selection/navigation, viewport scrolling, caret/selection painting and paint-only caret blink behavior.
-
-Windowing uses `StandaloneWindow` (`PUGL_PROGRAM`) and `EmbeddedView` (`PUGL_MODULE`), with non-blocking embedded polling, resize support, clipboard bridging and GL resource lifetime constrained to an active Pugl GL context. General text clipboard writes use canonical `text/plain`; this is required by the pinned Pugl macOS MIME→UTI mapping and avoids passing a nil UTI to `NSPasteboard`.
-
-The cross-cutting plugin-host safety baseline from #62/PR #63 is now merged. `StandaloneWindow` and `EmbeddedView` are non-movable because their internals retain stable back-references; embedded-font aliases are immutable-by-alias within the process-shared registry; retained UI/platform/resource APIs have explicit UI/resource-preparation thread contracts; and macOS platform builds require a consumer/plugin-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` so the statically linked Pugl Objective-C runtime classes do not collide between plug-in/application consumers.
-
-Every feature ticket ships `examples/features/tNNN_<feature>.cpp` with interactive mode and `--self-test`; feature sources also compile against `NativeUI::Core` in display-less CI.
-
-## Current work and DAG frontier
-
-- Last completed cross-cutting safety ticket: **#62 — plugin-host CODE_REVIEW revalidation**. PR #63 exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 (`34103924635`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. macOS additionally passed the two-consumer Objective-C runtime-isolation check and the clipboard/multi-instance lifecycle smoke. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
-- Last completed rendering feature: **T023 — SVG/icon resources**. PR #60 adds backend-neutral parsed SVG handles, aspect-preserving centered contain rendering, viewBox-only support, per-instance provider-backed caching and explicit static/self-contained SVG semantics while preserving the #62 plugin-host/runtime-prefix contracts.
-- Last completed text feature ticket: **T028 — multiline TextArea**. PR #56 final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed the Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan matrix and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`.
-- T028 post-merge macOS clipboard regression is fixed. PR #61 final head `57f56e70aa5852d0a90949af8ce1dcd94f76ebeb` passed CI run #152 (`34098862681`) on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS additionally passed the real clipboard plus multi-`EmbeddedView` lifecycle smoke. PR #61 was squash-merged as `e84aa9576f4197e249029e2028b45f6ab1283556`.
-- The expanded platform review exposed a separate pre-existing macOS crash when multiple `StandaloneWindow` / `PUGL_PROGRAM` worlds coexist. It is tracked independently as **#64 — Platform — multiple StandaloneWindow instances crash on macOS** and must not be conflated with the fixed T028 clipboard regression.
-- **T029 / PR #85** is active for advanced IME composition and remains draft while the platform bridge work and final validation are completed.
-- **#86 / PR #87** is active for the Pugl drag-and-drop dependency update. NativeUI targets reviewed `hemduf/pugl` commit `0187a800276776c50a4d4890b3e6de7a100ff876`, removes its platform-specific reject wrapper, enables `PUGL_ACCEPT_DROP` before realization and uses the public `puglRejectOffer()` API directly. The dependency review additionally restored the Win32 `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract, hardened actual drop coordinates/UTF-8/lifetime and kept all drop decision state per view. A fresh exact-head NativeUI CI plus the real macOS Finder smoke remain completion gates.
-
-Ready now:
-
-- P0: **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, **T053** consumer-scoped macOS Pugl/Objective-C bridge.
-- P1/high unblock value: **T030** Button, **T032** Slider/RangeSlider, **T034** ScrollView.
-- Other P1: **T033** ProgressBar/Meter, **T043** resize/scale hardening, **T044** pointer capture evaluation, **#64** multi-`StandaloneWindow` macOS lifecycle.
-- P2: **T046** Wayland strategy/prototype.
-
-Important explicit dependency chains:
-
-```text
-T030 -> T031
-T030 + T032 -> T037 -> T038 -> T039 / T040
-T034 -> T035 / T036
-T030 + T031 + T032 + T036 -> T045
-T030 + T032 + T034 + T035 + T036 -> T049
-T042 -> T051 -> T052
-T047 -> T048 -> T052
-#62 -> T053
-T047 + T053 -> T054
-T047 -> T056 -> T057
+target_link_libraries(MyFinalTarget PRIVATE NativeUI::Core)
+nativeui_attach_platform(
+    TARGET MyFinalTarget
+    CONSUMER_ID com.example.product
+)
 ```
 
-Recommended next increment: complete the active T029 and #86 validation lanes while continuing an independent Ready P0 lane when concurrency permits.
+Contract and implementation:
 
-## T022 implementation notes retained for recovery
+- only `NativeUI::Core` is exported as the reusable generic target; installed consumers must not receive `NativeUI::NativeUI` as a complete v1 native target;
+- `nativeui_attach_platform` accepts an existing final `EXECUTABLE`, `MODULE_LIBRARY` or `SHARED_LIBRARY`; static/object/interface/imported/alias/nonexistent targets are rejected;
+- one valid reverse-DNS `CONSUMER_ID` is required on every platform and all second attachments are deterministic configure errors;
+- the public helper is implemented as a CMake macro so language enablement remains valid on supported CMake 3.24–4.4 while retaining the documented function-like call syntax;
+- macOS delegates exact identity/prefix/bridge ownership to T053; Windows/Linux construct their generic Pugl/native layer behind the same public helper;
+- the installed package carries pinned Skia assets and the required Pugl/NativeUI platform source machinery privately, so consumers need no separate Pugl installation and no repository-private source path;
+- installed CMake paths are prefix-relative; tests copy the install tree to a new prefix and configure/build/run against the relocated package only;
+- package tests scan installed CMake files for original source/build path leakage and deliberately remove one pinned Skia archive to prove an explicit NativeUI diagnostic instead of unpinned fallback;
+- the installed package includes the project legal/licensing payload required by the package contract.
 
-- `Image` is a copyable platform-neutral handle whose public header contains no Skia/Pugl/platform type.
-- `Image::decode` copies encoded bytes into Skia-owned data; callers do not retain source-buffer lifetime obligations.
-- `CanvasContext2D::draw_image` supports whole-image or source-rectangle drawing plus `ImageFit::Fill`, `Contain` and `Cover`.
-- Invalid images and non-positive/non-finite draw rectangles are safe no-ops.
-- `ResourceProvider` resolves application-defined IDs to encoded byte vectors; filesystem/bundle/archive policy stays in the application layer.
-- `ImageCache` caches successful images and explicit `NotFound`/`DecodeFailed` results; `clear()` invalidates the cache.
+TDD/review history:
 
-## T023 implementation notes retained for recovery
+- RED/GREEN cycles cover target/identity validation, duplicate attach, build-tree/install-tree parity, external Core/native linkage, relocation and missing-pinned-dependency failure;
+- macOS installed-package acceptance builds two independent MODULE consumers, audits class and metaclass prefixes and loads both in one Objective-C runtime;
+- CODE_REVIEW.md pass is clean for instance isolation, configure-time-only bookkeeping, platform delegation, relocatability and public-target boundaries;
+- pre-refresh head `69a22f1439991721524bb2bc7aa4c7be94ccbd19` passed CI #338 on Linux X11, Windows/MSVC, macOS including two-consumer runtime isolation, and Linux ASan+UBSan;
+- the branch was first refreshed over merged T059 and then over current main `b32b09da473c70a857675e05f7fdc7c78e5f9361` after the independent T030 merge. T030 source/tests/public-header changes and root CMake registrations are preserved while the PR diff remains T047-owned plus mandatory recovery/roadmap bookkeeping.
 
-- `SvgIcon` is a copyable backend-neutral handle; Skia SVG DOM types remain private to Core.
-- SVG source bytes are parsed during resource preparation and are not retained by callers; parsing/loading is not a real-time audio-thread API.
-- `CanvasContext2D::draw_svg` uses a centered aspect-preserving contain fit, clips to the destination and treats non-positive/non-finite destinations as no-ops.
-- ViewBox-only icons derive intrinsic dimensions from root `viewBox` source metadata without reading inline Skia SVG members across the prebuilt ABI boundary.
-- V1 SVG resources are static and self-contained; NativeUI does not fetch external file/network resources or drive SVG animation.
-- `SvgCache` borrows its `ResourceProvider`, which must outlive it; parsed successes and explicit failures are cached per cache instance and `clear()` affects only that instance.
-- SVG linkage uses the pinned skia-builder SVG module plus its required shaper/unicode static dependencies.
-- Completion coverage includes paths, transforms, gradients, malformed input, invalid destinations, viewBox-only resources, cache reuse/failure reuse, same-ID isolation across two caches, deterministic path golden comparison, isolated public headers and `t023_svg_icons --self-test`.
+The merge candidate must pass the exact current-head full matrix after the latest refresh. Do not merge a stale or red head.
 
-## T027 portability notes retained for recovery
+## Current DAG frontier
 
-- `FontManager` is public and platform-neutral; CoreText/DirectWrite/Fontconfig construction remains private in `src/skia_core.cpp`.
-- Embedded font registration owns/copies bytes and publishes immutable registry snapshots; normal measure/paint reads do not acquire the registration mutex.
-- UBSan `vptr` alone is disabled at the pinned prebuilt Skia ABI boundary; ASan and remaining UBSan checks stay enabled.
-- Linux LSan keeps `detect_leaks=1`; only Fontconfig's process-lifetime `FcFontRenderPrepare` allocation path is suppressed.
-- Windows CI explicitly uses MSVC to match `Skia.lib`; `NOMINMAX` prevents Win32 macro pollution.
-- macOS uses the universal Skia artifact on `macos-15-intel`.
-- Xcode 16.4 libc++ portability uses `std::atomic<std::shared_ptr<T>>` only when supported, otherwise the standard shared_ptr atomic load/store API.
+```text
+lifecycle:        #64(done) -> T042 -> T051 -> T052
+platform/package: T053(done) -> T047(this merge) -> T048 -> T052
+                                           |
+                                           +-> T054
+                                           +-> T056 -> T057
+state/widgets:    T059(done) -> T030(done) -> T031
+```
 
-## Current limitations
+After T047 merges, T048, T054 and T056 are dependency-unblocked. T052 still additionally requires T048, T051 and T042; T057 requires T056. The active platform/package lane must not take T059, T030, #64 or T042.
 
-- T029 advanced IME composition is in progress.
-- Multiple simultaneous `StandaloneWindow` / `PUGL_PROGRAM` worlds can crash on macOS; tracked in #64. Plugin/editor multi-instance validation uses independent `EmbeddedView` / `PUGL_MODULE` instances and is green.
-- Real macOS Finder drag/drop validation for the final Pugl pin remains pending under #86 even though the fork's native drag/drop regressions and dependency review are green.
-- Windows `WM_DROPFILES` preserves NativeUI's logical offer/accept/reject contract only after the OS-level drop; native hover-time acceptance feedback would require a different Windows backend mechanism such as OLE `IDropTarget`.
-- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
-- Theme/style inheritance, accessibility, Wayland, packaging/install/export and full host integration remain incomplete.
+## Platform ownership reminders
 
-## Build commands
+- Normal standalone validation currently uses one `PUGL_PROGRAM` owner lifetime.
+- Multiple independent `EmbeddedView` / `PUGL_MODULE` instances are supported and remain the current host/plugin coexistence path.
+- T060 owns the future shared `Application` multi-window standalone model.
+- No global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` is part of the normal package contract.
+
+## Build / validation
+
+Source-tree Release:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
-./build/nativeui_demo
 ```
-
-On macOS platform builds, provide a consumer/application/plugin-specific Objective-C runtime prefix, normally derived from the final bundle identifier:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
-```
-
-Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) do not require the prefix.
 
 Offline dependency overrides:
 
@@ -161,18 +101,46 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-## Non-negotiable invariants
+T047 additionally runs public attach-contract CMake fixtures, build-tree and install-tree external consumers, relocated-install consumption, dependency-failure diagnostics, platform linkage and macOS two-consumer Objective-C isolation.
 
-- no plugin parameter/audio semantics in NativeUI;
-- no SDL/GLFW/Qt/JUCE/NanoVG;
-- widgets never depend on Pugl/Win32/AppKit/Xlib;
-- Pugl remains the native view/event layer;
-- Skia remains the renderer and comes from pinned skia-builder binaries;
-- dependencies stay CMake + CPM;
-- a normal new widget must not require a central component enum/switch;
-- mutable instance-dependent process-global/singleton/thread-local state is forbidden;
-- macOS runtime-visible classes in the statically linked platform bridge must use a consumer/plugin-specific collision-resistant prefix.
+## Next platform/package action
 
-## Pugl drag-and-drop portability note
+1. Require exact final T047 head CI green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
+2. Refresh from `main` again if it advances; resolve `CONTEXT.md`/`ROADMAP.md` and CMake overlaps without dropping upstream work, then revalidate that exact head.
+3. Mark PR #92 ready and merge only with no blocking CODE_REVIEW.md finding.
+4. Close/update issue #47 as Done.
+5. Re-read explicit dependencies/priorities and continue the next Ready ticket in the platform/package lane; T048, T054 and T056 become eligible after T047.
 
-The pinned `hemduf/pugl` commit implements `puglRejectOffer()` on macOS, Windows and X11, so portable NativeUI code calls that public API directly. The previous macOS/Windows compatibility no-op is removed. Cocoa delivers accepted drag data exactly once at the actual drop boundary. On Windows, `WM_DROPFILES` has no native hover-time negotiation, but the reviewed backend now emits `PUGL_DATA_OFFER` after the OS drop and before exposing the payload, so NativeUI's generic accept/reject path is preserved. Rejected data is suppressed, accepted data is delivered once at the actual drop coordinates, and all decision/payload state remains scoped to the concrete view.
+## Lifecycle/stress lane update — #105
+
+T042's deterministic lifecycle matrix exposed a constructor-time platform callback lifetime defect while exercising a focusable embedded view on macOS. Issue #105 / PR #106 fixes the defect without changing the public window/view API: each private `StandaloneWindow::Impl` and `EmbeddedView::Impl` is now its own per-instance `PlatformServices` bridge, so synchronous native callbacks during `ViewCore` construction never re-enter a public wrapper whose `impl_` has not yet been assigned.
+
+- Exact PR #106 code head `bf8e2ff055b4fe5ed2c2bd415bb3818f925f366b` passed CI `34344755454` on Linux X11, Windows/MSVC, macOS including two-consumer Objective-C isolation and clipboard/multi-instance lifecycle smoke, and Linux ASan+UBSan.
+- The stacked T042 validation head `97c2c19f09c60c537d538dc887660a0049fa35db` proves the original macOS `embedded_sequential_100` crash is GREEN; Linux X11 and Linux ASan+UBSan are also green.
+- Windows reaches the standalone stress path and exposes a separate documented `puglShow(PUGL_SHOW_RAISE)` non-fatal status handling defect, tracked independently as #107. That defect is not folded into #105.
+- #64 Decision B is unchanged: there is still no hidden application singleton, shared PROGRAM workaround, or mutable global/`thread_local` ownership state.
+
+After #105 and the independent #107 status fix are merged, refresh T042/PR #93 from current `main`, rerun the exact-head lifecycle matrix on macOS/Windows/Linux X11 plus Linux ASan+UBSan, complete the mandatory review, then merge T042 only if all supported-path acceptance gates are green.
+
+## Lifecycle/stress lane update — #103
+
+T042 also exposed a production Linux/X11 renderer crash before stress-specific lifecycle behavior: the first native exposure under Xvfb/Mesa llvmpipe entered Skia's assembled GL extension discovery and crashed in `GrGLExtensions::init`. Issue #103 / PR #104 keeps the fix in the platform renderer rather than weakening T042.
+
+- Linux now creates Skia's desktop-native GL interface from the Pugl-owned current GLX context. There is deliberately no Linux fallback to the assembled resolver that produced the crash; an unavailable interface returns through the existing controlled renderer-initialization failure path.
+- macOS and Windows retain the existing assembled Pugl-proc interface path.
+- CI `34343547392` passed the #103 code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. The Linux lane now includes a permanent Xvfb/Mesa llvmpipe real renderer/lifecycle smoke and passes it.
+- A stacked T042 candidate reaches and completes Linux native lifecycle stress after this fix, confirming the stress harness is no longer stopped by first-exposure renderer initialization.
+- No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
+
+After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
+
+## Active drag-and-drop correction — #86 / PR #87
+
+Finder drops exposed a second integration defect after the Pugl backend-child destination fix: NativeUI discarded DropOffer/DropData whenever the window lost keyboard focus. The retained tree now routes drops while mounted but inactive, without reactivating focus or IME, preserving T059 availability and dispatch reconciliation. The T018 example reads the first local regular file from a URI list (UTF-8/percent-decoding, 64 KiB cap) and displays its contents; --trace-drops enables diagnostic payload output.
+
+- TDD: the background-drop core test failed before the fix and passes after it; the malformed/NUL file-URI self-test likewise failed before hardening.
+- Before integration with main, the Release build and all 55 CTest tests passed, including the new real OpenGL Cocoa/Pugl destination smoke (focus loss, one delivery, rejection, logical coordinates, multiple file URLs, two embedded instances, sibling destruction and repeated cycles).
+- Main b651583 is integrated; the macOS fixture uses T053 consumer identity org.nativeui.test.macos-drop rather than a manual runtime prefix. The integrated Release build and all 63 CTest tests pass; the two targeted core/native tests also pass under ASan+UBSan, and T053's two-consumer runtime/symbol isolation passes. No compiler warnings were emitted. Remote exact-head CI remains pending.
+- The direct Cocoa callback test does not reproduce Finder's real drag-session routing. A confirmed Finder drop of /tmp/hello.txt with its contents visible remains the final acceptance gate. Do not mark #86 Done or merge #87 without it.
+
+Next action for this lane: finish integrated-head validation and the Finder smoke, record CODE_REVIEW.md review evidence in #87, then request merge direction. Other lanes/frontiers above remain unchanged.

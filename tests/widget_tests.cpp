@@ -2,6 +2,43 @@
 
 namespace {
 
+void value_widgets_respect_effective_read_only_state() {
+    ui::State<bool> read_only{true};
+    ui::State<float> drive{0.50f};
+    ui::State<bool> bypass{false};
+
+    ui::UI tree{
+        ui::ReadOnly{read_only,
+            ui::Row{
+                ui::Knob{"Drive", drive},
+                ui::Toggle{"Bypass", bypass},
+            }.gap(8.0f)}
+    };
+
+    test::MockPlatform platform;
+    tree.resize({420.0f, 220.0f});
+    tree.activate(platform);
+
+    // Read-only remains focusable/targetable, but value mutations are consumed
+    // by the value controls without changing their bound State.
+    tree.dispatch(test::key(ui::Key::Right), platform);
+    NUI_CHECK_NEAR(drive.get(), 0.50f, 0.0001f);
+
+    tree.dispatch(test::key(ui::Key::Tab), platform);
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(!bypass.get());
+    tree.dispatch(test::key(ui::Key::Enter), platform);
+    NUI_CHECK(!bypass.get());
+
+    read_only.set(false);
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(bypass.get());
+
+    tree.dispatch(test::key(ui::Key::Tab, true), platform);
+    tree.dispatch(test::key(ui::Key::Right), platform);
+    NUI_CHECK_NEAR(drive.get(), 0.51f, 0.0001f);
+}
+
 void suite() {
     ui::State<float> drive{0.50f};
     ui::State<float> tone{0.25f};
@@ -49,6 +86,8 @@ void suite() {
     layout_tree.resize({320.0f, 240.0f});
     layout_tree.activate(platform);
     NUI_CHECK(layout_tree.dirty());
+
+    value_widgets_respect_effective_read_only_state();
 }
 
 } // namespace

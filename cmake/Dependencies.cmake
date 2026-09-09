@@ -25,41 +25,9 @@ if(NATIVEUI_BUILD_PLATFORM)
   if(NOT EXISTS "${pugl_src_SOURCE_DIR}/include/pugl/pugl.h")
     message(FATAL_ERROR "Invalid Pugl source tree: ${pugl_src_SOURCE_DIR}")
   endif()
-
-  set(_pugl_sources
-    "${pugl_src_SOURCE_DIR}/src/common.c"
-    "${pugl_src_SOURCE_DIR}/src/internal.c"
-  )
-
-  if(APPLE)
-    enable_language(OBJC)
-    list(APPEND _pugl_sources
-      "${pugl_src_SOURCE_DIR}/src/mac.m"
-      "${pugl_src_SOURCE_DIR}/src/mac_gl.m"
-    )
-  elseif(WIN32)
-    list(APPEND _pugl_sources
-      "${pugl_src_SOURCE_DIR}/src/win.c"
-      "${pugl_src_SOURCE_DIR}/src/win_gl.c"
-    )
-  elseif(UNIX)
-    list(APPEND _pugl_sources
-      "${pugl_src_SOURCE_DIR}/src/x11.c"
-      "${pugl_src_SOURCE_DIR}/src/x11_gl.c"
-    )
-  else()
-    message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows and Linux/X11")
-  endif()
-
-  add_library(nativeui_pugl STATIC ${_pugl_sources})
-  add_library(NativeUI::Pugl ALIAS nativeui_pugl)
-  set_target_properties(nativeui_pugl PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_compile_features(nativeui_pugl PUBLIC c_std_99)
-  target_include_directories(nativeui_pugl PUBLIC "${pugl_src_SOURCE_DIR}/include")
-  target_compile_definitions(nativeui_pugl
-    PUBLIC PUGL_STATIC
-    PRIVATE PUGL_INTERNAL
-  )
+  # T053's consumer platform module and T047's installed-package helper use the
+  # same resolved pinned source root. This is build/configure data only.
+  set(NATIVEUI_PUGL_SOURCE_DIR "${pugl_src_SOURCE_DIR}")
 
   find_package(OpenGL REQUIRED)
   add_library(nativeui_opengl INTERFACE)
@@ -74,38 +42,71 @@ if(NATIVEUI_BUILD_PLATFORM)
   else()
     message(FATAL_ERROR "CMake FindOpenGL did not provide a usable OpenGL target")
   endif()
-  target_link_libraries(nativeui_pugl PUBLIC NativeUI::OpenGL)
 
   if(APPLE)
-    target_compile_definitions(nativeui_pugl PRIVATE GL_SILENCE_DEPRECATION)
-    target_compile_options(nativeui_pugl PRIVATE -Wno-deprecated-declarations)
+    # T053 deliberately does not create one generic Objective-C Pugl archive.
+    # Only the generic common/internal C sources are shared; mac.m, mac_gl.m
+    # and NativeUI's Cocoa IME bridge are compiled by the final-consumer target
+    # factory with the derived consumer-specific runtime prefix.
+    enable_language(OBJC)
     find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
     find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
-    target_link_libraries(nativeui_pugl PUBLIC
-      ${APPKIT_FRAMEWORK}
-      ${FOUNDATION_FRAMEWORK}
-      ${COREVIDEO_FRAMEWORK}
-    )
-  elseif(WIN32)
-    target_compile_definitions(nativeui_pugl PRIVATE
-      UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
-      WINVER=0x0601 _WIN32_WINNT=0x0601
-    )
-    target_link_libraries(nativeui_pugl PUBLIC
-      dwmapi gdi32 shell32 shlwapi user32
-    )
   else()
-    find_package(X11 REQUIRED)
-    target_compile_definitions(nativeui_pugl PRIVATE
-      _POSIX_C_SOURCE=200809L
-      USE_XCURSOR=0
-      USE_XRANDR=0
-      USE_XSYNC=0
+    set(_pugl_sources
+      "${pugl_src_SOURCE_DIR}/src/common.c"
+      "${pugl_src_SOURCE_DIR}/src/internal.c"
     )
-    target_link_libraries(nativeui_pugl PUBLIC X11::X11 ${CMAKE_DL_LIBS})
-  endif()
 
+    if(WIN32)
+      list(APPEND _pugl_sources
+        "${pugl_src_SOURCE_DIR}/src/win.c"
+        "${pugl_src_SOURCE_DIR}/src/win_gl.c"
+        "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_windows.c"
+      )
+    elseif(UNIX)
+      list(APPEND _pugl_sources
+        "${pugl_src_SOURCE_DIR}/src/x11.c"
+        "${pugl_src_SOURCE_DIR}/src/x11_gl.c"
+        "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_x11.c"
+      )
+    else()
+      message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows and Linux/X11")
+    endif()
+
+    add_library(nativeui_pugl STATIC ${_pugl_sources})
+    add_library(NativeUI::Pugl ALIAS nativeui_pugl)
+    set_target_properties(nativeui_pugl PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_features(nativeui_pugl PUBLIC c_std_99)
+    target_include_directories(nativeui_pugl
+      PUBLIC "${pugl_src_SOURCE_DIR}/include"
+      PRIVATE "${pugl_src_SOURCE_DIR}/src"
+    )
+    target_compile_definitions(nativeui_pugl
+      PUBLIC PUGL_STATIC
+      PRIVATE PUGL_INTERNAL
+    )
+    target_link_libraries(nativeui_pugl PUBLIC NativeUI::OpenGL)
+
+    if(WIN32)
+      target_compile_definitions(nativeui_pugl PRIVATE
+        UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+        WINVER=0x0601 _WIN32_WINNT=0x0601
+      )
+      target_link_libraries(nativeui_pugl PUBLIC
+        dwmapi gdi32 imm32 shell32 shlwapi user32
+      )
+    else()
+      find_package(X11 REQUIRED)
+      target_compile_definitions(nativeui_pugl PRIVATE
+        _POSIX_C_SOURCE=200809L
+        USE_XCURSOR=0
+        USE_XRANDR=0
+        USE_XSYNC=0
+      )
+      target_link_libraries(nativeui_pugl PUBLIC X11::X11 ${CMAKE_DL_LIBS})
+    endif()
+  endif()
 endif()
 
 # -----------------------------------------------------------------------------
@@ -182,7 +183,7 @@ if(NOT NATIVEUI_SKIA_ROOT)
 endif()
 
 # CMake/FetchContent strips a single common top-level directory when extracting
-# archives.  skia-builder release zips contain a top-level `build/` directory,
+# archives. skia-builder release zips contain a top-level `build/` directory,
 # so a CPM download normally lands as:
 #
 #   <source>/include/include/core/SkCanvas.h
@@ -207,7 +208,7 @@ else()
 endif()
 
 # skia-builder preserves Skia's source-relative include paths inside its
-# packaged header directory.  The consumer therefore adds the outer
+# packaged header directory. The consumer therefore adds the outer
 # `<package>/include` directory so `#include "include/core/SkCanvas.h"` and
 # `#include "src/..."` resolve correctly.
 set(_skia_include "${_skia_package_root}/include")

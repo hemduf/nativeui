@@ -48,7 +48,7 @@ ui::Canvas target(DropState& state) {
         });
 }
 
-void drop(ui::NativeViewHandle handle, DropState& state, NSPasteboard* pasteboard) {
+void drop(ui::NativeViewHandle handle, DropState& state, NSPasteboard* pasteboard, bool cancel = false) {
     NSView* const wrapper = (__bridge NSView*)reinterpret_cast<void*>(handle);
     NSView* const backend = wrapper.subviews.firstObject;
     NUI_CHECK(backend != nil);
@@ -70,6 +70,13 @@ void drop(ui::NativeViewHandle handle, DropState& state, NSPasteboard* pasteboar
     NUI_CHECK([destination draggingUpdated:sender] == operation);
     NUI_CHECK(state.offers == offers + 2);
     NUI_CHECK(state.deliveries == deliveries);
+    if (cancel) {
+        [destination draggingExited:sender];
+        [destination draggingEnded:sender];
+        NUI_CHECK(state.deliveries == deliveries);
+        NUI_CHECK(![destination prepareForDragOperation:sender]);
+        return;
+    }
     NUI_CHECK([destination prepareForDragOperation:sender] == state.accept);
     NUI_CHECK([destination performDragOperation:sender] == state.accept);
     NUI_CHECK(state.deliveries == deliveries + (state.accept ? 1 : 0));
@@ -115,6 +122,10 @@ void suite() {
         NUI_CHECK(!window.isKeyWindow);
         host_state.accept = false;
         drop(host.native_handle(), host_state, board);
+        host_state.accept = true;
+        drop(host.native_handle(), host_state, board, true);
+        drop(host.native_handle(), host_state, board);
+        NUI_CHECK(host_state.deliveries == 2);
 
         DropState a_state;
         DropState b_state;
