@@ -18,13 +18,31 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Merged baseline
 
-The merged baseline is complete through T029, including rendering resources T022/T023, platform safety issue #62 and T053. TextInput/TextArea share the UTF-8 `TextEditModel`; T029 provides platform-neutral IME composition plus private Cocoa/IMM32/XIM bridges. `StandaloneWindow` uses `PUGL_PROGRAM`; `EmbeddedView` uses `PUGL_MODULE` and non-blocking polling. General clipboard text uses canonical `text/plain`.
+The merged baseline is complete through T029, including rendering resources T022/T023, platform safety issue #62, T053 and the #64 Decision B ownership diagnosis. TextInput/TextArea share the UTF-8 `TextEditModel`; T029 provides platform-neutral IME composition plus private Cocoa/IMM32/XIM bridges. `StandaloneWindow` uses `PUGL_PROGRAM`; `EmbeddedView` uses `PUGL_MODULE` and non-blocking polling. General clipboard text uses canonical `text/plain`.
 
 T053 / PR #88 is merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`. `NativeUI::Core` and portable Pugl C code remain generic while the small macOS Objective-C Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives the frozen `NUI_<fragment>_<digest12>_` prefix from exact UTF-8 `CONSUMER_ID` bytes, rejects duplicate target/identity registration at configure time and introduces no runtime registry. The macOS acceptance fixture builds two final consumers, audits class+metaclass symbols and rejects any unprefixed `Pugl*` Objective-C runtime class/metaclass.
 
+## T059 component availability — PR #89 completion candidate
+
+T059 introduces one generic retained-tree availability model shared by standard and custom components:
+
+- `VisibilityMode::{Visible, Hidden, Collapsed}`;
+- monotonic inherited enabled/disabled state;
+- monotonic inherited read-only state;
+- `Visibility`, `Enabled` and `ReadOnly` composition wrappers;
+- public effective-availability query/debug seam without platform headers.
+
+The retained tree is the sole authority for availability. `Hidden` keeps layout contribution but suppresses paint, normal input and focus. `Collapsed` contributes no layout space and suppresses paint/input/focus without unmount/remount. Disabled subtrees stay laid out/painted but are excluded from normal input targeting and focus. Read-only stays targetable/focusable; TextInput/TextArea and existing Knob/Toggle controls reject value mutation while preserving applicable non-mutating interaction.
+
+Availability transitions cancel pointer capture exactly once before suppression, deactivate/re-home focus before applying the new effective state and preserve retained component identity. Reconciliation is per-tree and UI-thread confined, supports reentrant availability reversal from teardown callbacks, and adds no mutable process-global/singleton/`thread_local` state.
+
+Mandatory review found one FocusScope regression: clearing focus before the availability snapshot was applied caused an active trapping scope to lose its existing pre-scope `focus_restore` record when the whole scope became unavailable. RED head `8b3cdef553e680633039cf82ac896d18a8c416b5` exposed the incorrect global-first fallback; the fix retains only the transient per-tree availability teardown focus origin so normal FocusScope deactivation can restore the exact pre-scope target. GREEN implementation head before documentation synchronization is `3f24d4bb12723cbcf816d7737f62660fb560b4d3`.
+
+T059 ships dedicated core tests plus `examples/features/t059_component_state.cpp --self-test`; validation covers lifecycle identity, layout/paint invalidation, disabled dispatch/capture/focus, read-only editors/value controls, reentrancy, two-tree isolation, public-header compilation and Linux ASan+UBSan.
+
 ## Standalone ownership decision — issue #64 / PR #90
 
-Issue #64 freezes **Decision B** for top-level standalone ownership.
+Issue #64 is complete and merged as `b52d53eee65e5de91697e2c1f0685728b9646575`, freezing **Decision B** for top-level standalone ownership.
 
 Exact macOS RED evidence on diagnostic head `02910e4191d7aead61aee5f710f9a098d5eec600` reproduced:
 
@@ -53,16 +71,16 @@ PR #90 keeps `--issue64-simultaneous` and `--issue64-sequential` diagnostic mode
 
 ## Current DAG frontier
 
-- **#64 / PR #90:** Decision B and diagnostic fixtures are complete; exact-head supported-path CI/review and merge remain the completion gates.
-- **T042 / issue #42:** next lifecycle/stress ticket immediately after #64. Stress headless lifecycle, embedded sequential/two-live instances, active capture/focus teardown and supported standalone ownership. Under Decision B it must not invent hidden simultaneous standalone support before T060.
+- **T059 / issue #71 / PR #89:** completion candidate; after exact-head final validation and merge, T030 becomes Ready on the state/widget lane.
+- **T030 / issue #30:** next state/widget ticket immediately after T059; Button must consume T059 effective enabled state rather than introduce widget-local disabled traversal rules.
+- **T042 / issue #42:** current lifecycle/stress lane after merged #64 Decision B; stress supported ownership paths without inventing hidden simultaneous standalone support before T060.
 - **T053:** complete/merged. This unblocks T047 on the platform/package lane.
-- **T047:** package/install lane; owned independently from lifecycle work.
-- **T059:** retained availability/state lane; T030 follows it; owned independently.
+- **T047:** package/install lane; owned independently from lifecycle and state/widget work.
 
 Important dependency chains include:
 
 ```text
-T030 -> T031
+T059 -> T030 -> T031
 T030 + T032 -> T037 -> T038 -> T039 / T040
 T034 -> T035 / T036
 T030 + T031 + T032 + T036 -> T045
@@ -126,11 +144,11 @@ cmake -S . -B build \
 - Explicit shared-Application multi-window standalone support is not implemented yet; T060 owns it.
 - Legacy independent `PUGL_PROGRAM` worlds are diagnostic-only on macOS after #64 Decision B.
 - X11 advanced preedit callbacks depend on the installed XIM advertising `XIMPreeditCallbacks`; ordinary committed text remains available otherwise.
-- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete.
+- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete; T030 Button follows T059.
 - Theme/style inheritance, accessibility, Wayland, install/export packaging and full host integration remain incomplete.
 
-## Next lifecycle action
+## Next state/widget action
 
-1. Finish exact-head CI/review and merge PR #90; close #64 Done with Decision B evidence.
-2. Start T042 from the resulting current `main`.
-3. For T042, interpret legacy standalone stress consistently with Decision B: do not repeatedly create independent macOS PROGRAM application worlds as if that were supported multi-window architecture. Use supported one-owner lifecycle/process-level repetition until T060 provides one shared Application world for repeated/multi-window top-level stress.
+1. Finish final exact-head validation/review/documentation and merge T059 / PR #89.
+2. Move T030 / issue #30 to Doing from the resulting current `main`.
+3. Implement Button in strict TDD using the central T059 availability/focus/capture contract, then perform the mandatory CODE_REVIEW.md pass before merge.
