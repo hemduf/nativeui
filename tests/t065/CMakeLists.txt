@@ -10,6 +10,7 @@ set(NATIVEUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NATIVEUI_BUILD_PLATFORM OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../.." nativeui-build)
+target_sources(nativeui_core PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp")
 
 add_executable(t065_dispatcher_contract ../dispatcher_tests.cpp)
 target_include_directories(t065_dispatcher_contract PRIVATE "${CMAKE_CURRENT_LIST_DIR}/..")
