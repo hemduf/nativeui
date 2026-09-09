@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
-#include <limits>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -13,15 +12,6 @@ namespace ui::detail {
 
 struct DispatcherOwnerToken final {};
 
-namespace {
-
-class SteadyDispatcherClock final : public DispatcherClock {
-public:
-    [[nodiscard]] DispatcherTimePoint now() const noexcept override {
-        return std::chrono::steady_clock::now();
-    }
-};
-
 struct TimerEntry final {
     std::uint64_t id{};
     std::uint64_t sequence{};
@@ -29,6 +19,15 @@ struct TimerEntry final {
     std::chrono::steady_clock::duration interval{};
     bool repeating{};
     Dispatcher::Callback callback;
+};
+
+namespace {
+
+class SteadyDispatcherClock final : public DispatcherClock {
+public:
+    [[nodiscard]] DispatcherTimePoint now() const noexcept override {
+        return std::chrono::steady_clock::now();
+    }
 };
 
 [[nodiscard]] std::optional<std::chrono::steady_clock::duration>
@@ -64,6 +63,10 @@ struct DispatcherState final {
                                  : std::make_shared<SteadyDispatcherClock>()),
           token(std::make_shared<DispatcherOwnerToken>()) {}
 
+    [[nodiscard]] TimerHandle make_timer_handle(std::uint64_t id) const noexcept {
+        return TimerHandle{token, id};
+    }
+
     mutable std::mutex mutex;
     std::deque<Dispatcher::Callback> tasks;
     std::vector<TimerEntry> timers;
@@ -76,16 +79,21 @@ struct DispatcherState final {
     bool wake_pending{};
 };
 
-namespace {
-
-void request_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
-    if (auto backend = state->wake_backend.lock()) backend->request_wake();
+void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
+    std::shared_ptr<DispatcherWakeBackend> backend;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing || !state->wake_pending) return;
+        backend = state->wake_backend.lock();
+    }
+    if (backend) backend->request_wake();
 }
 
-[[nodiscard]] TimerHandle schedule_timer(const std::weak_ptr<DispatcherState>& weak_state,
-                                         DispatcherDuration duration,
-                                         bool repeating,
-                                         Dispatcher::Callback callback) {
+[[nodiscard]] TimerHandle schedule_dispatcher_timer(
+    const std::weak_ptr<DispatcherState>& weak_state,
+    DispatcherDuration duration,
+    bool repeating,
+    Dispatcher::Callback callback) {
     if (!callback) return {};
     const auto converted = checked_duration(duration, !repeating);
     if (!converted) return {};
@@ -100,11 +108,11 @@ void request_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
     {
         std::lock_guard lock{state->mutex};
         if (state->closing || state->timers.size() >= kDispatcherMaxActiveTimers) return {};
-
         if (state->next_timer_id == 0 || state->next_timer_sequence == 0) return {};
+
         const auto id = state->next_timer_id++;
         const auto sequence = state->next_timer_sequence++;
-        handle = TimerHandle{state->token, id};
+        handle = state->make_timer_handle(id);
         state->timers.push_back(TimerEntry{
             id,
             sequence,
@@ -119,11 +127,9 @@ void request_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
             should_wake = true;
         }
     }
-    if (should_wake) request_wake(state);
+    if (should_wake) request_dispatcher_wake(state);
     return handle;
 }
-
-} // namespace
 
 void ManualDispatcherClock::advance(DispatcherDuration delta) noexcept {
     const auto converted = checked_duration(delta, true);
@@ -214,7 +220,7 @@ std::size_t DispatcherOwner::checkpoint() {
         }
     }
 
-    if (should_wake) request_wake(state);
+    if (should_wake) request_dispatcher_wake(state);
 
     std::size_t executed = 0;
     for (auto& callback : snapshot) {
@@ -233,10 +239,6 @@ void DispatcherOwner::shutdown() noexcept {
     if (!state) return;
     {
         std::lock_guard lock{state->mutex};
-        if (state->closing) {
-            state_.reset();
-            return;
-        }
         state->closing = true;
         state->tasks.clear();
         state->timers.clear();
@@ -299,16 +301,16 @@ bool Dispatcher::post(Callback callback) const {
             should_wake = true;
         }
     }
-    if (should_wake) detail::request_wake(state);
+    if (should_wake) detail::request_dispatcher_wake(state);
     return true;
 }
 
 TimerHandle Dispatcher::schedule_after(DispatcherDuration delay, Callback callback) const {
-    return detail::schedule_timer(state_, delay, false, std::move(callback));
+    return detail::schedule_dispatcher_timer(state_, delay, false, std::move(callback));
 }
 
 TimerHandle Dispatcher::schedule_every(DispatcherDuration interval, Callback callback) const {
-    return detail::schedule_timer(state_, interval, true, std::move(callback));
+    return detail::schedule_dispatcher_timer(state_, interval, true, std::move(callback));
 }
 
 bool Dispatcher::cancel(const TimerHandle& handle) const {
