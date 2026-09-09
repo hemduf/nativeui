@@ -331,21 +331,24 @@ void visual_state_goldens() {
     constexpr ui::Size size{180.0f, 64.0f};
     ui::HeadlessRenderer renderer{size, 1.0f};
 
+    // A single root control fills the headless viewport, so both indicators are
+    // vertically centered at y=32 rather than at their 32px intrinsic height.
     ui::State<bool> checked{false};
     ui::UI checkbox{ui::Checkbox{checked, "Visual"}};
     NUI_CHECK(renderer.render(checkbox));
-    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::input));
-    const auto checkbox_normal_border = renderer.pixel(3, 16);
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), ui::colors::input));
+    const auto checkbox_normal_border = renderer.pixel(3, 32);
 
     checked.set(true);
     NUI_CHECK(renderer.render(checkbox));
-    NUI_CHECK(pixel_near(renderer.pixel(17, 20), ui::colors::accent));
+    // Sample checked fill away from both checkmark strokes and rounded edges.
+    NUI_CHECK(pixel_near(renderer.pixel(17, 35), ui::colors::accent));
 
     test::MockPlatform platform;
     checkbox.resize(size);
     checkbox.activate(platform);
     NUI_CHECK(renderer.render(checkbox));
-    const auto checkbox_focused_border = renderer.pixel(3, 16);
+    const auto checkbox_focused_border = renderer.pixel(3, 32);
     NUI_CHECK(!same_pixel(checkbox_normal_border, checkbox_focused_border));
 
     ui::State<bool> checkbox_enabled{false};
@@ -353,23 +356,23 @@ void visual_state_goldens() {
         ui::Enabled{checkbox_enabled, ui::Checkbox{checked, "Disabled"}}
     };
     NUI_CHECK(renderer.render(disabled_checkbox));
-    NUI_CHECK(pixel_near(renderer.pixel(17, 20), ui::colors::input));
+    NUI_CHECK(pixel_near(renderer.pixel(17, 35), ui::colors::input));
 
     ui::State<int> selected{2};
     ui::RadioGroup<int> group{selected};
     ui::UI radio{ui::RadioButton{group, 1, "Visual"}};
     NUI_CHECK(renderer.render(radio));
-    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::input));
-    const auto radio_normal_outer = renderer.pixel(20, 16);
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), ui::colors::input));
+    const auto radio_normal_outer = renderer.pixel(20, 32);
 
     selected.set(1);
     NUI_CHECK(renderer.render(radio));
-    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::accent));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), ui::colors::accent));
 
     radio.resize(size);
     radio.activate(platform);
     NUI_CHECK(renderer.render(radio));
-    const auto radio_focused_outer = renderer.pixel(20, 16);
+    const auto radio_focused_outer = renderer.pixel(20, 32);
     NUI_CHECK(!same_pixel(radio_normal_outer, radio_focused_outer));
 
     ui::State<bool> radio_enabled{false};
@@ -378,7 +381,7 @@ void visual_state_goldens() {
         ui::Enabled{radio_enabled, ui::RadioButton{disabled_group, 1, "Disabled"}}
     };
     NUI_CHECK(renderer.render(disabled_radio));
-    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::textMuted));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), ui::colors::textMuted));
 }
 
 void suite() {
