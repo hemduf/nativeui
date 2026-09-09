@@ -24,51 +24,59 @@ Non-negotiable rules:
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline
+## Current merged baseline
 
-Current `main` before the T051 benchmark integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
+Current `main` before T032 integration is `ce86c86e663ad5f8464224874039312143146300`.
 
-Completed foundations relevant to the release/lifecycle lane:
+Completed foundations relevant to the current widget/release frontier:
 
-- #64 / PR #90: standalone ownership frozen as Decision B — one application-level `PUGL_PROGRAM` world; no hidden singleton/shared-world workaround in the legacy constructor path.
+- #64 / PR #90: standalone ownership frozen as Decision B; one application-level `PUGL_PROGRAM` world and no hidden singleton/shared-world workaround in the legacy constructor path.
 - T042 / PR #93: deterministic headless/embedded/standalone lifecycle stress for every currently supported ownership path.
-- T024: deterministic headless raster/golden foundation.
 - T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
-- T056 / PR #111: deterministic binary resource packaging.
+- T056 / PR #111: deterministic binary-resource packaging.
+- T059 / PR #89: generic inherited visibility/enabled/read-only component state.
+- T030 / PR #94: Button.
+- T031 / PR #95: Checkbox and typed RadioGroup/RadioButton.
+- T051 / PR #116: reproducible Release benchmark harness and regression-budget policy, merged in current `main`.
 
-## T051 performance harness — PR #116
+T052 / issue #52 is an independent release-lane work item and is already in progress. It must not absorb or serialize the widget lane.
 
-T051 is the current lifecycle/release-lane merge candidate. It provides one Release-only deterministic microbenchmark suite and the relative regression policy consumed by T052/T071.
+## T032 Slider / RangeSlider — PR #115
+
+T032 is the current retained-state/widget completion candidate. It is refreshed from current `main` while preserving the merged T051 release infrastructure.
 
 Delivered contract:
 
-- fixed schema/workload versioning, compiler/OS/architecture/build/commit metadata and JSON round-trip support;
-- exact 5 warmup + 30 measured `steady_clock` sampling, median indices 14/15 and p95 index 28;
-- fixed batch counts for layout, deep hit testing, pointer/keyboard dispatch, short/multiline text editing, control/text headless paint and headless instance lifecycle;
-- deterministic `idle_invalidation` correctness gate: 1,000 logical 10 ms checkpoints (10 seconds logical idle) after the settled frame, requiring exactly zero framework invalidations;
-- benchmark-only allocation interception around measured operation scopes; it never changes `NativeUI::Core` or public allocator/lifetime APIs;
-- workload-contract coverage for exact node/action shapes plus known allocating and non-allocating counter scopes;
-- metadata-safe comparison entry point that rejects incompatible baseline/rerun environments before thresholds are evaluated;
-- timing gate: median >15% **and** p95 >20%, reproduced by two complete independent runs;
-- allocation gate: count or bytes/op >10% with two-run confirmation, or any recurring allocation for explicitly zero-allocation scenarios;
-- CI-generated immutable JSON artifacts; T052 selects/records the controlled v0.1 baseline artifact rather than committing universal machine-specific nanosecond constants.
+- one shared `detail::SliderDomain` validates finite `minimum < maximum`, finite non-negative step, quantize-then-clamp user writes and safe render-only external-state fallback;
+- `ui::Slider` supports horizontal/vertical pointer capture, Arrow/Home/End keyboard editing, exact stepped/continuous increments, optional display-only formatting and T059 Disabled/Hidden/Collapsed/ReadOnly semantics;
+- `ui::RangeSlider` / `RangeValue` uses the same numeric domain, selects the nearest thumb from raw pointer position before quantization, keeps the selected thumb stable for the interaction and enforces no crossing;
+- external NaN/Inf/out-of-range state is made finite/clamped only for rendering/hit testing and is never silently rewritten by mount/paint;
+- interaction bookkeeping is completed before synchronous `State::set()` boundaries so observer reentrancy cannot cause duplicate writes or stale `InputContext` access;
+- visual state is per instance and covers Normal/Hover/Pressed/Focused/Disabled/ReadOnly;
+- no platform/native control, process-global widget registry, singleton or `thread_local` state is introduced;
+- dedicated value-domain, completion/reentrancy, headless visual and existing widget integration tests are registered;
+- `examples/features/t032_slider.cpp` provides the required interactive example and deterministic `--self-test`.
 
-The benchmark and baseline contract is documented in `docs/performance-benchmarks.md`. Normal benchmark execution never rewrites baselines.
+Mandatory review found and corrected one Important defect: RangeSlider initially selected a thumb after step quantization, which could manufacture a false tie. The corrected implementation chooses from the raw pointer-domain value and only quantizes the eventual State write. The current production diff has no known Blocking/Important finding.
+
+The branch has been structurally synchronized with current `main`; exact-head normal CI and T042 Lifecycle Stress must be green again after this synchronization/documentation update before merge.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(Doing)
 platform/package:  T053(done) -> T047(done) -> T048(done) ----^
                                        |
                                        +-> T054
                                        +-> T056(done) -> T057
 state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        |
-                                       +-> T032 / T033 / T034 -> T035 / T036
+                                       +-> T032(current) -> T037
+                                       +-> T033(Ready)
+                                       +-> T034(Ready) -> T035 / T036
 ```
 
-When T051 merges cleanly, T052 becomes dependency-unblocked and is the next high-priority lifecycle/release ticket.
+After T032 merges, T037 becomes dependency-unblocked because T030 is already complete. T033 and T034 remain independent Ready widget work.
 
 ## Build / validation
 
@@ -80,24 +88,13 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T051 Release benchmark validation:
+T051's Release benchmark suite remains available independently under `tests/t051` and is consumed by T052; T032 must preserve it unchanged.
 
-```bash
-cmake -S tests/t051 -B build-t051 -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_SOURCE_DIR="$PWD" \
-  -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)"
-cmake --build build-t051 --parallel
-ctest --test-dir build-t051 --output-on-failure
-./build-t051/nativeui_benchmarks --self-test
-./build-t051/nativeui_benchmarks --json t051-results.json
-```
+Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate required gate.
 
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate gate.
+## Next state/widget actions
 
-## Next actions
-
-1. Require exact-head T051 contract, Release benchmark, normal CI and T042 lifecycle-stress workflows to complete green.
-2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Merge PR #116 only after current-main synchronization and exact-head validation are both satisfied.
-4. Mark #51 Done/`status:done`, close it, then move T052 / #52 from Blocked to Ready and continue that release/lifecycle dependency chain.
+1. Require exact-head T032 normal CI and T042 Lifecycle Stress to complete green after current-main synchronization.
+2. Refresh the mandatory `CODE_REVIEW.md` record against that exact head and resolve any Blocking/Important finding regression-first.
+3. Merge PR #115 only when current-main synchronization, exact-head validation and final review are all satisfied; mark #32 Done/closed.
+4. Move T037 to Ready if its other explicit dependencies are complete, then continue the highest-value dependency-unblocked widget work without taking platform/package/lifecycle tickets.
