@@ -33,29 +33,36 @@ void pure_visual_state_contract() {
 }
 
 void deterministic_headless_slider_states() {
-    ui::State<float> value{0.5f};
-    ui::State<bool> read_only{false};
-    ui::UI tree{ui::ReadOnly{
-        read_only,
-        ui::Slider{value}.range(0.0f, 1.0f)
-    }};
     ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
 
-    // Unmounted/headless rendering has no focus/hover/press state: Normal.
-    NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::accent));
+    {
+        ui::State<float> value{0.5f};
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f)};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::accent));
+    }
 
-    read_only.set(true);
-    NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::track));
+    {
+        ui::State<float> value{0.5f};
+        ui::State<bool> read_only{true};
+        ui::UI tree{ui::ReadOnly{
+            read_only,
+            ui::Slider{value}.range(0.0f, 1.0f)
+        }};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::track));
+    }
 
-    ui::State<bool> enabled{false};
-    ui::UI disabled_tree{ui::Enabled{
-        enabled,
-        ui::Slider{value}.range(0.0f, 1.0f)
-    }};
-    NUI_CHECK(renderer.render(disabled_tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::textMuted));
+    {
+        ui::State<float> value{0.5f};
+        ui::State<bool> enabled{false};
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Slider{value}.range(0.0f, 1.0f)
+        }};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::textMuted));
+    }
 }
 
 void deterministic_headless_interaction_states() {
