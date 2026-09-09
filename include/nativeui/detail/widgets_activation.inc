@@ -91,6 +91,23 @@ public:
         }
     }
 
+    // ReadOnly value controls consume mutating input without starting or
+    // retaining capture. If ReadOnly becomes effective while a press/Space
+    // interaction is already armed, terminate that local interaction without
+    // synthesizing PointerCancel (T059 owns cancellation for unavailability).
+    void cancel_pending_mutation(InputContext& context) {
+        const bool had_capture = pointer_armed_;
+        const bool dirty = pointer_armed_ || pointer_inside_ || space_down_ || space_armed_ ||
+                           enter_down_;
+        pointer_armed_ = false;
+        pointer_inside_ = false;
+        space_down_ = false;
+        space_armed_ = false;
+        enter_down_ = false;
+        if (had_capture) context.release_pointer();
+        if (dirty) context.invalidate();
+    }
+
     void focus_changed(bool focused, FocusContext& context) {
         if (focused) return;
         const bool dirty = pointer_armed_ || pointer_inside_ || hovered_ || space_down_ ||

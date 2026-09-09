@@ -18,7 +18,7 @@
     }
 
     [[nodiscard]] Node* focus_group_entry(
-        const void* identity, Node* trap = nullptr) const noexcept {
+        const void* identity, Node* trap = nullptr) const {
         if (!identity) return nullptr;
 
         Node* first = nullptr;
@@ -71,6 +71,9 @@
         const void* identity = focus_group_identity(current);
         if (!current || !identity || focusables_.empty()) return false;
 
+        // ReadOnly keeps the roving focus behavior but suppresses the value
+        // write that normally accompanies radio arrow navigation.
+        const bool select_value = !current->component->effective_read_only();
         auto* trap = trapping_scope_for(current);
         const auto count = focusables_.size();
         const auto current_it = std::find(focusables_.begin(), focusables_.end(), current);
@@ -91,7 +94,7 @@
             // State observers may synchronously mutate UI state. Availability
             // reconciliation remains deferred until dispatch completion, and no
             // candidate/tree node is touched after this call.
-            participant->focus_group_select();
+            if (select_value) participant->focus_group_select();
             return true;
         }
         return false;

@@ -47,29 +47,55 @@ void checkbox_activation_contract() {
 void checkbox_availability_contract() {
     test::MockPlatform platform;
 
-    ui::State<bool> checked{false};
-    ui::State<bool> enabled{false};
-    ui::UI disabled_tree{
-        ui::Enabled{enabled, ui::Checkbox{checked, "Disabled"}}
-    };
-    disabled_tree.resize({180.0f, 64.0f});
-    disabled_tree.activate(platform);
-    NUI_CHECK(disabled_tree.dispatch(
-                  test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
-              ui::EventResult::Ignored);
-    NUI_CHECK(!checked.get());
+    {
+        ui::State<bool> checked{false};
+        ui::State<bool> enabled{false};
+        ui::UI tree{ui::Enabled{enabled, ui::Checkbox{checked, "Disabled"}}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Ignored);
+        NUI_CHECK(!checked.get());
+    }
 
-    ui::State<bool> read_only{true};
-    ui::UI read_only_tree{
-        ui::ReadOnly{read_only, ui::Checkbox{checked, "Read only"}}
-    };
-    read_only_tree.resize({180.0f, 64.0f});
-    read_only_tree.activate(platform);
-    read_only_tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
-    read_only_tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
-    read_only_tree.dispatch(test::key(ui::Key::Space), platform);
-    read_only_tree.dispatch(key_up(ui::Key::Space), platform);
-    NUI_CHECK(!checked.get());
+    {
+        ui::State<bool> checked{false};
+        ui::State<bool> read_only{true};
+        int writes = 0;
+        auto observer = checked.observe([&](const bool&) { ++writes; });
+        ui::UI tree{ui::ReadOnly{read_only, ui::Checkbox{checked, "Read only"}}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.dispatch(key_up(ui::Key::Space), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(!checked.get());
+        NUI_CHECK(writes == 0);
+    }
+
+    // T059 owns the cancellation caused by becoming unavailable. T031 must not
+    // leave a second capture/cancel behind.
+    {
+        ui::State<bool> checked{false};
+        ui::State<bool> enabled{true};
+        ui::UI tree{ui::Enabled{enabled, ui::Checkbox{checked, "Transition"}}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        enabled.set(false);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+        NUI_CHECK(!checked.get());
+    }
 }
 
 enum class Choice { A, B, C, Missing };
@@ -134,19 +160,15 @@ void radio_navigation_and_tab_entry() {
     tree.resize({220.0f, 220.0f});
     tree.activate(platform);
 
-    // Tab enters at the selected enabled option. Right then skips the disabled
-    // middle option and selects/focuses Three.
     tree.dispatch(test::key(ui::Key::Tab), platform);
     tree.dispatch(test::key(ui::Key::Right), platform);
     NUI_CHECK(selected.get() == 3);
 
-    // Wrap within the group.
     tree.dispatch(test::key(ui::Key::Right), platform);
     NUI_CHECK(selected.get() == 1);
     tree.dispatch(test::key(ui::Key::Left), platform);
     NUI_CHECK(selected.get() == 3);
 
-    // A normal Tab from inside the group leaves the group in one step.
     tree.dispatch(test::key(ui::Key::Tab), platform);
     tree.dispatch(test::key(ui::Key::Space), platform);
     tree.dispatch(key_up(ui::Key::Space), platform);
@@ -166,8 +188,52 @@ void radio_no_match_tab_fallback() {
     tree.activate(platform);
 
     tree.dispatch(test::key(ui::Key::Tab), platform);
+    NUI_CHECK(selected.get() == 99);
     tree.dispatch(test::key(ui::Key::Right), platform);
     NUI_CHECK(selected.get() == 2);
+}
+
+void radio_read_only_contract() {
+    test::MockPlatform platform;
+    ui::State<int> selected{1};
+    ui::State<bool> read_only{true};
+    int writes = 0;
+    auto observer = selected.observe([&](const int&) { ++writes; });
+    ui::RadioGroup<int> group{selected};
+
+    ui::UI tree{ui::ReadOnly{
+        read_only,
+        ui::Column{
+            ui::RadioButton{group, 1, "One"},
+            ui::RadioButton{group, 2, "Two"},
+            ui::RadioButton{group, 3, "Three"}
+        }
+    }};
+    tree.resize({220.0f, 140.0f});
+    tree.activate(platform);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
+    NUI_CHECK(selected.get() == 1);
+    NUI_CHECK(writes == 0);
+
+    tree.dispatch(test::key(ui::Key::Right), platform);
+    NUI_CHECK(selected.get() == 1);
+    NUI_CHECK(writes == 0);
+
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    tree.dispatch(key_up(ui::Key::Space), platform);
+    NUI_CHECK(selected.get() == 1);
+    NUI_CHECK(writes == 0);
+
+    read_only.set(false);
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    tree.dispatch(key_up(ui::Key::Space), platform);
+    NUI_CHECK(selected.get() == 2);
+    NUI_CHECK(writes == 1);
 }
 
 void radio_group_isolation_and_remount() {
@@ -186,13 +252,11 @@ void radio_group_isolation_and_remount() {
         }};
         tree.resize({220.0f, 180.0f});
         tree.activate(platform);
-        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 60.0f), platform);
-        tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 60.0f), platform);
+        tree.dispatch(test::key(ui::Key::Right), platform);
         NUI_CHECK(left_selected.get() == 2);
         NUI_CHECK(right_selected.get() == 1);
     }
 
-    // Reordering/remounting does not rewrite or transfer selection by address.
     {
         ui::UI tree{ui::Column{
             ui::RadioButton{left, 2, "Second"},
@@ -204,13 +268,55 @@ void radio_group_isolation_and_remount() {
     }
 }
 
+void observer_reentrancy_is_single_activation() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<bool> checked{false};
+        int notifications = 0;
+        auto observer = checked.observe([&](const bool& value) {
+            ++notifications;
+            if (value) checked.set(false);
+        });
+        ui::UI tree{ui::Checkbox{checked, "Reentrant"}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
+        NUI_CHECK(!checked.get());
+        NUI_CHECK(notifications == 2);
+    }
+
+    {
+        ui::State<int> selected{1};
+        int notifications = 0;
+        auto observer = selected.observe([&](const int& value) {
+            ++notifications;
+            if (value == 2) selected.set(3);
+        });
+        ui::RadioGroup<int> group{selected};
+        ui::UI tree{ui::Column{
+            ui::RadioButton{group, 1, "One"},
+            ui::RadioButton{group, 2, "Two"},
+            ui::RadioButton{group, 3, "Three"}
+        }};
+        tree.resize({180.0f, 120.0f});
+        tree.activate(platform);
+        tree.dispatch(test::key(ui::Key::Right), platform);
+        NUI_CHECK(selected.get() == 3);
+        NUI_CHECK(notifications == 2);
+    }
+}
+
 void suite() {
     checkbox_activation_contract();
     checkbox_availability_contract();
     radio_typed_selection_contract();
     radio_navigation_and_tab_entry();
     radio_no_match_tab_fallback();
+    radio_read_only_contract();
     radio_group_isolation_and_remount();
+    observer_reentrancy_is_single_activation();
 }
 
 } // namespace

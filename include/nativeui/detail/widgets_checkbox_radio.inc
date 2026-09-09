@@ -16,6 +16,12 @@ namespace ui {
 
 namespace detail {
 
+[[nodiscard]] inline bool read_only_value_input(const InputEvent& event) noexcept {
+    if (event.type == InputType::PointerDown || event.type == InputType::PointerUp) return true;
+    return (event.type == InputType::KeyDown || event.type == InputType::KeyUp) &&
+           event.key == Key::Space;
+}
+
 class CheckboxComponent final : public Component {
 public:
     CheckboxComponent(State<bool>& state, std::string label)
@@ -45,10 +51,14 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const bool can_mutate = !effective_read_only();
+        if (effective_read_only() && read_only_value_input(event)) {
+            interaction_.cancel_pending_mutation(context);
+            return EventResult::Handled;
+        }
+
         auto* state = &state_;
         const auto outcome = interaction_.input(event, context, false);
-        if (outcome.activate && can_mutate) state->set(!state->get());
+        if (outcome.activate) state->set(!state->get());
         return outcome.result;
     }
 
@@ -65,7 +75,7 @@ public:
 
         Color fill = checked ? colors::accent : colors::input;
         Color border = context.focused() ? colors::borderFocus : colors::border;
-        Color text = disabled ? colors::textMuted : colors::text;
+        const Color text = disabled ? colors::textMuted : colors::text;
         if (disabled) fill = colors::input;
         if (interaction_.pressed() && !disabled) border = colors::accent;
 
@@ -140,7 +150,7 @@ public:
         return group_.get();
     }
 
-    [[nodiscard]] bool focus_group_selected() const noexcept override {
+    [[nodiscard]] bool focus_group_selected() const override {
         return is_selected_ && is_selected_();
     }
 
@@ -151,10 +161,14 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const bool can_mutate = !effective_read_only();
+        if (effective_read_only() && read_only_value_input(event)) {
+            interaction_.cancel_pending_mutation(context);
+            return EventResult::Handled;
+        }
+
         auto select = select_;
         const auto outcome = interaction_.input(event, context, false);
-        if (outcome.activate && can_mutate && select) select();
+        if (outcome.activate && select) select();
         return outcome.result;
     }
 
@@ -166,7 +180,7 @@ public:
 
         Color outer = context.focused() ? colors::borderFocus : colors::border;
         const Color inner = colors::input;
-        Color text = disabled ? colors::textMuted : colors::text;
+        const Color text = disabled ? colors::textMuted : colors::text;
         if (interaction_.pressed() && !disabled) outer = colors::accent;
         if (disabled) outer = colors::border;
 
