@@ -34,13 +34,34 @@ endfunction()
 
 function(_t047_write_consumer source_dir platform)
   file(MAKE_DIRECTORY "${source_dir}")
-  file(WRITE "${source_dir}/main.cpp" [=[
+
+  if(platform)
+    # A volatile pointer-to-member initializer forces the final executable to
+    # resolve a non-inline platform symbol from the attached implementation,
+    # rather than merely compiling an otherwise dead static archive.
+    file(WRITE "${source_dir}/main.cpp" [=[
+#include <nativeui/headless.hpp>
+#include <nativeui/window.hpp>
+
+using PollMember = bool (ui::EmbeddedView::*)();
+volatile PollMember t047_platform_link_anchor = &ui::EmbeddedView::poll;
+
+int main() {
+    ui::HeadlessRenderer renderer({4.0f, 3.0f});
+    const bool core_ok = renderer.pixel_width() == 4 && renderer.pixel_height() == 3;
+    const bool platform_linked = t047_platform_link_anchor != nullptr;
+    return (core_ok && platform_linked) ? 0 : 1;
+}
+]=])
+  else()
+    file(WRITE "${source_dir}/main.cpp" [=[
 #include <nativeui/headless.hpp>
 int main() {
     ui::HeadlessRenderer renderer({4.0f, 3.0f});
     return (renderer.pixel_width() == 4 && renderer.pixel_height() == 3) ? 0 : 1;
 }
 ]=])
+  endif()
 
   set(_attach "")
   if(platform)
