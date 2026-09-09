@@ -1,0 +1,58 @@
+name: T051 Release Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/t051/**'
+      - 'tests/t051_benchmarks.cpp'
+      - 'tests/benchmarks/**'
+      - '.github/workflows/t051-benchmarks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t051-benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-benchmarks:
+    name: Release benchmark suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev
+
+      - name: Configure benchmark project
+        run: >-
+          cmake -S tests/t051 -B build-t051 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Build benchmark suite
+        run: cmake --build build-t051 --parallel 2
+
+      - name: Harness self-test
+        run: ./build-t051/nativeui_benchmarks --self-test
+
+      - name: Run full fixed protocol
+        run: ./build-t051/nativeui_benchmarks --json t051-results.json
+
+      - name: Validate selected filter
+        run: ./build-t051/nativeui_benchmarks --filter text_edit --json t051-text-results.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t051-release-results
+          path: |
+            t051-results.json
+            t051-text-results.json
+          if-no-files-found: error
