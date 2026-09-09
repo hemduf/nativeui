@@ -47,6 +47,7 @@ foreach(_mode IN ITEMS
     multi-window
     explicit-only
     request-quit
+    callback-quit
     poll-contract
     invalid-timeout-nan
     invalid-timeout-inf
@@ -69,6 +70,7 @@ set_tests_properties(
   nativeui_t060_multi_window
   nativeui_t060_explicit_only
   nativeui_t060_request_quit
+  nativeui_t060_callback_quit
   nativeui_t060_poll_contract
   nativeui_t060_invalid_timeout_nan
   nativeui_t060_invalid_timeout_inf
