@@ -153,8 +153,21 @@
     /// - PointerMove/PointerWheel route to the capture owner first;
     /// - PointerUp routes to the capture owner then releases capture automatically;
     /// - PointerCancel is delivered exactly once to the capture owner and clears capture;
+    /// - external drop offers/data hit-test a mounted tree even without window focus;
     /// - ignored target events bubble through ancestors until handled or root.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // An external drag source (for example Finder) owns keyboard focus.
+        // Drop targeting must remain available without activating this tree
+        // or restoring keyboard focus/text input as a side effect.
+        if (event.type == InputType::DropOffer || event.type == InputType::DropData) {
+            if (!mounted_) return EventResult::Ignored;
+            ensure_layout();
+            if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
+                return route_from(*target, event, platform);
+            }
+            return EventResult::Ignored;
+        }
+
         if (!active_) return EventResult::Ignored;
         sync_focus_structure(platform);
 
@@ -223,13 +236,6 @@
             return EventResult::Ignored;
         }
 
-        if (event.type == InputType::DropOffer || event.type == InputType::DropData) {
-            if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
-                return route_from(*target, event, platform);
-            }
-            return EventResult::Ignored;
-        }
-
         if ((event.type == InputType::KeyDown || event.type == InputType::KeyUp ||
              event.type == InputType::TextInput || event.type == InputType::Tick) &&
             focus_active_ && !focusables_.empty()) {
@@ -266,4 +272,3 @@
 
         paint_dirty_.clear();
     }
-
