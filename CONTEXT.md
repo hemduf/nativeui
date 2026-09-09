@@ -26,6 +26,8 @@ The merged baseline is complete through T030 plus T023, #62, T053, #64 Decision 
 - T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract and is owned by the separate state/widget lane.
 - T047 / PR #92 merged as `df569e874539aaafb8600960938465f733a46f19`: the installed/build-tree v1 low-level package exports only `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`, preserves T053 consumer-scoped macOS bridges, carries pinned Skia/Pugl implementation assets privately, validates relocation and missing-pinned-dependency failure, and does not export/document `NativeUI::NativeUI` as a complete package target.
 - #97 / PR #98 merged as `864d2f35be1e7ae2976c14d2fac96ea4569f730f`: macOS Pugl MIN/MAX warning noise is removed from current main without changing the package/runtime contract.
+- #105 / PR #106 merged as `b1dd7393b95adc4667224cd3da4cfb15dfc3f746`: constructor-time platform callbacks are owned by each private per-instance implementation, preventing callbacks from observing an unassigned public-wrapper `impl_`.
+- #103 / PR #104 merged as `b6515836cd8bf571c66f5297a76fdb80d9924f83`: Linux/X11 Skia initialization uses the native GL interface under the Pugl-owned GLX context and the CI merge gate now includes a real Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
 
 ## T048 external relocated consumers — PR #99
 
@@ -40,17 +42,18 @@ Delivered fixtures and gates:
 - static source-contract checks reject repository-private includes/targets/override variables;
 - every native fixture links its real attached platform symbols and runs deterministic relocated-Core `--self-test` on Linux/Windows/macOS;
 - macOS additionally executes the real standalone/embedded `--native-smoke` lifecycle and the T053/T047 two-consumer Objective-C class/metaclass/runtime coexistence proof;
-- hosted Windows lacks a reliable interactive desktop and Linux/Xvfb native OpenGL execution proved nondeterministic, so those lanes retain deterministic package/runtime/link qualification rather than treating display availability as package correctness.
+- hosted Windows lacks a reliable interactive desktop and Linux/Xvfb native external-window execution is not used as package acceptance, while the permanent root Linux renderer/lifecycle smoke still exercises the supported X11/GLX path.
 
 TDD/review history:
 
 - RED `af34ed1c65409e054ba6c976d82cbdeff7234347` registered the source contract before fixtures existed and failed as intended;
 - GREEN/correction cycles added relocation, all three consumer shapes, platform-link validation, graphical-session separation and stronger portable UI rendering self-tests;
-- final code/review correction head `9904e2fe8f252a35e060bda128a82d18b9f5819a` passed CI #384 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the T048 source contract, relocated consumers and macOS native/runtime-isolation gates;
+- final pre-refresh code/review correction head `9904e2fe8f252a35e060bda128a82d18b9f5819a` passed CI #384 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the T048 source contract, relocated consumers and macOS native/runtime-isolation gates;
+- completion-doc head `841318d92c389c60ec48982cb0e7d002d56bccdf` passed CI #394 across the same required matrix;
 - CODE_REVIEW.md review is clean after correcting the earlier weak self-test and obsolete Linux diagnostic residue; no runtime globals, private package paths or Objective-C naming shortcuts were introduced;
-- current main at the completion-doc refresh is `864d2f35be1e7ae2976c14d2fac96ea4569f730f`, which is already the PR base, so no source rebase is required before this docs-only final candidate.
+- before merge, PR #99 was refreshed onto current main `b6515836cd8bf571c66f5297a76fdb80d9924f83`, preserving #105 constructor-lifetime fixes, #103 Linux renderer integration and the permanent Linux X11 renderer smoke while retaining all T048 package gates.
 
-The completion-doc commit changes `CONTEXT.md`/`ROADMAP.md`; its exact head must pass the full required matrix before PR #99 is marked ready and merged.
+The refreshed exact head must pass the full required matrix before PR #99 is marked ready and merged.
 
 ## Current DAG frontier
 
@@ -90,12 +93,35 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-T048 additionally runs the source-contract script, relocated install-tree Core/standalone/embedded consumers, platform attachment/link tests, macOS native lifecycle and macOS two-consumer Objective-C namespace/runtime coexistence.
+T048 additionally runs the source-contract script, relocated install-tree Core/standalone/embedded consumers, platform attachment/link tests, macOS native lifecycle and macOS two-consumer Objective-C namespace/runtime coexistence. Current Linux CI also retains the #103 Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
 
 ## Next platform/package action
 
-1. Require the completion-doc exact T048 head CI green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
-2. Refresh current `main` immediately before merge; if it advanced, reconcile without dropping concurrent work and revalidate the new exact head.
+1. Require the refreshed exact T048 head CI green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
+2. Refresh current `main` immediately before merge; if it advances again, reconcile without dropping concurrent work and revalidate the new exact head.
 3. Mark PR #99 ready and merge only with no blocking CODE_REVIEW.md finding.
 4. Close/update issue #48 as Done.
 5. Re-read T054/T056 priorities/dependencies and continue the highest-unblock-value Ready platform/package ticket; do not enter the lifecycle or state/widget lanes.
+
+## Lifecycle/stress lane update — #105
+
+T042's deterministic lifecycle matrix exposed a constructor-time platform callback lifetime defect while exercising a focusable embedded view on macOS. Issue #105 / PR #106 fixes the defect without changing the public window/view API: each private `StandaloneWindow::Impl` and `EmbeddedView::Impl` is now its own per-instance `PlatformServices` bridge, so synchronous native callbacks during `ViewCore` construction never re-enter a public wrapper whose `impl_` has not yet been assigned.
+
+- Exact PR #106 code head `bf8e2ff055b4fe5ed2c2bd415bb3818f925f366b` passed CI `34344755454` on Linux X11, Windows/MSVC, macOS including two-consumer Objective-C isolation and clipboard/multi-instance lifecycle smoke, and Linux ASan+UBSan.
+- The stacked T042 validation head `97c2c19f09c60c537d538dc887660a0049fa35db` proves the original macOS `embedded_sequential_100` crash is GREEN; Linux X11 and Linux ASan+UBSan are also green.
+- Windows reaches the standalone stress path and exposes a separate documented `puglShow(PUGL_SHOW_RAISE)` non-fatal status handling defect, tracked independently as #107. That defect is not folded into #105.
+- #64 Decision B is unchanged: there is still no hidden application singleton, shared PROGRAM workaround, or mutable global/`thread_local` ownership state.
+
+After #105 and the independent #107 status fix are merged, refresh T042/PR #93 from current `main`, rerun the exact-head lifecycle matrix on macOS/Windows/Linux X11 plus Linux ASan+UBSan, complete the mandatory review, then merge T042 only if all supported-path acceptance gates are green.
+
+## Lifecycle/stress lane update — #103
+
+T042 also exposed a production Linux/X11 renderer crash before stress-specific lifecycle behavior: the first native exposure under Xvfb/Mesa llvmpipe entered Skia's assembled GL extension discovery and crashed in `GrGLExtensions::init`. Issue #103 / PR #104 keeps the fix in the platform renderer rather than weakening T042.
+
+- Linux now creates Skia's desktop-native GL interface from the Pugl-owned current GLX context. There is deliberately no Linux fallback to the assembled resolver that produced the crash; an unavailable interface returns through the existing controlled renderer-initialization failure path.
+- macOS and Windows retain the existing assembled Pugl-proc interface path.
+- CI `34343547392` passed the #103 code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. The Linux lane now includes a permanent Xvfb/Mesa llvmpipe real renderer/lifecycle smoke and passes it.
+- A stacked T042 candidate reaches and completes Linux native lifecycle stress after this fix, confirming the stress harness is no longer stopped by first-exposure renderer initialization.
+- No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
+
+After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
