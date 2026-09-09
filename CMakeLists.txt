@@ -205,6 +205,7 @@ install(FILES
   "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
+  cmake/NativeUIApplication.cmake
   cmake/NativeUIBinaryData.cmake
   cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
@@ -269,6 +270,10 @@ configure_file(cmake/NativeUIConsumerPlatform.cmake
 )
 configure_file(cmake/NativeUIAttachPlatform.cmake
   "${_nativeui_build_package_dir}/NativeUIAttachPlatform.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIApplication.cmake
+  "${_nativeui_build_package_dir}/NativeUIApplication.cmake"
   COPYONLY
 )
 configure_file(cmake/NativeUIBinaryData.cmake
@@ -356,6 +361,24 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t047_attach_contract_tests.cmake"
   )
+  add_test(
+    NAME nativeui_t054_application_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_application_contract_tests.cmake"
+  )
+  add_test(
+    NAME nativeui_t054_argument_boundary_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_argument_boundary_tests.cmake"
+  )
+  add_test(
+    NAME nativeui_t054_package_source_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_package_source_contract_tests.cmake"
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
@@ -364,6 +387,12 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t047_attach_contract_tests
     PROPERTIES LABELS "build;cmake;t047" TIMEOUT 60
+  )
+  set_tests_properties(
+    nativeui_t054_application_contract_tests
+    nativeui_t054_argument_boundary_tests
+    nativeui_t054_package_source_contract_tests
+    PROPERTIES LABELS "build;cmake;t054" TIMEOUT 60
   )
 
   function(nativeui_add_core_test name source)
