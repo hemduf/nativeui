@@ -25,7 +25,7 @@ jobs:
         with:
           ref: ${{ env.CANDIDATE_SHA }}
 
-      - name: Validate release source contract
+      - name: Validate release source and checksum contracts
         run: python3 tests/t052_release_gate_contract.py
 
       - name: Record exact candidate evidence
@@ -70,7 +70,11 @@ jobs:
 
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
+        shell: bash
         run: |
+          # Hosted images include unrelated third-party apt sources. A stale
+          # Chrome index must not turn a NativeUI clean-bootstrap gate red.
+          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
@@ -103,3 +107,108 @@ jobs:
           grep -F 'GITHUB_REPOSITORY hemduf/pugl' cmake/Dependencies.cmake
           grep -F 'URL_HASH "${_skia_hash}"' cmake/Dependencies.cmake
           grep -F 'NATIVEUI_SKIA_TAG "chrome/m149"' cmake/Dependencies.cmake
+
+  benchmark:
+    name: T052 exact-head T051 benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev
+
+      - name: Configure exact-head T051 benchmark project
+        run: >-
+          cmake -S tests/t051 -B build-t052-bench -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ env.CANDIDATE_SHA }}
+
+      - name: Build and validate benchmark contract
+        run: |
+          cmake --build build-t052-bench --parallel 2
+          ctest --test-dir build-t052-bench --output-on-failure
+          ./build-t052-bench/nativeui_benchmarks --self-test
+
+      - name: Capture candidate baseline and two independent repeats
+        run: |
+          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-a.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-b.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-c.json
+
+      - name: Validate exact SHA, idle hard gate and repeat stability
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          candidate = os.environ['CANDIDATE_SHA']
+          documents = [
+              json.loads(Path(name).read_text())['results']
+              for name in ('t052-baseline-a.json', 't052-baseline-b.json', 't052-baseline-c.json')
+          ]
+          baseline, repeat_b, repeat_c = documents
+          if not (len(baseline) == len(repeat_b) == len(repeat_c)):
+              raise SystemExit('T052 benchmark repeat result-count mismatch')
+
+          compatible = (
+              'schema_version', 'workload_version', 'benchmark_name', 'os',
+              'architecture', 'compiler_id', 'compiler_major', 'build_type',
+              'operations_per_sample'
+          )
+
+          def timing_regression(base, candidate_run):
+              return (
+                  candidate_run['median_ns_per_op'] > base['median_ns_per_op'] * 1.15
+                  and candidate_run['p95_ns_per_op'] > base['p95_ns_per_op'] * 1.20
+              )
+
+          def allocation_regression(base, candidate_run):
+              base_count = base['allocations_per_op']
+              base_bytes = base['bytes_allocated_per_op']
+              cand_count = candidate_run['allocations_per_op']
+              cand_bytes = candidate_run['bytes_allocated_per_op']
+              count_bad = cand_count > 0 if base_count == 0 else cand_count > base_count * 1.10
+              bytes_bad = cand_bytes > 0 if base_bytes == 0 else cand_bytes > base_bytes * 1.10
+              return count_bad or bytes_bad
+
+          for a, b, c in zip(baseline, repeat_b, repeat_c):
+              for other in (b, c):
+                  for field in compatible:
+                      if a[field] != other[field]:
+                          raise SystemExit(f'T052 metadata mismatch for {a["benchmark_name"]}: {field}')
+                  if other['commit_sha'] != candidate or a['commit_sha'] != candidate:
+                      raise SystemExit(f'T052 benchmark SHA mismatch for {a["benchmark_name"]}')
+
+              name = a['benchmark_name']
+              if name == 'idle_invalidation':
+                  for run in (a, b, c):
+                      if run['median_ns_per_op'] != 0 or run['p95_ns_per_op'] != 0:
+                          raise SystemExit('T052 idle_invalidation timing hard gate is not zero')
+                      if run['allocations_per_op'] != 0 or run['bytes_allocated_per_op'] != 0:
+                          raise SystemExit('T052 idle_invalidation allocation hard gate is not zero')
+                  continue
+
+              if timing_regression(a, b) and timing_regression(a, c):
+                  raise SystemExit(f'T052 same-runner timing instability exceeds T051 budget twice: {name}')
+              if allocation_regression(a, b) and allocation_regression(a, c):
+                  raise SystemExit(f'T052 same-runner allocation instability exceeds T051 budget twice: {name}')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t052-v0.1-benchmark-baseline
+          path: |
+            t052-baseline-a.json
+            t052-baseline-b.json
+            t052-baseline-c.json
+          if-no-files-found: error
