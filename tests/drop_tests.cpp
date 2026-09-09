@@ -144,6 +144,26 @@ void suite() {
     NUI_CHECK(tree.dispatch(unknown, platform) == ui::EventResult::Handled);
     NUI_CHECK(platform.drop_reject_count == 2);
 
+    // Background drops still obey inherited enabled/visibility state, and
+    // changing that state while inactive takes effect without reactivation.
+    ui::State<bool> enabled{false};
+    ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Visible};
+    auto gated_state = std::make_shared<DropState>();
+    ui::UI gated{ui::Enabled{enabled, ui::Visibility{visibility, DropTarget{gated_state}}}};
+    gated.resize({300.0f, 160.0f});
+    gated.activate(platform);
+    gated.deactivate(platform);
+    NUI_CHECK(gated.dispatch(offer, platform) == ui::EventResult::Ignored);
+    enabled.set(true);
+    NUI_CHECK(gated.dispatch(offer, platform) == ui::EventResult::Handled);
+    visibility.set(ui::VisibilityMode::Hidden);
+    NUI_CHECK(gated.dispatch(data, platform) == ui::EventResult::Ignored);
+    visibility.set(ui::VisibilityMode::Collapsed);
+    NUI_CHECK(gated.dispatch(offer, platform) == ui::EventResult::Ignored);
+    visibility.set(ui::VisibilityMode::Visible);
+    NUI_CHECK(gated.dispatch(data, platform) == ui::EventResult::Handled);
+    NUI_CHECK(gated_state->offers == 1 && gated_state->data_events == 1);
+
     // Mount lifetime, unlike keyboard activation, is a drop-delivery gate.
     auto mounted_state = std::make_shared<DropState>();
     ui::Tree mounted_tree{ui::compile(ui::make_spec(DropTarget{mounted_state}))};

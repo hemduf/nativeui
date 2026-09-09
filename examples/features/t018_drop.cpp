@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
         if (!std::filesystem::create_directory(test_dir)) {
             return example::fail("could not create isolated drop fixture");
         }
-        const auto test_path = test_dir / std::filesystem::path{u8"hello café.txt"};
+        const auto test_path = test_dir / std::filesystem::path{u8"hello caf\u00e9.txt"};
         struct Cleanup {
             std::filesystem::path file;
             ~Cleanup() {
@@ -250,10 +250,29 @@ int main(int argc, char** argv) {
         data.drop_data.assign(uri.begin(), uri.end());
         tree->dispatch(data, platform);
         if (model.payload != contents) return example::fail("dropped text file contents were not displayed");
-        if (model.status != "Loaded hello café.txt") return example::fail("UTF-8 filename was not displayed");
+        if (model.status != "Loaded hello caf\xC3\xA9.txt") return example::fail("UTF-8 filename was not displayed");
+
+        std::filesystem::resize_file(test_path, kMaxDisplayedFileBytes + 1);
+        tree->dispatch(data, platform);
+        if (model.payload.size() != kMaxDisplayedFileBytes ||
+            !model.status.ends_with("(first 64 KiB)")) {
+            return example::fail("file preview read limit was not enforced");
+        }
+        std::filesystem::remove(test_path);
+        tree->dispatch(data, platform);
+        if (!model.payload.empty() || model.status != "Could not read dropped file") {
+            return example::fail("unreadable file retained stale preview contents");
+        }
+        std::filesystem::create_directory(test_path);
+        tree->dispatch(data, platform);
+        if (model.status != "Could not read dropped file") {
+            return example::fail("directory was treated as a text file");
+        }
         return 0;
     }
 
     auto tree = make_ui();
-    return example::run_window(*tree, "NativeUI T018 - Drag and Drop", {600.0f, 360.0f});
+    return example::run_window(*tree,
+        trace_drops ? "NativeUI T018 - Drop diagnostic" : "NativeUI T018 - Drag and Drop",
+        {600.0f, 360.0f});
 }

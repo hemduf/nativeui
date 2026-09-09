@@ -23,6 +23,7 @@ public:
         subscription_ = state_.observe(
             [this, invalidate = std::move(invalidate)](const std::string& value) {
                 if (value == model_.text()) return;
+                pending_ime_commit_.clear();
                 model_.set_text(value, true, true);
                 rebuild_lines();
                 scroll_x_ = 0.0f;
@@ -40,6 +41,8 @@ public:
             if (!was_focused) focus_snapshot_ = model_.text();
             ensure_cursor_visible(ctx);
         } else {
+            pending_ime_commit_.clear();
+            model_.cancel_composition();
             drag_select_ = false;
             ctx.set_text_input(false);
         }
@@ -47,8 +50,15 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& ctx) override {
+        const bool read_only = effective_read_only();
+
         if (event.type == InputType::Tick) {
             if (!focused_) return EventResult::Ignored;
+            if (read_only && model_.composition_active()) {
+                pending_ime_commit_.clear();
+                model_.cancel_composition();
+                ensure_cursor_visible(ctx);
+            }
             caret_visible_ = !caret_visible_;
             ctx.invalidate();
             return EventResult::Handled;
@@ -56,13 +66,83 @@ public:
 
         caret_visible_ = true;
 
+        if (event.type == InputType::Composition) {
+            if (read_only) {
+                pending_ime_commit_.clear();
+                model_.cancel_composition();
+                ensure_cursor_visible(ctx);
+                ctx.invalidate();
+                return EventResult::Handled;
+            }
+
+            switch (event.composition.type) {
+                case CompositionType::Start:
+                    pending_ime_commit_.clear();
+                    model_.begin_composition();
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+                case CompositionType::Update:
+                    pending_ime_commit_.clear();
+                    model_.update_composition(
+                        event.composition.text,
+                        event.composition.cursor_byte,
+                        event.composition.selection_bytes);
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+                case CompositionType::Commit:
+                    if (model_.commit_composition(event.composition.text)) {
+                        pending_ime_commit_ = event.composition.text;
+                        commit(ctx);
+                    } else {
+                        pending_ime_commit_.clear();
+                        ensure_cursor_visible(ctx);
+                        ctx.invalidate();
+                    }
+                    return EventResult::Handled;
+                case CompositionType::Cancel:
+                    pending_ime_commit_.clear();
+                    model_.cancel_composition();
+                    ensure_cursor_visible(ctx);
+                    ctx.invalidate();
+                    return EventResult::Handled;
+            }
+        }
+
         if (event.type == InputType::TextInput) {
-            const auto incoming = normalize_multiline(event.text);
-            if (!incoming.empty() && model_.insert(incoming)) commit(ctx);
-            return event.text.empty() ? EventResult::Ignored : EventResult::Handled;
+            if (event.text.empty()) return EventResult::Ignored;
+            if (read_only) {
+                pending_ime_commit_.clear();
+                return EventResult::Handled;
+            }
+            const bool duplicate_commit =
+                !pending_ime_commit_.empty() && event.text == pending_ime_commit_;
+            pending_ime_commit_.clear();
+            if (!duplicate_commit) {
+                const auto incoming = normalize_multiline(event.text);
+                if (!incoming.empty() && model_.insert(incoming)) commit(ctx);
+            }
+            return EventResult::Handled;
+        }
+
+        if (read_only && model_.composition_active()) {
+            pending_ime_commit_.clear();
+            model_.cancel_composition();
+            ensure_cursor_visible(ctx);
+            ctx.invalidate();
+        }
+
+        // The platform IME owns navigation/editing keys while marked text is
+        // active. Native callbacks will subsequently update, commit or cancel
+        // composition; the retained editor must not run a second command path.
+        if (event.type == InputType::KeyDown && model_.composition_active()) {
+            return EventResult::Handled;
         }
 
         if (event.type == InputType::PointerDown) {
+            pending_ime_commit_.clear();
+            model_.cancel_composition();
             const auto clicked = index_from_point(ctx, event.position);
             if (event.clicks >= 3) {
                 model_.select_all();
@@ -101,6 +181,7 @@ public:
         }
 
         if (event.type == InputType::Command) {
+            pending_ime_commit_.clear();
             switch (event.command) {
                 case Command::SelectAll:
                     model_.select_all();
@@ -111,19 +192,20 @@ public:
                     copy_selection(ctx);
                     return EventResult::Handled;
                 case Command::Cut:
+                    if (read_only) return EventResult::Handled;
                     if (model_.has_selection()) {
                         copy_selection(ctx);
                         if (model_.erase_selection()) commit(ctx);
                     }
                     return EventResult::Handled;
                 case Command::Paste:
-                    ctx.request_clipboard_text();
+                    if (!read_only) ctx.request_clipboard_text();
                     return EventResult::Handled;
                 case Command::Undo:
-                    if (model_.undo()) commit(ctx);
+                    if (!read_only && model_.undo()) commit(ctx);
                     return EventResult::Handled;
                 case Command::Redo:
-                    if (model_.redo()) commit(ctx);
+                    if (!read_only && model_.redo()) commit(ctx);
                     return EventResult::Handled;
                 case Command::None:
                     return EventResult::Ignored;
@@ -131,6 +213,7 @@ public:
         }
 
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
+        pending_ime_commit_.clear();
 
         switch (event.key) {
             case Key::Left:
@@ -166,15 +249,16 @@ public:
                 cursor_moved(ctx);
                 return EventResult::Handled;
             case Key::Backspace:
-                if (model_.backspace(motion_for(event))) commit(ctx);
+                if (!read_only && model_.backspace(motion_for(event))) commit(ctx);
                 return EventResult::Handled;
             case Key::Delete:
-                if (model_.delete_forward(motion_for(event))) commit(ctx);
+                if (!read_only && model_.delete_forward(motion_for(event))) commit(ctx);
                 return EventResult::Handled;
             case Key::Enter:
-                if (model_.insert("\n")) commit(ctx);
+                if (!read_only && model_.insert("\n")) commit(ctx);
                 return EventResult::Handled;
             case Key::Escape:
+                if (read_only) return EventResult::Handled;
                 if (model_.text() != focus_snapshot_) {
                     model_.set_text(focus_snapshot_, false, false);
                     commit(ctx);
@@ -191,6 +275,7 @@ public:
     void paint(PaintContext& p) const override {
         const auto bounds = p.bounds();
         auto& painter = p.painter();
+        const bool show_composition = model_.composition_active() && !effective_read_only();
 
         painter.text(
             Point{bounds.x, bounds.y + 10.0f},
@@ -210,7 +295,7 @@ public:
         const auto content = content_rect(field);
         painter.push_clip(content);
 
-        if (model_.text().empty() && !placeholder_.empty()) {
+        if (model_.text().empty() && !show_composition && !placeholder_.empty()) {
             painter.text(
                 Point{content.x, content.y + kLineHeight * 0.5f},
                 placeholder_,
@@ -218,10 +303,10 @@ public:
                 colors::textMuted,
                 TextAlign::Left);
         } else {
-            paint_visible_lines(p, content);
+            paint_visible_lines(p, content, show_composition);
         }
 
-        if (p.focused() && caret_visible_) paint_caret(p, content);
+        if (p.focused() && caret_visible_) paint_caret(p, content, show_composition);
         painter.pop_clip();
     }
 
@@ -344,9 +429,31 @@ private:
     template <class Context>
     void ensure_cursor_visible(Context& ctx) {
         if (lines_.empty()) rebuild_lines();
-        const auto content = content_rect(field_rect(ctx.bounds()));
-        const auto line_index = line_index_for_cursor(model_.cursor());
-        const float caret_x = ctx.text_width(line_prefix(line_index, model_.cursor()), kTextSize);
+        const auto field = field_rect(ctx.bounds());
+        const auto content = content_rect(field);
+        const auto cursor = model_.composition_active() ? model_.selection_begin() : model_.cursor();
+        const auto line_index = line_index_for_cursor(cursor);
+        float caret_x = ctx.text_width(line_prefix(line_index, cursor), kTextSize);
+        float line_width = ctx.text_width(line_text(line_index), kTextSize);
+
+        if (model_.composition_active()) {
+            const auto& line = lines_[line_index];
+            const auto replace_begin = std::clamp(model_.selection_begin(), line.begin, line.end);
+            const auto replace_end = std::clamp(model_.selection_end(), line.begin, line.end);
+            const auto committed = std::string_view{model_.text()};
+            const auto before = committed.substr(line.begin, replace_begin - line.begin);
+            const auto after = committed.substr(replace_end, line.end - replace_end);
+            const auto preedit = std::string_view{model_.composition_text()};
+            const auto preedit_cursor = preedit.substr(
+                0,
+                std::min(model_.composition_cursor_byte(), preedit.size()));
+
+            const float before_width = ctx.text_width(before, kTextSize);
+            caret_x = before_width + ctx.text_width(preedit_cursor, kTextSize);
+            line_width = before_width + ctx.text_width(preedit, kTextSize) +
+                         ctx.text_width(after, kTextSize);
+        }
+
         const float caret_y = static_cast<float>(line_index) * kLineHeight;
         constexpr float margin = 4.0f;
 
@@ -354,7 +461,6 @@ private:
         if (caret_x - scroll_x_ > content.w - margin) {
             scroll_x_ = caret_x - content.w + margin;
         }
-        const float line_width = ctx.text_width(line_text(line_index), kTextSize);
         scroll_x_ = std::clamp(scroll_x_, 0.0f, std::max(0.0f, line_width - content.w));
 
         if (caret_y - scroll_y_ < 0.0f) scroll_y_ = caret_y;
@@ -366,7 +472,12 @@ private:
 
         const float cursor_offset =
             kHorizontalPadding + std::clamp(caret_x - scroll_x_, 0.0f, content.w);
-        ctx.set_text_input(true, field_rect(ctx.bounds()), cursor_offset);
+        const Rect candidate_area{
+            field.x,
+            content.y + caret_y - scroll_y_,
+            field.w,
+            kLineHeight};
+        ctx.set_text_input(true, candidate_area, cursor_offset);
     }
 
     void cursor_moved(InputContext& ctx) {
@@ -385,7 +496,47 @@ private:
         ctx.invalidate();
     }
 
-    void paint_visible_lines(PaintContext& p, Rect content) const {
+    void paint_composition_line(
+        PaintContext& p,
+        std::size_t line_index,
+        float base_x,
+        float top,
+        float center_y) const {
+        const auto& line = lines_[line_index];
+        const auto replace_begin = std::clamp(model_.selection_begin(), line.begin, line.end);
+        const auto replace_end = std::clamp(model_.selection_end(), line.begin, line.end);
+        const auto committed = std::string_view{model_.text()};
+        const auto before = committed.substr(line.begin, replace_begin - line.begin);
+        const auto after = committed.substr(replace_end, line.end - replace_end);
+        const auto preedit = std::string_view{model_.composition_text()};
+
+        float x = base_x;
+        if (!before.empty()) {
+            p.painter().text(
+                Point{x, center_y}, before, kTextSize, colors::text, TextAlign::Left);
+            x += p.text_width(before, kTextSize);
+        }
+
+        if (!preedit.empty()) {
+            p.painter().text(
+                Point{x, center_y}, preedit, kTextSize, colors::text, TextAlign::Left);
+            const float preedit_width = p.text_width(preedit, kTextSize);
+            const float underline_y = top + kLineHeight - 3.0f;
+            p.painter().line(
+                Point{x, underline_y},
+                Point{x + std::max(1.0f, preedit_width), underline_y},
+                1.5f,
+                colors::borderFocus);
+            x += preedit_width;
+        }
+
+        if (!after.empty()) {
+            p.painter().text(
+                Point{x, center_y}, after, kTextSize, colors::text, TextAlign::Left);
+        }
+    }
+
+    void paint_visible_lines(PaintContext& p, Rect content, bool show_composition) const {
         if (lines_.empty()) return;
         const auto first = std::min(
             static_cast<std::size_t>(std::max(0.0f, scroll_y_) / kLineHeight),
@@ -393,13 +544,16 @@ private:
         const auto visible_count = static_cast<std::size_t>(content.h / kLineHeight) + 2;
         const auto last = std::min(lines_.size(), first + visible_count);
         const float base_x = content.x - scroll_x_;
+        const auto composition_line = show_composition
+                                          ? line_index_for_cursor(model_.selection_begin())
+                                          : lines_.size();
 
         for (std::size_t i = first; i < last; ++i) {
             const auto& line = lines_[i];
             const float top = content.y + static_cast<float>(i) * kLineHeight - scroll_y_;
             const float center_y = top + kLineHeight * 0.5f;
 
-            if (model_.has_selection()) {
+            if (model_.has_selection() && !show_composition) {
                 const auto selection_begin = model_.selection_begin();
                 const auto selection_end = model_.selection_end();
                 const auto begin = std::max(selection_begin, line.begin);
@@ -417,20 +571,36 @@ private:
                 }
             }
 
-            p.painter().text(
-                Point{base_x, center_y},
-                line_text(i),
-                kTextSize,
-                colors::text,
-                TextAlign::Left);
+            if (i == composition_line) {
+                paint_composition_line(p, i, base_x, top, center_y);
+            } else {
+                p.painter().text(
+                    Point{base_x, center_y},
+                    line_text(i),
+                    kTextSize,
+                    colors::text,
+                    TextAlign::Left);
+            }
         }
     }
 
-    void paint_caret(PaintContext& p, Rect content) const {
+    void paint_caret(PaintContext& p, Rect content, bool show_composition) const {
         if (lines_.empty()) return;
-        const auto line_index = line_index_for_cursor(model_.cursor());
-        const float x = content.x - scroll_x_ +
-                        p.text_width(line_prefix(line_index, model_.cursor()), kTextSize);
+
+        std::size_t cursor = model_.cursor();
+        if (show_composition) cursor = model_.selection_begin();
+        const auto line_index = line_index_for_cursor(cursor);
+        float x = content.x - scroll_x_ +
+                  p.text_width(line_prefix(line_index, cursor), kTextSize);
+
+        if (show_composition) {
+            const auto preedit = std::string_view{model_.composition_text()};
+            const auto preedit_cursor = preedit.substr(
+                0,
+                std::min(model_.composition_cursor_byte(), preedit.size()));
+            x += p.text_width(preedit_cursor, kTextSize);
+        }
+
         const float top = content.y + static_cast<float>(line_index) * kLineHeight - scroll_y_;
         p.painter().line(
             Point{x, top + 2.0f},
@@ -449,6 +619,7 @@ private:
     bool caret_visible_{true};
     float scroll_x_{};
     float scroll_y_{};
+    std::string pending_ime_commit_;
     std::string focus_snapshot_;
     State<std::string>::Subscription subscription_;
 };

@@ -10,6 +10,8 @@
         focusables_.clear();
         focus_active_ = false;
         focus_structure_dirty_ = true;
+        initialize_availability(*root_);
+        availability_structure_dirty_ = false;
         mount_node(*root_);
         invalidate_layout_from(*root_);
     }
@@ -35,6 +37,8 @@
         if (active_) return;
         active_ = true;
         activate_node(*root_);
+        active_platform_ = &platform;
+        sync_availability_structure(platform);
         focus_structure_dirty_ = true;
         sync_focus_structure(platform);
         if (!focus_active_) {
@@ -45,6 +49,7 @@
 
     void refresh_focus(PlatformServices& platform) {
         if (!active_) return;
+        sync_availability_structure(platform);
         sync_focus_structure(platform);
         if (focusables_.empty() || !focus_active_) return;
         auto* node = focusables_[focused_index_];
@@ -55,6 +60,7 @@
 
     void deactivate_focus(PlatformServices& platform) {
         if (!active_) return;
+        sync_availability_structure(platform);
 
         // Cancel any in-flight pointer interaction while components and
         // platform services are still active. This is the deterministic
@@ -71,10 +77,12 @@
 
         focus_active_ = false;
         clear_pointer_capture();
+        active_platform_ = nullptr;
         deactivate_node(*root_);
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
+        if (availability_structure_dirty_) sync_availability_inactive();
         invalidate_paint(viewport_rect());
     }
 
@@ -87,6 +95,7 @@
         // tree directly.
         focus_active_ = false;
         clear_pointer_capture();
+        active_platform_ = nullptr;
         if (active_) {
             deactivate_node(*root_);
             active_ = false;
@@ -104,6 +113,14 @@
     [[nodiscard]] bool paint_dirty() const noexcept { return !paint_dirty_.empty(); }
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
+    }
+
+    [[nodiscard]] std::optional<ComponentAvailability> component_availability(
+        NodeId id) const noexcept {
+        if (!root_) return std::nullopt;
+        const auto* node = find_node(*root_, id);
+        if (!node) return std::nullopt;
+        return node->component->effective_availability();
     }
 
     /// Install a logical-coordinate exposure callback. Existing accumulated
@@ -134,10 +151,12 @@
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
     void focus_next(PlatformServices& platform) {
+        sync_availability_structure(platform);
         move_focus(1, platform);
     }
 
     void focus_previous(PlatformServices& platform) {
+        sync_availability_structure(platform);
         move_focus(-1, platform);
     }
 
@@ -148,7 +167,7 @@
     /// Route one input event according to the retained-mode targeting rules:
     ///
     /// - Tab/Shift+Tab is owned by the tree and never double-delivered;
-    /// - key/text/tick events target the focused node while focus is active;
+    /// - key/text/composition/tick events target the focused node while focus is active;
     /// - PointerDown cancels an older capture, then hit-tests/focuses a new target;
     /// - PointerMove/PointerWheel route to the capture owner first;
     /// - PointerUp routes to the capture owner then releases capture automatically;
@@ -159,22 +178,25 @@
         // An external drag source (for example Finder) owns keyboard focus.
         // Drop targeting must remain available without activating this tree
         // or restoring keyboard focus/text input as a side effect.
-        if (event.type == InputType::DropOffer || event.type == InputType::DropData) {
-            if (!mounted_) return EventResult::Ignored;
-            ensure_layout();
-            if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
-                return route_from(*target, event, platform);
-            }
-            return EventResult::Ignored;
-        }
+        const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
+        if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
+        sync_availability_structure(platform);
+        if (active_) sync_focus_structure(platform);
 
-        if (!active_) return EventResult::Ignored;
-        sync_focus_structure(platform);
+        ++dispatch_depth_;
+        auto finish = [this, &platform](EventResult result) {
+            if (dispatch_depth_ > 0) --dispatch_depth_;
+            if (dispatch_depth_ == 0) {
+                sync_availability_structure(platform);
+                if (active_) sync_focus_structure(platform);
+            }
+            return result;
+        };
 
         if (event.type == InputType::KeyDown && event.key == Key::Tab) {
-            if (!focus_active_) return EventResult::Ignored;
+            if (!focus_active_) return finish(EventResult::Ignored);
             event.shift ? focus_previous(platform) : focus_next(platform);
-            return EventResult::Handled;
+            return finish(EventResult::Handled);
         }
 
         if (event.type == InputType::Command || command_from_shortcut(event) != Command::None) {
@@ -186,7 +208,7 @@
                 command_event.text.clear();
             }
 
-            if (command_event.command == Command::None) return EventResult::Ignored;
+            if (command_event.command == Command::None) return finish(EventResult::Ignored);
 
             EventResult result = EventResult::Ignored;
             if (focus_active_ && !focusables_.empty()) {
@@ -195,11 +217,11 @@
             if (!handled(result) && global_command_handler_) {
                 result = global_command_handler_(command_event.command);
             }
-            return result;
+            return finish(result);
         }
 
         if (event.type == InputType::PointerCancel) {
-            return cancel_pointer_capture(platform, event);
+            return finish(cancel_pointer_capture(platform, event));
         }
 
         if (event.type == InputType::PointerDown) {
@@ -209,50 +231,63 @@
 
             if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
                 set_focus(target, platform);
-                return route_from(*target, event, platform);
+                return finish(route_from(*target, event, platform));
             }
-            return EventResult::Ignored;
+            return finish(EventResult::Ignored);
         }
 
         if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
             if (auto* owner = pointer_capture_owner()) {
-                return route_from(*owner, event, platform);
+                return finish(route_from(*owner, event, platform));
             }
             if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
-                return route_from(*target, event, platform);
+                return finish(route_from(*target, event, platform));
             }
-            return EventResult::Ignored;
+            return finish(EventResult::Ignored);
         }
 
         if (event.type == InputType::PointerUp) {
             if (auto* owner = pointer_capture_owner()) {
                 const auto result = route_from(*owner, event, platform);
                 clear_pointer_capture();
-                return result;
+                return finish(result);
             }
             if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
-                return route_from(*target, event, platform);
+                return finish(route_from(*target, event, platform));
             }
-            return EventResult::Ignored;
+            return finish(EventResult::Ignored);
+        }
+
+        if (is_drop) {
+            ensure_layout();
+            if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
+                return finish(route_from(*target, event, platform));
+            }
+            return finish(EventResult::Ignored);
         }
 
         if ((event.type == InputType::KeyDown || event.type == InputType::KeyUp ||
-             event.type == InputType::TextInput || event.type == InputType::Tick) &&
+             event.type == InputType::TextInput || event.type == InputType::Composition ||
+             event.type == InputType::Tick) &&
             focus_active_ && !focusables_.empty()) {
-            return route_from(*focusables_[focused_index_], event, platform);
+            return finish(route_from(*focusables_[focused_index_], event, platform));
         }
 
-        return EventResult::Ignored;
+        return finish(EventResult::Ignored);
     }
 
     /// Explicitly cancel the active pointer capture, if any. The current owner
     /// receives one PointerCancel event before capture is cleared.
     EventResult cancel_pointer(PlatformServices& platform) {
+        sync_availability_structure(platform);
         return cancel_pointer_capture(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
-        if (active_) sync_focus_structure(platform);
+        if (active_) {
+            sync_availability_structure(platform);
+            sync_focus_structure(platform);
+        }
         ensure_layout();
 
         Painter painter{canvas};

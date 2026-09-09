@@ -185,8 +185,8 @@ Pugl is especially suitable because it is intentionally small, embeddable, stati
 NativeUI currently pins:
 
 ```text
-repository: lv2/pugl
-commit:     b7637149ebe53124e5be90559e02a0185bbcbd73
+repository: hemduf/pugl
+commit:     d12d63815b8cfe3f36293d3791a418e8f558ff1b
 license:    ISC
 ```
 
@@ -700,7 +700,9 @@ Important portability rules:
 - clipboard data must not be retained beyond the lifetime guaranteed by the platform event/API;
 - drop acceptance/rejection remains platform-neutral to widgets.
 
-The pinned Pugl source declares `puglRejectOffer()` but only X11 defines it. Portable NativeUI code therefore uses an internal reject helper: X11 explicitly rejects, while macOS/Windows rely on their native unaccepted-offer behavior.
+The pinned Pugl fork implements `puglRejectOffer()` on Cocoa, Windows and X11, so NativeUI calls it directly. Drop types and `PUGL_ACCEPT_DROP` are registered before realization. On macOS the backend child forwards the complete drag-destination lifecycle to its owning wrapper; accepted data is delivered once at the actual drop boundary.
+
+External drag sources such as Finder own keyboard focus. `DropOffer`/`DropData` therefore target a **mounted** tree even while it is inactive, without activating keyboard focus, component lifecycle or IME. Hit testing still respects clipping, inherited visibility/enabled state and normal bubbling. Unmounted trees reject delivery. Reading a dropped file is an application-layer policy: the T018 example decodes local file URIs and previews the first regular file with a 64 KiB read limit; the toolkit itself delivers MIME type and owned payload bytes, not file contents.
 
 ---
 
@@ -956,7 +958,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=b7637149ebe53124e5be90559e02a0185bbcbd73
+NATIVEUI_PUGL_COMMIT=d12d63815b8cfe3f36293d3791a418e8f558ff1b
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149

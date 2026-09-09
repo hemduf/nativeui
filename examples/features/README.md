@@ -17,7 +17,7 @@ Current examples:
 | T015 | `nativeui_example_t015_pointer_capture` | capture, outside drag and terminal cancellation |
 | T016 | `nativeui_example_t016_gestures` | reusable click/drag gesture helpers |
 | T017 | `nativeui_example_t017_commands` | portable command/shortcut routing |
-| T018 | `nativeui_example_t018_drop` | neutral drag-and-drop offers/data |
+| T018 | `nativeui_example_t018_drop` | background-window drops and local text-file preview |
 | T019 | `nativeui_example_t019_transforms` | Painter save/restore and local 2D transforms |
 | T024 | `nativeui_example_t024_goldens` | golden rendering scenes and explicit baseline workflow |
 | T025 | `nativeui_example_t025_text_edit_model` | reusable headless text editing model |
@@ -37,3 +37,16 @@ Automated executable check:
 ./build/nativeui_example_t015_pointer_capture --self-test
 ctest --test-dir build -R nativeui_example_ --output-on-failure
 ```
+
+For a real macOS file-drop check, launch `./build/nativeui_example_t018_drop
+--trace-drops`, then drag `/tmp/hello.txt` from Finder onto the panel without
+first clicking the destination window. The status should become `Loaded
+hello.txt` and its text should appear. The diagnostic option also prints the
+received contents to stdout. Restart any previously running example after a
+rebuild: a running process still uses its old code.
+
+T018 previews the first 120 bytes of the first local regular file (read limit:
+64 KiB). URI decoding/file I/O belong to this example, not the toolkit's drop
+API. The self-test uses an isolated temporary UTF-8 filename and leaves the
+user's `/tmp/hello.txt` untouched. The macOS CTest smoke traverses the native
+OpenGL/Cocoa/Pugl destination callbacks, but does not synthesize a Finder drag.

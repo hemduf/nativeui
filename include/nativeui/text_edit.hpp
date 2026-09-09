@@ -216,6 +216,76 @@ public:
     [[nodiscard]] bool can_undo() const noexcept { return !undo_.empty(); }
     [[nodiscard]] bool can_redo() const noexcept { return !redo_.empty(); }
 
+    [[nodiscard]] bool composition_active() const noexcept { return composition_active_; }
+    [[nodiscard]] const std::string& composition_text() const noexcept { return composition_text_; }
+    [[nodiscard]] std::size_t composition_cursor_byte() const noexcept { return composition_cursor_byte_; }
+    [[nodiscard]] std::size_t composition_selection_bytes() const noexcept { return composition_selection_bytes_; }
+
+    void begin_composition() {
+        composition_start_ = snapshot();
+        composition_text_.clear();
+        composition_cursor_byte_ = 0;
+        composition_selection_bytes_ = 0;
+        composition_active_ = true;
+    }
+
+    void update_composition(std::string preedit, std::size_t cursor_byte, std::size_t selection_bytes) {
+        if (!composition_active_) begin_composition();
+        composition_text_ = std::move(preedit);
+        composition_cursor_byte_ =
+            text::clamp_boundary(composition_text_, std::min(cursor_byte, composition_text_.size()));
+
+        const auto remaining = composition_text_.size() - composition_cursor_byte_;
+        const auto requested = std::min(selection_bytes, remaining);
+        const auto selection_end = text::clamp_boundary(
+            composition_text_, composition_cursor_byte_ + requested);
+        composition_selection_bytes_ = selection_end - composition_cursor_byte_;
+    }
+
+    [[nodiscard]] bool commit_composition(std::string_view committed) {
+        if (!composition_active_) return false;
+
+        const auto start = composition_start_;
+        clear_composition_state();
+
+        // Editing while a composition is active must cancel it first. Refuse a
+        // stale replacement range rather than applying it to changed contents.
+        if (text_ != start.text) return false;
+
+        cursor_ = text::clamp_boundary(text_, std::min(start.cursor, text_.size()));
+        anchor_ = text::clamp_boundary(text_, std::min(start.anchor, text_.size()));
+        vertical_column_.reset();
+
+        const auto selected = text::codepoint_count(selected_text());
+        const auto current = text::codepoint_count(text_);
+        const auto remaining_base = current >= selected ? current - selected : 0;
+        if (remaining_base >= max_length_) return false;
+
+        const auto available = max_length_ - remaining_base;
+        auto accepted = text::truncate_codepoints(committed, available);
+        if (accepted.empty()) return false;
+
+        checkpoint();
+        erase_selection_untracked();
+        text_.insert(cursor_, accepted);
+        cursor_ += accepted.size();
+        anchor_ = cursor_;
+        vertical_column_.reset();
+        return true;
+    }
+
+    void cancel_composition() noexcept {
+        if (!composition_active_) return;
+        const auto start = composition_start_;
+        clear_composition_state();
+
+        if (text_ == start.text) {
+            cursor_ = text::clamp_boundary(text_, std::min(start.cursor, text_.size()));
+            anchor_ = text::clamp_boundary(text_, std::min(start.anchor, text_.size()));
+            vertical_column_.reset();
+        }
+    }
+
     void set_max_length(std::size_t max_length) noexcept {
         max_length_ = max_length == 0 ? std::numeric_limits<std::size_t>::max() : max_length;
     }
@@ -312,6 +382,7 @@ public:
 
     [[nodiscard]] bool insert(std::string_view incoming) {
         if (incoming.empty()) return false;
+        if (composition_active_) cancel_composition();
 
         const auto selected = text::codepoint_count(selected_text());
         const auto current = text::codepoint_count(text_);
@@ -333,12 +404,14 @@ public:
 
     [[nodiscard]] bool erase_selection() {
         if (!has_selection()) return false;
+        if (composition_active_) cancel_composition();
         checkpoint();
         erase_selection_untracked();
         return true;
     }
 
     [[nodiscard]] bool backspace(TextMotion motion = TextMotion::Codepoint) {
+        if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ == 0) return false;
         checkpoint();
         if (has_selection()) {
@@ -360,6 +433,7 @@ public:
     }
 
     [[nodiscard]] bool delete_forward(TextMotion motion = TextMotion::Codepoint) {
+        if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ >= text_.size()) return false;
         checkpoint();
         if (has_selection()) {
@@ -380,6 +454,7 @@ public:
     }
 
     [[nodiscard]] bool undo() {
+        if (composition_active_) cancel_composition();
         if (undo_.empty()) return false;
         redo_.push_back(snapshot());
         restore(undo_.back());
@@ -389,6 +464,7 @@ public:
     }
 
     [[nodiscard]] bool redo() {
+        if (composition_active_) cancel_composition();
         if (redo_.empty()) return false;
         undo_.push_back(snapshot());
         restore(redo_.back());
@@ -401,6 +477,13 @@ public:
 
 private:
     static constexpr std::size_t kHistoryLimit = 64;
+
+    void clear_composition_state() noexcept {
+        composition_active_ = false;
+        composition_text_.clear();
+        composition_cursor_byte_ = 0;
+        composition_selection_bytes_ = 0;
+    }
 
     static void trim_history(std::vector<Snapshot>& history) {
         if (history.size() > kHistoryLimit) {
@@ -472,6 +555,11 @@ private:
     std::size_t cursor_{};
     std::size_t anchor_{};
     std::optional<std::size_t> vertical_column_;
+    bool composition_active_{};
+    Snapshot composition_start_{};
+    std::string composition_text_;
+    std::size_t composition_cursor_byte_{};
+    std::size_t composition_selection_bytes_{};
     std::vector<Snapshot> undo_;
     std::vector<Snapshot> redo_;
 };
