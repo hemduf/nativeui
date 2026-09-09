@@ -47,8 +47,46 @@ jobs:
       - name: Harness self-test
         run: ./build-t051/nativeui_benchmarks --self-test
 
-      - name: Run full fixed protocol
-        run: ./build-t051/nativeui_benchmarks --json t051-results.json
+      - name: Run full fixed protocol A
+        run: ./build-t051/nativeui_benchmarks --json t051-results-a.json
+
+      - name: Run full fixed protocol B on same runner
+        run: ./build-t051/nativeui_benchmarks --json t051-results-b.json
+
+      - name: Validate repeated-run metadata and report deltas
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path('t051-results-a.json').read_text())['results']
+          second = json.loads(Path('t051-results-b.json').read_text())['results']
+          if len(first) != len(second):
+              raise SystemExit('T051 repeated-run result count mismatch')
+
+          compatible = (
+              'schema_version', 'workload_version', 'benchmark_name', 'os',
+              'architecture', 'compiler_id', 'compiler_major', 'build_type',
+              'operations_per_sample'
+          )
+          for a, b in zip(first, second):
+              for field in compatible:
+                  if a[field] != b[field]:
+                      raise SystemExit(
+                          f'T051 repeated-run metadata mismatch for {a["benchmark_name"]}: {field}')
+              if a['benchmark_name'] == 'idle_invalidation':
+                  if a['allocations_per_op'] != 0 or b['allocations_per_op'] != 0:
+                      raise SystemExit('T051 idle repeated run unexpectedly allocated')
+                  print('idle_invalidation: hard gate stable at zero')
+                  continue
+              median_delta = ((b['median_ns_per_op'] / a['median_ns_per_op']) - 1.0) * 100.0
+              p95_delta = ((b['p95_ns_per_op'] / a['p95_ns_per_op']) - 1.0) * 100.0
+              print(
+                  f'{a["benchmark_name"]}: median {median_delta:+.2f}% '
+                  f'p95 {p95_delta:+.2f}% allocations '
+                  f'{a["allocations_per_op"]}->{b["allocations_per_op"]} '
+                  f'bytes {a["bytes_allocated_per_op"]}->{b["bytes_allocated_per_op"]}')
+          PY
 
       - name: Validate selected filter
         run: ./build-t051/nativeui_benchmarks --filter text_edit --json t051-text-results.json
@@ -57,6 +95,7 @@ jobs:
         with:
           name: t051-release-results
           path: |
-            t051-results.json
+            t051-results-a.json
+            t051-results-b.json
             t051-text-results.json
           if-no-files-found: error
