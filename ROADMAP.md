@@ -17,7 +17,7 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` is `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` and includes the completed T057 ResourceManager.
+Current `main` is `15df68e8f72f02abadbccdba579ab6c1b0ee8409` and includes the completed T057 ResourceManager plus its post-merge recovery/roadmap synchronization. The active P0 platform correction is #124 / PR #125, which advances the reviewed Pugl pin to `195f79b22644010c81a5e0c3231c591856787ec6`.
 
 Recently completed foundations relevant to the dependency graph:
 
@@ -47,9 +47,10 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        +-> T032
                                        +-> T033
                                        +-> T034 -> T035 / T036
+platform fix:       #124 / PR #125 (active P0)
 ```
 
-T057 / issue #69 / PR #126 is complete. The independent P0 Pugl/X11 regression #124 / PR #125 and T042 are separate work; T059, T030 and #64 belong to other lanes and are not part of the platform/package lane.
+T057 / issue #69 / PR #126 is complete. The P0 Pugl/X11 regression #124 / PR #125 is an independent platform correction; T042 remains its lifecycle regression gate. T059, T030 and #64 belong to other lanes and are not part of the platform/package lane.
 
 ## Milestone 0 — Baseline hardening
 
@@ -91,7 +92,7 @@ T059(done) -> T030(done) -> T031(done)
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: core lifecycle/consumer-safety baseline substantially complete; independent platform tickets remain.**
+**Status: core lifecycle/consumer-safety baseline substantially complete; the active P0 correction is #124 / PR #125.**
 
 Delivered safety includes:
 
@@ -103,7 +104,11 @@ Delivered safety includes:
 - #107 documented non-fatal standalone raise handling;
 - T042 deterministic headless/embedded/standalone lifecycle stress.
 
-The P0 Pugl/X11 regression is tracked independently as #124 / PR #125. It owns any shared Pugl pin change and associated dependency documentation; the platform/package lane does not absorb that change.
+### #124 — Pugl X11 failed-selection correction
+
+PR #125 pins reviewed Pugl commit `195f79b22644010c81a5e0c3231c591856787ec6`. A failed X11 selection conversion can report `SelectionNotify.property == None`; the old dependency path passed atom `None` to `XGetWindowProperty()` and terminated with `BadAtom`. The Pugl correction guards the failed conversion before the property read. NativeUI keeps the deterministic T042 clipboard/lifecycle fixture intact and does not add a local workaround.
+
+The pre-refresh dependency-only PR head passed normal CI and T042 Lifecycle Stress. The current-main-synchronized, documentation-complete head must repeat the exact-head gates and mandatory `CODE_REVIEW.md` pass before merge.
 
 ## Milestone 8 — Packaging, tooling and release
 
@@ -195,6 +200,16 @@ T052 belongs to the separate release/lifecycle lane. T064 and T072 remain blocke
 - [x] candidate refreshed against then-current `main` immediately before merge;
 - [x] PR #126 merged and #69 marked Done/closed;
 - [x] completion status synchronized into `CONTEXT.md` and this roadmap.
+
+## #124 completion protocol
+
+- [x] root cause isolated to Pugl X11 failed-selection handling;
+- [x] Pugl regression fixed and reviewed in the dependency repository;
+- [x] NativeUI pin updated without weakening T042 or adding a local workaround;
+- [x] `THIRD_PARTY.md`, `CONTEXT.md`, `ROADMAP.md` and `VALIDATION.md` included in the completion cycle;
+- [ ] final exact-head normal CI and T042 Lifecycle Stress green after synchronization with current `main`;
+- [ ] mandatory `CODE_REVIEW.md` pass records no Blocking/Important finding;
+- [ ] merge PR #125 and close #124 Done.
 
 ## Prioritization rule
 
