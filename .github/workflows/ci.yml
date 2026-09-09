@@ -54,7 +54,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev xvfb xauth
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -96,6 +96,15 @@ jobs:
           -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
           -DCONFIG=Release
           -P tests/t047_package_tests.cmake
+
+      - name: T048 relocated external consumers
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t048_external_consumer_tests.cmake
 
       # T053/CODE_REVIEW.md requires proof that two final consumers configured
       # together derive different Objective-C runtime namespaces while sharing
