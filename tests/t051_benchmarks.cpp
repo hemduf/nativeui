@@ -345,7 +345,7 @@ BenchCase make_hit_test_case() {
         .logical_width = 512,
         .logical_height = 512,
         .before_sample = [state] { state->cursor = 0; },
-        .operation = [state] {
+        .operation = [state, positions] {
             const auto position = positions[state->cursor++ % positions.size()];
             ui::InputEvent event{};
             event.type = ui::InputType::PointerMove;
