@@ -178,22 +178,29 @@ private:
         return effective;
     }
 
-    [[nodiscard]] float value_from_pointer(
+    [[nodiscard]] float pointer_fraction(
         const InputEvent& event, const InputContext& context) const noexcept {
         const auto bounds = context.bounds();
         if (orientation_ == SliderOrientation::Horizontal) {
-            if (bounds.w <= 0.0f) return domain_.minimum();
-            return domain_.value_from_fraction((event.position.x - bounds.x) / bounds.w);
+            if (bounds.w <= 0.0f) return 0.0f;
+            return std::clamp((event.position.x - bounds.x) / bounds.w, 0.0f, 1.0f);
         }
-        if (bounds.h <= 0.0f) return domain_.minimum();
-        return domain_.value_from_fraction(
-            1.0f - (event.position.y - bounds.y) / bounds.h);
+        if (bounds.h <= 0.0f) return 0.0f;
+        return std::clamp(
+            1.0f - (event.position.y - bounds.y) / bounds.h,
+            0.0f,
+            1.0f);
+    }
+
+    [[nodiscard]] float value_from_pointer(
+        const InputEvent& event, const InputContext& context) const noexcept {
+        return domain_.value_from_fraction(pointer_fraction(event, context));
     }
 
     [[nodiscard]] RangeSliderThumb choose_thumb(
-        float target, const RangeValue& effective) const noexcept {
-        const float lower_distance = std::abs(target - effective.low);
-        const float upper_distance = std::abs(target - effective.high);
+        float raw_fraction, const RangeValue& effective) const noexcept {
+        const float lower_distance = std::abs(raw_fraction - domain_.fraction(effective.low));
+        const float upper_distance = std::abs(raw_fraction - domain_.fraction(effective.high));
         if (lower_distance < upper_distance) return RangeSliderThumb::Lower;
         if (upper_distance < lower_distance) return RangeSliderThumb::Upper;
         return has_active_thumb_ ? active_thumb_ : RangeSliderThumb::Lower;
@@ -218,9 +225,10 @@ private:
     }
 
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
-        const float target = value_from_pointer(event, context);
+        const float raw_fraction = pointer_fraction(event, context);
+        const float target = domain_.value_from_fraction(raw_fraction);
         const auto effective = effective_range(state_.get());
-        active_thumb_ = choose_thumb(target, effective);
+        active_thumb_ = choose_thumb(raw_fraction, effective);
         has_active_thumb_ = true;
         dragging_ = true;
         hovered_ = true;
