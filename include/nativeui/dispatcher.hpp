@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 
 namespace ui {
 
@@ -43,6 +44,7 @@ private:
     std::uint64_t id_{};
 
     friend class Dispatcher;
+    friend struct detail::DispatcherState;
 };
 
 inline const TimerHandle kInvalidTimerHandle{};
