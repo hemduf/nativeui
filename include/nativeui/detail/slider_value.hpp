@@ -50,10 +50,18 @@ public:
         return (effective - minimum_) / (maximum_ - minimum_);
     }
 
-    [[nodiscard]] float value_from_fraction(float fraction) const noexcept {
+    // Continuous pointer-domain value before step quantization. RangeSlider
+    // uses this for nearest-thumb hit selection so the step grid cannot create
+    // an artificial tie. The selected thumb's eventual write still goes
+    // through normalize().
+    [[nodiscard]] float raw_value_from_fraction(float fraction) const noexcept {
         if (!std::isfinite(fraction)) return minimum_;
         const float clamped = std::clamp(fraction, 0.0f, 1.0f);
-        return normalize(minimum_ + clamped * (maximum_ - minimum_));
+        return minimum_ + clamped * (maximum_ - minimum_);
+    }
+
+    [[nodiscard]] float value_from_fraction(float fraction) const noexcept {
+        return normalize(raw_value_from_fraction(fraction));
     }
 
     [[nodiscard]] float keyboard_increment(bool shift) const noexcept {
