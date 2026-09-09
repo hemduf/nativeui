@@ -18,11 +18,12 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Merged baseline
 
-The baseline is complete through T029 plus T023, #62, T053, #64 Decision B and T059.
+The baseline is complete through T030 plus T023, #62, T053, #64 Decision B and T059.
 
 - T053 / PR #88 merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`: `NativeUI::Core` and portable Pugl C remain generic; the Cocoa Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and has no runtime registry.
 - #64 / PR #90 merged as `b52d53eee65e5de91697e2c1f0685728b9646575`: independent overlapping `PUGL_PROGRAM` worlds are not a supported macOS multi-window ownership model. Legacy `StandaloneWindow(UI&, ...)` remains pre-v1/single-window; T060 owns one explicit `ui::Application` PROGRAM owner with multiple top-level windows.
-- T059 / PR #89 merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`: the retained tree centrally resolves Visible/Hidden/Collapsed, inherited enabled/disabled and read-only state with focus/capture teardown, reentrancy handling and FocusScope restoration. T030 is now Ready on its separate lane.
+- T059 / PR #89 merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`: the retained tree centrally resolves Visible/Hidden/Collapsed, inherited enabled/disabled and read-only state with focus/capture teardown, reentrancy handling and FocusScope restoration.
+- T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract and is owned by the separate state/widget lane. T031 is its next dependency-unblocked widget successor.
 
 ## T047 install/export package — PR #92
 
@@ -58,9 +59,9 @@ TDD/review history:
 - macOS installed-package acceptance builds two independent MODULE consumers, audits class and metaclass prefixes and loads both in one Objective-C runtime;
 - CODE_REVIEW.md pass is clean for instance isolation, configure-time-only bookkeeping, platform delegation, relocatability and public-target boundaries;
 - pre-refresh head `69a22f1439991721524bb2bc7aa4c7be94ccbd19` passed CI #338 on Linux X11, Windows/MSVC, macOS including two-consumer runtime isolation, and Linux ASan+UBSan;
-- branch refresh incorporated current main `6d84bc6b7817b0dcaea4eefd81833d765ad7685d` without absorbing T059-owned work into the PR diff; overlapping CMake test/example/header registrations were reconciled.
+- the branch was first refreshed over merged T059 and then over current main `b32b09da473c70a857675e05f7fdc7c78e5f9361` after the independent T030 merge. T030 source/tests/public-header changes and root CMake registrations are preserved while the PR diff remains T047-owned plus mandatory recovery/roadmap bookkeeping.
 
-The merge candidate must still pass the exact current-head full matrix after these final documentation updates. Do not merge a stale or red head.
+The merge candidate must pass the exact current-head full matrix after the latest refresh. Do not merge a stale or red head.
 
 ## Current DAG frontier
 
@@ -70,7 +71,7 @@ platform/package: T053(done) -> T047(this merge) -> T048 -> T052
                                            |
                                            +-> T054
                                            +-> T056 -> T057
-state/widgets:    T059(done) -> T030 -> T031
+state/widgets:    T059(done) -> T030(done) -> T031
 ```
 
 After T047 merges, T048, T054 and T056 are dependency-unblocked. T052 still additionally requires T048, T051 and T042; T057 requires T056. The active platform/package lane must not take T059, T030, #64 or T042.
