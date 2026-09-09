@@ -137,6 +137,19 @@ if(NOT EXISTS "${_installed_nativeui_dir}/NativeUIConfig.cmake" OR
     "missing config/targets under ${_installed_nativeui_dir}")
 endif()
 
+# Distributed packages must carry the repository's legal/licensing payload.
+# At minimum LICENSE/NOTICE/THIRD_PARTY are required by #47; the commercial
+# distribution path also carries the EULA/privacy/terms/legal documents.
+set(_legal_dir "${_prefix}/share/nativeui/legal")
+foreach(_legal_doc IN ITEMS
+    LICENSE.md NOTICE.md THIRD_PARTY.md
+    EULA.md PRIVACY.md TERMS.md LEGAL.md)
+  if(NOT EXISTS "${_legal_dir}/${_legal_doc}")
+    _t047_fail("legal payload"
+      "missing installed legal document: ${_legal_dir}/${_legal_doc}")
+  endif()
+endforeach()
+
 # Core-only consumers need no Pugl discovery; platform attachment is exercised
 # independently through the same installed config.
 _t047_configure_build(install-core "${_installed_nativeui_dir}" FALSE)
@@ -275,4 +288,4 @@ if(_diagnostic_found EQUAL -1)
 endif()
 
 message(STATUS
-  "T047 package contract passed: build-tree/install-tree parity, external Core/platform consumers, relocation, no path leakage, pinned dependency failure, and applicable macOS runtime isolation")
+  "T047 package contract passed: build-tree/install-tree parity, external Core/platform consumers, relocation, legal payload, no path leakage, pinned dependency failure, and applicable macOS runtime isolation")
