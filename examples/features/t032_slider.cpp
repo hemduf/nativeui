@@ -61,6 +61,7 @@ int self_test() {
     tree.resize({620.0f, 460.0f});
     tree.activate(platform);
 
+    // Enabled toggle -> ReadOnly toggle -> Slider.
     tree.dispatch(example::key(ui::Key::Tab), platform);
     tree.dispatch(example::key(ui::Key::Tab), platform);
     tree.dispatch(example::key(ui::Key::Right), platform);
@@ -76,6 +77,14 @@ int self_test() {
     }
 
     state.read_only.set(false);
+    const auto before_range = state.band.get();
+    tree.dispatch(example::key(ui::Key::Tab), platform);
+    tree.dispatch(example::key(ui::Key::Right), platform);
+    const auto edited_range = state.band.get();
+    if (!(edited_range.low > before_range.low && edited_range.low <= edited_range.high)) {
+        return example::fail("RangeSlider keyboard edit failed");
+    }
+
     ui::HeadlessRenderer renderer{{620.0f, 460.0f}, 1.0f};
     if (!renderer.render(tree)) return example::fail("headless Slider/RangeSlider render failed");
 
