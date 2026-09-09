@@ -136,7 +136,25 @@
                     break;
                 }
             }
-            if (!any_change) continue;
+            if (!any_change) {
+                // A teardown callback can reverse the state that triggered
+                // focus loss before the pending availability snapshot is
+                // applied. In that case there is no availability delta on the
+                // next pass, but focus still needs to be restored explicitly.
+                if (focus_needs_rehome && active_ && !focus_active_) {
+                    Node* fallback = nullptr;
+                    if (rehome_scope &&
+                        rehome_scope->component->effective_availability().interactive()) {
+                        fallback = first_available_focusable(rehome_scope);
+                    } else {
+                        fallback = first_available_focusable();
+                    }
+                    if (fallback) set_focus(fallback, platform);
+                    focus_needs_rehome = false;
+                    rehome_scope = nullptr;
+                }
+                continue;
+            }
 
             if (auto* capture = pointer_capture_owner()) {
                 if (!pending_availability_for(pending, capture).interactive()) {
