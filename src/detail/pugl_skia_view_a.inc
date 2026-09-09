@@ -4,14 +4,24 @@ public:
              PlatformServices& services,
              PuglWorldType world_type,
              WindowDesc desc,
-             NativeParentHandle parent)
-        : ui_(ui), services_(services), logical_size_(desc.size) {
-        world_ = puglNewWorld(world_type, 0);
+             NativeParentHandle parent,
+             PuglWorld* shared_world = nullptr,
+             std::function<void()> close_callback = {})
+        : ui_(ui),
+          services_(services),
+          logical_size_(desc.size),
+          close_callback_(std::move(close_callback)) {
+        if (shared_world) {
+            world_ = shared_world;
+        } else {
+            world_ = puglNewWorld(world_type, 0);
+            owns_world_ = true;
+        }
         if (!world_) throw std::runtime_error("puglNewWorld failed");
 
         view_ = puglNewView(world_);
         if (!view_) {
-            puglFreeWorld(world_);
+            if (owns_world_) puglFreeWorld(world_);
             world_ = nullptr;
             throw std::runtime_error("puglNewView failed");
         }
@@ -94,10 +104,10 @@ public:
             puglFreeView(view_);
             view_ = nullptr;
         }
-        if (world_) {
+        if (world_ && owns_world_) {
             puglFreeWorld(world_);
-            world_ = nullptr;
         }
+        world_ = nullptr;
     }
 
     ViewCore(const ViewCore&) = delete;
@@ -253,10 +263,10 @@ private:
             puglFreeView(view_);
             view_ = nullptr;
         }
-        if (world_) {
+        if (world_ && owns_world_) {
             puglFreeWorld(world_);
-            world_ = nullptr;
         }
+        world_ = nullptr;
         throw_pugl(status, what);
     }
 
