@@ -17,6 +17,7 @@ void check(bool condition, const char* expression, int line) {
 #define NUI_CHECK(expr) ::check(static_cast<bool>(expr), #expr, __LINE__)
 
 using nativeui::bench::ComparisonMetadata;
+using nativeui::bench::ResultRecord;
 using nativeui::bench::RunMetrics;
 
 void suite() {
@@ -89,8 +90,10 @@ void suite() {
         .architecture = "x86_64",
         .compiler_id = "Clang",
         .compiler_major = 18,
+        .compiler_version = "18.1.2",
         .build_type = "Release",
         .operations_per_sample = 100,
+        .commit_sha = "0123456789abcdef",
     };
     NUI_CHECK(nativeui::bench::metadata_compatible(linux_clang, linux_clang));
 
@@ -103,6 +106,31 @@ void suite() {
     incompatible = linux_clang;
     incompatible.workload_version = 2;
     NUI_CHECK(!nativeui::bench::metadata_compatible(linux_clang, incompatible));
+    incompatible = linux_clang;
+    incompatible.commit_sha = "different-commit";
+    NUI_CHECK(nativeui::bench::metadata_compatible(linux_clang, incompatible));
+
+    const ResultRecord record{
+        .metadata = linux_clang,
+        .node_count = 116,
+        .actions_per_operation = 0,
+        .logical_width = 1024,
+        .logical_height = 768,
+        .warmup_samples = 5,
+        .measured_samples = 30,
+        .timing = {.median_ns_per_op = 12.5,
+                   .p95_ns_per_op = 18.75,
+                   .min_ns_per_op = 10.25,
+                   .max_ns_per_op = 21.5},
+        .allocation_metrics_available = true,
+        .allocations_per_op = 0.125,
+        .bytes_allocated_per_op = 32.0,
+    };
+    const auto json = nativeui::bench::to_json(record);
+    NUI_CHECK(json.find("\"schema_version\":1") != std::string::npos);
+    NUI_CHECK(json.find("\"benchmark_name\":\"layout_small\"") != std::string::npos);
+    const auto parsed = nativeui::bench::parse_result_json(json);
+    NUI_CHECK(parsed == record);
 
     const RunMetrics baseline{.median_ns_per_op = 100.0, .p95_ns_per_op = 100.0};
 
