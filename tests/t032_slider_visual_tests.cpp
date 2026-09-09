@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -39,6 +40,8 @@ void deterministic_headless_slider_states() {
         ui::Slider{value}.range(0.0f, 1.0f)
     }};
     ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
+
+    // Unmounted/headless rendering has no focus/hover/press state: Normal.
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::accent));
 
@@ -53,6 +56,37 @@ void deterministic_headless_slider_states() {
     }};
     NUI_CHECK(renderer.render(disabled_tree));
     NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::textMuted));
+}
+
+void deterministic_headless_interaction_states() {
+    ui::State<float> value{0.5f};
+    ui::State<bool> enabled{true};
+    ui::UI tree{ui::Enabled{
+        enabled,
+        ui::Slider{value}.range(0.0f, 1.0f)
+    }};
+    test::MockPlatform platform;
+    tree.resize({200.0f, 60.0f});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
+
+    // Activation focuses the first focusable control. The focus ring is drawn
+    // behind the thumb, so a solid pixel just outside the 7px thumb proves it.
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(108, 30), ui::colors::borderFocus));
+
+    tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::caret));
+
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 100.0f, 30.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::text));
+
+    enabled.set(false);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), ui::colors::textMuted));
+    NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
 }
 
 void deterministic_headless_orientation_and_two_thumbs() {
@@ -80,6 +114,7 @@ void deterministic_headless_orientation_and_two_thumbs() {
 void suite() {
     pure_visual_state_contract();
     deterministic_headless_slider_states();
+    deterministic_headless_interaction_states();
     deterministic_headless_orientation_and_two_thumbs();
 }
 
