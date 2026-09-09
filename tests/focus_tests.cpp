@@ -56,8 +56,6 @@ void suite() {
     tree.dispatch(test::key(ui::Key::Space), platform);
     NUI_CHECK(third.get());
 
-
-
     // A trapping active scope enters on its default focus and wraps both Tab directions.
     {
         ui::State<bool> active{true};
@@ -143,6 +141,49 @@ void suite() {
         scoped.dispatch(test::key(ui::Key::Space), scoped_platform);
         NUI_CHECK(!outside.get()); // restored to Outside and toggled again
         NUI_CHECK(dialog_b.get());
+    }
+
+    // T059: making an active trapping scope unavailable must preserve the scope's
+    // existing restore target, not fall back to the first focusable in the tree.
+    {
+        ui::State<bool> dialog_active{false};
+        ui::State<bool> scope_enabled{true};
+        ui::State<bool> outside_a{false};
+        ui::State<bool> outside_b{false};
+        ui::State<bool> dialog_value{false};
+        ui::UI scoped{
+            ui::Column{
+                ui::Toggle{"Outside A", outside_a},
+                ui::Toggle{"Outside B", outside_b},
+                ui::Enabled{scope_enabled,
+                    ui::FocusScope{dialog_active,
+                        ui::Toggle{"Dialog", dialog_value}}
+                        .trap(true)}
+            }.gap(4.0f).padding(0.0f)};
+
+        test::MockPlatform scoped_platform;
+        scoped.resize({720.0f, 180.0f});
+        scoped.activate(scoped_platform);
+
+        // Move the pre-dialog focus away from the first global focusable so an
+        // incorrect generic fallback is observable.
+        scoped.dispatch(test::key(ui::Key::Tab), scoped_platform);
+        scoped.dispatch(test::key(ui::Key::Space), scoped_platform);
+        NUI_CHECK(outside_b.get());
+        NUI_CHECK(!outside_a.get());
+
+        dialog_active.set(true);
+        scoped.dispatch(test::key(ui::Key::Space), scoped_platform);
+        NUI_CHECK(dialog_value.get());
+
+        scope_enabled.set(false);
+        scoped.dispatch(test::key(ui::Key::Space), scoped_platform);
+
+        // Existing FocusScope semantics restore Outside B. Falling back to the
+        // first global focusable would toggle Outside A instead.
+        NUI_CHECK(!outside_b.get());
+        NUI_CHECK(!outside_a.get());
+        NUI_CHECK(dialog_value.get());
     }
 
     // A deactivated tree must not route stray key events or traversal.

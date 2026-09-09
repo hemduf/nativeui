@@ -182,12 +182,15 @@ public:
             if (event.key == Key::Right || event.key == Key::Up) delta = +step;
             if (delta == 0.0f) return EventResult::Ignored;
 
-            state_.set(std::clamp(value_ + delta, minimum_, maximum_));
-            ctx.invalidate();
+            if (!effective_read_only()) {
+                state_.set(std::clamp(value_ + delta, minimum_, maximum_));
+                ctx.invalidate();
+            }
             return EventResult::Handled;
         }
 
         if (event.type == InputType::PointerDown) {
+            if (effective_read_only()) return EventResult::Handled;
             drag_gesture_.begin(event.position);
             drag_start_value_ = value_;
             ctx.capture_pointer();
@@ -196,6 +199,12 @@ public:
         }
 
         if (event.type == InputType::PointerMove && drag_gesture_.active()) {
+            if (effective_read_only()) {
+                (void)drag_gesture_.cancel();
+                ctx.release_pointer();
+                ctx.invalidate();
+                return EventResult::Handled;
+            }
             const auto drag = drag_gesture_.move(event.position);
             if (drag.dragging) {
                 const float value_delta = drag_value_delta(
@@ -207,7 +216,11 @@ public:
         }
 
         if (event.type == InputType::PointerUp && drag_gesture_.active()) {
-            (void)drag_gesture_.end(event.position);
+            if (effective_read_only()) {
+                (void)drag_gesture_.cancel();
+            } else {
+                (void)drag_gesture_.end(event.position);
+            }
             ctx.release_pointer();
             ctx.invalidate();
             return EventResult::Handled;
@@ -288,8 +301,10 @@ public:
         const bool pointer_toggle = event.type == InputType::PointerDown;
         if (!keyboard_toggle && !pointer_toggle) return EventResult::Ignored;
 
-        state_.set(!value_);
-        ctx.invalidate();
+        if (!effective_read_only()) {
+            state_.set(!value_);
+            ctx.invalidate();
+        }
         return EventResult::Handled;
     }
 
