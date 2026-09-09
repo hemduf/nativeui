@@ -5,3 +5,4 @@
 #include <nativeui/detail/widgets_builders.inc>
 #include <nativeui/detail/widgets_button.inc>
 #include <nativeui/detail/widgets_slider.inc>
+#include <nativeui/detail/widgets_range_slider.inc>
