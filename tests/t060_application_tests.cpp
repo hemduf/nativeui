@@ -161,6 +161,16 @@ int callback_quit() {
                        .resizable = true}};
     if (!valid_window(window, "callback-quit-create")) return 1;
 
+    // Realization/configure establishes the retained layout used by hit testing.
+    // Keep this deterministic and bounded; no sleeps or helper threads.
+    for (int i = 0; i < 8; ++i) {
+        if (!application.poll(0.0)) {
+            return fail("callback-quit-realize", application.last_error().empty()
+                                                     ? "application stopped before callback dispatch"
+                                                     : application.last_error());
+        }
+    }
+
     ui::InputEvent down{};
     down.type = ui::InputType::PointerDown;
     down.position = {20.0f, 20.0f};
