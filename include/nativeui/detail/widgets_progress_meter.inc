@@ -40,7 +40,14 @@ public:
     }
 
     [[nodiscard]] float fraction(float value) const noexcept {
-        return (effective(value) - minimum_) / (maximum_ - minimum_);
+        // The endpoints are finite binary32 values, but maximum-minimum can
+        // still overflow binary32 for a valid wide range. Normalize in double
+        // so every accepted finite range produces finite [0, 1] geometry.
+        const double minimum = static_cast<double>(minimum_);
+        const double span = static_cast<double>(maximum_) - minimum;
+        const double normalized =
+            (static_cast<double>(effective(value)) - minimum) / span;
+        return static_cast<float>(std::clamp(normalized, 0.0, 1.0));
     }
 
     [[nodiscard]] Rect fill_rect(
