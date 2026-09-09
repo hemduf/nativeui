@@ -53,7 +53,7 @@ endif()
     ERROR_VARIABLE _stderr)
   if(NOT _result EQUAL 0)
     message(FATAL_ERROR
-      "T054 ${name} failed; semicolon-bearing PRODUCT_NAME must retain its value\n"
+      "T054 ${name} failed; original one-value argument boundaries must be preserved\n"
       "${_stdout}\n${_stderr}")
   endif()
 endfunction()
@@ -63,11 +63,19 @@ endfunction()
 _t054_argument_case(quoted_semicolons
   [==["Alpha;Beta;Omega"]==] "Alpha;Beta;Omega")
 
-# When a semicolon-delimited component itself equals a helper keyword, callers
-# can use normal CMake list escaping to keep that semicolon inside the original
-# macro value. The helper must remove only CMake's list escape and preserve the
-# actual product filename bytes.
+# A one-value argument may itself equal another helper keyword. The public
+# grammar allows this filename and must not reinterpret it as syntax.
+_t054_argument_case(keyword_as_value
+  [==["VERSION"]==] "VERSION")
+
+# A semicolon-bearing quoted value may contain a component that happens to be a
+# helper keyword. Quoting the original CMake argument is sufficient; callers
+# must not need an extra list escape to preserve a valid PRODUCT_NAME.
+_t054_argument_case(keyword_inside_semicolon
+  [==["Alpha;VERSION;Omega"]==] "Alpha;VERSION;Omega")
+
+# Explicit CMake list escaping must also continue to preserve the same bytes.
 _t054_argument_case(escaped_keyword_component
   [==["Alpha\;VERSION\;Omega"]==] "Alpha;VERSION;Omega")
 
-message(STATUS "T054 semicolon argument-boundary regression passed")
+message(STATUS "T054 original argument-boundary regression passed")
