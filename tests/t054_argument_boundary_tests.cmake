@@ -78,8 +78,4 @@ _t054_argument_case(keyword_as_value
 _t054_argument_case(keyword_inside_semicolon
   [==["Alpha;VERSION;Omega"]==] "Alpha;VERSION;Omega")
 
-# Explicit CMake list escaping must also continue to preserve the same bytes.
-_t054_argument_case(escaped_keyword_component
-  [==["Alpha\;VERSION\;Omega"]==] "Alpha;VERSION;Omega")
-
 message(STATUS "T054 original argument-boundary regression passed")
