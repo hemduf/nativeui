@@ -303,13 +303,27 @@ inline bool blocking_after_two_runs(const RunMetrics& baseline,
            is_timing_regression(baseline, second_candidate);
 }
 
-inline bool allocation_regression(double baseline_allocations_per_op,
-                                  double candidate_allocations_per_op,
-                                  bool zero_recurring_allocation) noexcept {
+struct AllocationMetrics {
+    double allocations_per_op{};
+    double bytes_per_op{};
+};
+
+inline bool is_allocation_regression(const AllocationMetrics& baseline,
+                                     const AllocationMetrics& candidate,
+                                     bool zero_recurring_allocation) noexcept {
     if (zero_recurring_allocation) {
-        return candidate_allocations_per_op > 0.0;
+        return candidate.allocations_per_op > 0.0;
     }
-    return candidate_allocations_per_op > baseline_allocations_per_op * 1.10;
+    return candidate.allocations_per_op > baseline.allocations_per_op * 1.10 ||
+           candidate.bytes_per_op > baseline.bytes_per_op * 1.10;
+}
+
+inline bool allocation_blocking_after_two_runs(const AllocationMetrics& baseline,
+                                                const AllocationMetrics& first_candidate,
+                                                const AllocationMetrics& second_candidate,
+                                                bool zero_recurring_allocation) noexcept {
+    return is_allocation_regression(baseline, first_candidate, zero_recurring_allocation) &&
+           is_allocation_regression(baseline, second_candidate, zero_recurring_allocation);
 }
 
 inline bool idle_invalidation_passes(std::uint64_t invalidation_count) noexcept {
