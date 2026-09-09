@@ -33,10 +33,16 @@ jobs:
           - name: Linux X11
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: T047 public attachment contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t047_attach_contract_tests.cmake
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -75,6 +81,16 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
+      - name: T047 external package contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t047_package_tests.cmake
+
       # T053/CODE_REVIEW.md requires proof that two final consumers configured
       # together derive different Objective-C runtime namespaces while sharing
       # one generic Core/platform-C layer, and that both bridge images load in
@@ -100,6 +116,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: T047 public attachment contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t047_attach_contract_tests.cmake
 
       - name: Install dependencies
         run: |

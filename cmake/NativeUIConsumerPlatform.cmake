@@ -81,7 +81,8 @@ function(_nativeui_platform_source_roots out_pugl out_nativeui)
     set(_pugl_root "${pugl_src_SOURCE_DIR}")
   else()
     message(FATAL_ERROR
-      "NativeUI consumer platform bridge cannot locate the pinned Pugl source tree")
+      "NativeUI consumer platform bridge cannot locate the pinned Pugl source tree. "
+      "The installed package may be incomplete; expected include/pugl/pugl.h under NATIVEUI_PUGL_SOURCE_DIR.")
   endif()
 
   if(DEFINED NATIVEUI_PLATFORM_SOURCE_ROOT AND
@@ -91,7 +92,8 @@ function(_nativeui_platform_source_roots out_pugl out_nativeui)
     get_filename_component(
       _nativeui_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/.." ABSOLUTE)
   endif()
-  if(NOT EXISTS "${_nativeui_root}/src/detail/native_ime_macos.m")
+  if(NOT EXISTS "${_nativeui_root}/src/detail/native_ime_macos.m" OR
+     NOT EXISTS "${_nativeui_root}/src/pugl_skia.cpp")
     message(FATAL_ERROR
       "NativeUI consumer platform bridge cannot locate NativeUI platform sources at ${_nativeui_root}")
   endif()
@@ -100,16 +102,47 @@ function(_nativeui_platform_source_roots out_pugl out_nativeui)
   set(${out_nativeui} "${_nativeui_root}" PARENT_SCOPE)
 endfunction()
 
+function(_nativeui_platform_opengl_target out_var)
+  if(TARGET NativeUI::OpenGL)
+    set(${out_var} NativeUI::OpenGL PARENT_SCOPE)
+    return()
+  endif()
+  if(TARGET _nativeui_package_opengl)
+    set(${out_var} _nativeui_package_opengl PARENT_SCOPE)
+    return()
+  endif()
+
+  find_package(OpenGL REQUIRED)
+  add_library(_nativeui_package_opengl INTERFACE)
+  if(TARGET OpenGL::GL)
+    target_link_libraries(_nativeui_package_opengl INTERFACE OpenGL::GL)
+  elseif(TARGET OpenGL::OpenGL)
+    target_link_libraries(_nativeui_package_opengl INTERFACE OpenGL::OpenGL)
+    if(TARGET OpenGL::GLX)
+      target_link_libraries(_nativeui_package_opengl INTERFACE OpenGL::GLX)
+    endif()
+  else()
+    message(FATAL_ERROR
+      "NativeUI platform attachment requires a usable OpenGL target from CMake FindOpenGL")
+  endif()
+  set(${out_var} _nativeui_package_opengl PARENT_SCOPE)
+endfunction()
+
 # The portable Pugl C core is generic and compiled once. Only Cocoa/OpenGL and
 # NativeUI's Objective-C IME bridge are consumer-specific on macOS.
 function(_nativeui_prepare_macos_platform_common)
   if(NOT APPLE OR TARGET nativeui_pugl_common)
     return()
   endif()
-  if(NOT TARGET NativeUI::OpenGL)
-    message(FATAL_ERROR "NativeUI::OpenGL must exist before preparing the macOS platform bridge")
+
+  if(NOT CMAKE_C_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  if(NOT CMAKE_OBJC_COMPILER_LOADED)
+    enable_language(OBJC)
   endif()
 
+  _nativeui_platform_opengl_target(_nativeui_opengl_target)
   _nativeui_platform_source_roots(_pugl_root _nativeui_root)
   add_library(nativeui_pugl_common STATIC
     "${_pugl_root}/src/common.c"
@@ -129,16 +162,28 @@ function(_nativeui_prepare_macos_platform_common)
     PRIVATE PUGL_INTERNAL GL_SILENCE_DEPRECATION
   )
   target_compile_options(nativeui_pugl_common PRIVATE -Wno-deprecated-declarations)
-  target_link_libraries(nativeui_pugl_common PUBLIC NativeUI::OpenGL)
+  target_link_libraries(nativeui_pugl_common PUBLIC "${_nativeui_opengl_target}")
+
   if(DEFINED APPKIT_FRAMEWORK)
-    target_link_libraries(nativeui_pugl_common PUBLIC "${APPKIT_FRAMEWORK}")
+    set(_nativeui_appkit "${APPKIT_FRAMEWORK}")
+  else()
+    find_library(_nativeui_appkit AppKit REQUIRED)
   endif()
   if(DEFINED FOUNDATION_FRAMEWORK)
-    target_link_libraries(nativeui_pugl_common PUBLIC "${FOUNDATION_FRAMEWORK}")
+    set(_nativeui_foundation "${FOUNDATION_FRAMEWORK}")
+  else()
+    find_library(_nativeui_foundation Foundation REQUIRED)
   endif()
   if(DEFINED COREVIDEO_FRAMEWORK)
-    target_link_libraries(nativeui_pugl_common PUBLIC "${COREVIDEO_FRAMEWORK}")
+    set(_nativeui_corevideo "${COREVIDEO_FRAMEWORK}")
+  else()
+    find_library(_nativeui_corevideo CoreVideo REQUIRED)
   endif()
+  target_link_libraries(nativeui_pugl_common PUBLIC
+    "${_nativeui_appkit}"
+    "${_nativeui_foundation}"
+    "${_nativeui_corevideo}"
+  )
 
   # Dependencies.cmake still defines its historical all-in-one Pugl target for
   # non-macOS platforms. It is intentionally unreachable/excluded on macOS once
@@ -147,6 +192,119 @@ function(_nativeui_prepare_macos_platform_common)
   if(TARGET nativeui_pugl)
     set_target_properties(nativeui_pugl PROPERTIES EXCLUDE_FROM_ALL TRUE)
   endif()
+endfunction()
+
+# Installed packages do not export a generic NativeUI::NativeUI platform target:
+# T047's public surface is NativeUI::Core + nativeui_attach_platform(). Build the
+# private generic C++/Pugl layer lazily in the consuming build when that helper is
+# actually called. macOS still keeps Objective-C bridge sources per final target.
+function(_nativeui_prepare_package_platform out_var)
+  if(TARGET _nativeui_package_platform)
+    set(${out_var} _nativeui_package_platform PARENT_SCOPE)
+    return()
+  endif()
+  if(NOT TARGET NativeUI::Core)
+    message(FATAL_ERROR
+      "NativeUI package platform attachment requires imported target NativeUI::Core")
+  endif()
+
+  if(NOT CMAKE_C_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  if(NOT CMAKE_CXX_COMPILER_LOADED)
+    enable_language(CXX)
+  endif()
+
+  _nativeui_platform_source_roots(_pugl_root _nativeui_root)
+  _nativeui_platform_opengl_target(_nativeui_opengl_target)
+
+  if(APPLE)
+    _nativeui_prepare_macos_platform_common()
+    set(_nativeui_pugl_target nativeui_pugl_common)
+  else()
+    if(NOT TARGET _nativeui_package_pugl)
+      set(_nativeui_pugl_sources
+        "${_pugl_root}/src/common.c"
+        "${_pugl_root}/src/internal.c"
+      )
+      if(WIN32)
+        list(APPEND _nativeui_pugl_sources
+          "${_pugl_root}/src/win.c"
+          "${_pugl_root}/src/win_gl.c"
+          "${_nativeui_root}/src/detail/native_ime_windows.c"
+        )
+      elseif(UNIX)
+        list(APPEND _nativeui_pugl_sources
+          "${_pugl_root}/src/x11.c"
+          "${_pugl_root}/src/x11_gl.c"
+          "${_nativeui_root}/src/detail/native_ime_x11.c"
+        )
+      else()
+        message(FATAL_ERROR
+          "NativeUI package platform attachment supports macOS, Windows and Linux/X11")
+      endif()
+
+      add_library(_nativeui_package_pugl STATIC ${_nativeui_pugl_sources})
+      set_target_properties(_nativeui_package_pugl PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+      )
+      target_compile_features(_nativeui_package_pugl PUBLIC c_std_99)
+      target_include_directories(_nativeui_package_pugl
+        PUBLIC "${_pugl_root}/include"
+        PRIVATE "${_pugl_root}/src"
+      )
+      target_compile_definitions(_nativeui_package_pugl
+        PUBLIC PUGL_STATIC
+        PRIVATE PUGL_INTERNAL
+      )
+      target_link_libraries(_nativeui_package_pugl PUBLIC "${_nativeui_opengl_target}")
+
+      if(WIN32)
+        target_compile_definitions(_nativeui_package_pugl PRIVATE
+          UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+          WINVER=0x0601 _WIN32_WINNT=0x0601
+        )
+        target_link_libraries(_nativeui_package_pugl PUBLIC
+          dwmapi gdi32 imm32 shell32 shlwapi user32
+        )
+      else()
+        find_package(X11 REQUIRED)
+        target_compile_definitions(_nativeui_package_pugl PRIVATE
+          _POSIX_C_SOURCE=200809L
+          USE_XCURSOR=0
+          USE_XRANDR=0
+          USE_XSYNC=0
+        )
+        target_link_libraries(_nativeui_package_pugl PUBLIC
+          X11::X11 ${CMAKE_DL_LIBS}
+        )
+      endif()
+    endif()
+    set(_nativeui_pugl_target _nativeui_package_pugl)
+  endif()
+
+  add_library(_nativeui_package_platform STATIC
+    "${_nativeui_root}/src/pugl_skia.cpp"
+  )
+  set_target_properties(_nativeui_package_platform PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+  )
+  target_compile_features(_nativeui_package_platform PUBLIC cxx_std_20)
+  target_compile_definitions(_nativeui_package_platform PRIVATE SK_GL)
+  if(WIN32)
+    target_compile_definitions(_nativeui_package_platform PRIVATE NOMINMAX)
+  elseif(APPLE)
+    target_compile_definitions(_nativeui_package_platform PRIVATE GL_SILENCE_DEPRECATION)
+  endif()
+  target_link_libraries(_nativeui_package_platform
+    PUBLIC NativeUI::Core
+    PRIVATE "${_nativeui_pugl_target}" "${_nativeui_opengl_target}"
+  )
+
+  set(${out_var} _nativeui_package_platform PARENT_SCOPE)
 endfunction()
 
 # Internal T053 source-tree/package primitive. T047 supplies the public
@@ -167,8 +325,11 @@ function(_nativeui_attach_consumer_platform)
   if(NOT NUI_CONSUMER_ID)
     message(FATAL_ERROR "NativeUI consumer platform attachment requires CONSUMER_ID")
   endif()
-  if(NOT TARGET NativeUI::NativeUI)
-    message(FATAL_ERROR "NativeUI::NativeUI must exist before attaching the platform bridge")
+
+  if(TARGET NativeUI::NativeUI)
+    set(_nativeui_platform_target NativeUI::NativeUI)
+  else()
+    _nativeui_prepare_package_platform(_nativeui_platform_target)
   endif()
 
   _nativeui_register_consumer_identity("${NUI_TARGET}" "${NUI_CONSUMER_ID}")
@@ -217,9 +378,19 @@ function(_nativeui_attach_consumer_platform)
     if(COMMAND nativeui_enable_project_warnings)
       nativeui_enable_project_warnings("${_nativeui_bridge}")
     endif()
+
+    # Xcode's Foundation MIN/MAX macros use GNU statement expressions. Pugl's
+    # mac.m calls those system macros with side-effect-free arguments, so keep
+    # the project-wide pedantic warning policy and disable only Clang's narrow
+    # macro-expansion diagnostic for this Objective-C bridge.
+    if(CMAKE_OBJC_COMPILER_ID MATCHES "Clang")
+      target_compile_options("${_nativeui_bridge}" PRIVATE
+        -Wno-gnu-statement-expression-from-macro-expansion
+      )
+    endif()
   endif()
 
-  target_link_libraries("${NUI_TARGET}" PRIVATE NativeUI::NativeUI)
+  target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_platform_target}")
   if(_nativeui_bridge)
     target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_bridge}")
   endif()
