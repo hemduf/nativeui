@@ -123,6 +123,14 @@ emitEvent(NativeUIImeBridge* bridge,
 }
 
 static void
+callSuperKeyDown(id self, SEL selector, NSEvent* event)
+{
+  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  ((void (*)(struct objc_super*, SEL, NSEvent*))objc_msgSendSuper)(
+    &superInfo, selector, event);
+}
+
+static void
 callSuperSetMarkedText(id self,
                        SEL selector,
                        id string,
@@ -147,6 +155,23 @@ callSuperUnmarkText(id self, SEL selector)
 {
   struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
   ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superInfo, selector);
+}
+
+static void
+nativeuiKeyDown(id self, SEL selector, NSEvent* event)
+{
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (bridge && bridge->active && bridge->composing) {
+    // Pugl deliberately dispatches special keys without interpretKeyEvents:.
+    // Once marked text is active, however, Return/Escape/arrows and similar
+    // keys belong to the input manager. Feeding them directly to Cocoa keeps
+    // candidate navigation/commit/cancel in the IME and prevents a second
+    // NativeUI editor-command path from running for the same key sequence.
+    [(NSView*)self interpretKeyEvents:@[event]];
+    return;
+  }
+
+  callSuperKeyDown(self, selector, event);
 }
 
 static void
@@ -282,7 +307,8 @@ bridgeSubclass(Class original)
     return Nil;
   }
 
-  if (!addOverride(subclass,
+  if (!addOverride(subclass, original, "keyDown:", (IMP)nativeuiKeyDown) ||
+      !addOverride(subclass,
                    original,
                    "setMarkedText:selectedRange:replacementRange:",
                    (IMP)nativeuiSetMarkedText) ||
