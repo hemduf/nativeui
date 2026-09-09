@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
 project(NativeUI VERSION 0.1.0 LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
@@ -20,6 +23,7 @@ endif()
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/NativeUIConsumerPlatform.cmake)
+include(cmake/NativeUIAttachPlatform.cmake)
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
@@ -55,6 +59,19 @@ set_target_properties(SkiaBuilder::svg PROPERTIES
 )
 set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
   "${NATIVEUI_SKIA_SHAPER_LIBRARY};${NATIVEUI_SKIA_UNICODE_ICU_LIBRARY};${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY};SkiaBuilder::skia")
+
+# Stable file names are baked into the generated package configs while every
+# path remains relative to the package prefix in the installed configuration.
+get_filename_component(NATIVEUI_SKIA_MAIN_FILENAME "${_skia_lib}" NAME)
+get_filename_component(NATIVEUI_SKIA_SVG_FILENAME "${NATIVEUI_SKIA_SVG_LIBRARY}" NAME)
+get_filename_component(NATIVEUI_SKIA_SHAPER_FILENAME "${NATIVEUI_SKIA_SHAPER_LIBRARY}" NAME)
+get_filename_component(NATIVEUI_SKIA_UNICODE_ICU_FILENAME "${NATIVEUI_SKIA_UNICODE_ICU_LIBRARY}" NAME)
+get_filename_component(NATIVEUI_SKIA_UNICODE_CORE_FILENAME "${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY}" NAME)
+
+set(NATIVEUI_INSTALL_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/NativeUI")
+set(NATIVEUI_INSTALL_SKIA_DIR "${CMAKE_INSTALL_DATADIR}/nativeui/skia")
+set(NATIVEUI_INSTALL_PUGL_DIR "${CMAKE_INSTALL_DATADIR}/nativeui/pugl")
+set(NATIVEUI_INSTALL_SOURCE_DIR "${CMAKE_INSTALL_DATADIR}/nativeui/source")
 
 function(nativeui_enable_project_warnings target)
   if(MSVC)
@@ -100,9 +117,13 @@ add_library(nativeui_core STATIC
   src/headless.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
-set_target_properties(nativeui_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(nativeui_core PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  EXPORT_NAME Core
+)
 target_include_directories(nativeui_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(nativeui_core PUBLIC cxx_std_20)
 target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
@@ -146,6 +167,108 @@ if(NATIVEUI_BUILD_PLATFORM)
   nativeui_enable_project_warnings(nativeui)
   nativeui_enable_sanitizers(nativeui)
 endif()
+
+# T047 package/export contract. Only the generic Core library is exported.
+# Platform implementation sources remain private package machinery compiled by
+# nativeui_attach_platform() into each final consumer as required by T053.
+install(TARGETS nativeui_core
+  EXPORT NativeUITargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+install(DIRECTORY include/nativeui
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+install(EXPORT NativeUITargets
+  FILE NativeUITargets.cmake
+  NAMESPACE NativeUI::
+  DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
+)
+
+set(_nativeui_install_package_dir "${CMAKE_CURRENT_BINARY_DIR}/nativeui-install-package")
+file(MAKE_DIRECTORY "${_nativeui_install_package_dir}")
+configure_package_config_file(
+  cmake/NativeUIConfig.cmake.in
+  "${_nativeui_install_package_dir}/NativeUIConfig.cmake"
+  INSTALL_DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
+  PATH_VARS
+    NATIVEUI_INSTALL_SKIA_DIR
+    NATIVEUI_INSTALL_PUGL_DIR
+    NATIVEUI_INSTALL_SOURCE_DIR
+)
+write_basic_package_version_file(
+  "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  "${_nativeui_install_package_dir}/NativeUIConfig.cmake"
+  "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
+  cmake/NativeUIConsumerPlatform.cmake
+  cmake/NativeUIAttachPlatform.cmake
+  DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
+)
+
+# Preserve the exact pinned Skia binaries/headers in the package. This avoids a
+# consumer silently resolving an ABI-incompatible system Skia.
+install(DIRECTORY "${_skia_include}/"
+  DESTINATION "${NATIVEUI_INSTALL_SKIA_DIR}/include"
+)
+install(FILES
+  "${_skia_lib}"
+  "${NATIVEUI_SKIA_SVG_LIBRARY}"
+  "${NATIVEUI_SKIA_SHAPER_LIBRARY}"
+  "${NATIVEUI_SKIA_UNICODE_ICU_LIBRARY}"
+  "${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY}"
+  DESTINATION "${NATIVEUI_INSTALL_SKIA_DIR}/lib"
+)
+
+if(NATIVEUI_BUILD_PLATFORM)
+  # Pugl is a source dependency by design: the final consumer owns its platform
+  # backend, and macOS needs separately compiled Objective-C runtime names.
+  install(DIRECTORY "${NATIVEUI_PUGL_SOURCE_DIR}/include/"
+    DESTINATION "${NATIVEUI_INSTALL_PUGL_DIR}/include"
+  )
+  install(DIRECTORY "${NATIVEUI_PUGL_SOURCE_DIR}/src/"
+    DESTINATION "${NATIVEUI_INSTALL_PUGL_DIR}/src"
+  )
+  install(FILES "${NATIVEUI_PUGL_SOURCE_DIR}/COPYING"
+    DESTINATION "${NATIVEUI_INSTALL_PUGL_DIR}"
+    OPTIONAL
+  )
+  install(FILES src/pugl_skia.cpp
+    DESTINATION "${NATIVEUI_INSTALL_SOURCE_DIR}/src"
+  )
+  install(DIRECTORY src/detail/
+    DESTINATION "${NATIVEUI_INSTALL_SOURCE_DIR}/src/detail"
+  )
+endif()
+
+# Build-tree package parity: expose the same NativeUI::Core target and public
+# nativeui_attach_platform() helper to an external CMake project without install.
+set(_nativeui_build_package_dir "${CMAKE_CURRENT_BINARY_DIR}/nativeui-package")
+file(MAKE_DIRECTORY "${_nativeui_build_package_dir}")
+export(TARGETS nativeui_core
+  FILE "${_nativeui_build_package_dir}/NativeUITargets.cmake"
+  NAMESPACE NativeUI::
+)
+configure_file(
+  cmake/NativeUIBuildTreeConfig.cmake.in
+  "${_nativeui_build_package_dir}/NativeUIConfig.cmake"
+  @ONLY
+)
+write_basic_package_version_file(
+  "${_nativeui_build_package_dir}/NativeUIConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+configure_file(cmake/NativeUIConsumerPlatform.cmake
+  "${_nativeui_build_package_dir}/NativeUIConsumerPlatform.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIAttachPlatform.cmake
+  "${_nativeui_build_package_dir}/NativeUIAttachPlatform.cmake"
+  COPYONLY
+)
 
 set(NATIVEUI_FEATURE_EXAMPLES
   t007_constraints
@@ -214,10 +337,20 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t053_registration_tests.cmake"
   )
+  add_test(
+    NAME nativeui_t047_attach_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t047_attach_contract_tests.cmake"
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
     PROPERTIES LABELS "build;cmake;t053" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t047_attach_contract_tests
+    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 30
   )
 
   function(nativeui_add_core_test name source)
