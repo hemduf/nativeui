@@ -211,8 +211,9 @@ void progress_meter_visual_and_idle_contract() {
         NUI_CHECK(std::isnan(value.get()));
     }
 
-    // Meter owns no animation/timer source: ignored input does not invalidate;
-    // the only observed invalidation here is an external State update.
+    // Meter owns no animation/timer source: ignored input does not schedule any
+    // redraw beyond the tree's pre-existing activation exposure. The next new
+    // invalidation must come from an external State update.
     {
         ui::State<float> value{0.2f};
         ui::UI tree{ui::Meter{value}};
@@ -221,11 +222,12 @@ void progress_meter_visual_and_idle_contract() {
         tree.activate(platform);
         int invalidations = 0;
         tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
+        const int activation_exposures = invalidations;
         tree.dispatch(test::pointer(ui::InputType::PointerMove, 30.0f, 20.0f), platform);
         tree.dispatch(test::key(ui::Key::Right), platform);
-        NUI_CHECK(invalidations == 0);
+        NUI_CHECK(invalidations == activation_exposures);
         value.set(0.8f);
-        NUI_CHECK(invalidations > 0);
+        NUI_CHECK(invalidations > activation_exposures);
     }
 
     // Formatter is presentation-only; invoking it during paint cannot write
