@@ -127,6 +127,9 @@ _t047_run_case(slash FALSE
 _t047_run_case(colon FALSE
   "add_executable(app main.cpp)\nnativeui_attach_platform(TARGET app CONSUMER_ID com.example:app)"
   "reverse-DNS")
+_t047_run_case(semicolon FALSE
+  "add_executable(app main.cpp)\nnativeui_attach_platform(TARGET app CONSUMER_ID \"com.example;app\")"
+  "reverse-DNS")
 _t047_run_case(empty_segment FALSE
   "add_executable(app main.cpp)\nnativeui_attach_platform(TARGET app CONSUMER_ID com..app)"
   "reverse-DNS")
