@@ -18,6 +18,7 @@ nativeui_add_binary_data(T056PackageResources
     resources/other.txt
   ALIASES
     "resources/message.txt=message"
+    [=[resources/other.txt=punct;semi]=]
 )
 
 get_target_property(_resource_type T056PackageResources TYPE)
