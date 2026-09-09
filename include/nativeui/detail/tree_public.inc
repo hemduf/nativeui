@@ -148,7 +148,7 @@
     /// Route one input event according to the retained-mode targeting rules:
     ///
     /// - Tab/Shift+Tab is owned by the tree and never double-delivered;
-    /// - key/text/tick events target the focused node while focus is active;
+    /// - key/text/composition/tick events target the focused node while focus is active;
     /// - PointerDown cancels an older capture, then hit-tests/focuses a new target;
     /// - PointerMove/PointerWheel route to the capture owner first;
     /// - PointerUp routes to the capture owner then releases capture automatically;
@@ -231,7 +231,8 @@
         }
 
         if ((event.type == InputType::KeyDown || event.type == InputType::KeyUp ||
-             event.type == InputType::TextInput || event.type == InputType::Tick) &&
+             event.type == InputType::TextInput || event.type == InputType::Composition ||
+             event.type == InputType::Tick) &&
             focus_active_ && !focusables_.empty()) {
             return route_from(*focusables_[focused_index_], event, platform);
         }
