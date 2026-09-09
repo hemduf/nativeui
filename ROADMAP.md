@@ -387,3 +387,13 @@ T042 also exposed #103 before the intended stress interaction: the first Linux/X
 Linux now uses Skia's desktop-native GL interface while Pugl owns the current GLX context, and deliberately does not fall back to the assembled resolver that caused the crash. Interface/context/surface ownership remains per `SkiaGlRenderer`; macOS and Windows preserve the existing assembled Pugl-proc path. CI `34343547392` passed the code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, and the Linux merge gate now permanently exercises a real Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
 
 This fix does not change #64 Decision B or add mutable context globals. Once #103 and #107 are complete, T042 must be refreshed from current `main` and rerun as the exact supported-path lifecycle matrix before merge.
+
+## State/widget completion candidate — T031
+
+T031 / PR #95 completes Checkbox and RadioButton on top of the merged T030/T059 interaction and availability contracts. The branch has been refreshed over current main after T048 without overwriting package or lifecycle work from parallel lanes.
+
+The completion candidate provides a two-state `Checkbox`, typed value-backed `RadioGroup<T>` / `RadioButton<T>`, one-Tab-stop group entry, wrapped arrow navigation that skips unavailable options, preserved externally supplied no-match selection, and ReadOnly navigation without value mutation. Group identity and duplicate-live-value bookkeeping remain group-owned only; duplicate simultaneously-live values are rejected deterministically and weak bookkeeping permits reuse after prior components are destroyed/remounted. No process-global registry, singleton, `thread_local` state or platform/Pugl dependency enters the widget implementation.
+
+The mandatory review is clean after a TDD correction for duplicate live option values. The synchronized pre-documentation code head `ceb42ecfac9e8f17535b2136a572a2c08179055d` preserves current-main T048/lifecycle integration and has no remaining Blocking/Important code finding. This ROADMAP update is part of the mandatory completion cycle; the documentation-complete exact head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before merge.
+
+When T031 merges, the state/widget frontier advances to the independently Ready T032/T033/T034 set. Re-read live GitHub priorities/dependencies at that point; current roadmap indicates T032 and T034 have the stronger downstream unblock value, while T034 still gates T035/T036 and T032 participates in the styling dependency chain.
