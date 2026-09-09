@@ -19,11 +19,11 @@ function(_t054_argument_case name product_expression expected_output)
   set(_src "${_root}/${name}-src")
   set(_build "${_root}/${name}-build")
   file(MAKE_DIRECTORY "${_src}")
-  file(WRITE "${_src}/main.c" "int main(void) { return 0; }\n")
+  file(WRITE "${_src}/main.cpp" "int main() { return 0; }\n")
 
   set(_project [=[
 cmake_minimum_required(VERSION 3.24)
-project(T054ArgumentBoundary LANGUAGES NONE)
+project(T054ArgumentBoundary LANGUAGES CXX)
 add_library(nativeui_core_stub INTERFACE)
 add_library(NativeUI::Core ALIAS nativeui_core_stub)
 function(_nativeui_attach_consumer_platform)
@@ -35,7 +35,7 @@ nativeui_add_application(App
   PRODUCT_NAME @PRODUCT_EXPRESSION@
   BUNDLE_ID com.example.argument-boundary
   VERSION 1.2.3
-  SOURCES main.c)
+  SOURCES main.cpp)
 get_target_property(_output App OUTPUT_NAME)
 if(NOT _output STREQUAL [==[@EXPECTED_OUTPUT@]==])
   message(FATAL_ERROR "PRODUCT_NAME argument boundary changed: '${_output}'")
@@ -57,6 +57,10 @@ endif()
       "${_stdout}\n${_stderr}")
   endif()
 endfunction()
+
+# Caller SOURCES follow ordinary CMake target language semantics. The fixture
+# therefore enables CXX explicitly; T054 only adds its private platform-language
+# requirements through T047 and does not infer languages from caller sources.
 
 # A normal quoted CMake argument containing semicolons is legal for the frozen
 # PRODUCT_NAME filename grammar and must round-trip unchanged.
