@@ -35,9 +35,11 @@
 
         case PUGL_CLOSE:
             // Notify an in-flight interaction immediately; destructor teardown
-            // will then be idempotent.
+            // will then be idempotent. The Application callback only updates
+            // per-Application bookkeeping; it never mutates the Pugl world.
             (void)ui_.cancel_pointer(services_);
             should_close_ = true;
+            if (close_callback_) close_callback_();
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_IN:
@@ -228,6 +230,7 @@
     UI& ui_;
     PlatformServices& services_;
     PuglWorld* world_{};
+    bool owns_world_{};
     PuglView* view_{};
     NativeUIImeBridge* ime_bridge_{};
     SkiaGlRenderer renderer_;
@@ -248,6 +251,7 @@
     const PuglDataOfferEvent* active_drop_offer_{};
     bool drop_offer_decided_{};
     std::string last_error_;
+    std::function<void()> close_callback_;
 };
 
 } // namespace
