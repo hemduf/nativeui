@@ -72,6 +72,83 @@ function(_nativeui_register_consumer_identity target consumer_id)
   set_property(GLOBAL PROPERTY "${_identity_property}" "${target}")
 endfunction()
 
+function(_nativeui_platform_source_roots out_pugl out_nativeui)
+  if(DEFINED NATIVEUI_PUGL_SOURCE_DIR AND
+     EXISTS "${NATIVEUI_PUGL_SOURCE_DIR}/include/pugl/pugl.h")
+    set(_pugl_root "${NATIVEUI_PUGL_SOURCE_DIR}")
+  elseif(DEFINED pugl_src_SOURCE_DIR AND
+         EXISTS "${pugl_src_SOURCE_DIR}/include/pugl/pugl.h")
+    set(_pugl_root "${pugl_src_SOURCE_DIR}")
+  else()
+    message(FATAL_ERROR
+      "NativeUI consumer platform bridge cannot locate the pinned Pugl source tree")
+  endif()
+
+  if(DEFINED NATIVEUI_PLATFORM_SOURCE_ROOT AND
+     EXISTS "${NATIVEUI_PLATFORM_SOURCE_ROOT}/src/detail/native_ime_macos.m")
+    set(_nativeui_root "${NATIVEUI_PLATFORM_SOURCE_ROOT}")
+  else()
+    get_filename_component(
+      _nativeui_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/.." ABSOLUTE)
+  endif()
+  if(NOT EXISTS "${_nativeui_root}/src/detail/native_ime_macos.m")
+    message(FATAL_ERROR
+      "NativeUI consumer platform bridge cannot locate NativeUI platform sources at ${_nativeui_root}")
+  endif()
+
+  set(${out_pugl} "${_pugl_root}" PARENT_SCOPE)
+  set(${out_nativeui} "${_nativeui_root}" PARENT_SCOPE)
+endfunction()
+
+# The portable Pugl C core is generic and compiled once. Only Cocoa/OpenGL and
+# NativeUI's Objective-C IME bridge are consumer-specific on macOS.
+function(_nativeui_prepare_macos_platform_common)
+  if(NOT APPLE OR TARGET nativeui_pugl_common)
+    return()
+  endif()
+  if(NOT TARGET NativeUI::OpenGL)
+    message(FATAL_ERROR "NativeUI::OpenGL must exist before preparing the macOS platform bridge")
+  endif()
+
+  _nativeui_platform_source_roots(_pugl_root _nativeui_root)
+  add_library(nativeui_pugl_common STATIC
+    "${_pugl_root}/src/common.c"
+    "${_pugl_root}/src/internal.c"
+  )
+  set_target_properties(nativeui_pugl_common PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+  )
+  target_compile_features(nativeui_pugl_common PUBLIC c_std_99)
+  target_include_directories(nativeui_pugl_common
+    PUBLIC "${_pugl_root}/include"
+    PRIVATE "${_pugl_root}/src"
+  )
+  target_compile_definitions(nativeui_pugl_common
+    PUBLIC PUGL_STATIC
+    PRIVATE PUGL_INTERNAL GL_SILENCE_DEPRECATION
+  )
+  target_compile_options(nativeui_pugl_common PRIVATE -Wno-deprecated-declarations)
+  target_link_libraries(nativeui_pugl_common PUBLIC NativeUI::OpenGL)
+  if(DEFINED APPKIT_FRAMEWORK)
+    target_link_libraries(nativeui_pugl_common PUBLIC "${APPKIT_FRAMEWORK}")
+  endif()
+  if(DEFINED FOUNDATION_FRAMEWORK)
+    target_link_libraries(nativeui_pugl_common PUBLIC "${FOUNDATION_FRAMEWORK}")
+  endif()
+  if(DEFINED COREVIDEO_FRAMEWORK)
+    target_link_libraries(nativeui_pugl_common PUBLIC "${COREVIDEO_FRAMEWORK}")
+  endif()
+
+  # Dependencies.cmake still defines its historical all-in-one Pugl target for
+  # non-macOS platforms. It is intentionally unreachable/excluded on macOS once
+  # T053 rewires NativeUI::NativeUI to this generic common target plus a final-
+  # consumer bridge.
+  if(TARGET nativeui_pugl)
+    set_target_properties(nativeui_pugl PROPERTIES EXCLUDE_FROM_ALL TRUE)
+  endif()
+endfunction()
+
 # Internal T053 source-tree/package primitive. T047 supplies the public
 # nativeui_attach_platform() validation wrapper; all high-level helpers must
 # delegate here instead of reproducing the prefix or bridge logic.
@@ -99,21 +176,19 @@ function(_nativeui_attach_consumer_platform)
 
   set(_nativeui_bridge "")
   if(APPLE)
-    if(NOT DEFINED NATIVEUI_PUGL_MACOS_SOURCES OR
-       "${NATIVEUI_PUGL_MACOS_SOURCES}" STREQUAL "")
-      message(FATAL_ERROR
-        "NativeUI macOS consumer bridge sources are unavailable; T053 platform dependencies were not initialized")
-    endif()
-    if(NOT TARGET NativeUI::Pugl)
-      message(FATAL_ERROR "NativeUI::Pugl common target is unavailable")
-    endif()
+    _nativeui_prepare_macos_platform_common()
+    _nativeui_platform_source_roots(_pugl_root _nativeui_root)
 
     string(SHA256 _nativeui_bridge_digest
       "${NUI_TARGET}\n${NUI_CONSUMER_ID}")
     string(SUBSTRING "${_nativeui_bridge_digest}" 0 16 _nativeui_bridge_key)
     set(_nativeui_bridge "nativeui_macos_bridge_${_nativeui_bridge_key}")
 
-    add_library("${_nativeui_bridge}" STATIC ${NATIVEUI_PUGL_MACOS_SOURCES})
+    add_library("${_nativeui_bridge}" STATIC
+      "${_pugl_root}/src/mac.m"
+      "${_pugl_root}/src/mac_gl.m"
+      "${_nativeui_root}/src/detail/native_ime_macos.m"
+    )
     set_target_properties("${_nativeui_bridge}" PROPERTIES
       POSITION_INDEPENDENT_CODE ON
       C_VISIBILITY_PRESET hidden
@@ -122,8 +197,8 @@ function(_nativeui_attach_consumer_platform)
     )
     target_compile_features("${_nativeui_bridge}" PUBLIC c_std_99)
     target_include_directories("${_nativeui_bridge}"
-      PUBLIC "${NATIVEUI_PUGL_SOURCE_DIR}/include"
-      PRIVATE "${NATIVEUI_PUGL_SOURCE_DIR}/src"
+      PUBLIC "${_pugl_root}/include"
+      PRIVATE "${_pugl_root}/src"
     )
     target_compile_definitions("${_nativeui_bridge}"
       PUBLIC PUGL_STATIC
@@ -136,7 +211,7 @@ function(_nativeui_attach_consumer_platform)
         "PuglOpenGLView=${_nativeui_objc_prefix}PuglOpenGLView"
     )
     target_compile_options("${_nativeui_bridge}" PRIVATE -Wno-deprecated-declarations)
-    target_link_libraries("${_nativeui_bridge}" PUBLIC NativeUI::Pugl)
+    target_link_libraries("${_nativeui_bridge}" PUBLIC nativeui_pugl_common)
 
     if(COMMAND nativeui_enable_project_warnings)
       nativeui_enable_project_warnings("${_nativeui_bridge}")
