@@ -57,14 +57,9 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On macOS, any platform build must additionally provide a **consumer/application/plugin-specific** Objective-C runtime prefix, normally derived from the final bundle identifier:
+On macOS, T053 makes the Objective-C/Pugl bridge **consumer scoped**. Do not configure a global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX`. Each final application/module/shared-library consumer must attach the platform bridge with one stable non-empty `CONSUMER_ID`; the single T053 CMake derivation helper turns that exact identity into the collision-resistant runtime prefix. NativeUI's own source-tree examples/tests already register distinct identities internally. T047 owns the installed/public `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)` entry point; do not invent a source-tree-only public alternative while that package work is incomplete.
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
-```
-
-There is deliberately no generic NativeUI/Pugl fallback prefix: a static platform library with one framework-level Objective-C class prefix can still collide when copied into several plug-in bundles loaded by the same host. Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) do not require the prefix.
+There is deliberately no generic NativeUI/Pugl fallback prefix and no reusable precompiled macOS Objective-C bridge shared across unrelated final bundles. `NativeUI::Core` and the portable Pugl C layer remain generic; only the small Cocoa/OpenGL/IME Objective-C bridge is compiled per final consumer. Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) require no consumer platform attachment.
 
 If dependencies are already available locally, prefer the documented `NATIVEUI_PUGL_SOURCE` / `NATIVEUI_SKIA_ROOT` overrides rather than changing the dependency model.
 
@@ -121,7 +116,7 @@ When creating or editing a ticket, preserve this section as the final section of
 
 Every new NativeUI GitHub issue must use the canonical work-item formalism defined by [`.github/ISSUE_TEMPLATE/work-item.yml`](.github/ISSUE_TEMPLATE/work-item.yml).
 
-This rule applies regardless of how the issue is created. Creating a ticket through the GitHub API, an agent, automation, migration script or another integration does **not** exempt it from the Issue Form schema. When the GitHub Issue Form UI is bypassed, reproduce the same fields, section order, defaults and mandatory completion/review content in the generated issue body.
+This rule applies regardless of how the issue is created. Creating a ticket through the GitHub API, an agent, automation script or another integration does **not** exempt it from the Issue Form schema. When the GitHub Issue Form UI is bypassed, reproduce the same fields, section order, defaults and mandatory completion/review content in the generated issue body.
 
 Every new ticket must contain, in this order:
 
@@ -266,6 +261,7 @@ Do not violate these without an explicit architecture ticket:
 - mutable instance-dependent process-global/singleton/thread-local state is forbidden;
 - `State<T>` and normal retained UI mutation are UI/main-thread confined unless an API explicitly documents thread safety;
 - Objective-C runtime-visible classes generated/defined for plug-in embedding must use consumer/plugin-specific collision-resistant names;
+- on macOS, generic Core/Pugl C code may be shared, but Objective-C Pugl/OpenGL/IME bridge sources are compiled per final consumer identity; no fixed framework-level runtime prefix or generic precompiled Objective-C bridge is reusable across unrelated final bundles;
 - no SDL, GLFW, Qt, JUCE or NanoVG dependency;
 - third-party acquisition goes through CPM;
 - Skia is consumed from `skia-builder`, not rebuilt by NativeUI;
@@ -311,10 +307,13 @@ CMake + CPM is mandatory.
 
 - source dependency;
 - exact pinned commit;
-- compiled statically inside NativeUI;
+- compiled statically inside NativeUI/final consumers;
 - only required platform + OpenGL backend sources;
-- on macOS, every compiled Objective-C runtime class from the Pugl bridge must be renamed with `NATIVEUI_OBJC_RUNTIME_PREFIX`, and that prefix must be unique to the final consumer/plugin binary;
-- never publish a generic precompiled static macOS platform archive whose Objective-C runtime prefix cannot vary per final plug-in consumer.
+- Windows/Linux keep one generic Pugl platform target;
+- macOS compiles `common.c`/`internal.c` once as generic platform C code, while `mac.m`, `mac_gl.m` and NativeUI's Cocoa IME bridge are compiled into a small final-consumer bridge;
+- macOS consumer identity is the source of truth: derive runtime names only through T053's frozen `nativeui_compute_objc_runtime_prefix()` algorithm and attach each final target exactly once with its stable `CONSUMER_ID`;
+- never require or restore a global/cache `NATIVEUI_OBJC_RUNTIME_PREFIX` as a normal consumer path;
+- never publish a generic precompiled static macOS Objective-C platform archive whose runtime names cannot vary per final application/plug-in consumer.
 
 ### Skia
 
