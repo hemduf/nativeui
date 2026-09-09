@@ -23,7 +23,7 @@ struct TimerEntry final {
     DispatcherTimePoint due{};
     std::chrono::steady_clock::duration interval{};
     bool repeating{};
-    Dispatcher::Callback callback;
+    std::shared_ptr<Dispatcher::Callback> callback;
 };
 
 namespace {
@@ -123,6 +123,11 @@ void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noex
     const auto now = state->clock->now();
     if (!can_add(now, *converted)) return {};
 
+    // One callable object belongs to the timer for its entire active lifetime.
+    // Queueing a firing captures this shared callable instead of copying
+    // std::function, so mutable callback state is preserved across repeats.
+    auto shared_callback = std::make_shared<Dispatcher::Callback>(std::move(callback));
+
     TimerHandle handle;
     bool should_wake = false;
     {
@@ -139,7 +144,7 @@ void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noex
             now + *converted,
             repeating ? *converted : std::chrono::steady_clock::duration::zero(),
             repeating,
-            std::move(callback),
+            std::move(shared_callback),
         });
 
         if (!state->wake_pending) {
@@ -214,7 +219,9 @@ std::size_t DispatcherOwner::checkpoint() {
                                          });
             if (it == state->timers.end() || it->due > now) continue;
 
-            const bool enqueued = enqueue_task_locked(*state, it->callback);
+            const auto callback = it->callback;
+            const bool enqueued = enqueue_task_locked(
+                *state, [callback] { (*callback)(); });
             if (!enqueued) {
                 timer_blocked_by_full_queue = true;
                 break;
@@ -227,7 +234,8 @@ std::size_t DispatcherOwner::checkpoint() {
                 }
             } else {
                 // One-shot becomes inactive immediately after successful queue
-                // insertion and before its callback can execute.
+                // insertion and before its callback can execute. The queued
+                // wrapper owns the callable until this firing completes.
                 state->timers.erase(it);
             }
         }
