@@ -18,7 +18,7 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 ## Current execution snapshot — 2026-09-09
 
-Active correction **#86 / PR #87 (Doing, not merged):** the reviewed Pugl fork plus background-window drop routing and a T018 text-file preview are being validated. Automated coverage now includes inactive-tree delivery and the OpenGL Cocoa/Pugl destination lifecycle; real Finder acceptance and exact-head CI remain completion gates. This correction does not change milestone completion or unblock another dependency.
+Active correction **#86 / PR #87 (Doing, not merged):** the reviewed Pugl fork plus background-window drop routing and a T018 text-file preview are being validated. The subsequent image-drop crash is covered by binary-file rejection, UTF-8-safe preview limits and shared text-layout repair before Skia. Automated coverage includes inactive-tree delivery, headless malformed-text rendering and the OpenGL Cocoa/Pugl destination lifecycle; real Finder acceptance and exact-head CI remain completion gates. This correction does not change milestone completion or unblock another dependency.
 
 The merged baseline is complete through T030, including T023 and T053, plus the merged #64 Decision B ownership diagnosis and T059 component-availability contract. This T047 merge completes the low-level install/export package contract.
 

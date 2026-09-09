@@ -41,12 +41,17 @@ ctest --test-dir build -R nativeui_example_ --output-on-failure
 For a real macOS file-drop check, launch `./build/nativeui_example_t018_drop
 --trace-drops`, then drag `/tmp/hello.txt` from Finder onto the panel without
 first clicking the destination window. The status should become `Loaded
-hello.txt` and its text should appear. The diagnostic option also prints the
-received contents to stdout. Restart any previously running example after a
-rebuild: a running process still uses its old code.
+hello.txt` and its text should appear. The diagnostic option prints only the
+acceptance result and text byte count, never file contents. Restart any
+previously running example after a rebuild: a running process still uses its
+old code.
 
-T018 previews the first 120 bytes of the first local regular file (read limit:
-64 KiB). URI decoding/file I/O belong to this example, not the toolkit's drop
-API. The self-test uses an isolated temporary UTF-8 filename and leaves the
-user's `/tmp/hello.txt` untouched. The macOS CTest smoke traverses the native
+T018 previews up to 120 bytes of the first local regular UTF-8 `.txt` file
+(case-insensitive extension, 64 KiB read limit). Both limits preserve complete
+UTF-8 characters. Images, binary contents and unsupported files produce an
+error message and clear the old preview; they are not passed to the text
+renderer. Test an image followed by `/tmp/hello.txt` to verify recovery.
+URI decoding/file I/O and this file-type policy belong to the example, not
+the toolkit's generic drop API. The self-test uses an isolated temporary UTF-8
+filename and leaves the user's `/tmp/hello.txt` untouched. The macOS CTest smoke traverses the native
 OpenGL/Cocoa/Pugl destination callbacks, but does not synthesize a Finder drag.
