@@ -205,6 +205,8 @@ install(FILES
   "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
+  cmake/NativeUIBinaryData.cmake
+  cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
 )
 
@@ -267,6 +269,14 @@ configure_file(cmake/NativeUIConsumerPlatform.cmake
 )
 configure_file(cmake/NativeUIAttachPlatform.cmake
   "${_nativeui_build_package_dir}/NativeUIAttachPlatform.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIBinaryData.cmake
+  "${_nativeui_build_package_dir}/NativeUIBinaryData.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIEmbedResource.cmake
+  "${_nativeui_build_package_dir}/NativeUIEmbedResource.cmake"
   COPYONLY
 )
 
@@ -464,7 +474,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource embedded_resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
