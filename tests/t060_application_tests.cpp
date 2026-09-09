@@ -143,6 +143,41 @@ int request_quit() {
     return 0;
 }
 
+int callback_quit() {
+    ui::Application application;
+    if (!application.valid()) return fail("callback-quit", application.last_error());
+    application.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+
+    bool callback_called = false;
+    ui::UI tree{ui::Button{"Quit", [&] {
+        callback_called = true;
+        application.request_quit();
+    }}};
+    ui::StandaloneWindow window{
+        application,
+        tree,
+        ui::WindowDesc{.title = "NativeUI T060 callback quit",
+                       .size = {180.0f, 64.0f},
+                       .resizable = true}};
+    if (!valid_window(window, "callback-quit-create")) return 1;
+
+    ui::InputEvent down{};
+    down.type = ui::InputType::PointerDown;
+    down.position = {20.0f, 20.0f};
+    ui::InputEvent up = down;
+    up.type = ui::InputType::PointerUp;
+    (void)tree.dispatch(down, window);
+    (void)tree.dispatch(up, window);
+
+    if (!callback_called) return fail("callback-quit", "activation callback did not run");
+    if (!application.quit_requested()) return fail("callback-quit", "callback did not request quit");
+    if (window.should_close()) return fail("callback-quit", "callback quit closed the live window");
+    if (!window.valid()) return fail("callback-quit", "callback quit invalidated the live window");
+    if (application.poll(0.0)) return fail("callback-quit", "poll resumed after callback quit");
+    if (!application.last_error().empty()) return fail("callback-quit", application.last_error());
+    return 0;
+}
+
 int poll_contract() {
     ui::Application application;
     if (!application.valid()) return fail("poll-contract", application.last_error());
@@ -292,6 +327,7 @@ int main(int argc, char** argv) {
         if (mode == "--multi-window") return multi_window();
         if (mode == "--explicit-only") return explicit_only();
         if (mode == "--request-quit") return request_quit();
+        if (mode == "--callback-quit") return callback_quit();
         if (mode == "--poll-contract") return poll_contract();
         if (mode == "--invalid-timeout-nan") {
             return invalid_timeout(std::numeric_limits<double>::quiet_NaN(), "invalid-timeout-nan");
