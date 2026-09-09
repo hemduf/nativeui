@@ -141,11 +141,34 @@ def main() -> int:
         "T052 must call T051's canonical C++ comparison entry point instead of duplicating thresholds in workflow Python",
     )
 
+    legal_documents = (
+        "LICENSE.md",
+        "NOTICE.md",
+        "THIRD_PARTY.md",
+        "EULA.md",
+        "PRIVACY.md",
+        "TERMS.md",
+        "LEGAL.md",
+    )
+    for legal_document in legal_documents:
+        text(legal_document)
+
+    package_contract = text("tests/t047_package_tests.cmake")
+    require_all(package_contract, legal_documents, "installed legal payload contract")
+    require("share/nativeui/legal" in package_contract,
+            "T047/T052 release package contract must validate the installed legal directory")
+
     release_notes = text("docs/releases/v0.1.0.md")
     release_notes_lower = release_notes.lower()
     require("developer preview" in release_notes_lower, "v0.1.0 must be identified as a developer preview")
     require("public api" in release_notes_lower and "may change" in release_notes_lower,
             "v0.1.0 must state that public APIs may change during 0.x")
+    require("agpl-3.0-only" in release_notes_lower,
+            "v0.1.0 release notes must state the AGPL-3.0-only licensing path")
+    require("commercial" in release_notes_lower and "dual" in release_notes_lower,
+            "v0.1.0 release notes must state the commercial dual-licensing model")
+    require_all(release_notes, legal_documents,
+                "v0.1.0 legal/licensing notice references")
     require(f"`{pugl_match.group(1)}`" in release_notes, "release notes must match the exact pinned Pugl commit")
     require(f"`{skia_match.group(1)}`" in release_notes, "release notes must match the exact pinned Skia tag")
     require_all(
