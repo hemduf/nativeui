@@ -1,8 +1,18 @@
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <limits>
 
 namespace {
+
+bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 4) {
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    return std::abs(static_cast<int>(pixel.r) - channel(color.r)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.g) - channel(color.g)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
+}
 
 void value_widgets_respect_effective_read_only_state() {
     ui::State<bool> read_only{true};
@@ -115,6 +125,68 @@ void progress_meter_contract() {
     NUI_CHECK(std::isnan(meter.get()));
 }
 
+void progress_meter_visual_and_idle_contract() {
+    {
+        ui::State<float> value{0.5f};
+        ui::UI tree{ui::ProgressBar{value}};
+        ui::HeadlessRenderer renderer{{200.0f, 40.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(40, 20), ui::colors::accent));
+        NUI_CHECK(pixel_matches(renderer.pixel(160, 20), ui::colors::input));
+
+        value.set(2.0f);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(160, 20), ui::colors::accent));
+        NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
+
+        value.set(std::numeric_limits<float>::quiet_NaN());
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 20), ui::colors::input));
+        NUI_CHECK(std::isnan(value.get()));
+    }
+
+    {
+        ui::State<float> value{0.5f};
+        ui::UI tree{ui::Meter{value}.orientation(ui::ProgressOrientation::Vertical)};
+        ui::HeadlessRenderer renderer{{40.0f, 200.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(20, 160), ui::colors::accent));
+        NUI_CHECK(pixel_matches(renderer.pixel(20, 40), ui::colors::input));
+    }
+
+    // Meter owns no animation/timer source: ignored input does not invalidate;
+    // the only observed invalidation here is an external State update.
+    {
+        ui::State<float> value{0.2f};
+        ui::UI tree{ui::Meter{value}};
+        test::MockPlatform platform;
+        tree.resize({200.0f, 40.0f});
+        tree.activate(platform);
+        int invalidations = 0;
+        tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 30.0f, 20.0f), platform);
+        tree.dispatch(test::key(ui::Key::Right), platform);
+        NUI_CHECK(invalidations == 0);
+        value.set(0.8f);
+        NUI_CHECK(invalidations > 0);
+    }
+
+    // Formatter is presentation-only; invoking it during paint cannot write
+    // normalized data back into the application state.
+    {
+        ui::State<float> value{2.0f};
+        int formatter_calls = 0;
+        ui::UI tree{ui::ProgressBar{value}.formatter([&formatter_calls](float effective) {
+            ++formatter_calls;
+            return std::to_string(effective);
+        })};
+        ui::HeadlessRenderer renderer{{200.0f, 40.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(formatter_calls == 1);
+        NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
+    }
+}
+
 void suite() {
     ui::State<float> drive{0.50f};
     ui::State<float> tone{0.25f};
@@ -166,6 +238,7 @@ void suite() {
     value_widgets_respect_effective_read_only_state();
     progress_meter_numeric_contract();
     progress_meter_contract();
+    progress_meter_visual_and_idle_contract();
 }
 
 } // namespace
