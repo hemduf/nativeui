@@ -206,7 +206,11 @@ function(nativeui_add_application)
         if(_nativeui_application_next_is_keyword)
           break()
         endif()
-        if(_nativeui_application_token MATCHES "^[A-Z][A-Z0-9_]+$")
+        # The frozen public surface explicitly rejects the old generic ICON
+        # pseudo-keyword, but otherwise SOURCES follows normal CMake source-name
+        # semantics. Do not reinterpret uppercase/generated source names as
+        # helper syntax.
+        if(_nativeui_application_token STREQUAL "ICON")
           _nativeui_application_fail("unknown argument '${_nativeui_application_token}'")
         endif()
         list(APPEND _nativeui_application_SOURCES "${_nativeui_application_token}")
