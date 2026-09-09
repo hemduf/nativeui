@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-08
+**Updated:** 2026-09-09
 
 This roadmap turns the current POC into a reusable desktop UI toolkit while preserving the simple architecture: Pugl for native views/events, Skia for rendering, NativeUI for UI behavior.
 
@@ -16,34 +16,27 @@ Ready work is selected by priority, then downstream unblock value / critical-pat
 
 Feature examples are mandatory: every feature ticket ships a dedicated executable example with an interactive mode and a `--self-test` mode. T049 remains the later **gallery/aggregation** milestone, not the first point where examples are created.
 
-## Current execution snapshot — 2026-09-08
+## Current execution snapshot — 2026-09-09
 
-The merged baseline is complete through T029, including T023.
+The merged baseline is complete through T029, including T023. T053 is completing in this merge cycle on the platform/package lane.
 
-- **T029 — advanced IME composition bridge / PR #85:** **Complete in this merge cycle**. NativeUI now has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe preedit offsets, composition-start selection replacement with one undo transaction, deterministic cancel/stale-commit handling, one-shot duplicate committed-text suppression, logical candidate geometry that follows editor scrolling and scale changes, and private Cocoa/Win32 IMM32/X11 XIM bridges. Multi-view isolation, candidate geometry, duplicate delivery and both editor rendering paths are covered; `t029_ime_composition` provides interactive and deterministic `--self-test` modes. Final exact-head platform/sanitizer validation and the mandatory review record are attached to PR #85 before merge.
-- **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete**. Exact head `e197315c85dc6fb5213040f988833b0837c301d7` passed CI run #165 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the macOS two-consumer Objective-C runtime-isolation and multi-instance lifecycle smokes. PR #63 was squash-merged as `4922b85ae8ebb2f004611081f257946ac60e0fa1`; issue #62 is Done/closed.
-- **T023 — SVG/icon resources / PR #60:** **Complete**. NativeUI now exposes backend-neutral `SvgIcon` handles, centered contain-fit SVG drawing, application-owned `ResourceProvider` loading and per-instance `SvgCache` reuse/failure caching. ViewBox-only SVGs, malformed input, invalid destinations, transforms/gradients, cache isolation, deterministic path golden coverage, isolated public-header compilation and `t023_svg_icons --self-test` are covered. The implementation preserves the #62/#63 plugin-host/runtime-prefix contracts.
-- **#64 — multiple `StandaloneWindow` instances crash on macOS:** `Ready`, P1. This is a separate `PUGL_PROGRAM` application-world lifecycle defect; independent `EmbeddedView`/`PUGL_MODULE` multi-instance validation is green.
-- **Ready P0 lanes:** **T042** multi-instance/attach-detach stress tests, **T047** install/export CMake package, and **T053** consumer-scoped macOS Pugl/Objective-C bridge (unblocked by #62 completion).
-- **New M8 CMake/resource chain:** T053 is now `Ready`. T054 (`nativeui_add_application`) depends on T047 + T053. T056 (`nativeui_add_binary_data`) depends on T047, then T057 adds the embedded `ResourceManager`. T055 (`nativeui_add_plugin`) was deliberately closed as `Not planned` for now and is not part of the v1 release path.
-- **Ready high-unblock widget lane:** T030 Button, T032 Slider/RangeSlider and T034 ScrollView. T033 ProgressBar/Meter remains independent Ready work.
+- **T053 — consumer-scoped macOS platform bridge / PR #88:** **Complete in this merge cycle once the final documentation head revalidates.** `NativeUI::Core` remains generic and Pugl `common.c`/`internal.c` are compiled once on macOS; only `mac.m`, `mac_gl.m` and the Cocoa IME bridge compile per final consumer. One frozen CMake helper derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID` bytes. Duplicate target attachment and duplicate identity reuse fail at configure time with no runtime registry. The macOS acceptance fixture builds two final MODULE consumers in one configure, audits class+metaclass symbols with a future-proof unprefixed-`Pugl*` rejection pattern, and loads both modules in one Objective-C runtime. Exact implementation head `fad1d96a17902fa18ee25187ed965ac212b7c89b` passed CI #287 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan; macOS also passed the two-consumer runtime-isolation and lifecycle smoke. Final docs remove the historical global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` contract; the final exact docs head must be green before merge.
+- **T029 — advanced IME composition bridge / PR #85:** **Complete.** NativeUI has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe offsets, single-transaction commit/cancel semantics, candidate geometry and private Cocoa/IMM32/XIM bridges.
+- **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete** and the safety baseline consumed by T053.
+- **T023 — SVG/icon resources / PR #60:** **Complete.** Backend-neutral SVG resources and per-instance provider-backed caching are in the merged baseline.
+- **#64 — multiple `StandaloneWindow` instances crash on macOS:** independent platform lane; it is not a T053 blocker because T053's required embedded/two-consumer coexistence gates are separate and green.
+- **Platform/package lane frontier:** after T053 merges, **T047 becomes Ready** and is the next owned task. T054 remains blocked only until T047 is complete; T048/T056 also follow T047.
+- Other independent lanes such as T059, T030, #64 and T042 are intentionally not part of the T053/T047 lane.
 
-Recommended near-term execution:
+Platform/package execution:
 
 ```text
-T053           -> consumer-scoped macOS platform bridge
+#62 complete -> T053 -> T047 -> T048 -> T052
+                         |
+                         +-> T056 -> T057
 
-in parallel when branches do not conflict:
-T042 -> T051
-T047 -> T048
-     -> T056 -> T057
 T047 + T053 -> T054
-T030 -> T031
-T032
-T034 -> T035 / T036
 ```
-
-#64, T033, T043, T044 and T046 remain valid independent fallback work when a lane is free or another branch is waiting on external validation.
 
 ## Milestone 0 — Baseline hardening
 
@@ -175,7 +168,7 @@ Tickets: `T025`–`T029`.
 
 Progress: T025–T027 are complete. T028 PR #56 added multiline `TextArea`, UTF-8-aware vertical navigation, cross-line selection, viewport scrolling, caret/selection painting and the mandatory feature self-test. Final head `4af63a380ad5c39afed79891242f2d64aa414dd8` passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan and was squash-merged as `ccf53d234cb81a4fb546acba2990bb1478351496`. The post-merge macOS clipboard regression was fixed by PR #61 and validated with real clipboard plus multi-`EmbeddedView` lifecycle coverage.
 
-T029 PR #85 completes the text milestone with a neutral `CompositionEvent` stream shared by `TextInput`/`TextArea`, transient preedit rendering, candidate-window geometry after scrolling and scale conversion, single-transaction commit/cancel semantics, stale/duplicate commit protection, and private native bridges for Cocoa marked-text APIs, Win32 IMM32 and X11 XIM preedit callbacks. Platform implementation types remain private, composition ownership stays per editor/view, and the macOS helper preserves the existing consumer-specific Objective-C runtime namespace. The dedicated `t029_ime_composition --self-test` covers transient state, rendering, duplicate delivery and multi-view isolation.
+T029 PR #85 completes the text milestone with a neutral `CompositionEvent` stream shared by `TextInput`/`TextArea`, transient preedit rendering, candidate-window geometry after scrolling and scale conversion, single-transaction commit/cancel semantics, stale/duplicate commit protection, and private native bridges for Cocoa marked-text APIs, Win32 IMM32 and X11 XIM preedit callbacks. Platform implementation types remain private, composition ownership stays per editor/view, and the macOS helper preserves consumer-specific Objective-C runtime naming. The dedicated `t029_ime_composition --self-test` covers transient state, rendering, duplicate delivery and multi-view isolation.
 
 ## Milestone 5 — Standard widget set
 
@@ -247,7 +240,7 @@ T030 + T032 -> T037 -> T038 -> T039 / T040
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: T041 and cross-cutting #62 complete; T042/T043/T044/T046 and #64 Ready**
+**Status: T041 and cross-cutting #62 complete; T042/T043/T044/T046 and #64 remain independent work**
 
 **Goal:** make NativeUI dependable inside real hosts and standalone applications.
 
@@ -274,22 +267,20 @@ Exit gate:
 
 Tickets: `T041`–`T046`, plus cross-cutting safety issue #62 and standalone lifecycle issue #64.
 
-T042 is P0 and feeds the benchmark/release path. T043, T044, T046 and #64 are independent Ready fallback work. T045 remains explicitly blocked on the standard-widget dependency chain.
-
-The #62/PR #63 safety baseline is complete: unsafe wrapper move semantics are removed, process-shared font aliases are immutable, UI/resource thread contracts are explicit, and macOS Pugl Objective-C runtime classes require a consumer/plugin-specific prefix. This completed baseline unblocks T053 and is now the contract that subsequent platform/package work must preserve.
+The #62/PR #63 safety baseline removed unsafe wrapper move semantics, made process-shared font aliases immutable and established the consumer-specific Objective-C naming requirement. T053 turns that requirement into a final-consumer build invariant instead of a manual global prefix.
 
 ## Milestone 8 — Packaging, tooling and v1 release
 
-**Status: T047 and T053 Ready; T054/T056/T057 follow explicit dependencies; T055 Not planned**
+**Status: T053 completing; T047 is next and becomes Ready immediately after T053 merge; T054/T056/T057 follow explicit dependencies; T055 Not planned**
 
 **Goal:** make the toolkit easy to consume and maintain.
 
 Deliverables:
 
 - `install()` / exported CMake package;
-- `NativeUI::NativeUI` consumer target;
+- exported generic `NativeUI::Core` plus a final-target platform attachment helper;
 - JUCE-style `nativeui_add_application()` helper for concise application target creation;
-- real macOS `.app` bundle generation with bundle metadata and automatic consumer-specific Objective-C runtime prefixing;
+- real macOS `.app` bundle generation with bundle metadata and automatic consumer identity handling;
 - consumer-scoped macOS Pugl/Objective-C bridge so multiple final bundles never share one fixed runtime namespace;
 - `nativeui_add_binary_data()` for deterministic resource packaging directly into binaries;
 - public embedded `ResourceManager` with zero-copy immutable lookup and `ResourceProvider` compatibility;
@@ -298,8 +289,7 @@ Deliverables:
 - component inspector/debug overlay;
 - benchmark suite;
 - CI build matrix;
-- release checklist and semantic versioning policy;
-- macOS packaging that preserves a consumer/plugin-specific Objective-C runtime prefix for the statically linked Pugl bridge.
+- release checklist and semantic versioning policy.
 
 Exit gate:
 
@@ -322,27 +312,24 @@ target_link_libraries(MyApp PRIVATE MyResources)
 
 works on supported platforms with documented prerequisites, with resources available from the embedded runtime resource API and no required runtime filesystem lookup.
 
-On macOS, packaging must not publish one generic precompiled static platform archive whose Objective-C runtime names collide when copied into unrelated application or plug-in bundles. `NativeUI::Core` may remain generic; the Pugl/Objective-C platform bridge must preserve per-consumer runtime naming. High-level CMake helpers must derive and apply the consumer-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` automatically from stable final-target identity rather than requiring a global manual configure flag.
+T053 freezes the lower-level macOS rule: `NativeUI::Core` and portable platform C code are generic, while Objective-C Pugl/OpenGL/IME code is instantiated per final consumer from stable identity. There is no normal global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` path. T047 must install/export this machinery relocatably and expose the single low-level v1 contract `NativeUI::Core + nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`; it must not export/document `NativeUI::NativeUI` as a complete v1 package target.
 
 Tickets: `T047`–`T054`, `T056`–`T057`. `T055` is closed as **Not planned** and deliberately excluded from the current v1 scope.
 
 Release/package dependency chain:
 
 ```text
-#62 / PR #63 (complete) -> T053 -------\
-                                      +-> T054
-T047 ---------------------------------/
-  |\
-  | +-> T048 -------------------\
-  |                              +-> T052
-  +-> T056 -> T057               |
-                                 |
-T042 -> T051 -------------------/
+#62 complete -> T053 -> T047 -> T048 -------------------\
+                         |                               +-> T052
+                         +-> T056 -> T057               |
+                                                       |
+T042 -> T051 -------------------------------------------/
 
+T047 + T053 -> T054
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T047, T053 and T042 are now the P0/high-unblock-value release lanes. T056 can start after T047 independently of T053, and T054 starts when both T047 and T053 are complete. T057 follows T056. The plug-in target helper is explicitly deferred; NativeUI continues to support embedded views without owning plug-in target creation or plug-in SDK semantics.
+The platform/package lane proceeds T053 then T047. Once T047 is complete, T048 and T056 become independently available and T054 is fully unblocked because T053 is already satisfied.
 
 ## Prioritization rule
 
