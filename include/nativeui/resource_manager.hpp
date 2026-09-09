@@ -107,10 +107,11 @@ private:
 /// Compatibility adapter for APIs that require owned resource bytes.
 ///
 /// ResourceManagerProvider stores a lightweight ResourceManager copy. A
-/// successful load allocates/copies the requested payload into the vector
-/// required by ResourceProvider; it is therefore a UI/resource-preparation
-/// operation and is not real-time safe. Missing/invalid resources return
-/// std::nullopt and no cache is kept here.
+/// successful non-empty load allocates/copies the requested payload into the
+/// vector required by ResourceProvider; it is therefore a UI/resource-
+/// preparation operation and is not real-time safe. Empty resources still
+/// return an engaged empty vector. Missing/invalid resources return std::nullopt
+/// and no cache is kept here.
 class ResourceManagerProvider final : public ResourceProvider {
 public:
     explicit ResourceManagerProvider(ResourceManager manager) noexcept : manager_(manager) {}
@@ -119,6 +120,7 @@ public:
         std::string_view resource_id) override {
         const auto resource = manager_.find(resource_id);
         if (!resource) return std::nullopt;
+        if (resource->bytes.empty()) return std::vector<std::byte>{};
         return std::vector<std::byte>{resource->bytes.begin(), resource->bytes.end()};
     }
 
