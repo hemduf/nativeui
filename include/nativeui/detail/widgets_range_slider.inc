@@ -54,8 +54,9 @@ public:
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void deactivate(LifecycleContext& context) override {
-        if (!dragging_) return;
+        if (!dragging_ && !hovered_) return;
         dragging_ = false;
+        hovered_ = false;
         context.invalidate();
     }
 
@@ -63,6 +64,10 @@ public:
         if (effective_read_only() && mutating_input(event)) {
             const bool release_capture = dragging_;
             dragging_ = false;
+            if (event.type == InputType::PointerDown || event.type == InputType::PointerMove ||
+                event.type == InputType::PointerUp) {
+                hovered_ = context.bounds().contains(event.position);
+            }
             if (release_capture) context.release_pointer();
             context.invalidate();
             return EventResult::Handled;
@@ -73,16 +78,17 @@ public:
                 return begin_drag(event, context);
 
             case InputType::PointerMove:
-                if (!dragging_) return EventResult::Ignored;
-                return update_drag(event, context, false);
+                return pointer_move(event, context);
 
             case InputType::PointerUp:
                 if (!dragging_) return EventResult::Ignored;
+                hovered_ = context.bounds().contains(event.position);
                 return update_drag(event, context, true);
 
             case InputType::PointerCancel:
                 if (!dragging_) return EventResult::Ignored;
                 dragging_ = false;
+                hovered_ = false;
                 context.invalidate();
                 return EventResult::Handled;
 
@@ -94,15 +100,20 @@ public:
         }
     }
 
+    [[nodiscard]] SliderVisualState visual_state(bool focused) const noexcept {
+        return slider_visual_state(
+            effective_enabled(), effective_read_only(), hovered_, dragging_, focused);
+    }
+
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
         const auto effective = effective_range(state_.get());
         const float low_fraction = domain_.fraction(effective.low);
         const float high_fraction = domain_.fraction(effective.high);
-        const bool unavailable = !effective_enabled() || effective_read_only();
+        const auto state = visual_state(context.focused());
         const Color track = colors::input;
-        const Color active = unavailable ? colors::textMuted : colors::accent;
-        const Color border = context.focused() ? colors::borderFocus : colors::border;
+        const Color active = slider_active_color(state);
+        const bool focused = state == SliderVisualState::Focused;
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
@@ -116,12 +127,12 @@ public:
                 Rect{low_x, y - 2.0f, std::max(0.0f, high_x - low_x), 4.0f},
                 2.0f,
                 active);
+            if (focused) {
+                painter.circle(Point{low_x, y}, 9.0f, colors::borderFocus);
+                painter.circle(Point{high_x, y}, 9.0f, colors::borderFocus);
+            }
             painter.circle(Point{low_x, y}, 7.0f, active);
             painter.circle(Point{high_x, y}, 7.0f, active);
-            if (context.focused()) {
-                painter.circle(Point{low_x, y}, 9.0f, border);
-                painter.circle(Point{high_x, y}, 9.0f, border);
-            }
         } else {
             const float x = bounds.x + bounds.w * 0.5f;
             const float y0 = bounds.y + 8.0f;
@@ -133,21 +144,21 @@ public:
                 Rect{x - 2.0f, high_y, 4.0f, std::max(0.0f, low_y - high_y)},
                 2.0f,
                 active);
+            if (focused) {
+                painter.circle(Point{x, low_y}, 9.0f, colors::borderFocus);
+                painter.circle(Point{x, high_y}, 9.0f, colors::borderFocus);
+            }
             painter.circle(Point{x, low_y}, 7.0f, active);
             painter.circle(Point{x, high_y}, 7.0f, active);
-            if (context.focused()) {
-                painter.circle(Point{x, low_y}, 9.0f, border);
-                painter.circle(Point{x, high_y}, 9.0f, border);
-            }
         }
     }
 
 private:
     [[nodiscard]] bool mutating_input(const InputEvent& event) const noexcept {
-        if (event.type == InputType::PointerDown || event.type == InputType::PointerUp) {
-            return true;
+        if (event.type == InputType::PointerDown) return true;
+        if (event.type == InputType::PointerMove || event.type == InputType::PointerUp) {
+            return dragging_;
         }
-        if (event.type == InputType::PointerMove) return dragging_;
         if (event.type != InputType::KeyDown) return false;
         return event.key == Key::Left || event.key == Key::Right ||
                event.key == Key::Up || event.key == Key::Down ||
@@ -212,9 +223,23 @@ private:
         active_thumb_ = choose_thumb(target, effective);
         has_active_thumb_ = true;
         dragging_ = true;
+        hovered_ = true;
         context.capture_pointer();
         commit_value(edited_value(target), context);
         return EventResult::Handled;
+    }
+
+    EventResult pointer_move(const InputEvent& event, InputContext& context) {
+        const bool inside = context.bounds().contains(event.position);
+        if (!dragging_) {
+            if (hovered_ != inside) {
+                hovered_ = inside;
+                context.invalidate();
+            }
+            return EventResult::Handled;
+        }
+        hovered_ = inside;
+        return update_drag(event, context, false);
     }
 
     EventResult update_drag(
@@ -281,6 +306,7 @@ private:
     RangeSliderThumb active_thumb_{RangeSliderThumb::Lower};
     bool has_active_thumb_{};
     bool dragging_{};
+    bool hovered_{};
 };
 
 } // namespace detail
