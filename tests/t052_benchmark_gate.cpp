@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -178,10 +179,8 @@ void validate(const Options& options) {
             continue;
         }
 
-        const bool zero_recurring_allocation =
-            base.allocation_metrics_available && base.allocations_per_op == 0.0;
         const auto comparison = nativeui::bench::compare_two_complete_runs(
-            base, candidate_a, candidate_b, zero_recurring_allocation);
+            base, candidate_a, candidate_b, false);
         if (!comparison.allocation_metrics_comparable) {
             throw std::runtime_error("T052 allocation evidence is unavailable for " + name);
         }
