@@ -467,7 +467,8 @@ if(NATIVEUI_BUILD_TESTS)
   foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(${_header} PRIVATE)
+    nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
+    nativeui_enable_sanitizers(nativeui_header_${_header}_compile)
   endforeach()
 
   # Every completed feature ships an executable example. Compile every
