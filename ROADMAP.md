@@ -368,3 +368,11 @@ core correctness
 ```
 
 This sequence minimizes rewrites, but it is an architectural roadmap rather than a serialized work queue. Once a ticket's explicit dependencies are satisfied, it may proceed independently. Prefer critical-path/unblock-value work and keep unrelated lanes moving while another PR waits on CI or platform validation.
+
+## Lifecycle completion note — #105
+
+T042 lifecycle stress exposed #105, a constructor-time callback lifetime defect in the public wrapper-to-platform bridge. PR #106 keeps the public API intact while moving the `PlatformServices` bridge into each private per-instance `StandaloneWindow::Impl` / `EmbeddedView::Impl`, so synchronous native callbacks during `ViewCore` construction cannot observe an unassigned public-wrapper `impl_`.
+
+The exact #105 code head `bf8e2ff055b4fe5ed2c2bd415bb3818f925f366b` passed Linux X11, Windows/MSVC, macOS (including Objective-C two-consumer and clipboard/multi-instance lifecycle validation), and Linux ASan+UBSan in CI `34344755454`. A stacked T042 validation candidate also turns the original macOS `embedded_sequential_100` crash GREEN. No global/singleton/`thread_local` ownership state or #64 Decision-B workaround is introduced.
+
+T042 remains the lifecycle frontier after this focused fix. Its Windows stress subsequently exposed independent issue #107, where Pugl's documented `PUGL_SHOW_RAISE + PUGL_FAILURE` means the window was shown but could not be raised; that separate production integration defect must be resolved independently before the final T042 exact-head matrix and merge.
