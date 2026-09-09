@@ -22,6 +22,8 @@ endforeach()
 file(READ "${_fixture_root}/core/CMakeLists.txt" _core_cmake)
 file(READ "${_fixture_root}/standalone/CMakeLists.txt" _standalone_cmake)
 file(READ "${_fixture_root}/embedded/CMakeLists.txt" _embedded_cmake)
+file(READ "${_fixture_root}/standalone/main.cpp" _standalone_main)
+file(READ "${_fixture_root}/embedded/main.cpp" _embedded_main)
 
 foreach(_cmake_text IN ITEMS
     "${_core_cmake}"
@@ -42,6 +44,20 @@ foreach(_cmake_text IN ITEMS "${_standalone_cmake}" "${_embedded_cmake}")
   endif()
   if(NOT _cmake_text MATCHES "CONSUMER_ID")
     message(FATAL_ERROR "T048 native fixture must provide a stable CONSUMER_ID")
+  endif()
+endforeach()
+
+# Hosted Windows runners have no interactive desktop and Xvfb/OpenGL is not a
+# reliable qualification surface for a package contract. Every native fixture
+# therefore has two explicit paths: a portable --self-test that still links the
+# attached platform implementation, and a real --native-smoke used where the CI
+# supplies a supported graphical session. Keep both paths permanently present.
+foreach(_native_main IN ITEMS "${_standalone_main}" "${_embedded_main}")
+  string(FIND "${_native_main}" "--self-test" _self_test_index)
+  string(FIND "${_native_main}" "--native-smoke" _native_smoke_index)
+  if(_self_test_index EQUAL -1 OR _native_smoke_index EQUAL -1)
+    message(FATAL_ERROR
+      "T048 native fixture must expose both portable --self-test and real --native-smoke paths")
   endif()
 endforeach()
 
