@@ -25,6 +25,7 @@ function(_t054_run_case name expect_success body)
   file(MAKE_DIRECTORY "${_src}")
   file(WRITE "${_src}/main.cpp" "int main() { return 0; }\n")
   file(WRITE "${_src}/extra.cpp" "int t054_extra() { return 54; }\n")
+  file(WRITE "${_src}/UPPER.CPP" "int t054_upper() { return 54; }\n")
   file(WRITE "${_src}/icon.icns" "t054 deterministic icns fixture\n")
   file(WRITE "${_src}/icon.ico" "t054 deterministic ico fixture\n")
   file(WRITE "${_src}/wrong.txt" "wrong icon extension\n")
@@ -140,6 +141,16 @@ nativeui_add_application(App
   VERSION 1.2.3
   PRODUCT_NAME "Reordered App"
   BUNDLE_ID com.example.reordered)
+]=])
+
+# SOURCES follows normal CMake target-source semantics. Uppercase caller-owned
+# source names are data, not helper syntax.
+_t054_run_case(uppercase_source TRUE [=[
+nativeui_add_application(App
+  PRODUCT_NAME App
+  BUNDLE_ID com.example.uppercase-source
+  VERSION 1.2.3
+  SOURCES main.cpp UPPER.CPP)
 ]=])
 
 # Non-consuming platform icon keywords must be accepted without touching the
