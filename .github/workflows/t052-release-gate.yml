@@ -1,0 +1,105 @@
+name: T052 v0.1 Release Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t052-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  contract:
+    name: T052 release contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Validate release source contract
+        run: python3 tests/t052_release_gate_contract.py
+
+      - name: Record exact candidate evidence
+        run: |
+          mkdir -p t052-evidence
+          {
+            echo "release=0.1.0"
+            echo "candidate_sha=${CANDIDATE_SHA}"
+            echo "contract_workflow=${GITHUB_RUN_ID}"
+          } > t052-evidence/release-candidate.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t052-release-evidence
+          path: t052-evidence/release-candidate.txt
+          if-no-files-found: error
+
+  bootstrap:
+    name: T052 clean bootstrap — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux X11
+            os: ubuntu-24.04
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.t052-cpm-source-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Start from an empty dependency/build cache
+        shell: bash
+        run: rm -rf build-t052-bootstrap "${CPM_SOURCE_CACHE}"
+
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - name: Configure clean Unix bootstrap
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build-t052-bootstrap -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure clean Windows bootstrap
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-t052-bootstrap -A x64
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build clean bootstrap
+        run: cmake --build build-t052-bootstrap --config Release --parallel 2
+
+      - name: Verify pinned dependency/hash contract is present
+        shell: bash
+        run: |
+          grep -F 'GITHUB_REPOSITORY hemduf/pugl' cmake/Dependencies.cmake
+          grep -F 'URL_HASH "${_skia_hash}"' cmake/Dependencies.cmake
+          grep -F 'NATIVEUI_SKIA_TAG "chrome/m149"' cmake/Dependencies.cmake
