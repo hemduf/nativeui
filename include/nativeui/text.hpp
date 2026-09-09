@@ -69,6 +69,8 @@ public:
 
 class TextService {
 public:
+    /// Measure UTF-8 text. Malformed bytes are replaced with U+FFFD, using
+    /// exactly the same repaired text as Painter::text.
     [[nodiscard]] static TextMetrics measure(std::string_view text, const TextStyle& style);
     [[nodiscard]] static TextMetrics measure(std::string_view text, float size) {
         TextStyle style{};

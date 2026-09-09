@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -42,6 +43,13 @@ struct ResolvedTextRun {
 struct ResolvedTextLayout {
     TextMetrics metrics;
     std::vector<ResolvedTextRun> runs;
+    // Only populated for malformed input. Run offsets then refer to these
+    // owned bytes, so measurement and painting never pass invalid UTF-8 to Skia.
+    std::string repaired_text;
+
+    [[nodiscard]] std::string_view text_bytes(std::string_view original) const noexcept {
+        return repaired_text.empty() ? original : std::string_view{repaired_text};
+    }
 };
 
 [[nodiscard]] ResolvedTextLayout resolve_text_layout(
@@ -220,6 +228,7 @@ public:
 
     void text(Point position, std::string_view text, const TextStyle& style) {
         const auto layout = detail::resolve_text_layout(text, style);
+        text = layout.text_bytes(text);
         SkPaint paint;
         paint.setAntiAlias(true);
         paint.setColor4f(to_sk_color(style.color));
