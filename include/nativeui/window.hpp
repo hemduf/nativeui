@@ -94,6 +94,9 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    void mark_application_window_closed() noexcept;
+    void unregister_from_application() noexcept;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
