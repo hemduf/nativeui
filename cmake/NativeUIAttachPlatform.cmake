@@ -34,6 +34,16 @@ function(_nativeui_validate_consumer_id consumer_id)
     message(FATAL_ERROR "NativeUI nativeui_attach_platform CONSUMER_ID is required")
   endif()
 
+  # Reject non-grammar bytes before converting dots to a CMake list. Without
+  # this guard a literal semicolon becomes an implicit list separator and can
+  # make an invalid identity such as "com.example;app" look like three valid
+  # reverse-DNS segments.
+  if(NOT "${consumer_id}" MATCHES "^[A-Za-z0-9.-]+$")
+    message(FATAL_ERROR
+      "NativeUI CONSUMER_ID '${consumer_id}' must be a reverse-DNS identity; "
+      "only ASCII [A-Za-z0-9.-] is permitted")
+  endif()
+
   string(REPLACE "." ";" _nativeui_consumer_segments "${consumer_id}")
   list(LENGTH _nativeui_consumer_segments _nativeui_consumer_segment_count)
   if(_nativeui_consumer_segment_count LESS 2)
