@@ -1,0 +1,62 @@
+name: T065 Dispatcher Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/nativeui/dispatcher.hpp'
+      - 'include/nativeui/detail/dispatcher_owner.hpp'
+      - 'src/dispatcher.cpp'
+      - 'tests/dispatcher_tests.cpp'
+      - 'tests/t065/**'
+      - 'examples/features/t065_ui_dispatcher.cpp'
+      - 'CMakeLists.txt'
+      - '.github/workflows/t065-dispatcher-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t065-dispatcher-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-contract:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: cmake -S tests/t065 -B build-t065 -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S tests/t065 -B build-t065 -A x64
+
+      - name: Build
+        run: cmake --build build-t065 --config Release --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build-t065 --output-on-failure -C Release
