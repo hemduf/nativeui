@@ -24,51 +24,91 @@ Non-negotiable rules:
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline and platform/package lane
+## Current merged baseline
 
-Current `main` before the T056 integration merge is `4cd904466d05e4b403eb2b61386868e7c498c719` and already contains T042 lifecycle stress plus the earlier platform/package foundation.
+Current `main` before T032 merges is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
 
-Completed dependencies relevant to this lane:
+Important completed work relevant to the current frontier:
 
 - T053 / PR #88: consumer-scoped macOS platform bridge.
+- #64 / PR #90: standalone PROGRAM-world ownership Decision B.
+- T059 / PR #89: generic component availability/read-only model.
+- T030 / PR #94: Button.
+- T031 / PR #95: Checkbox + typed `RadioGroup<T>` / `RadioButton<T>`.
+- T042 / PR #93: deterministic supported-path lifecycle stress.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`.
 - T048 / PR #99: relocated external Core/standalone/embedded consumer qualification.
-- T042 / PR #93: deterministic supported-path lifecycle stress, merged before this T056 refresh.
+- T056 / PR #111: deterministic CMake binary resources, merged as `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
 
-## T056 binary resources — PR #111
+T056 exact-head qualification is green on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus the dedicated T042 lifecycle matrix. Its last CMake correction only changes the T047 CTest timeout from 30s to 60s because the unchanged macOS contract legitimately needs about 41s.
 
-T056 is the current platform/package merge candidate. It adds:
+## T032 Slider / RangeSlider — PR #115
 
-- installed/build-tree `nativeui_add_binary_data()` and `NativeUIEmbedResource.cmake` helpers;
-- backend-neutral `ui::EmbeddedResourceEntry` with immutable borrowed byte spans;
-- one deterministic generated resource object per source and one target-specific generated table/header;
-- exact SHA-256-derived payload symbols, sorted unique resource IDs, explicit aliases and symlink-aware BASE_DIR containment;
-- exact binary/NUL/empty-file round trips, deterministic clean-build output, incremental rebuild coverage, two-target namespace/symbol isolation and relocated installed-package consumers;
-- semicolon-safe handling for valid resource IDs and canonical source paths without relying on raw CMake list identity.
+T032 is the current widget completion candidate. The branch was structurally refreshed from T056-complete `main` rather than replaying its stale umbrella/CMake files, so merged T031/T042/T056 work is preserved.
 
-Review of pre-refresh head `4cc48ed083a493519b19e8481007a0a6315d0a71` completed all mandatory `CODE_REVIEW.md` categories. The review found one Important CMake-list identity defect for semicolon-containing IDs/paths; TDD regression coverage and the production correction are included in that head. Final pre-refresh review reports no remaining Blocking/Important finding.
+### Shared numeric domain
 
-Pre-refresh exact-head validation is green:
+`detail::SliderDomain` is the sole numeric policy for Slider and RangeSlider:
 
-- normal CI run #451 (`34369151069`): Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan all passed, including T047/T048/T056 package/external-consumer checks;
-- T042 Lifecycle Stress run #23 passed on the same T056 head.
+- finite `minimum < maximum` and finite non-negative optional step are required;
+- user edits normalize by quantize-then-clamp;
+- continuous keyboard increment is exactly 1% of the range and Shift uses 10x; stepped widgets use one step and Shift uses 10 steps;
+- external finite values clamp only for display and are not silently step-snapped;
+- external NaN/Inf maps to a deterministic safe effective value for geometry without rewriting bound State during mount/paint.
 
-The final T056 candidate is refreshed from current `main` rather than carrying the stale feature-branch `CMakeLists.txt`: it preserves merged T031 widget targets and the macOS drop smoke while applying only the T056 package/helper/header additions. `CONTEXT.md` and `ROADMAP.md` are synchronized in this same candidate. The refreshed exact head must rerun the required CI before merge; no earlier-SHA result substitutes for that gate.
+### Slider
+
+`ui::Slider` binds directly to `State<float>&` and supports:
+
+- horizontal/vertical pointer mapping, drag capture, release/cancel;
+- Arrow/Home/End keyboard editing through the same domain;
+- T059 Disabled/Hidden/Collapsed availability and ReadOnly consume-without-write semantics;
+- optional `formatter(...)` which is presentation-only and receives the effective displayed value;
+- explicit retained visual states Normal/Hover/Pressed/Focused/Disabled/ReadOnly;
+- all hover/drag/visual bookkeeping per component instance.
+
+Interaction/capture/invalidation bookkeeping is completed before synchronous `State::set()` calls so an observer may immediately change availability without a duplicate write or post-callback use of stale input context.
+
+### RangeSlider
+
+`ui::RangeSlider` binds to `State<RangeValue>&` and reuses the same numeric domain. It:
+
+- clamps/falls back/sorts external state only for effective rendering and never rewrites it merely because it is out of range/non-finite;
+- selects the nearest thumb; exact ties keep the previous active thumb or default to lower;
+- retains active thumb identity through drag;
+- prevents thumb crossing for every user write;
+- supports horizontal/vertical pointer input plus Arrow/Home/End keyboard editing;
+- renders two thumbs and the selected interval using the same six-state visual policy;
+- keeps drag/hover/active-thumb state per instance.
+
+### Completion regressions and example
+
+The completion candidate registers and executes:
+
+- existing `widget_tests.cpp` Slider/RangeSlider input/T059 coverage;
+- `t032_slider_value_contract.cpp` for the pure domain;
+- `t032_slider_completion_tests.cpp` for NaN/Inf render-only behavior, reentrancy, Hidden/Collapsed capture cancellation and formatter no-write behavior;
+- `t032_slider_visual_tests.cpp` for the six state variants, focus/hover/press, both orientations and two-thumb RangeSlider geometry;
+- `examples/features/t032_slider.cpp` as the required interactive feature demo and deterministic `--self-test`.
+
+No platform-native widget/control, mutable process-global registry, singleton or `thread_local` state is introduced by T032.
 
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042(done) -> T051 -> T052
+lifecycle:        #64(done) -> T042(done) -> T051(Ready) -> T052
 platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                       |
-                                      +-> T054 (Ready)
-                                      +-> T056 (complete by this merge) -> T057
+                                      +-> T054(Ready)
+                                      +-> T056(done) -> T057(Ready)
 state/widgets:    T059(done) -> T030(done) -> T031(done)
                                       |
-                                      +-> T032 / T033 / T034 -> T035 / T036
+                                      +-> T032(this merge) -> T037
+                                      +-> T033(Ready)
+                                      +-> T034(Ready) -> T035 / T036
 ```
 
-After T056 merges, T057 becomes Ready because T022 is already complete. T054 is independently Ready because T047 and T053 are complete. For the platform/package lane, select the next P1 by repository priority/dependency-unblock rules; with no existing in-progress platform/package PR, T054 is the next recommended ticket, then T057.
+After T032 merges, T037 becomes Ready because T030 is already complete. T033/T034 remain independent Ready widget work. Package/release work remains independent.
 
 ## Build / validation
 
@@ -88,11 +128,11 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-T047/T048/T056 package validation additionally exercises source/configure contracts, relocation, external consumers and deterministic generated-resource behavior. Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy.
+The final T032 merge candidate must pass normal CI on Linux X11/Windows/macOS/Linux ASan+UBSan plus the existing T042 Lifecycle Stress matrix. The normal platform jobs also keep T047/T048/T056 package/relocation gates and native platform smokes, so the widget merge cannot silently regress current packaging/platform ownership.
 
 ## Next actions
 
-1. Require all required workflows on the refreshed T056 PR #111 head to complete green.
-2. Re-check the exact refreshed diff/review and merge PR #111 only if no Blocking/Important finding exists.
-3. Mark #68 Done/`status:done` and close it only after merge.
-4. Re-read the platform/package frontier; resume an existing platform/package PR if one appeared, otherwise take T054 / #66 next, with T057 / #69 Ready after T056.
+1. Complete exact-head T032 normal CI and T042 Lifecycle Stress after these documentation changes.
+2. Perform the mandatory exact-head `CODE_REVIEW.md` pass and resolve any Blocking/Important finding regression-first.
+3. Merge PR #115, close #32 as Done and change T037 / #37 from Blocked to Ready.
+4. Continue independent Ready work by repository priority/dependency-unblock rules; do not serialize package/platform work behind the widget lane.
