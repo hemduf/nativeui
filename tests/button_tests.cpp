@@ -196,13 +196,13 @@ void visual_state_goldens() {
     // therefore form deterministic cross-platform golden checks for each fill.
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::panel));
-    const auto normal_edge = renderer.pixel(1, 32);
+    const auto normal_edge = renderer.pixel(0, 32);
 
     test::MockPlatform platform;
     tree.resize(size);
     tree.activate(platform);
     NUI_CHECK(renderer.render(tree));
-    const auto focused_edge = renderer.pixel(1, 32);
+    const auto focused_edge = renderer.pixel(0, 32);
     NUI_CHECK(!same_pixel(normal_edge, focused_edge));
 
     tree.dispatch(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
