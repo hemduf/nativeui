@@ -1,5 +1,7 @@
 #include "example_support.hpp"
 
+#include <stdexcept>
+
 namespace {
 
 enum class Mode { Clean, Drive, Wide };
@@ -73,6 +75,26 @@ int self_test() {
     tree.dispatch(example::key(ui::Key::Right), platform);
     if (state.mode.get() != Mode::Clean) {
         return example::fail("ReadOnly must block RadioButton selection mutation");
+    }
+
+    // A RadioGroup is value-backed, so duplicate simultaneously-live option
+    // values would otherwise both render selected for the same State<T> value.
+    // Reject that invalid configuration deterministically while still allowing
+    // the same values to be reused after earlier components are destroyed.
+    bool duplicate_rejected = false;
+    try {
+        ui::State<int> duplicate_selected{1};
+        ui::RadioGroup<int> duplicate_group{duplicate_selected};
+        ui::UI duplicate_tree{ui::Column{
+            ui::RadioButton{duplicate_group, 1, "First"},
+            ui::RadioButton{duplicate_group, 1, "Duplicate"}
+        }};
+        (void)duplicate_tree;
+    } catch (const std::invalid_argument&) {
+        duplicate_rejected = true;
+    }
+    if (!duplicate_rejected) {
+        return example::fail("RadioGroup must reject duplicate live option values");
     }
 
     ui::HeadlessRenderer renderer{{620.0f, 360.0f}, 1.0f};
