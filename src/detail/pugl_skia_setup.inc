@@ -48,6 +48,25 @@ PuglSpan to_pugl_span(float physical) {
     throw std::runtime_error(std::string(what) + ": " + puglStrerror(status));
 }
 
+sk_sp<const GrGLInterface> make_skia_gl_interface() {
+#if defined(__linux__)
+    // On GLX, Skia's native interface is built against the same current
+    // context and system GL implementation as the pinned desktop package.
+    // The generic assembled path has been observed to hand GrGLExtensions an
+    // unusable discovery function under Xvfb/Mesa llvmpipe, causing a SIGSEGV
+    // during the first exposure instead of returning an initialization error.
+    // Do not fall back to that unsafe path on Linux: a missing native interface
+    // is a controlled renderer-init failure.
+    return GrGLMakeNativeInterface();
+#else
+    return GrGLMakeAssembledInterface(
+        nullptr,
+        [](void*, const char name[]) -> GrGLFuncPtr {
+            return reinterpret_cast<GrGLFuncPtr>(puglGetProcAddress(name));
+        });
+#endif
+}
+
 class SkiaGlRenderer {
 public:
     void reset() {
@@ -74,11 +93,7 @@ public:
         glViewport(0, 0, physical_width, physical_height);
 
         if (!context_) {
-            interface_ = GrGLMakeAssembledInterface(
-                nullptr,
-                [](void*, const char name[]) -> GrGLFuncPtr {
-                    return reinterpret_cast<GrGLFuncPtr>(puglGetProcAddress(name));
-                });
+            interface_ = make_skia_gl_interface();
             if (!interface_) return false;
             context_ = GrDirectContexts::MakeGL(interface_);
             if (!context_) return false;
@@ -207,4 +222,3 @@ PuglStatus reject_pugl_drop_offer(PuglView* view,
     return puglRejectOffer(view, offer, x, y, width, height);
 #endif
 }
-

@@ -1,11 +1,22 @@
-struct StandaloneWindow::Impl {
-    Impl(UI& ui, PlatformServices& services, WindowDesc desc)
-        : core(ui, services, PUGL_PROGRAM, std::move(desc), 0) {}
+struct StandaloneWindow::Impl final : PlatformServices {
+    explicit Impl(UI& ui, WindowDesc desc)
+        : core(ui, *this, PUGL_PROGRAM, std::move(desc), 0) {}
+
+    void set_text_input(bool active, Rect area, float cursor_offset) override {
+        core.set_text_input(active, area, cursor_offset);
+    }
+    void set_clipboard_text(std::string_view text) override { core.set_clipboard_text(text); }
+    void request_clipboard_text() override { core.request_clipboard_text(); }
+    bool accept_drop(std::string_view type, Rect region) override {
+        return core.accept_drop(type, region);
+    }
+    void reject_drop(Rect region) override { core.reject_drop(region); }
+
     ViewCore core;
 };
 
 StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
-    : impl_(std::make_unique<Impl>(ui, *this, std::move(desc))) {}
+    : impl_(std::make_unique<Impl>(ui, std::move(desc))) {}
 StandaloneWindow::~StandaloneWindow() = default;
 
 int StandaloneWindow::run() {
@@ -30,18 +41,29 @@ bool StandaloneWindow::accept_drop(std::string_view type, Rect region) {
 }
 void StandaloneWindow::reject_drop(Rect region) { if (impl_) impl_->core.reject_drop(region); }
 
-struct EmbeddedView::Impl {
-    Impl(UI& ui, PlatformServices& services, NativeParentHandle parent, Size size)
+struct EmbeddedView::Impl final : PlatformServices {
+    Impl(UI& ui, NativeParentHandle parent, Size size)
         : core(ui,
-               services,
+               *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true},
                parent) {}
+
+    void set_text_input(bool active, Rect area, float cursor_offset) override {
+        core.set_text_input(active, area, cursor_offset);
+    }
+    void set_clipboard_text(std::string_view text) override { core.set_clipboard_text(text); }
+    void request_clipboard_text() override { core.request_clipboard_text(); }
+    bool accept_drop(std::string_view type, Rect region) override {
+        return core.accept_drop(type, region);
+    }
+    void reject_drop(Rect region) override { core.reject_drop(region); }
+
     ViewCore core;
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
-    : impl_(std::make_unique<Impl>(ui, *this, parent, size)) {}
+    : impl_(std::make_unique<Impl>(ui, parent, size)) {}
 EmbeddedView::~EmbeddedView() = default;
 
 bool EmbeddedView::poll() { return impl_->core.poll(0.0); }

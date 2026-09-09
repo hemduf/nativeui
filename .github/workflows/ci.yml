@@ -54,7 +54,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev xvfb xauth
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -83,6 +83,20 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel 2
+
+      # Keep a real Linux/X11 renderer exposure in the normal merge gate. T042
+      # stress caught a production crash here that the previous compile/core
+      # coverage could not see. The native smoke uses one supported PROGRAM
+      # world and the existing embedded multi-instance lifecycle path.
+      - name: Linux X11 renderer and lifecycle smoke
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone'
 
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
