@@ -59,6 +59,18 @@ function(_t048_executable_path out_var build_dir target)
   set(${out_var} "${_path}" PARENT_SCOPE)
 endfunction()
 
+function(_t048_execute label executable)
+  execute_process(
+    COMMAND "${executable}" ${ARGN}
+    RESULT_VARIABLE _run_result
+    OUTPUT_VARIABLE _run_output
+    ERROR_VARIABLE _run_error
+  )
+  if(NOT _run_result EQUAL 0)
+    _t048_fail("${label}" "${_run_output}\n${_run_error}")
+  endif()
+endfunction()
+
 function(_t048_run_fixture name target native)
   set(_source "${SOURCE_DIR}/tests/t048_external_consumers/${name}")
   set(_build "${_root}/${name}-build")
@@ -94,32 +106,21 @@ function(_t048_run_fixture name target native)
   endif()
 
   if(native)
-    if(UNIX AND NOT APPLE)
-      find_program(_xvfb_run NAMES xvfb-run REQUIRED)
-      execute_process(
-        COMMAND "${_xvfb_run}" -a "${_executable}" --self-test
-        RESULT_VARIABLE _run_result
-        OUTPUT_VARIABLE _run_output
-        ERROR_VARIABLE _run_error
-      )
-    else()
-      execute_process(
-        COMMAND "${_executable}" --self-test
-        RESULT_VARIABLE _run_result
-        OUTPUT_VARIABLE _run_output
-        ERROR_VARIABLE _run_error
-      )
+    # The package contract must be deterministic on every hosted native runner.
+    # Building this final executable already proves that public window symbols
+    # resolve through nativeui_attach_platform(); --self-test exercises the
+    # relocated Core runtime without depending on an interactive desktop.
+    _t048_execute("${name} self-test" "${_executable}" --self-test)
+
+    # Keep a real native lifecycle gate where CI has a stable graphical session.
+    # The existing project-level macOS smoke exercises the same AppKit/Pugl path,
+    # and this external run additionally proves that the relocated package owns
+    # all implementation sources needed by a real consumer.
+    if(APPLE)
+      _t048_execute("${name} native smoke" "${_executable}" --native-smoke)
     endif()
   else()
-    execute_process(
-      COMMAND "${_executable}"
-      RESULT_VARIABLE _run_result
-      OUTPUT_VARIABLE _run_output
-      ERROR_VARIABLE _run_error
-    )
-  endif()
-  if(NOT _run_result EQUAL 0)
-    _t048_fail("${name} runtime" "${_run_output}\n${_run_error}")
+    _t048_execute("${name} runtime" "${_executable}")
   endif()
 endfunction()
 
@@ -197,4 +198,4 @@ if(APPLE)
 endif()
 
 message(STATUS
-  "T048 relocated external consumers passed: Core, standalone, embedded lifecycle, and applicable macOS two-consumer Objective-C isolation")
+  "T048 relocated external consumers passed: cross-platform Core/self-tests, platform link attachment, macOS native lifecycle, and macOS two-consumer Objective-C isolation")
