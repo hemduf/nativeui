@@ -171,7 +171,8 @@ inline std::string json_string(std::string_view json, std::string_view key) {
             continue;
         }
         if (position >= json.size()) break;
-        switch (const char escaped = json[position++]) {
+        const char escaped = json[position++];
+        switch (escaped) {
         case '\\': out.push_back('\\'); break;
         case '"': out.push_back('"'); break;
         case 'n': out.push_back('\n'); break;
