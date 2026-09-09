@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -104,6 +105,33 @@ private:
 };
 
 struct RadioGroupToken final {};
+
+template <class T>
+class RadioOptionRegistry final {
+public:
+    [[nodiscard]] std::shared_ptr<const T> register_value(T value) {
+        std::erase_if(active_values_, [](const std::weak_ptr<const T>& entry) {
+            return entry.expired();
+        });
+
+        for (const auto& entry : active_values_) {
+            if (auto existing = entry.lock(); existing && *existing == value) {
+                throw std::invalid_argument(
+                    "RadioButton option values must be unique within one RadioGroup");
+            }
+        }
+
+        auto registered = std::make_shared<const T>(std::move(value));
+        active_values_.push_back(registered);
+        return registered;
+    }
+
+private:
+    // Weak entries model only simultaneously-live option specifications/components.
+    // Once an earlier UI tree releases its option value, the same group/value can
+    // be used again by a remounted or reordered tree without retaining stale state.
+    std::vector<std::weak_ptr<const T>> active_values_;
+};
 
 class RadioButtonComponent final : public Component, public FocusGroupParticipant {
 public:
@@ -231,7 +259,9 @@ template <class T>
 class RadioGroup {
 public:
     explicit RadioGroup(State<T>& selected)
-        : selected_(&selected), token_(std::make_shared<detail::RadioGroupToken>()) {}
+        : selected_(&selected),
+          token_(std::make_shared<detail::RadioGroupToken>()),
+          registry_(std::make_shared<detail::RadioOptionRegistry<T>>()) {}
 
 private:
     template <class U>
@@ -239,6 +269,7 @@ private:
 
     State<T>* selected_{};
     std::shared_ptr<detail::RadioGroupToken> token_;
+    std::shared_ptr<detail::RadioOptionRegistry<T>> registry_;
 };
 
 template <class T>
@@ -247,16 +278,18 @@ public:
     RadioButton(const RadioGroup<T>& group, T value, std::string label)
         : selected_(group.selected_),
           token_(group.token_),
+          registry_(group.registry_),
           value_(std::move(value)),
           label_(std::move(label)) {}
 
     Spec spec() && {
         auto* selected = selected_;
         auto token = std::move(token_);
+        auto registry = std::move(registry_);
         auto value = std::move(value_);
         auto label = std::move(label_);
 
-        auto value_identity = std::make_shared<T>(std::move(value));
+        auto value_identity = registry->register_value(std::move(value));
         detail::RadioButtonComponent::IsSelected is_selected =
             [selected, value_identity] { return selected->get() == *value_identity; };
         detail::RadioButtonComponent::Select select =
@@ -287,6 +320,7 @@ public:
 private:
     State<T>* selected_{};
     std::shared_ptr<detail::RadioGroupToken> token_;
+    std::shared_ptr<detail::RadioOptionRegistry<T>> registry_;
     T value_;
     std::string label_;
 };
