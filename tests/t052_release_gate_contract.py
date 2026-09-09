@@ -117,6 +117,9 @@ def main() -> int:
             "t052-release-evidence",
             "t052-v0.1-benchmark-baseline",
             "github.event.pull_request.head.sha || github.sha",
+            "BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}",
+            "Checkout benchmark baseline",
+            "Capture one approved-base run and two candidate runs",
         ),
         "T052 release workflow",
     )
