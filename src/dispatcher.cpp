@@ -12,6 +12,11 @@ namespace ui::detail {
 
 struct DispatcherOwnerToken final {};
 
+struct TaskEntry final {
+    std::uint64_t sequence{};
+    Dispatcher::Callback callback;
+};
+
 struct TimerEntry final {
     std::uint64_t id{};
     std::uint64_t sequence{};
@@ -68,16 +73,31 @@ struct DispatcherState final {
     }
 
     mutable std::mutex mutex;
-    std::deque<Dispatcher::Callback> tasks;
+    std::deque<TaskEntry> tasks;
     std::vector<TimerEntry> timers;
     std::weak_ptr<DispatcherWakeBackend> wake_backend;
     std::shared_ptr<DispatcherClock> clock;
     std::shared_ptr<const DispatcherOwnerToken> token;
+    std::uint64_t next_task_sequence{1};
     std::uint64_t next_timer_id{1};
     std::uint64_t next_timer_sequence{1};
     bool closing{};
     bool wake_pending{};
 };
+
+namespace {
+
+[[nodiscard]] bool enqueue_task_locked(DispatcherState& state,
+                                       Dispatcher::Callback callback) {
+    if (!callback || state.tasks.size() >= kDispatcherMaxPendingTasks ||
+        state.next_task_sequence == 0) {
+        return false;
+    }
+    state.tasks.push_back(TaskEntry{state.next_task_sequence++, std::move(callback)});
+    return true;
+}
+
+} // namespace
 
 void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
     std::shared_ptr<DispatcherWakeBackend> backend;
@@ -156,7 +176,7 @@ std::size_t DispatcherOwner::checkpoint() {
     if (!state) return 0;
 
     const auto now = state->clock->now();
-    std::vector<Dispatcher::Callback> snapshot;
+    std::vector<TaskEntry> snapshot;
     snapshot.reserve(kDispatcherMaxTasksPerCheckpoint);
     bool should_wake = false;
 
@@ -182,7 +202,8 @@ std::size_t DispatcherOwner::checkpoint() {
 
         bool timer_blocked_by_full_queue = false;
         for (const auto& candidate : due) {
-            if (state->tasks.size() >= kDispatcherMaxPendingTasks) {
+            if (state->tasks.size() >= kDispatcherMaxPendingTasks ||
+                state->next_task_sequence == 0) {
                 timer_blocked_by_full_queue = true;
                 break;
             }
@@ -193,7 +214,11 @@ std::size_t DispatcherOwner::checkpoint() {
                                          });
             if (it == state->timers.end() || it->due > now) continue;
 
-            state->tasks.push_back(it->callback);
+            const bool enqueued = enqueue_task_locked(*state, it->callback);
+            if (!enqueued) {
+                timer_blocked_by_full_queue = true;
+                break;
+            }
             if (it->repeating) {
                 if (!can_add(now, it->interval)) {
                     state->timers.erase(it);
@@ -223,12 +248,12 @@ std::size_t DispatcherOwner::checkpoint() {
     if (should_wake) request_dispatcher_wake(state);
 
     std::size_t executed = 0;
-    for (auto& callback : snapshot) {
+    for (auto& task : snapshot) {
         {
             std::lock_guard lock{state->mutex};
             if (state->closing) break;
         }
-        callback();
+        task.callback();
         ++executed;
     }
     return executed;
@@ -293,9 +318,9 @@ bool Dispatcher::post(Callback callback) const {
     bool should_wake = false;
     {
         std::lock_guard lock{state->mutex};
-        if (state->closing || state->tasks.size() >= kDispatcherMaxPendingTasks) return false;
+        if (state->closing) return false;
         const bool was_empty = state->tasks.empty();
-        state->tasks.push_back(std::move(callback));
+        if (!detail::enqueue_task_locked(*state, std::move(callback))) return false;
         if (was_empty && !state->wake_pending) {
             state->wake_pending = true;
             should_wake = true;
