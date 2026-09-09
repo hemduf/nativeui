@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <string>
 
@@ -10,6 +11,19 @@ ui::InputEvent key_up(ui::Key key) {
     event.type = ui::InputType::KeyUp;
     event.key = key;
     return event;
+}
+
+bool pixel_near(ui::Rgba8 pixel, ui::Color color, int tolerance = 4) {
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(value * 255.0f));
+    };
+    return std::abs(static_cast<int>(pixel.r) - channel(color.r)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.g) - channel(color.g)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
+}
+
+bool same_pixel(ui::Rgba8 a, ui::Rgba8 b) {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
 void checkbox_activation_contract() {
@@ -212,11 +226,16 @@ void radio_read_only_contract() {
     tree.resize({220.0f, 140.0f});
     tree.activate(platform);
 
+    // Column has 24 px default padding, so target an actual option rather than
+    // the wrapper padding. The previous (20,20) probe correctly hit no focusable
+    // child and exposed a test-coordinate error on every platform.
     NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+                  test::pointer(ui::InputType::PointerDown, 40.0f, 40.0f), platform) ==
               ui::EventResult::Handled);
     NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
-    tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerUp, 40.0f, 40.0f), platform) ==
+              ui::EventResult::Handled);
     NUI_CHECK(selected.get() == 1);
     NUI_CHECK(writes == 0);
 
@@ -308,6 +327,60 @@ void observer_reentrancy_is_single_activation() {
     }
 }
 
+void visual_state_goldens() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    ui::HeadlessRenderer renderer{size, 1.0f};
+
+    ui::State<bool> checked{false};
+    ui::UI checkbox{ui::Checkbox{checked, "Visual"}};
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::input));
+    const auto checkbox_normal_border = renderer.pixel(3, 16);
+
+    checked.set(true);
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(17, 20), ui::colors::accent));
+
+    test::MockPlatform platform;
+    checkbox.resize(size);
+    checkbox.activate(platform);
+    NUI_CHECK(renderer.render(checkbox));
+    const auto checkbox_focused_border = renderer.pixel(3, 16);
+    NUI_CHECK(!same_pixel(checkbox_normal_border, checkbox_focused_border));
+
+    ui::State<bool> checkbox_enabled{false};
+    ui::UI disabled_checkbox{
+        ui::Enabled{checkbox_enabled, ui::Checkbox{checked, "Disabled"}}
+    };
+    NUI_CHECK(renderer.render(disabled_checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(17, 20), ui::colors::input));
+
+    ui::State<int> selected{2};
+    ui::RadioGroup<int> group{selected};
+    ui::UI radio{ui::RadioButton{group, 1, "Visual"}};
+    NUI_CHECK(renderer.render(radio));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::input));
+    const auto radio_normal_outer = renderer.pixel(20, 16);
+
+    selected.set(1);
+    NUI_CHECK(renderer.render(radio));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::accent));
+
+    radio.resize(size);
+    radio.activate(platform);
+    NUI_CHECK(renderer.render(radio));
+    const auto radio_focused_outer = renderer.pixel(20, 16);
+    NUI_CHECK(!same_pixel(radio_normal_outer, radio_focused_outer));
+
+    ui::State<bool> radio_enabled{false};
+    ui::RadioGroup<int> disabled_group{selected};
+    ui::UI disabled_radio{
+        ui::Enabled{radio_enabled, ui::RadioButton{disabled_group, 1, "Disabled"}}
+    };
+    NUI_CHECK(renderer.render(disabled_radio));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 16), ui::colors::textMuted));
+}
+
 void suite() {
     checkbox_activation_contract();
     checkbox_availability_contract();
@@ -317,6 +390,7 @@ void suite() {
     radio_read_only_contract();
     radio_group_isolation_and_remount();
     observer_reentrancy_is_single_activation();
+    visual_state_goldens();
 }
 
 } // namespace
