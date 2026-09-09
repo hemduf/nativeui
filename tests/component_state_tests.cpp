@@ -2,6 +2,7 @@
 
 #include <nativeui/component_state.hpp>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -25,6 +26,7 @@ struct AvailabilityProbeState {
     int commands{};
     ui::ComponentAvailability last_paint_availability{};
     ui::ComponentAvailability last_input_availability{};
+    std::function<void(bool)> on_focus;
 };
 
 class AvailabilityProbeComponent final : public ui::Component {
@@ -55,6 +57,7 @@ public:
             ++state_->focus_out;
             context.set_text_input(false);
         }
+        if (state_->on_focus) state_->on_focus(focused);
     }
 
     ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
@@ -149,6 +152,8 @@ void visibility_preserves_identity_and_lifecycle() {
 
     visibility.set(ui::VisibilityMode::Hidden);
     NUI_CHECK(probe->pointer_cancel == 1);
+    NUI_CHECK(probe->last_input_availability.visibility == ui::VisibilityMode::Visible);
+    NUI_CHECK(probe->last_input_availability.enabled);
     NUI_CHECK(probe->focus_out == 1);
     NUI_CHECK(!platform.text_input_active);
     NUI_CHECK(!tree.layout_dirty());
@@ -167,6 +172,15 @@ void visibility_preserves_identity_and_lifecycle() {
     const auto hidden = tree.component_availability(probe->node_id);
     NUI_CHECK(hidden.has_value());
     NUI_CHECK(hidden->visibility == ui::VisibilityMode::Hidden);
+
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+    tree.dispatch(test::key(ui::Key::A), platform);
+    tree.dispatch(test::text("x"), platform);
+    tree.dispatch(command(ui::Command::Copy), platform);
+    NUI_CHECK(probe->pointer_down == 1);
+    NUI_CHECK(probe->key_down == 0);
+    NUI_CHECK(probe->text_input == 0);
+    NUI_CHECK(probe->commands == 0);
 
     visibility.set(ui::VisibilityMode::Collapsed);
     NUI_CHECK(tree.layout_dirty());
@@ -201,6 +215,7 @@ void disabled_subtree_is_removed_from_normal_input_and_focus() {
 
     enabled.set(false);
     NUI_CHECK(probe->pointer_cancel == 1);
+    NUI_CHECK(probe->last_input_availability.enabled);
     NUI_CHECK(probe->focus_out == 1);
     NUI_CHECK(!platform.text_input_active);
     NUI_CHECK(!tree.layout_dirty());
@@ -230,6 +245,39 @@ void disabled_subtree_is_removed_from_normal_input_and_focus() {
     tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
     NUI_CHECK(probe->pointer_down == 2);
     NUI_CHECK(probe->last_input_availability.enabled);
+}
+
+void read_only_stays_targetable_and_is_paint_only() {
+    test::MockPlatform platform;
+    ui::State<bool> read_only{false};
+    auto probe = std::make_shared<AvailabilityProbeState>();
+    ui::UI tree{ui::ReadOnly{read_only, AvailabilityProbe{probe}}};
+    tree.resize({100.0f, 40.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{100.0f, 40.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(probe->focus_in == 1);
+    NUI_CHECK(platform.text_input_active);
+
+    read_only.set(true);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+    NUI_CHECK(probe->focus_out == 0);
+    NUI_CHECK(platform.text_input_active);
+
+    const auto availability = tree.component_availability(probe->node_id);
+    NUI_CHECK(availability.has_value());
+    NUI_CHECK(availability->read_only);
+    NUI_CHECK(availability->enabled);
+    NUI_CHECK(availability->visibility == ui::VisibilityMode::Visible);
+
+    tree.dispatch(test::key(ui::Key::A), platform);
+    tree.dispatch(command(ui::Command::Copy), platform);
+    NUI_CHECK(probe->key_down == 1);
+    NUI_CHECK(probe->commands == 1);
+    NUI_CHECK(probe->last_input_availability.read_only);
 }
 
 void inherited_state_is_monotonic_and_equal_effective_updates_are_noops() {
@@ -276,6 +324,30 @@ void inherited_state_is_monotonic_and_equal_effective_updates_are_noops() {
     NUI_CHECK(availability->read_only);
 }
 
+void reentrant_focus_callback_rehomes_after_availability_reversal() {
+    test::MockPlatform platform;
+    ui::State<bool> enabled{true};
+    auto probe = std::make_shared<AvailabilityProbeState>();
+    probe->on_focus = [&](bool focused) {
+        if (!focused && !enabled.get()) enabled.set(true);
+    };
+
+    ui::UI tree{ui::Enabled{enabled, AvailabilityProbe{probe}}};
+    tree.resize({100.0f, 40.0f});
+    tree.activate(platform);
+    NUI_CHECK(probe->focus_in == 1);
+    NUI_CHECK(platform.text_input_active);
+
+    enabled.set(false);
+
+    const auto availability = tree.component_availability(probe->node_id);
+    NUI_CHECK(availability.has_value());
+    NUI_CHECK(availability->enabled);
+    NUI_CHECK(probe->focus_out == 1);
+    NUI_CHECK(probe->focus_in == 2);
+    NUI_CHECK(platform.text_input_active);
+}
+
 void two_trees_keep_availability_and_capture_isolated() {
     test::MockPlatform platform_a;
     test::MockPlatform platform_b;
@@ -307,7 +379,9 @@ void two_trees_keep_availability_and_capture_isolated() {
 void suite() {
     visibility_preserves_identity_and_lifecycle();
     disabled_subtree_is_removed_from_normal_input_and_focus();
+    read_only_stays_targetable_and_is_paint_only();
     inherited_state_is_monotonic_and_equal_effective_updates_are_noops();
+    reentrant_focus_callback_rehomes_after_availability_reversal();
     two_trees_keep_availability_and_capture_isolated();
 }
 
