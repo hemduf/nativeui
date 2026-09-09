@@ -58,9 +58,10 @@ jobs:
           - name: Windows
             os: windows-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CPM_SOURCE_CACHE: ${{ github.workspace }}/.t052-cpm-source-cache
+      T052_INSTALL_PREFIX: ${{ github.workspace }}/t052-install
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,7 +69,7 @@ jobs:
 
       - name: Start from an empty dependency/build cache
         shell: bash
-        run: rm -rf build-t052-bootstrap "${CPM_SOURCE_CACHE}"
+        run: rm -rf build-t052-bootstrap build-t052-release-consumer t052-release-consumer t052-install "${CPM_SOURCE_CACHE}"
 
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
@@ -109,6 +110,35 @@ jobs:
           grep -F 'GITHUB_REPOSITORY hemduf/pugl' cmake/Dependencies.cmake
           grep -F 'URL_HASH "${_skia_hash}"' cmake/Dependencies.cmake
           grep -F 'NATIVEUI_SKIA_TAG "chrome/m149"' cmake/Dependencies.cmake
+
+      - name: Install exact candidate package
+        run: cmake --install build-t052-bootstrap --config Release --prefix "${{ env.T052_INSTALL_PREFIX }}"
+
+      - name: Prepare release-doc consumer from exact snippet (Unix)
+        if: runner.os != 'Windows'
+        run: python3 tests/t052_prepare_release_consumer.py --output t052-release-consumer
+
+      - name: Prepare release-doc consumer from exact snippet (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tests/t052_prepare_release_consumer.py --output t052-release-consumer
+
+      - name: Configure release-doc consumer (Unix)
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S t052-release-consumer -B build-t052-release-consumer -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH=${{ env.T052_INSTALL_PREFIX }}
+
+      - name: Configure release-doc consumer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S t052-release-consumer -B build-t052-release-consumer -A x64
+          -DCMAKE_PREFIX_PATH="${{ env.T052_INSTALL_PREFIX }}"
+
+      - name: Build release-doc consumer
+        run: cmake --build build-t052-release-consumer --config Release --parallel 2
 
   benchmark:
     name: T052 exact-head T051 benchmark
