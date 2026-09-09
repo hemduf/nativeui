@@ -188,6 +188,11 @@ jobs:
           ctest --test-dir build-t052-bench --output-on-failure
           ./build-t052-bench/nativeui_benchmarks --self-test
 
+      - name: Build T051 policy gate
+        run: |
+          cmake --build build-t052-bench --target nativeui_t052_benchmark_gate --parallel 2
+          cp build-t052-bench/t052-benchmark-gate ./t052-benchmark-gate
+
       - name: Capture one approved-base run and two candidate runs
         run: |
           ./build-t052-base/nativeui_benchmarks --json t052-approved-base.json
@@ -195,66 +200,13 @@ jobs:
           ./build-t052-bench/nativeui_benchmarks --json t052-candidate-b.json
 
       - name: Validate exact SHAs, idle hard gate and T051 regression budget
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          baseline_sha = os.environ['BASELINE_SHA']
-          candidate_sha = os.environ['CANDIDATE_SHA']
-          baseline = json.loads(Path('t052-approved-base.json').read_text())['results']
-          candidate_a = json.loads(Path('t052-candidate-a.json').read_text())['results']
-          candidate_b = json.loads(Path('t052-candidate-b.json').read_text())['results']
-          if not (len(baseline) == len(candidate_a) == len(candidate_b)):
-              raise SystemExit('T052 benchmark result-count mismatch')
-
-          compatible = (
-              'schema_version', 'workload_version', 'benchmark_name', 'os',
-              'architecture', 'compiler_id', 'compiler_major', 'build_type',
-              'operations_per_sample'
-          )
-
-          def timing_regression(base, candidate):
-              return (
-                  candidate['median_ns_per_op'] > base['median_ns_per_op'] * 1.15
-                  and candidate['p95_ns_per_op'] > base['p95_ns_per_op'] * 1.20
-              )
-
-          def allocation_regression(base, candidate):
-              base_count = base['allocations_per_op']
-              base_bytes = base['bytes_allocated_per_op']
-              candidate_count = candidate['allocations_per_op']
-              candidate_bytes = candidate['bytes_allocated_per_op']
-              count_bad = candidate_count > 0 if base_count == 0 else candidate_count > base_count * 1.10
-              bytes_bad = candidate_bytes > 0 if base_bytes == 0 else candidate_bytes > base_bytes * 1.10
-              return count_bad or bytes_bad
-
-          for base, first, second in zip(baseline, candidate_a, candidate_b):
-              if base['commit_sha'] != baseline_sha:
-                  raise SystemExit(f'T052 baseline SHA mismatch for {base["benchmark_name"]}')
-              for candidate in (first, second):
-                  for field in compatible:
-                      if base[field] != candidate[field]:
-                          raise SystemExit(f'T052 metadata mismatch for {base["benchmark_name"]}: {field}')
-                  if candidate['commit_sha'] != candidate_sha:
-                      raise SystemExit(f'T052 candidate SHA mismatch for {base["benchmark_name"]}')
-
-              name = base['benchmark_name']
-              if name == 'idle_invalidation':
-                  for run in (base, first, second):
-                      if run['median_ns_per_op'] != 0 or run['p95_ns_per_op'] != 0:
-                          raise SystemExit('T052 idle_invalidation timing hard gate is not zero')
-                      if run['allocations_per_op'] != 0 or run['bytes_allocated_per_op'] != 0:
-                          raise SystemExit('T052 idle_invalidation allocation hard gate is not zero')
-                  continue
-
-              if timing_regression(base, first) and timing_regression(base, second):
-                  raise SystemExit(f'T052 timing regression exceeds T051 budget twice: {name}')
-              if allocation_regression(base, first) and allocation_regression(base, second):
-                  raise SystemExit(f'T052 allocation regression exceeds T051 budget twice: {name}')
-          PY
+        run: >-
+          ./t052-benchmark-gate
+          --baseline t052-approved-base.json
+          --candidate-a t052-candidate-a.json
+          --candidate-b t052-candidate-b.json
+          --baseline-sha "${BASELINE_SHA}"
+          --candidate-sha "${CANDIDATE_SHA}"
 
       - uses: actions/upload-artifact@v4
         with:
