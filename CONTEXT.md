@@ -52,7 +52,7 @@ T032 is the current widget completion candidate. The branch was structurally ref
 
 - finite `minimum < maximum` and finite non-negative optional step are required;
 - user edits normalize by quantize-then-clamp;
-- continuous keyboard increment is exactly 1% of the range and Shift uses 10x; stepped widgets use one step and Shift uses 10 steps;
+- continuous keyboard increment is exactly 1% of the range and Shift uses 0.1% of the range; stepped widgets use exactly one step and Shift has no effect;
 - external finite values clamp only for display and are not silently step-snapped;
 - external NaN/Inf maps to a deterministic safe effective value for geometry without rewriting bound State during mount/paint.
 
@@ -74,7 +74,7 @@ Interaction/capture/invalidation bookkeeping is completed before synchronous `St
 `ui::RangeSlider` binds to `State<RangeValue>&` and reuses the same numeric domain. It:
 
 - clamps/falls back/sorts external state only for effective rendering and never rewrites it merely because it is out of range/non-finite;
-- selects the nearest thumb; exact ties keep the previous active thumb or default to lower;
+- selects the nearest thumb from the raw pointer position before quantizing the value written to State; exact ties keep the previous active thumb or default to lower;
 - retains active thumb identity through drag;
 - prevents thumb crossing for every user write;
 - supports horizontal/vertical pointer input plus Arrow/Home/End keyboard editing;
@@ -87,7 +87,7 @@ The completion candidate registers and executes:
 
 - existing `widget_tests.cpp` Slider/RangeSlider input/T059 coverage;
 - `t032_slider_value_contract.cpp` for the pure domain;
-- `t032_slider_completion_tests.cpp` for NaN/Inf render-only behavior, reentrancy, Hidden/Collapsed capture cancellation and formatter no-write behavior;
+- `t032_slider_completion_tests.cpp` for NaN/Inf render-only behavior, reentrancy, Hidden/Collapsed capture cancellation, raw-position nearest-thumb selection and formatter no-write behavior;
 - `t032_slider_visual_tests.cpp` for the six state variants, focus/hover/press, both orientations and two-thumb RangeSlider geometry;
 - `examples/features/t032_slider.cpp` as the required interactive feature demo and deterministic `--self-test`.
 
