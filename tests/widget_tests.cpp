@@ -48,7 +48,7 @@ void progress_meter_contract() {
     ui::UI tree{
         ui::Column{
             ui::ProgressBar{progress, 0.0f, 1.0f},
-            ui::Meter{meter, -1.0f, 1.0f}.orientation(ui::Orientation::Vertical),
+            ui::Meter{meter, -1.0f, 1.0f}.orientation(ui::ProgressOrientation::Vertical),
         }
     };
 
