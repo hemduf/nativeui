@@ -50,6 +50,18 @@ jobs:
           -DSOURCE_DIR=${{ github.workspace }}
           -P tests/t048_external_consumer_contract_tests.cmake
 
+      - name: T054 application argument contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t054_argument_boundary_tests.cmake
+
+      - name: T054 package source contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t054_package_source_contract_tests.cmake
+
       - name: T056 package source contract
         run: >-
           cmake
@@ -132,6 +144,16 @@ jobs:
           -DCONFIG=Release
           -P tests/t048_external_consumer_tests.cmake
 
+      - name: T054 build-tree and relocated application consumers
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t054_package_tests.cmake
+
       - name: T056 build-tree and relocated binary-data consumers
         run: >-
           cmake
@@ -179,6 +201,18 @@ jobs:
           cmake
           -DSOURCE_DIR=${{ github.workspace }}
           -P tests/t048_external_consumer_contract_tests.cmake
+
+      - name: T054 application argument contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t054_argument_boundary_tests.cmake
+
+      - name: T054 package source contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -P tests/t054_package_source_contract_tests.cmake
 
       - name: T056 package source contract
         run: >-
