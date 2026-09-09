@@ -35,6 +35,8 @@ Every timed workload uses the frozen T051 protocol:
 
 Fixture reset documented as outside the timed region is performed by `before_sample`. Logging, JSON serialization and baseline I/O are outside measured operations.
 
+The Release CI job executes the complete fixed protocol twice consecutively on the **same runner** and archives both result documents. This pair is reproducibility evidence only: CI verifies comparison metadata is identical and reports per-workload median/p95/allocation deltas without silently widening thresholds or rewriting a baseline. If a workload is pathologically noisy on the same runner, it requires an explicit ticket/spec decision rather than runtime calibration.
+
 ## Fixed schema
 
 Schema version 1 result records contain:
