@@ -18,26 +18,27 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 ## Current execution snapshot — 2026-09-09
 
-The merged baseline is complete through T030, including T023 and T053, plus the merged #64 Decision B ownership diagnosis and T059 component-availability contract. This T047 merge completes the low-level install/export package contract.
+The merged baseline is complete through T030, including T023 and T053, plus the merged #64 Decision B ownership diagnosis, T059 component-availability contract and T047 low-level install/export package. This T048 merge completes the permanent relocated external-consumer acceptance layer for that package.
 
 - **T053 — consumer-scoped macOS platform bridge / PR #88:** **Complete and merged** as `ad83ed05f1687fea31255bcc77329fae0f4efb69`. `NativeUI::Core` and portable Pugl C code remain generic; only the small macOS Objective-C Pugl/OpenGL/IME bridge is instantiated per final consumer. The frozen helper derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and introduces no runtime registry. The macOS acceptance path validates two final consumers plus class/metaclass symbol isolation.
 - **#64 — macOS standalone PROGRAM-world ownership / PR #90:** **Complete and merged** as `b52d53eee65e5de91697e2c1f0685728b9646575`. Decision B is frozen: independent `PUGL_PROGRAM` worlds are not a valid NativeUI multi-window ownership model on macOS. Legacy `StandaloneWindow(UI&, ...)` therefore remains single-window/pre-v1 only. **T060 / issue #72 owns the replacement contract:** one explicit `ui::Application`, exactly one PROGRAM world that outlives all top-level windows, multiple `StandaloneWindow(Application&, ...)` views, and no hidden mutable global/singleton/`thread_local` application owner.
 - **T059 — generic component availability / PR #89:** **Complete and merged** as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`. One retained-tree model resolves `Visible`/`Hidden`/`Collapsed`, inherited enabled/disabled and inherited read-only state. Hidden preserves layout while suppressing paint/input/focus; Collapsed removes layout contribution without unmounting; Disabled suppresses normal targeting/focus while remaining laid out/painted; ReadOnly preserves targeting/focus while widgets reject mutations. Capture/focus teardown occurs before suppression, reentrant reversal is bounded, and FocusScope restore semantics are covered.
 - **T030 — Button / PR #94:** **Complete and merged** as `b32b09da473c70a857675e05f7fdc7c78e5f9361`. Button consumes T059 effective enabled/read-only state and the central focus/capture policy, with platform-neutral pointer/keyboard activation and reentrancy-safe callbacks. T031 is now the next dependency-unblocked widget successor on its separate lane.
-- **T047 — install/export CMake package / PR #92:** **Complete by this merge.** The installed/build-tree low-level v1 surface is `NativeUI::Core` plus `nativeui_attach_platform(TARGET <final-target> CONSUMER_ID <reverse-dns-id>)`. The helper rejects invalid/non-final/imported/alias targets, malformed identities and all double attachment; macOS delegates exact identity to T053 while Windows/Linux use the same public helper with generic platform implementation. The package carries pinned Skia assets and Pugl/platform source machinery privately, installs required legal payload, validates relocated install-tree consumers and never exports/documents `NativeUI::NativeUI` as a complete v1 target. T048, T054 and T056 become dependency-unblocked after this merge.
+- **T047 — install/export CMake package / PR #92:** **Complete and merged** as `df569e874539aaafb8600960938465f733a46f19`. The installed/build-tree low-level v1 surface is `NativeUI::Core` plus `nativeui_attach_platform(TARGET <final-target> CONSUMER_ID <reverse-dns-id>)`. The helper rejects invalid/non-final/imported/alias targets, malformed identities and all double attachment; macOS delegates exact identity to T053 while Windows/Linux use the same public helper with generic platform implementation. The package carries pinned Skia assets and Pugl/platform source machinery privately, installs required legal payload, validates relocated install-tree consumers and never exports/documents `NativeUI::NativeUI` as a complete v1 target.
+- **T048 — external relocated consumer smoke / PR #99:** **Complete by this merge.** Three independent projects validate the relocated installed package only through `find_package(NativeUI CONFIG REQUIRED)`: Core/headless, low-level standalone, and SDK-neutral embedded. All native fixtures link the real `nativeui_attach_platform()` implementation and run deterministic relocated-Core self-tests on Linux/Windows/macOS; macOS additionally runs real standalone/embedded native lifecycle plus the T053/T047 two-consumer Objective-C namespace/runtime coexistence proof. Static checks reject private/source-tree targets, includes and dependency override variables. Code/review head `9904e2fe8f252a35e060bda128a82d18b9f5819a` passed CI #384 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before this completion-doc refresh.
 - **T029 — advanced IME composition bridge / PR #85:** **Complete.** NativeUI has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe offsets, single-transaction commit/cancel semantics, candidate geometry and private Cocoa/IMM32/XIM bridges.
 - **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete** and consumed by T053.
 - **T023 — SVG/icon resources / PR #60:** **Complete.** Backend-neutral SVG resources and per-instance provider-backed caching are in the merged baseline.
 - **Lifecycle lane frontier:** **T042** follows merged #64 Decision B. T042 must stress current supported ownership paths—one standalone PROGRAM application-owner lifetime and independent `EmbeddedView` / `PUGL_MODULE` instances—without inventing a hidden simultaneous-standalone workaround. Shared-Application multi-window stress belongs to T060.
-- **Platform/package frontier:** **T048, T054 and T056 are Ready after this T047 merge.** T057 remains dependent on T056; T052 additionally depends on T048, T051 and T042.
+- **Platform/package frontier:** **T054 and T056 are Ready after this T048 merge.** T057 remains dependent on T056. T052 has its T047/T048 package dependencies satisfied after this merge but still additionally requires T051 and T042.
 - **State/widget frontier:** **T031 is Ready** after merged T030; later theme/accessibility/gallery work follows its declared dependencies.
 
 Parallel execution frontier:
 
 ```text
 lifecycle:        #64(done) -> T042 -> T051 -> T052
-platform/package: T053(done) -> T047(done) -> T048 -> T052
-                                    |         
+platform/package: T053(done) -> T047(done) -> T048(done) -> T052
+                                    |
                                     +-> T056 -> T057
                                     +-> T054
 state/widgets:    T059(done) -> T030(done) -> T031
@@ -280,7 +281,7 @@ T042 consumes that decision. Its stress helpers must remain separate from produc
 
 ## Milestone 8 — Packaging, tooling and v1 release
 
-**Status: T053/T047 complete; T048/T054/T056 Ready; T057 follows T056; T055 Not planned**
+**Status: T053/T047/T048 complete; T054/T056 Ready; T057 follows T056; T055 Not planned**
 
 **Goal:** make the toolkit easy to consume and maintain.
 
@@ -335,22 +336,24 @@ nativeui_attach_platform(
 
 The helper accepts only existing final `EXECUTABLE`/`MODULE_LIBRARY`/`SHARED_LIBRARY` targets, requires one valid reverse-DNS identity on every platform and rejects every second attachment. macOS delegates exact identity to T053 consumer-specific bridges; Windows/Linux attach their generic Pugl/native implementation behind the same call. Installed CMake state is prefix-relative, carries pinned Skia/Pugl implementation assets privately, proves relocation and missing-pinned-asset failure, and does not export/document `NativeUI::NativeUI` as a complete v1 package target.
 
+T048 adds permanent external acceptance projects around that contract. CI installs to one prefix, relocates the install tree, deletes the original prefix, and configures three independent projects against the relocated package only. Core/headless proves `NativeUI::Core` does not require platform attachment; standalone and embedded prove the documented final-target helper and public C++ lifecycle/link surface. All native lanes run deterministic relocated-Core rendering self-tests; macOS additionally runs the real native standalone/embedded lifecycle and two-consumer Objective-C namespace/runtime-isolation proof. Static fixture checks forbid private/detail/source-tree targets, paths and dependency override variables.
+
 Tickets: `T047`–`T054`, `T056`–`T057`. `T055` is closed as **Not planned** and deliberately excluded from the current v1 scope.
 
 Release/package dependency chain:
 
 ```text
-#62 complete -> T053 complete -> T047 complete -> T048 -----------\
-                                           |                       +-> T052
-                                           +-> T056 -> T057       |
-                                                                  |
-T042 -> T051 ------------------------------------------------------/
+#62 complete -> T053 complete -> T047 complete -> T048 complete ----\
+                                           |                        +-> T052
+                                           +-> T056 -> T057        |
+                                                                   |
+T042 -> T051 -------------------------------------------------------/
 
 T047 complete + T053 complete -> T054
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-The platform/package lane can now take T048, T054 or T056 according to priority/unblock value. T052 remains blocked by T048, T051 and T042; T057 remains blocked by T056.
+The platform/package lane can now take T054 or T056 according to priority/unblock value. T052 has its package/external-consumer prerequisites satisfied after T048 but remains blocked by T051 and T042; T057 remains blocked by T056.
 
 ## Prioritization rule
 
