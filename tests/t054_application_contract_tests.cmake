@@ -23,15 +23,15 @@ function(_t054_run_case name expect_success body)
   set(_src "${_root}/${name}-src")
   set(_build "${_root}/${name}-build")
   file(MAKE_DIRECTORY "${_src}")
-  file(WRITE "${_src}/main.c" "int main(void) { return 0; }\n")
-  file(WRITE "${_src}/extra.c" "int t054_extra(void) { return 54; }\n")
+  file(WRITE "${_src}/main.cpp" "int main() { return 0; }\n")
+  file(WRITE "${_src}/extra.cpp" "int t054_extra() { return 54; }\n")
   file(WRITE "${_src}/icon.icns" "t054 deterministic icns fixture\n")
   file(WRITE "${_src}/icon.ico" "t054 deterministic ico fixture\n")
   file(WRITE "${_src}/wrong.txt" "wrong icon extension\n")
 
   set(_project [=[
 cmake_minimum_required(VERSION 3.24)
-project(T054ApplicationContract LANGUAGES NONE)
+project(T054ApplicationContract LANGUAGES CXX)
 add_library(nativeui_core_stub INTERFACE)
 add_library(NativeUI::Core ALIAS nativeui_core_stub)
 
@@ -83,7 +83,7 @@ nativeui_add_application(App
   PRODUCT_NAME "NativeUI Café"
   BUNDLE_ID com.example.nativeui-test
   VERSION 001.02.0003
-  SOURCES main.c)
+  SOURCES main.cpp)
 get_target_property(_output App OUTPUT_NAME)
 get_target_property(_consumer App NATIVEUI_CONSUMER_ID)
 get_target_property(_type App TYPE)
@@ -114,20 +114,20 @@ else()
   endif()
 endif()
 # Caller remains free to extend the target after helper invocation.
-target_sources(App PRIVATE extra.c)
+target_sources(App PRIVATE extra.cpp)
 target_compile_definitions(App PRIVATE T054_CALLER_EXTENSION=1)
 ]=])
 _t054_run_case(valid TRUE "${_valid_body}")
 
 # Semicolon is a valid portable filename character and therefore part of the
-# frozen PRODUCT_NAME acceptance surface. This regression also guards against
-# flattening quoted one-value arguments through CMake list parsing.
+# frozen PRODUCT_NAME acceptance surface. This regression guards the original
+# one-value CMake argument boundary rather than reparsing a flattened list.
 _t054_run_case(product_semicolon TRUE [=[
 nativeui_add_application(App
   PRODUCT_NAME "Semi;Colon"
   BUNDLE_ID com.example.semicolon
   VERSION 1.2.3
-  SOURCES main.c)
+  SOURCES main.cpp)
 get_target_property(_output App OUTPUT_NAME)
 if(NOT _output STREQUAL "Semi;Colon")
   message(FATAL_ERROR "semicolon PRODUCT_NAME was not preserved: '${_output}'")
@@ -136,7 +136,7 @@ endif()
 
 _t054_run_case(reordered_keywords TRUE [=[
 nativeui_add_application(App
-  SOURCES main.c
+  SOURCES main.cpp
   VERSION 1.2.3
   PRODUCT_NAME "Reordered App"
   BUNDLE_ID com.example.reordered)
@@ -158,37 +158,37 @@ else()
   set(_good_extension does-not-exist.ico)
 endif()
 _t054_run_case(icon_nonconsuming_missing TRUE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_ignored_keyword} does-not-exist.invalid)")
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_ignored_keyword} does-not-exist.invalid)")
 _t054_run_case(icon_consuming_valid TRUE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} ${_good_extension})")
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} ${_good_extension})")
 if(APPLE OR WIN32)
   _t054_run_case(icon_consuming_missing FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} missing.invalid)"
+    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} missing.invalid)"
     "does not exist")
   _t054_run_case(icon_consuming_wrong_extension FALSE
-    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.c ${_consumed_keyword} wrong.txt)"
+    "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.icon VERSION 1.2.3 SOURCES main.cpp ${_consumed_keyword} wrong.txt)"
     "must use the")
 endif()
 
 _t054_run_case(missing_target FALSE
   "nativeui_add_application()" "target name is required")
 _t054_run_case(duplicate_target FALSE
-  "add_executable(App main.c)\nnativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c)"
+  "add_executable(App main.cpp)\nnativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp)"
   "already exists")
 _t054_run_case(missing_product FALSE
-  "nativeui_add_application(App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c)"
+  "nativeui_add_application(App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp)"
   "PRODUCT_NAME" "required")
 _t054_run_case(missing_bundle FALSE
-  "nativeui_add_application(App PRODUCT_NAME App VERSION 1.2.3 SOURCES main.c)"
+  "nativeui_add_application(App PRODUCT_NAME App VERSION 1.2.3 SOURCES main.cpp)"
   "BUNDLE_ID" "required")
 _t054_run_case(missing_version FALSE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app SOURCES main.c)"
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app SOURCES main.cpp)"
   "VERSION" "MAJOR.MINOR.PATCH")
 _t054_run_case(missing_sources FALSE
   "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3)"
   "SOURCES" "at least one")
 _t054_run_case(unknown_keyword FALSE
-  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.c ICON icon.ico)"
+  "nativeui_add_application(App PRODUCT_NAME App BUNDLE_ID com.example.app VERSION 1.2.3 SOURCES main.cpp ICON icon.ico)"
   "unknown" "ICON")
 
 # Validation matrices run in script mode so dozens of fatal cases stay isolated
