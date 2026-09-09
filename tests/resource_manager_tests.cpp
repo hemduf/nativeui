@@ -75,6 +75,7 @@ constexpr std::array<std::byte, 75> kTinyRgbaPng{
 
 constexpr std::string_view kSvg =
     R"svg(<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2" viewBox="0 0 2 2"><rect width="2" height="2" fill="#ffffff"/></svg>)svg";
+constexpr char kUtf8EAcute[] = "\xC3\xA9";
 
 std::span<const std::byte> svg_bytes() noexcept {
     return {reinterpret_cast<const std::byte*>(kSvg.data()), kSvg.size()};
@@ -107,6 +108,21 @@ void validation_and_zero_copy_lookup() {
     const auto empty = manager.find("empty");
     NUI_CHECK(empty.has_value());
     NUI_CHECK(empty->bytes.empty());
+}
+
+void generated_table_byte_order_is_accepted() {
+    const std::array<ui::EmbeddedResourceEntry, 4> entries{{
+        {";semi", kAlpha},
+        {"A", kBeta},
+        {"a", kOther},
+        {std::string_view{kUtf8EAcute, 2}, kAlpha},
+    }};
+    const ui::ResourceManager manager{entries};
+    NUI_CHECK(manager.valid());
+    NUI_CHECK(manager.find(";semi").has_value());
+    NUI_CHECK(manager.find("A").has_value());
+    NUI_CHECK(manager.find("a").has_value());
+    NUI_CHECK(manager.find(std::string_view{kUtf8EAcute, 2}).has_value());
 }
 
 void invalid_tables_are_atomic_and_diagnostic() {
@@ -182,6 +198,32 @@ void direct_api_is_allocation_free() {
     NUI_CHECK(!invalid.valid());
 }
 
+void large_table_lookup_sanity() {
+    std::array<std::array<char, 4>, 256> ids{};
+    std::array<ui::EmbeddedResourceEntry, 256> entries{};
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        ids[index][0] = 'r';
+        ids[index][1] = static_cast<char>('0' + ((index / 100) % 10));
+        ids[index][2] = static_cast<char>('0' + ((index / 10) % 10));
+        ids[index][3] = static_cast<char>('0' + (index % 10));
+        entries[index] = {std::string_view{ids[index].data(), ids[index].size()}, {}};
+    }
+    const ui::ResourceManager manager{entries};
+    NUI_CHECK(manager.valid());
+
+    allocation_probe::begin();
+    const auto first = manager.find("r000");
+    const auto middle = manager.find("r127");
+    const auto last = manager.find("r255");
+    const auto absent = manager.find("r999");
+    const auto allocations = allocation_probe::end();
+    NUI_CHECK(allocations == 0U);
+    NUI_CHECK(first && first->id == "r000");
+    NUI_CHECK(middle && middle->id == "r127");
+    NUI_CHECK(last && last->id == "r255");
+    NUI_CHECK(!absent);
+}
+
 void copy_move_and_instance_isolation() {
     const std::array<ui::EmbeddedResourceEntry, 1> first_entries{{{"same", kAlpha}}};
     const std::array<ui::EmbeddedResourceEntry, 1> second_entries{{{"same", kOther}}};
@@ -237,6 +279,7 @@ void provider_adapter_has_explicit_copy_boundary() {
     const auto success_allocations = allocation_probe::end();
     NUI_CHECK(loaded.has_value());
     NUI_CHECK(loaded->size() == kAlpha.size());
+    NUI_CHECK(loaded->data() != kAlpha.data());
     NUI_CHECK((*loaded)[0] == kAlpha[0]);
     NUI_CHECK((*loaded)[1] == kAlpha[1]);
     NUI_CHECK(success_allocations > 0U);
@@ -247,16 +290,23 @@ void provider_adapter_has_explicit_copy_boundary() {
     NUI_CHECK(!missing.has_value());
     NUI_CHECK(missing_allocations == 0U);
 
+    allocation_probe::begin();
     const auto empty = provider.load("empty");
+    const auto empty_allocations = allocation_probe::end();
     NUI_CHECK(empty.has_value());
     NUI_CHECK(empty->empty());
+    NUI_CHECK(empty_allocations == 0U);
 
     const std::array<ui::EmbeddedResourceEntry, 2> invalid_entries{{
         {"z", kAlpha},
         {"a", kBeta},
     }};
     ui::ResourceManagerProvider invalid_provider{ui::ResourceManager{invalid_entries}};
-    NUI_CHECK(!invalid_provider.load("a").has_value());
+    allocation_probe::begin();
+    const auto invalid = invalid_provider.load("a");
+    const auto invalid_allocations = allocation_probe::end();
+    NUI_CHECK(!invalid.has_value());
+    NUI_CHECK(invalid_allocations == 0U);
 }
 
 void image_and_svg_caches_use_the_adapter() {
@@ -281,8 +331,10 @@ void image_and_svg_caches_use_the_adapter() {
 
 void suite() {
     validation_and_zero_copy_lookup();
+    generated_table_byte_order_is_accepted();
     invalid_tables_are_atomic_and_diagnostic();
     direct_api_is_allocation_free();
+    large_table_lookup_sanity();
     copy_move_and_instance_isolation();
     concurrent_read_only_lookup();
     provider_adapter_has_explicit_copy_boundary();
