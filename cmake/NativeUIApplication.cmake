@@ -12,7 +12,7 @@ function(_nativeui_validate_application_product_name product_name)
 
   string(HEX "${product_name}" _nativeui_name_hex)
   string(LENGTH "${_nativeui_name_hex}" _nativeui_hex_length)
-  math(EXPR _nativeui_byte_count "${_nativeui_name_hex_length} / 2")
+  math(EXPR _nativeui_byte_count "${_nativeui_hex_length} / 2")
   set(_nativeui_byte_index 0)
   while(_nativeui_byte_index LESS _nativeui_byte_count)
     math(EXPR _nativeui_hex_index "${_nativeui_byte_index} * 2")
