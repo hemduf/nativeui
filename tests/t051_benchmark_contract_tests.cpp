@@ -16,6 +16,7 @@ void check(bool condition, const char* expression, int line) {
 
 #define NUI_CHECK(expr) ::check(static_cast<bool>(expr), #expr, __LINE__)
 
+using nativeui::bench::AllocationMetrics;
 using nativeui::bench::ComparisonMetadata;
 using nativeui::bench::ResultRecord;
 using nativeui::bench::RunMetrics;
@@ -148,9 +149,34 @@ void suite() {
     NUI_CHECK(!nativeui::bench::blocking_after_two_runs(baseline, both_above, exact_boundary));
     NUI_CHECK(nativeui::bench::blocking_after_two_runs(baseline, both_above, both_above));
 
-    NUI_CHECK(nativeui::bench::allocation_regression(0.0, 0.001, true));
-    NUI_CHECK(!nativeui::bench::allocation_regression(10.0, 11.0, false));
-    NUI_CHECK(nativeui::bench::allocation_regression(10.0, 11.01, false));
+    // Allocation policy is also a two-complete-run gate. For non-zero
+    // scenarios either allocation count or allocated bytes above 10% is a
+    // regression; the exact 10% boundary remains non-blocking.
+    const AllocationMetrics alloc_baseline{.allocations_per_op = 10.0, .bytes_per_op = 100.0};
+    const AllocationMetrics alloc_exact_boundary{.allocations_per_op = 11.0,
+                                                  .bytes_per_op = 110.0};
+    const AllocationMetrics alloc_count_above{.allocations_per_op = 11.01,
+                                               .bytes_per_op = 100.0};
+    const AllocationMetrics alloc_bytes_above{.allocations_per_op = 10.0,
+                                               .bytes_per_op = 110.01};
+    NUI_CHECK(!nativeui::bench::is_allocation_regression(
+        alloc_baseline, alloc_exact_boundary, false));
+    NUI_CHECK(nativeui::bench::is_allocation_regression(
+        alloc_baseline, alloc_count_above, false));
+    NUI_CHECK(nativeui::bench::is_allocation_regression(
+        alloc_baseline, alloc_bytes_above, false));
+    NUI_CHECK(!nativeui::bench::allocation_blocking_after_two_runs(
+        alloc_baseline, alloc_count_above, alloc_exact_boundary, false));
+    NUI_CHECK(nativeui::bench::allocation_blocking_after_two_runs(
+        alloc_baseline, alloc_count_above, alloc_bytes_above, false));
+
+    const AllocationMetrics zero_alloc_baseline{};
+    const AllocationMetrics zero_alloc_candidate{.allocations_per_op = 0.001,
+                                                  .bytes_per_op = 1.0};
+    NUI_CHECK(nativeui::bench::is_allocation_regression(
+        zero_alloc_baseline, zero_alloc_candidate, true));
+    NUI_CHECK(nativeui::bench::allocation_blocking_after_two_runs(
+        zero_alloc_baseline, zero_alloc_candidate, zero_alloc_candidate, true));
 
     NUI_CHECK(nativeui::bench::idle_invalidation_passes(0));
     NUI_CHECK(!nativeui::bench::idle_invalidation_passes(1));
