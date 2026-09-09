@@ -410,6 +410,18 @@ ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& s
 
 namespace ui {
 
+std::optional<std::string_view> text::utf8_prefix(
+    std::string_view value, std::size_t max_bytes) noexcept {
+    std::size_t offset = 0;
+    while (offset < value.size() && offset < max_bytes) {
+        const auto scalar = detail::decode_utf8(value, offset);
+        if (!scalar.valid) return std::nullopt;
+        if (scalar.next > max_bytes) break;
+        offset = scalar.next;
+    }
+    return value.substr(0, offset);
+}
+
 bool FontManager::register_embedded_font(std::string_view family_alias,
                                          std::span<const std::byte> data) {
     if (family_alias.empty() || data.empty()) return false;

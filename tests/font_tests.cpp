@@ -76,6 +76,8 @@ void suite() {
         std::pair{std::string{"\xC3\xA9\xFF" "B"}, std::string{"\xC3\xA9"} + replacement + "B"},
     };
     for (const auto& [input, expected] : malformed) {
+        NUI_CHECK(!ui::text::utf8_prefix(input));
+        NUI_CHECK(ui::text::utf8_prefix(expected) == expected);
         const auto actual_metrics = ui::TextService::measure(input, system_style);
         const auto expected_metrics = ui::TextService::measure(expected, system_style);
         NUI_CHECK(std::isfinite(actual_metrics.width));
@@ -83,6 +85,24 @@ void suite() {
         // Same-platform pixel equivalence proves painting uses the repaired
         // bytes too, not only the safe measurement/fallback scalar values.
         NUI_CHECK(render_canvas_text(input, system_style) == render_canvas_text(expected, system_style));
+    }
+
+    const std::string valid_text{"A\xC3\xA9\xF0\x9F\x9A\x80" "B"};
+    const std::array<std::size_t, 9> boundaries{0, 1, 1, 3, 3, 3, 3, 7, 8};
+    for (std::size_t limit = 0; limit < boundaries.size(); ++limit) {
+        const auto prefix = ui::text::utf8_prefix(valid_text, limit);
+        NUI_CHECK(prefix && prefix->size() == boundaries[limit]);
+        NUI_CHECK(prefix->data() == valid_text.data());
+    }
+    NUI_CHECK(ui::text::utf8_prefix("A\xFF", 1) == "A");
+    NUI_CHECK(!ui::text::utf8_prefix("A\xFF", 2));
+    // UTF-8 validity is not a file-type/control-character policy.
+    NUI_CHECK(ui::text::utf8_prefix(std::string_view{"a\0b", 3}).has_value());
+    NUI_CHECK(ui::text::utf8_prefix("").has_value());
+    for (unsigned int byte = 0; byte < 256; ++byte) {
+        const char character = static_cast<char>(byte);
+        const auto prefix = ui::text::utf8_prefix(std::string_view{&character, 1});
+        NUI_CHECK(prefix.has_value() == (byte < 0x80));
     }
 
     const auto repaired_layout = ui::detail::resolve_text_layout(jpeg_header, system_style);

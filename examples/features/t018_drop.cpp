@@ -9,53 +9,43 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 constexpr std::size_t kMaxDisplayedFileBytes = 64U * 1024U;
+constexpr std::size_t kPreviewBytes = 120;
+
+// A text preview is optional. This is presentation policy, not a decision
+// about whether a file can be dropped; filenames/extensions are irrelevant.
+std::optional<std::string_view> text_preview(std::string_view bytes, std::size_t limit) {
+    const auto text = ui::text::utf8_prefix(bytes, limit);
+    if (!text || std::any_of(text->begin(), text->end(), [](unsigned char byte) {
+            return (byte < 0x20 && byte != '\t' && byte != '\n' && byte != '\r') || byte == 0x7F;
+        })) return std::nullopt;
+    return text;
+}
 
 struct Model {
-    std::string status{"Drop a UTF-8 .txt file or text on the panel"};
+    std::string status{"Drop a file or text on the panel"};
     std::string payload;
     bool accepted{};
+
+    void receive(std::string_view bytes, std::string description, bool truncated = false) {
+        const auto preview = text_preview(bytes, kMaxDisplayedFileBytes);
+        accepted = true;
+        payload = preview ? std::string{*preview} : std::string{};
+        status = std::move(description);
+        if (!preview) status += " (no UTF-8 text preview)";
+        else if (truncated) status += " (preview limited)";
+    }
 };
 
-struct LoadedTextFile {
+struct LoadedFile {
     std::string name;
     std::string contents;
     bool truncated{};
-    bool supported{true};
 };
-
-// Return a complete UTF-8 text prefix, rejecting binary/control bytes. A read
-// or display limit may cut the final scalar; only that incomplete tail is
-// omitted. This policy belongs to the example, not the generic drop API.
-std::optional<std::size_t> text_prefix(std::string_view text, bool truncated = false) {
-    for (std::size_t i = 0; i < text.size();) {
-        const auto lead = static_cast<unsigned char>(text[i]);
-        if (lead < 0x80) {
-            if ((lead < 0x20 && lead != '\t' && lead != '\n' && lead != '\r') || lead == 0x7F) {
-                return std::nullopt;
-            }
-            ++i;
-            continue;
-        }
-        const std::size_t count = lead >= 0xC2 && lead <= 0xDF ? 2 :
-                                  lead >= 0xE0 && lead <= 0xEF ? 3 :
-                                  lead >= 0xF0 && lead <= 0xF4 ? 4 : 0;
-        if (!count) return std::nullopt;
-        for (std::size_t j = 1; j < count; ++j) {
-            if (i + j >= text.size()) return truncated ? std::optional{i} : std::nullopt;
-            const auto byte = static_cast<unsigned char>(text[i + j]);
-            if (byte < 0x80 || byte > 0xBF ||
-                (j == 1 && ((lead == 0xE0 && byte < 0xA0) ||
-                            (lead == 0xED && byte > 0x9F) ||
-                            (lead == 0xF0 && byte < 0x90) ||
-                            (lead == 0xF4 && byte > 0x8F)))) return std::nullopt;
-        }
-        i += count;
-    }
-    return text.size();
-}
 
 int hex_value(char character) {
     if (character >= '0' && character <= '9') return character - '0';
@@ -107,7 +97,7 @@ std::optional<std::filesystem::path> path_from_file_uri(std::string_view uri) {
     return std::filesystem::path{decoded_utf8};
 }
 
-std::optional<LoadedTextFile> load_first_text_file(std::string_view uri_list) {
+std::optional<LoadedFile> load_first_file(std::string_view uri_list) {
     while (!uri_list.empty()) {
         const auto newline = uri_list.find('\n');
         auto line = uri_list.substr(0, newline);
@@ -115,13 +105,6 @@ std::optional<LoadedTextFile> load_first_text_file(std::string_view uri_list) {
 
         if (!line.empty() && line.front() != '#') {
             if (const auto path = path_from_file_uri(line)) {
-                auto extension = path->extension().u8string();
-                for (auto& byte : extension) {
-                    if (byte >= u8'A' && byte <= u8'Z') {
-                        byte = static_cast<char8_t>(byte + (u8'a' - u8'A'));
-                    }
-                }
-                if (extension != u8".txt") return LoadedTextFile{{}, {}, false, false};
                 // Keep this synchronous demo bounded and do not open directories
                 // or special files (for example a named pipe waiting for a writer).
                 std::error_code error;
@@ -130,23 +113,20 @@ std::optional<LoadedTextFile> load_first_text_file(std::string_view uri_list) {
                 if (!input) return std::nullopt;
 
                 const auto name = path->filename().u8string();
-                LoadedTextFile result{{name.begin(), name.end()}, {}, false};
+                LoadedFile result{{name.begin(), name.end()}, {}, false};
+                // Up to three lookahead bytes let the shared UTF-8 decoder
+                // inspect a scalar crossing the text-preview read limit.
+                constexpr auto read_limit = kMaxDisplayedFileBytes + 3;
                 std::array<char, 4096> buffer{};
-                while (input && result.contents.size() < kMaxDisplayedFileBytes) {
-                    const auto remaining = kMaxDisplayedFileBytes - result.contents.size();
+                while (input && result.contents.size() < read_limit) {
+                    const auto remaining = read_limit - result.contents.size();
                     const auto count = static_cast<std::streamsize>(
                         std::min(remaining, buffer.size()));
                     input.read(buffer.data(), count);
                     result.contents.append(buffer.data(), static_cast<std::size_t>(input.gcount()));
                 }
                 if (input.bad()) return std::nullopt;
-                result.truncated = input.peek() != std::char_traits<char>::eof();
-                if (const auto size = text_prefix(result.contents, result.truncated)) {
-                    result.contents.resize(*size);
-                } else {
-                    result.contents.clear();
-                    result.supported = false;
-                }
+                result.truncated = result.contents.size() > kMaxDisplayedFileBytes;
                 return result;
             }
         }
@@ -177,8 +157,8 @@ int main(int argc, char** argv) {
                     g.text({16.0f, 30.0f}, model.status, 12.0f, ui::colors::text);
                     g.text({16.0f, 62.0f}, "Accepted MIME: text/uri-list or text/plain", 10.0f, ui::colors::textMuted);
                     if (!model.payload.empty()) {
-                        auto preview = std::string_view{model.payload}.substr(0, 120);
-                        preview = preview.substr(0, text_prefix(preview, true).value_or(0));
+                        const auto preview = std::string_view{model.payload}.substr(
+                            0, ui::text::clamp_boundary(model.payload, kPreviewBytes));
                         g.text({16.0f, 112.0f}, preview, 10.0f, ui::colors::textMuted);
                     }
                 }}.on_input([&](const ui::InputEvent& event, ui::CanvasInputContext& ctx) {
@@ -200,23 +180,15 @@ int main(int argc, char** argv) {
                     if (event.type == ui::InputType::DropData) {
                         const std::string data{event.drop_data.begin(), event.drop_data.end()};
                         if (event.drop_type == "text/uri-list") {
-                            if (const auto file = load_first_text_file(data)) {
-                                model.payload = file->contents;
-                                model.accepted = file->supported;
-                                model.status = file->supported
-                                    ? "Loaded " + file->name + (file->truncated ? " (first 64 KiB)" : "")
-                                    : "Unsupported file: expected a UTF-8 .txt file";
+                            if (const auto file = load_first_file(data)) {
+                                model.receive(file->contents, "Received " + file->name, file->truncated);
                             } else {
                                 model.payload.clear();
                                 model.accepted = false;
                                 model.status = "Could not read dropped file";
                             }
                         } else if (event.drop_type == "text/plain") {
-                            const auto preview = std::string_view{data}.substr(0, kMaxDisplayedFileBytes);
-                            const auto size = text_prefix(preview, data.size() > preview.size());
-                            model.accepted = size.has_value();
-                            model.payload = size ? std::string{preview.substr(0, *size)} : std::string{};
-                            model.status = size ? "Received UTF-8 text" : "Unsupported drop: expected UTF-8 text";
+                            model.receive(data, "Received text/plain", data.size() > kMaxDisplayedFileBytes);
                         } else {
                             model.accepted = false;
                             model.payload.clear();
@@ -224,7 +196,8 @@ int main(int argc, char** argv) {
                         }
                         if (trace_drops) {
                             std::cout << "NativeUI drop: accepted=" << model.accepted
-                                      << " text_bytes=" << model.payload.size() << '\n';
+                                      << " drop_bytes=" << event.drop_data.size()
+                                      << " preview_bytes=" << model.payload.size() << '\n';
                             std::cout.flush();
                         }
                         ctx.invalidate();
@@ -239,12 +212,18 @@ int main(int argc, char** argv) {
         for (const auto bytes : {std::string_view{"\x80"}, std::string_view{"\xC0\xAF"},
                                  std::string_view{"\xED\xA0\x80"}, std::string_view{"\xF4\x90\x80\x80"},
                                  std::string_view{"x\0y", 3}, std::string_view{"\x1B"}}) {
-            if (text_prefix(bytes)) return example::fail("binary/invalid UTF-8 text was accepted");
+            if (text_preview(bytes, kMaxDisplayedFileBytes)) {
+                return example::fail("binary/invalid UTF-8 bytes were treated as a text preview");
+            }
         }
         const std::string utf8 = "Hello \xC3\xA9 \xF0\x9F\x9A\x80\r\n\t";
-        if (text_prefix(utf8) != utf8.size()) return example::fail("valid UTF-8 text was rejected");
-        const std::string cut_preview = std::string(119, 'x') + "\xC3";
-        if (text_prefix(cut_preview, true) != 119 || text_prefix(cut_preview)) {
+        if (text_preview(utf8, kMaxDisplayedFileBytes) != utf8) {
+            return example::fail("valid UTF-8 text was not previewable");
+        }
+        const std::string cut_preview = std::string(kPreviewBytes - 1, 'x') + "\xC3\xA9";
+        const auto prefix = text_preview(cut_preview, kPreviewBytes);
+        if (!prefix || prefix->size() != kPreviewBytes - 1 ||
+            text_preview(std::string_view{cut_preview}.substr(0, kPreviewBytes), kPreviewBytes)) {
             return example::fail("UTF-8 preview boundary was not preserved");
         }
         if (path_from_file_uri("file:///tmp/hello%00.txt") ||
@@ -279,15 +258,14 @@ int main(int argc, char** argv) {
         const auto test_path = test_dir / std::filesystem::path{u8"hello caf\u00e9.txt"};
         const auto image_path = test_dir / "image.jpg";
         struct Cleanup {
-            std::filesystem::path file;
-            std::filesystem::path image;
+            std::filesystem::path directory;
+            std::vector<std::filesystem::path> files;
             ~Cleanup() {
                 std::error_code error;
-                std::filesystem::remove(file, error);
-                std::filesystem::remove(image, error);
-                std::filesystem::remove(file.parent_path(), error);
+                for (const auto& file : files) std::filesystem::remove(file, error);
+                std::filesystem::remove(directory, error);
             }
-        } cleanup{test_path, image_path};
+        } cleanup{test_dir, {test_path}};
         const std::string contents = "NativeUI drop file contents\n";
         {
             std::ofstream output{test_path, std::ios::binary};
@@ -319,9 +297,31 @@ int main(int argc, char** argv) {
         data.drop_data.assign(uri.begin(), uri.end());
         tree->dispatch(data, platform);
         if (model.payload != contents) return example::fail("dropped text file contents were not displayed");
-        if (model.status != "Loaded hello caf\xC3\xA9.txt") return example::fail("UTF-8 filename was not displayed");
+        if (model.status != "Received hello caf\xC3\xA9.txt") return example::fail("UTF-8 filename was not displayed");
 
-        // Reject binary bytes even when a file has been renamed to .txt.
+        // The same text must be previewed independently of its filename.
+        const auto parent_uri = uri.substr(0, uri.find_last_of('/') + 1);
+        for (const auto* name : {"image.jpg", "notes.md", "README"}) {
+            const auto path = test_dir / name;
+            cleanup.files.push_back(path);
+            {
+                std::ofstream output{path, std::ios::binary};
+                output << contents;
+                if (!output) return example::fail("could not write extension-independent fixture");
+            }
+            const auto renamed_uri = parent_uri + name + "\r\n";
+            auto renamed_data = data;
+            renamed_data.drop_data.assign(renamed_uri.begin(), renamed_uri.end());
+            tree->dispatch(renamed_data, platform);
+            if (!model.accepted || model.payload != contents) {
+                return example::fail("text preview depends on a hardcoded filename extension");
+            }
+        }
+        const auto image_uri = parent_uri + "image.jpg\r\n";
+        auto image_data = data;
+        image_data.drop_data.assign(image_uri.begin(), image_uri.end());
+
+        // Binary files are received normally, but cannot be previewed as text.
         {
             std::ofstream output{test_path, std::ios::binary};
             const std::string jpeg{"\xFF\xD8\xFF\xE1", 4};
@@ -331,20 +331,17 @@ int main(int argc, char** argv) {
             if (!output || !image) return example::fail("could not write binary drop fixtures");
         }
         tree->dispatch(data, platform);
-        if (!model.payload.empty() || model.accepted ||
-            model.status != "Unsupported file: expected a UTF-8 .txt file") {
-            return example::fail("binary image bytes were accepted as text");
+        if (!model.payload.empty() || !model.accepted ||
+            model.status != "Received hello caf\xC3\xA9.txt (no UTF-8 text preview)") {
+            return example::fail("binary .txt reception was confused with text preview availability");
         }
-        auto image_data = data;
-        const auto image_uri = uri.substr(0, uri.find_last_of('/') + 1) + "image.jpg\r\n";
-        image_data.drop_data.assign(image_uri.begin(), image_uri.end());
         tree->dispatch(image_data, platform);
-        if (!model.payload.empty() || model.accepted ||
-            model.status != "Unsupported file: expected a UTF-8 .txt file") {
-            return example::fail("image file was not rejected");
+        if (!model.payload.empty() || !model.accepted ||
+            model.status != "Received image.jpg (no UTF-8 text preview)") {
+            return example::fail("binary image reception was confused with text preview availability");
         }
         ui::HeadlessRenderer renderer{{580.0f, 300.0f}, 1.0f};
-        if (!renderer.render(*tree)) return example::fail("image rejection did not paint safely");
+        if (!renderer.render(*tree)) return example::fail("binary drop status did not paint safely");
 
         // The bounded-read fixture must itself be text, not NUL padding.
         {
@@ -354,18 +351,22 @@ int main(int argc, char** argv) {
         }
         tree->dispatch(data, platform);
         if (!model.accepted || model.payload.size() != kMaxDisplayedFileBytes ||
-            !model.status.ends_with("(first 64 KiB)")) {
+            !model.status.ends_with("(preview limited)")) {
             return example::fail("file preview read limit was not enforced");
         }
-        {
-            std::ofstream output{test_path, std::ios::binary};
-            output << std::string(kMaxDisplayedFileBytes - 2, 'x') << "\xF0\x9F\x9A\x80";
-            if (!output) return example::fail("could not write bounded UTF-8 fixture");
-        }
-        tree->dispatch(data, platform);
-        if (!model.accepted || model.payload.size() != kMaxDisplayedFileBytes - 2 ||
-            !text_prefix(model.payload) || !renderer.render(*tree)) {
-            return example::fail("bounded UTF-8 file preview was not safe after an image drop");
+        for (const auto prefix_bytes : {kMaxDisplayedFileBytes - 1,
+                                        kMaxDisplayedFileBytes - 2,
+                                        kMaxDisplayedFileBytes - 3}) {
+            {
+                std::ofstream output{test_path, std::ios::binary};
+                output << std::string(prefix_bytes, 'x') << "\xF0\x9F\x9A\x80";
+                if (!output) return example::fail("could not write bounded UTF-8 fixture");
+            }
+            tree->dispatch(data, platform);
+            if (!model.accepted || model.payload.size() != prefix_bytes ||
+                !ui::text::utf8_prefix(model.payload) || !renderer.render(*tree)) {
+                return example::fail("bounded UTF-8 file preview was not safe after an image drop");
+            }
         }
         std::filesystem::remove(test_path);
         tree->dispatch(data, platform);
@@ -381,14 +382,14 @@ int main(int argc, char** argv) {
         plain_data.drop_type = "text/plain";
         plain_data.drop_data = {0xFF, 0xD8, 0xFF, 0xE1};
         tree->dispatch(plain_data, platform);
-        if (model.accepted || !model.payload.empty() ||
-            model.status != "Unsupported drop: expected UTF-8 text") {
-            return example::fail("binary plain-text drop was accepted");
+        if (!model.accepted || !model.payload.empty() ||
+            model.status != "Received text/plain (no UTF-8 text preview)") {
+            return example::fail("invalid text/plain bytes reached the preview");
         }
         plain_data.drop_data.assign(utf8.begin(), utf8.end());
         tree->dispatch(plain_data, platform);
         if (!model.accepted || model.payload != utf8 || !renderer.render(*tree)) {
-            return example::fail("UTF-8 plain-text drop did not recover after binary rejection");
+            return example::fail("UTF-8 plain-text preview did not recover after binary delivery");
         }
         return 0;
     }

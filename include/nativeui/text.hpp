@@ -3,12 +3,23 @@
 #include <nativeui/geometry.hpp>
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ui {
+
+namespace text {
+
+/// Borrow a complete UTF-8 prefix of at most max_bytes. Returns nullopt when
+/// malformed text is encountered before the limit; the remaining suffix is
+/// not inspected. Uses the renderer's decoder, without allocation or font I/O.
+[[nodiscard]] std::optional<std::string_view> utf8_prefix(
+    std::string_view value, std::size_t max_bytes = std::string_view::npos) noexcept;
+
+} // namespace text
 
 enum class TextAlign { Left, Center, Right };
 enum class FontWeight { Regular = 400, Bold = 700 };

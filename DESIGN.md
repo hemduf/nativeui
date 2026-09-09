@@ -682,6 +682,12 @@ byte becomes U+FFFD before reaching Skia. Repaired bytes are owned by the local
 resolved layout, and run offsets refer to that buffer. Valid input keeps its
 original bytes without a repair allocation; there is no shared repair state.
 
+`ui::text::utf8_prefix(value, max_bytes)` borrows a complete valid prefix or
+returns `nullopt` when it encounters malformed input before the limit. It uses
+that same decoder, with no allocation or font initialization. This helper
+checks encoding, not file type or text-preview policy; a NUL scalar is valid
+UTF-8, for example. Suffix bytes beyond the inspected prefix are not validated.
+
 Embedded-font registration owns/copies the supplied font bytes. Shared registry data must use immutable/safely published state and must not become implicit instance-dependent mutable global state.
 
 ### 17.4 Committed text and advanced IME
@@ -707,7 +713,16 @@ Important portability rules:
 
 The pinned Pugl fork implements `puglRejectOffer()` on Cocoa, Windows and X11, so NativeUI calls it directly. Drop types and `PUGL_ACCEPT_DROP` are registered before realization. On macOS the backend child forwards the complete drag-destination lifecycle to its owning wrapper; accepted data is delivered once at the actual drop boundary.
 
-External drag sources such as Finder own keyboard focus. `DropOffer`/`DropData` therefore target a **mounted** tree even while it is inactive, without activating keyboard focus, component lifecycle or IME. Hit testing still respects clipping, inherited visibility/enabled state and normal bubbling. Unmounted trees reject delivery. Reading a dropped file is an application-layer policy: the T018 example decodes local file URIs, requires a regular UTF-8 `.txt` file, and previews up to 120 bytes with a 64 KiB read limit. Both limits preserve complete UTF-8 characters; binary/unsupported files clear the preview and show an error. The toolkit itself delivers MIME type and owned payload bytes, not file contents, and does not impose the example's text-file policy.
+External drag sources such as Finder own keyboard focus. `DropOffer`/`DropData` therefore target a **mounted** tree even while it is inactive, without activating keyboard focus, component lifecycle or IME. Hit testing still respects clipping, inherited visibility/enabled state and normal bubbling. Unmounted trees reject delivery.
+
+Reading a dropped file and choosing an optional preview are application-layer
+decisions. T018 decodes local file URIs and reads the first regular file without
+an extension allow-list. It inspects up to 64 KiB plus three UTF-8 lookahead
+bytes, and previews up to 120 character-aligned bytes if the inspected content
+is text. Binary/non-UTF-8 content is reported as received without a text preview,
+not as a rejected drop. The shared UTF-8 decoder supplies encoding validation;
+the example's control-byte check only decides preview availability. NativeUI's
+drop API delivers MIME type and owned payload bytes, never file-type policy.
 
 ---
 
