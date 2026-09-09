@@ -5,8 +5,9 @@
     }
 
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
-        if (!node) return false;
+        if (!node || !node->component->effective_availability().interactive()) return false;
         for (auto* current = node; current; current = current->parent) {
+            if (!current->component->effective_availability().interactive()) return false;
             if (current->component->is_focus_scope() &&
                 !current->component->focus_scope_active()) {
                 return false;
@@ -23,7 +24,8 @@
 
     [[nodiscard]] Node* trapping_scope_for(const Node* node) const noexcept {
         for (auto* current = node; current; current = current->parent) {
-            if (current->component->is_focus_scope() &&
+            if (current->component->effective_availability().interactive() &&
+                current->component->is_focus_scope() &&
                 current->component->focus_scope_active() &&
                 current->component->focus_scope_traps()) {
                 return const_cast<Node*>(current);
@@ -59,9 +61,16 @@
     void clear_focus(PlatformServices& platform) {
         if (!focus_active_ || focused_index_ >= focusables_.size()) {
             focus_active_ = false;
+            if (!syncing_availability_) availability_cleared_focus_ = nullptr;
             return;
         }
         auto* old = focusables_[focused_index_];
+        if (syncing_availability_) {
+            auto* trap = trapping_scope_for(old);
+            availability_cleared_focus_ = trap && trap->focus_restore ? old : nullptr;
+        } else {
+            availability_cleared_focus_ = nullptr;
+        }
         FocusContext context{
             old->bounds, platform, paint_invalidator(*old), layout_invalidator(*old)};
         old->component->focus_changed(false, context);
@@ -88,10 +97,12 @@
     }
 
     [[nodiscard]] static bool scope_effectively_active(const Node& scope) noexcept {
-        if (!scope.component->is_focus_scope() || !scope.component->focus_scope_active()) {
+        if (!scope.component->effective_availability().interactive() ||
+            !scope.component->is_focus_scope() || !scope.component->focus_scope_active()) {
             return false;
         }
         for (auto* parent = scope.parent; parent; parent = parent->parent) {
+            if (!parent->component->effective_availability().interactive()) return false;
             if (parent->component->is_focus_scope() &&
                 !parent->component->focus_scope_active()) {
                 return false;
@@ -112,10 +123,14 @@
         const bool now = scope_effectively_active(node);
         if (node.focus_scope_active_cached && !now) {
             auto* focused = current_focus_node();
+            auto* transition_focus = availability_cleared_focus_ &&
+                    is_descendant_or_self(availability_cleared_focus_, &node)
+                ? availability_cleared_focus_
+                : focused;
             auto* restore = node.focus_restore;
             node.focus_scope_active_cached = false;
             node.focus_restore = nullptr;
-            if (focused && is_descendant_or_self(focused, &node)) {
+            if (transition_focus && is_descendant_or_self(transition_focus, &node)) {
                 if (restore && focus_target_available(restore)) {
                     set_focus(restore, platform);
                 } else if (auto* fallback = first_available_focusable()) {
@@ -149,6 +164,7 @@
             if (auto* fallback = first_available_focusable()) set_focus(fallback, platform);
             else clear_focus(platform);
         }
+        availability_cleared_focus_ = nullptr;
         focus_structure_dirty_ = false;
     }
 
@@ -175,6 +191,9 @@
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, new_context);
         invalidate_node_paint(*node);
+        if (!syncing_availability_ || !focus_structure_dirty_) {
+            availability_cleared_focus_ = nullptr;
+        }
     }
 
     [[nodiscard]] EventResult route_from(

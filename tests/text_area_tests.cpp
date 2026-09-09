@@ -234,10 +234,6 @@ void composition_candidate_tracks_preedit_cursor_on_current_line() {
     tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
     NUI_CHECK(value.get() == "one\ntwo");
 
-    // The committed caret sits after "two" (3 ASCII bytes). MockPlatform
-    // measures each UTF-8 byte as half the 15 px font size, so advancing the
-    // preedit cursor through the first 3-byte code point adds 22.5 px. The
-    // native candidate offset must follow that transient preedit cursor.
     NUI_CHECK_NEAR(platform.text_input_cursor_offset, 57.0f, 0.001f);
 }
 
@@ -261,6 +257,55 @@ void composition_candidate_tracks_visible_line_after_vertical_scroll() {
     NUI_CHECK_NEAR(platform.text_input_area.h, 22.0f, 0.001f);
 }
 
+void read_only_preserves_selection_copy_navigation_but_blocks_mutations() {
+    test::MockPlatform platform;
+    ui::State<bool> read_only{false};
+    ui::State<std::string> value{"one\ntwo"};
+    ui::UI tree{ui::ReadOnly{read_only, ui::TextArea{"Notes", value}}};
+
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    tree.dispatch(test::text("!"), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+
+    read_only.set(true);
+    NUI_CHECK(platform.text_input_active);
+
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+
+    tree.dispatch(test::key(ui::Key::A, false, true), platform);
+    tree.dispatch(test::key(ui::Key::C, false, true), platform);
+    NUI_CHECK(platform.clipboard == "one\ntwo!");
+
+    platform.clipboard = "sentinel";
+    tree.dispatch(test::key(ui::Key::X, false, true), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+    NUI_CHECK(platform.clipboard == "sentinel");
+
+    const int paste_requests = platform.paste_request_count;
+    tree.dispatch(test::key(ui::Key::V, false, true), platform);
+    NUI_CHECK(platform.paste_request_count == paste_requests);
+
+    tree.dispatch(test::text("blocked"), platform);
+    tree.dispatch(test::key(ui::Key::Backspace), platform);
+    tree.dispatch(test::key(ui::Key::Delete), platform);
+    tree.dispatch(test::key(ui::Key::Enter), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+
+    tree.dispatch(composition(ui::CompositionType::Start), platform);
+    tree.dispatch(composition(ui::CompositionType::Update, "日本", 3, 0), platform);
+    tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+
+    tree.dispatch(test::key(ui::Key::Escape), platform);
+    NUI_CHECK(value.get() == "one\ntwo!");
+
+    read_only.set(false);
+    tree.dispatch(test::key(ui::Key::Z, false, true), platform);
+    NUI_CHECK(value.get() == "one\ntwo");
+}
+
 void suite() {
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
@@ -273,6 +318,7 @@ void suite() {
     composition_state_is_isolated_between_views();
     composition_candidate_tracks_preedit_cursor_on_current_line();
     composition_candidate_tracks_visible_line_after_vertical_scroll();
+    read_only_preserves_selection_copy_navigation_but_blocks_mutations();
 }
 
 } // namespace

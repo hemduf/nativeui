@@ -2,6 +2,8 @@
 
 #include <nativeui/component_base.hpp>
 
+#include <optional>
+
 namespace ui {
 
 class Tree {
