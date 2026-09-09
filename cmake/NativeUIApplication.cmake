@@ -148,82 +148,86 @@ function(_nativeui_xml_escape out_value value)
   set(${out_value} "${_nativeui_xml}" PARENT_SCOPE)
 endfunction()
 
-macro(nativeui_add_application)
-  set(_nativeui_application_target "${ARGV0}")
-  # This helper must be a macro because T047's public nativeui_attach_platform()
-  # macro may enable C/Objective-C at the consumer directory scope on CMake 3.24.
-  # A normal cmake_parse_arguments(${ARGN}) call would flatten semicolons inside
-  # quoted values (for example PRODUCT_NAME "Semi;Colon"). Parse the flattened
-  # keyword stream explicitly and reconstruct one-value fields between keywords.
-  # SOURCES retains normal CMake list semantics.
+function(_nativeui_application_is_keyword out_value token)
+  if(token STREQUAL "PRODUCT_NAME" OR
+     token STREQUAL "BUNDLE_ID" OR
+     token STREQUAL "VERSION" OR
+     token STREQUAL "MACOS_ICON" OR
+     token STREQUAL "WINDOWS_ICON" OR
+     token STREQUAL "SOURCES")
+    set(${out_value} TRUE PARENT_SCOPE)
+  else()
+    set(${out_value} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(nativeui_add_application target)
+  if("${target}" STREQUAL "")
+    _nativeui_application_fail("target name is required")
+  endif()
+  if(TARGET "${target}")
+    _nativeui_application_fail("target '${target}' already exists")
+  endif()
+
+  # T054 deliberately accepts semicolons and public-keyword spellings inside
+  # one-value arguments such as PRODUCT_NAME. A function exposes the original
+  # ARGVn boundaries, unlike a macro's flattened ${ARGV} list, so consume every
+  # one-value field from the next original argument before interpreting syntax.
   foreach(_nativeui_application_field IN ITEMS
       PRODUCT_NAME BUNDLE_ID VERSION MACOS_ICON WINDOWS_ICON SOURCES)
     unset(_nativeui_application_${_nativeui_application_field})
     unset(_nativeui_application_seen_${_nativeui_application_field})
-    unset(_nativeui_application_parts_${_nativeui_application_field})
   endforeach()
-  unset(_nativeui_application_current_keyword)
-  unset(_nativeui_application_unknown)
-  set(_nativeui_application_skip_target TRUE)
 
-  foreach(_nativeui_application_token ${ARGV})
-    if(_nativeui_application_skip_target)
-      set(_nativeui_application_skip_target FALSE)
-      continue()
+  set(_nativeui_application_index 1)
+  while(_nativeui_application_index LESS ARGC)
+    set(_nativeui_application_arg_name "ARGV${_nativeui_application_index}")
+    set(_nativeui_application_keyword "${${_nativeui_application_arg_name}}")
+    _nativeui_application_is_keyword(
+      _nativeui_application_is_known_keyword "${_nativeui_application_keyword}")
+    if(NOT _nativeui_application_is_known_keyword)
+      _nativeui_application_fail("unknown argument '${_nativeui_application_keyword}'")
     endif()
-    if(_nativeui_application_token STREQUAL "PRODUCT_NAME" OR
-       _nativeui_application_token STREQUAL "BUNDLE_ID" OR
-       _nativeui_application_token STREQUAL "VERSION" OR
-       _nativeui_application_token STREQUAL "MACOS_ICON" OR
-       _nativeui_application_token STREQUAL "WINDOWS_ICON" OR
-       _nativeui_application_token STREQUAL "SOURCES")
-      if(DEFINED _nativeui_application_seen_${_nativeui_application_token})
-        _nativeui_application_fail(
-          "keyword '${_nativeui_application_token}' may only be specified once")
-      endif()
-      set(_nativeui_application_seen_${_nativeui_application_token} TRUE)
-      set(_nativeui_application_current_keyword "${_nativeui_application_token}")
-    elseif("${_nativeui_application_current_keyword}" STREQUAL "")
-      list(APPEND _nativeui_application_unknown "${_nativeui_application_token}")
-    elseif(_nativeui_application_current_keyword STREQUAL "SOURCES")
-      # An all-uppercase token in the SOURCES tail is almost certainly a keyword
-      # typo (for example the deliberately unsupported generic ICON keyword),
-      # and accepting it as a source would defer a confusing failure to generate.
-      if(_nativeui_application_token MATCHES "^[A-Z][A-Z0-9_]+$")
-        list(APPEND _nativeui_application_unknown "${_nativeui_application_token}")
-      else()
+    if(DEFINED _nativeui_application_seen_${_nativeui_application_keyword})
+      _nativeui_application_fail(
+        "keyword '${_nativeui_application_keyword}' may only be specified once")
+    endif()
+    set(_nativeui_application_seen_${_nativeui_application_keyword} TRUE)
+    math(EXPR _nativeui_application_index "${_nativeui_application_index} + 1")
+
+    if(_nativeui_application_keyword STREQUAL "SOURCES")
+      set(_nativeui_application_source_count 0)
+      while(_nativeui_application_index LESS ARGC)
+        set(_nativeui_application_arg_name "ARGV${_nativeui_application_index}")
+        set(_nativeui_application_token "${${_nativeui_application_arg_name}}")
+        _nativeui_application_is_keyword(
+          _nativeui_application_next_is_keyword "${_nativeui_application_token}")
+        if(_nativeui_application_next_is_keyword)
+          break()
+        endif()
+        if(_nativeui_application_token MATCHES "^[A-Z][A-Z0-9_]+$")
+          _nativeui_application_fail("unknown argument '${_nativeui_application_token}'")
+        endif()
         list(APPEND _nativeui_application_SOURCES "${_nativeui_application_token}")
+        math(EXPR _nativeui_application_source_count
+          "${_nativeui_application_source_count} + 1")
+        math(EXPR _nativeui_application_index "${_nativeui_application_index} + 1")
+      endwhile()
+      if(_nativeui_application_source_count EQUAL 0)
+        _nativeui_application_fail("SOURCES requires at least one caller-owned source")
       endif()
     else()
-      list(APPEND
-        _nativeui_application_parts_${_nativeui_application_current_keyword}
-        "${_nativeui_application_token}")
-    endif()
-  endforeach()
-
-  if(_nativeui_application_unknown)
-    _nativeui_application_fail("unknown arguments: ${_nativeui_application_unknown}")
-  endif()
-
-  foreach(_nativeui_application_field IN ITEMS
-      PRODUCT_NAME BUNDLE_ID VERSION MACOS_ICON WINDOWS_ICON)
-    if(DEFINED _nativeui_application_seen_${_nativeui_application_field})
-      if(NOT DEFINED _nativeui_application_parts_${_nativeui_application_field})
+      if(_nativeui_application_index GREATER_EQUAL ARGC)
         _nativeui_application_fail(
-          "keyword '${_nativeui_application_field}' is missing its value")
+          "keyword '${_nativeui_application_keyword}' is missing its value")
       endif()
-      list(JOIN _nativeui_application_parts_${_nativeui_application_field} ";"
-        _nativeui_application_${_nativeui_application_field})
+      set(_nativeui_application_arg_name "ARGV${_nativeui_application_index}")
+      set(_nativeui_application_${_nativeui_application_keyword}
+        "${${_nativeui_application_arg_name}}")
+      math(EXPR _nativeui_application_index "${_nativeui_application_index} + 1")
     endif()
-  endforeach()
+  endwhile()
 
-  if("${_nativeui_application_target}" STREQUAL "")
-    _nativeui_application_fail("target name is required")
-  endif()
-  if(TARGET "${_nativeui_application_target}")
-    _nativeui_application_fail(
-      "target '${_nativeui_application_target}' already exists")
-  endif()
   if(NOT _nativeui_application_SOURCES)
     _nativeui_application_fail("SOURCES requires at least one caller-owned source")
   endif()
@@ -232,9 +236,12 @@ macro(nativeui_add_application)
   if("${_nativeui_application_BUNDLE_ID}" STREQUAL "")
     _nativeui_application_fail("BUNDLE_ID is required")
   endif()
+  if(COMMAND _nativeui_validate_consumer_id)
+    _nativeui_validate_consumer_id("${_nativeui_application_BUNDLE_ID}")
+  endif()
   _nativeui_validate_application_version("${_nativeui_application_VERSION}")
 
-  string(SHA256 _nativeui_application_target_digest "${_nativeui_application_target}")
+  string(SHA256 _nativeui_application_target_digest "${target}")
   string(SUBSTRING "${_nativeui_application_target_digest}" 0 16
     _nativeui_application_target_key)
   set(_nativeui_application_metadata_dir
@@ -242,7 +249,7 @@ macro(nativeui_add_application)
   file(MAKE_DIRECTORY "${_nativeui_application_metadata_dir}")
 
   if(APPLE)
-    add_executable("${_nativeui_application_target}" MACOSX_BUNDLE
+    add_executable("${target}" MACOSX_BUNDLE
       ${_nativeui_application_SOURCES})
 
     _nativeui_xml_escape(_nativeui_application_product_xml
@@ -258,7 +265,7 @@ macro(nativeui_add_application)
         _nativeui_application_icon_path
         _nativeui_application_icon_basename
         "${_nativeui_application_MACOS_ICON}" ".icns" "MACOS_ICON")
-      target_sources("${_nativeui_application_target}" PRIVATE
+      target_sources("${target}" PRIVATE
         "${_nativeui_application_icon_path}")
       set_source_files_properties("${_nativeui_application_icon_path}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
@@ -272,7 +279,7 @@ macro(nativeui_add_application)
       "${_nativeui_application_metadata_dir}/Info.plist")
     file(WRITE "${_nativeui_application_plist}"
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+"<!DOCTYPE plist PUBLIC \"-//Apple//DTD Plist 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
 "<plist version=\"1.0\">\n"
 "<dict>\n"
 "  <key>CFBundleIdentifier</key>\n"
@@ -294,12 +301,12 @@ macro(nativeui_add_application)
 "${_nativeui_application_icon_plist}"
 "</dict>\n"
 "</plist>\n")
-    set_target_properties("${_nativeui_application_target}" PROPERTIES
+    set_target_properties("${target}" PROPERTIES
       MACOSX_BUNDLE TRUE
       MACOSX_BUNDLE_INFO_PLIST "${_nativeui_application_plist}"
     )
   elseif(WIN32)
-    add_executable("${_nativeui_application_target}" WIN32
+    add_executable("${target}" WIN32
       ${_nativeui_application_SOURCES})
 
     if(NOT "${_nativeui_application_WINDOWS_ICON}" STREQUAL "")
@@ -318,47 +325,43 @@ macro(nativeui_add_application)
         "${_nativeui_application_metadata_dir}/application.rc")
       file(WRITE "${_nativeui_application_rc}"
         "IDI_NATIVEUI_APPLICATION_ICON ICON \"${_nativeui_application_icon_basename}\"\n")
-      target_sources("${_nativeui_application_target}" PRIVATE
+      target_sources("${target}" PRIVATE
         "${_nativeui_application_rc}")
     endif()
   else()
-    add_executable("${_nativeui_application_target}"
+    add_executable("${target}"
       ${_nativeui_application_SOURCES})
   endif()
 
-  set_target_properties("${_nativeui_application_target}" PROPERTIES
+  set_target_properties("${target}" PROPERTIES
     OUTPUT_NAME "${_nativeui_application_PRODUCT_NAME}")
+  target_link_libraries("${target}" PRIVATE NativeUI::Core)
 
-  target_link_libraries("${_nativeui_application_target}" PRIVATE NativeUI::Core)
-  # T047 is the sole public final-consumer platform attachment authority and in
-  # turn delegates macOS Objective-C naming/bridge creation to T053.
-  nativeui_attach_platform(
-    TARGET "${_nativeui_application_target}"
-    CONSUMER_ID "${_nativeui_application_BUNDLE_ID}"
+  # T047's public attachment helper must execute at CMake file scope because it
+  # may enable C and Objective-C on CMake 3.24-4.4. Generate a tiny per-target
+  # subdirectory and execute it synchronously. The target and consumer identity
+  # are inherited as variables, so generated code contains no caller-controlled
+  # text and T047/T053 remain the sole platform/naming implementation.
+  set(_NATIVEUI_APPLICATION_ATTACH_TARGET "${target}")
+  set(_NATIVEUI_APPLICATION_ATTACH_CONSUMER_ID
+    "${_nativeui_application_BUNDLE_ID}")
+  set(_nativeui_application_attach_source_dir
+    "${_nativeui_application_metadata_dir}/platform-attach")
+  set(_nativeui_application_attach_binary_dir
+    "${_nativeui_application_metadata_dir}/platform-attach-build")
+  file(MAKE_DIRECTORY "${_nativeui_application_attach_source_dir}")
+  file(WRITE "${_nativeui_application_attach_source_dir}/CMakeLists.txt" [=[
+if(NOT DEFINED _NATIVEUI_APPLICATION_ATTACH_TARGET OR
+   NOT DEFINED _NATIVEUI_APPLICATION_ATTACH_CONSUMER_ID)
+  message(FATAL_ERROR "NativeUI T054 internal platform attachment context is missing")
+endif()
+nativeui_attach_platform(
+  TARGET "${_NATIVEUI_APPLICATION_ATTACH_TARGET}"
+  CONSUMER_ID "${_NATIVEUI_APPLICATION_ATTACH_CONSUMER_ID}"
+)
+]=])
+  add_subdirectory(
+    "${_nativeui_application_attach_source_dir}"
+    "${_nativeui_application_attach_binary_dir}"
   )
-
-  foreach(_nativeui_application_field IN ITEMS
-      PRODUCT_NAME BUNDLE_ID VERSION MACOS_ICON WINDOWS_ICON SOURCES)
-    unset(_nativeui_application_${_nativeui_application_field})
-    unset(_nativeui_application_seen_${_nativeui_application_field})
-    unset(_nativeui_application_parts_${_nativeui_application_field})
-  endforeach()
-  unset(_nativeui_application_current_keyword)
-  unset(_nativeui_application_unknown)
-  unset(_nativeui_application_token)
-  unset(_nativeui_application_skip_target)
-  unset(_nativeui_application_field)
-  unset(_nativeui_application_target_digest)
-  unset(_nativeui_application_target_key)
-  unset(_nativeui_application_metadata_dir)
-  unset(_nativeui_application_product_xml)
-  unset(_nativeui_application_bundle_xml)
-  unset(_nativeui_application_version_xml)
-  unset(_nativeui_application_icon_plist)
-  unset(_nativeui_application_icon_path)
-  unset(_nativeui_application_icon_basename)
-  unset(_nativeui_application_icon_xml)
-  unset(_nativeui_application_icon_copy)
-  unset(_nativeui_application_plist)
-  unset(_nativeui_application_rc)
-endmacro()
+endfunction()
