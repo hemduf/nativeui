@@ -1,4 +1,4 @@
-#include "benchmarks/t051_benchmark_harness.hpp"
+#include "benchmarks/t051_benchmark_comparison.hpp"
 
 #include <cstdlib>
 #include <iostream>
