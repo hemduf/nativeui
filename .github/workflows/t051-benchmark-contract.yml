@@ -1,0 +1,42 @@
+name: T051 Benchmark Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tests/t051_benchmark_contract_tests.cpp'
+      - 'tests/t051_comparison_contract_tests.cpp'
+      - 'tests/benchmarks/**'
+      - '.github/workflows/t051-benchmark-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t051-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Benchmark harness contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile harness contract tests
+        run: >-
+          c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror
+          -Itests
+          tests/t051_benchmark_contract_tests.cpp
+          -o t051_benchmark_contract_tests
+      - name: Run harness contract tests
+        run: ./t051_benchmark_contract_tests
+      - name: Compile comparison contract tests
+        run: >-
+          c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror
+          -Itests
+          tests/t051_comparison_contract_tests.cpp
+          -o t051_comparison_contract_tests
+      - name: Run comparison contract tests
+        run: ./t051_comparison_contract_tests
