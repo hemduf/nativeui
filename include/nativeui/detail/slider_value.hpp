@@ -25,6 +25,8 @@ public:
     [[nodiscard]] float maximum() const noexcept { return maximum_; }
     [[nodiscard]] float step() const noexcept { return step_; }
 
+    // Normalize a value written by user interaction: finite fallback first,
+    // then the ticket's exact quantize-to-grid formula, then range clamp.
     [[nodiscard]] float normalize(float value) const noexcept {
         if (!std::isfinite(value)) return minimum_;
 
@@ -36,8 +38,15 @@ public:
         return std::clamp(normalized, minimum_, maximum_);
     }
 
+    // External State values are never rewritten or silently snapped merely for
+    // mount/paint. Rendering/hit-testing only applies the safe fallback + clamp.
+    [[nodiscard]] float effective_external(float value) const noexcept {
+        if (!std::isfinite(value)) return minimum_;
+        return std::clamp(value, minimum_, maximum_);
+    }
+
     [[nodiscard]] float fraction(float value) const noexcept {
-        const float effective = normalize(value);
+        const float effective = effective_external(value);
         return (effective - minimum_) / (maximum_ - minimum_);
     }
 
