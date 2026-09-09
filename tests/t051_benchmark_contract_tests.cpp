@@ -1,12 +1,19 @@
 #include "benchmarks/t051_benchmark_harness.hpp"
-#include "test_support.hpp"
 
-#include <array>
-#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
+
+void check(bool condition, const char* expression, int line) {
+    if (condition) return;
+    throw std::runtime_error("line " + std::to_string(line) + ": CHECK failed: " + expression);
+}
+
+#define NUI_CHECK(expr) ::check(static_cast<bool>(expr), #expr, __LINE__)
 
 using nativeui::bench::ComparisonMetadata;
 using nativeui::bench::RunMetrics;
@@ -72,4 +79,13 @@ void suite() {
 
 } // namespace
 
-int main() { return test::run("t051 benchmark contract", &suite); }
+int main() {
+    try {
+        suite();
+        std::cout << "PASS t051 benchmark contract\n";
+        return EXIT_SUCCESS;
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL t051 benchmark contract: " << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
+}
