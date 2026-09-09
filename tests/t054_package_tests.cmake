@@ -53,7 +53,13 @@ function(_t054_expect_invalid_product_bytes label expected_diagnostic)
     _t054_package_fail("PRODUCT_NAME ${label}"
       "invalid byte sequence unexpectedly passed validation")
   endif()
-  string(FIND "${_combined}" "${expected_diagnostic}" _diagnostic_index)
+  # CMake may wrap long diagnostics differently across runner versions. Match
+  # semantic text after normalizing line wrapping instead of coupling this
+  # contract to terminal formatting.
+  string(REPLACE "\r" " " _normalized_combined "${_combined}")
+  string(REPLACE "\n" " " _normalized_combined "${_normalized_combined}")
+  string(REGEX REPLACE " +" " " _normalized_combined "${_normalized_combined}")
+  string(FIND "${_normalized_combined}" "${expected_diagnostic}" _diagnostic_index)
   if(_diagnostic_index EQUAL -1)
     _t054_package_fail("PRODUCT_NAME ${label} diagnostic"
       "missing '${expected_diagnostic}' in:\n${_combined}")
