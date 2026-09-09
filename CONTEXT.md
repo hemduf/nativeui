@@ -18,13 +18,13 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 
 ## Merged baseline
 
-The merged baseline is complete through T029, including rendering resources T022/T023, platform safety issue #62, T053 and the #64 Decision B ownership diagnosis. TextInput/TextArea share the UTF-8 `TextEditModel`; T029 provides platform-neutral IME composition plus private Cocoa/IMM32/XIM bridges. `StandaloneWindow` uses `PUGL_PROGRAM`; `EmbeddedView` uses `PUGL_MODULE` and non-blocking polling. General clipboard text uses canonical `text/plain`.
+The merged baseline is complete through T029 plus T059, including rendering resources T022/T023, platform safety issue #62, T053 and the #64 Decision B ownership diagnosis. TextInput/TextArea share the UTF-8 `TextEditModel`; T029 provides platform-neutral IME composition plus private Cocoa/IMM32/XIM bridges. `StandaloneWindow` uses `PUGL_PROGRAM`; `EmbeddedView` uses `PUGL_MODULE` and non-blocking polling. General clipboard text uses canonical `text/plain`.
 
 T053 / PR #88 is merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`. `NativeUI::Core` and portable Pugl C code remain generic while the small macOS Objective-C Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives the frozen `NUI_<fragment>_<digest12>_` prefix from exact UTF-8 `CONSUMER_ID` bytes, rejects duplicate target/identity registration at configure time and introduces no runtime registry. The macOS acceptance fixture builds two final consumers, audits class+metaclass symbols and rejects any unprefixed `Pugl*` Objective-C runtime class/metaclass.
 
-## T059 component availability — PR #89 completion candidate
+## T059 component availability — merged PR #89
 
-T059 introduces one generic retained-tree availability model shared by standard and custom components:
+T059 is merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d` and provides one generic retained-tree availability model shared by standard and custom components:
 
 - `VisibilityMode::{Visible, Hidden, Collapsed}`;
 - monotonic inherited enabled/disabled state;
@@ -36,9 +36,20 @@ The retained tree is the sole authority for availability. `Hidden` keeps layout 
 
 Availability transitions cancel pointer capture exactly once before suppression, deactivate/re-home focus before applying the new effective state and preserve retained component identity. Reconciliation is per-tree and UI-thread confined, supports reentrant availability reversal from teardown callbacks, and adds no mutable process-global/singleton/`thread_local` state.
 
-Mandatory review found one FocusScope regression: clearing focus before the availability snapshot was applied caused an active trapping scope to lose its existing pre-scope `focus_restore` record when the whole scope became unavailable. RED head `8b3cdef553e680633039cf82ac896d18a8c416b5` exposed the incorrect global-first fallback; the fix retains only the transient per-tree availability teardown focus origin so normal FocusScope deactivation can restore the exact pre-scope target. GREEN implementation head before documentation synchronization is `3f24d4bb12723cbcf816d7737f62660fb560b4d3`.
+Mandatory review found one FocusScope regression: clearing focus before the availability snapshot was applied caused an active trapping scope to lose its existing pre-scope `focus_restore` record when the whole scope became unavailable. RED head `8b3cdef553e680633039cf82ac896d18a8c416b5` exposed the incorrect global-first fallback; the corrected implementation retains only the transient per-tree availability teardown focus origin so normal FocusScope deactivation can restore the exact pre-scope target. Final T059 validation passed Linux ASan+UBSan, Linux X11, Windows and macOS including native lifecycle smoke.
 
-T059 ships dedicated core tests plus `examples/features/t059_component_state.cpp --self-test`; validation covers lifecycle identity, layout/paint invalidation, disabled dispatch/capture/focus, read-only editors/value controls, reentrancy, two-tree isolation, public-header compilation and Linux ASan+UBSan.
+## T030 Button — PR #94 completion candidate
+
+T030 consumes T059 rather than introducing a widget-local disabled policy. The public `ui::Button` builder owns a visible label and activation callback and remains platform-neutral. The retained Button implementation:
+
+- captures on PointerDown, tracks release-inside while captured and fires exactly once only for a valid inside PointerUp;
+- cancels on PointerCancel, deactivation, focus loss and T059 availability teardown;
+- activates Space on KeyUp and Enter on first KeyDown while suppressing duplicate held-key activation without requiring a platform repeat flag;
+- treats inherited ReadOnly as non-blocking because Button is an action/command control, while inherited Disabled/Hidden/Collapsed remains centrally enforced by T059;
+- copies the activation callback and completes all component/context mutation before invoking user code, with no `this` or `InputContext` access after the callback, so synchronous hide/disable is reentrancy-safe and later T058 structural removal can use the same boundary;
+- exposes minimal normal/hover/pressed/focused/disabled visual states without adopting T038's future rich style/theme API.
+
+TDD evidence begins with RED head `2800623fd00cf5ab7c0bfc6333afe8960944c7d2`, where the new Button contract intentionally failed compilation because `ui::Button` did not exist. Dedicated `nativeui_button_tests` now cover pointer inside/outside/cancel/capture, Space/Enter repeat guards, focus loss, disable/hide while armed, ReadOnly action behavior, deactivation and synchronous self-disable. Deterministic headless raster checks cover normal, hover, pressed, focused and disabled visual states. `examples/features/t030_button.cpp` provides the mandatory interactive mode and deterministic `--self-test`.
 
 ## Standalone ownership decision — issue #64 / PR #90
 
@@ -71,8 +82,8 @@ PR #90 keeps `--issue64-simultaneous` and `--issue64-sequential` diagnostic mode
 
 ## Current DAG frontier
 
-- **T059 / issue #71 / PR #89:** completion candidate; after exact-head final validation and merge, T030 becomes Ready on the state/widget lane.
-- **T030 / issue #30:** next state/widget ticket immediately after T059; Button must consume T059 effective enabled state rather than introduce widget-local disabled traversal rules.
+- **T059 / issue #71 / PR #89:** complete and merged; this unblocked T030.
+- **T030 / issue #30 / PR #94:** state/widget completion candidate; exact-head CI, mandatory review and documentation are the remaining merge gates. Once merged, T031 is unblocked and T037 has its Button-side dependency satisfied.
 - **T042 / issue #42:** current lifecycle/stress lane after merged #64 Decision B; stress supported ownership paths without inventing hidden simultaneous standalone support before T060.
 - **T053:** complete/merged. This unblocks T047 on the platform/package lane.
 - **T047:** package/install lane; owned independently from lifecycle and state/widget work.
@@ -80,7 +91,7 @@ PR #90 keeps `--issue64-simultaneous` and `--issue64-sequential` diagnostic mode
 Important dependency chains include:
 
 ```text
-T059 -> T030 -> T031
+T059(done) -> T030 -> T031
 T030 + T032 -> T037 -> T038 -> T039 / T040
 T034 -> T035 / T036
 T030 + T031 + T032 + T036 -> T045
@@ -144,11 +155,12 @@ cmake -S . -B build \
 - Explicit shared-Application multi-window standalone support is not implemented yet; T060 owns it.
 - Legacy independent `PUGL_PROGRAM` worlds are diagnostic-only on macOS after #64 Decision B.
 - X11 advanced preedit callbacks depend on the installed XIM advertising `XIMPreeditCallbacks`; ordinary committed text remains available otherwise.
-- Standard Button/Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete; T030 Button follows T059.
+- Standard Slider/ComboBox/List/ScrollView/Tabs/Menu widgets remain incomplete; T030 Button is the current completion candidate.
+- Dynamic structural self-removal is not available until T058; T030 already establishes the callback boundary needed for safe synchronous state changes and deferred future removal.
 - Theme/style inheritance, accessibility, Wayland, install/export packaging and full host integration remain incomplete.
 
 ## Next state/widget action
 
-1. Finish final exact-head validation/review/documentation and merge T059 / PR #89.
-2. Move T030 / issue #30 to Doing from the resulting current `main`.
-3. Implement Button in strict TDD using the central T059 availability/focus/capture contract, then perform the mandatory CODE_REVIEW.md pass before merge.
+1. Finish exact-head T030 validation and mandatory CODE_REVIEW.md review on PR #94.
+2. Resolve every blocking finding, synchronize ROADMAP.md and merge T030 only from current `main`.
+3. After T030 is merged, T031 becomes unblocked; this state/widget automation lane has completed the requested T059 -> T030 chain.
