@@ -283,6 +283,21 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_sanitizers(nativeui_smoke_embedded)
 
     if(APPLE)
+      enable_language(OBJCXX)
+      add_executable(nativeui_smoke_macos_drop tests/smoke_macos_drop.mm)
+      set_target_properties(nativeui_smoke_macos_drop PROPERTIES OBJCXX_STANDARD 20)
+      target_compile_options(nativeui_smoke_macos_drop PRIVATE -fobjc-arc)
+      target_compile_definitions(nativeui_smoke_macos_drop PRIVATE
+        "NativeUIDropTestDraggingInfo=${NATIVEUI_OBJC_RUNTIME_PREFIX}DropTestDraggingInfo")
+      target_link_libraries(nativeui_smoke_macos_drop PRIVATE NativeUI::NativeUI)
+      nativeui_enable_project_warnings(nativeui_smoke_macos_drop)
+      nativeui_enable_sanitizers(nativeui_smoke_macos_drop)
+      add_test(NAME nativeui_smoke_macos_drop COMMAND nativeui_smoke_macos_drop)
+      set_tests_properties(nativeui_smoke_macos_drop PROPERTIES
+        LABELS "integration;platform;macos;drop"
+        TIMEOUT 20
+      )
+
       add_test(
         NAME nativeui_objc_runtime_prefix
         COMMAND ${CMAKE_COMMAND}
