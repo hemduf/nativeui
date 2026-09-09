@@ -18,18 +18,19 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 ## Current execution snapshot — 2026-09-09
 
-The merged baseline is complete through T029, including T023 and T053, plus the merged #64 Decision B ownership diagnosis and T059 component-availability contract. This T047 merge completes the low-level install/export package contract.
+The merged baseline is complete through T030, including T023 and T053, plus the merged #64 Decision B ownership diagnosis and T059 component-availability contract. This T047 merge completes the low-level install/export package contract.
 
 - **T053 — consumer-scoped macOS platform bridge / PR #88:** **Complete and merged** as `ad83ed05f1687fea31255bcc77329fae0f4efb69`. `NativeUI::Core` and portable Pugl C code remain generic; only the small macOS Objective-C Pugl/OpenGL/IME bridge is instantiated per final consumer. The frozen helper derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and introduces no runtime registry. The macOS acceptance path validates two final consumers plus class/metaclass symbol isolation.
 - **#64 — macOS standalone PROGRAM-world ownership / PR #90:** **Complete and merged** as `b52d53eee65e5de91697e2c1f0685728b9646575`. Decision B is frozen: independent `PUGL_PROGRAM` worlds are not a valid NativeUI multi-window ownership model on macOS. Legacy `StandaloneWindow(UI&, ...)` therefore remains single-window/pre-v1 only. **T060 / issue #72 owns the replacement contract:** one explicit `ui::Application`, exactly one PROGRAM world that outlives all top-level windows, multiple `StandaloneWindow(Application&, ...)` views, and no hidden mutable global/singleton/`thread_local` application owner.
-- **T059 — generic component availability / PR #89:** **Complete and merged** as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`. One retained-tree model resolves `Visible`/`Hidden`/`Collapsed`, inherited enabled/disabled and inherited read-only state. Hidden preserves layout while suppressing paint/input/focus; Collapsed removes layout contribution without unmounting; Disabled suppresses normal targeting/focus while remaining laid out/painted; ReadOnly preserves targeting/focus while widgets reject mutations. Capture/focus teardown occurs before suppression, reentrant reversal is bounded, and FocusScope restore semantics are covered. T030 is now Ready on the state/widget lane.
+- **T059 — generic component availability / PR #89:** **Complete and merged** as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`. One retained-tree model resolves `Visible`/`Hidden`/`Collapsed`, inherited enabled/disabled and inherited read-only state. Hidden preserves layout while suppressing paint/input/focus; Collapsed removes layout contribution without unmounting; Disabled suppresses normal targeting/focus while remaining laid out/painted; ReadOnly preserves targeting/focus while widgets reject mutations. Capture/focus teardown occurs before suppression, reentrant reversal is bounded, and FocusScope restore semantics are covered.
+- **T030 — Button / PR #94:** **Complete and merged** as `b32b09da473c70a857675e05f7fdc7c78e5f9361`. Button consumes T059 effective enabled/read-only state and the central focus/capture policy, with platform-neutral pointer/keyboard activation and reentrancy-safe callbacks. T031 is now the next dependency-unblocked widget successor on its separate lane.
 - **T047 — install/export CMake package / PR #92:** **Complete by this merge.** The installed/build-tree low-level v1 surface is `NativeUI::Core` plus `nativeui_attach_platform(TARGET <final-target> CONSUMER_ID <reverse-dns-id>)`. The helper rejects invalid/non-final/imported/alias targets, malformed identities and all double attachment; macOS delegates exact identity to T053 while Windows/Linux use the same public helper with generic platform implementation. The package carries pinned Skia assets and Pugl/platform source machinery privately, installs required legal payload, validates relocated install-tree consumers and never exports/documents `NativeUI::NativeUI` as a complete v1 target. T048, T054 and T056 become dependency-unblocked after this merge.
 - **T029 — advanced IME composition bridge / PR #85:** **Complete.** NativeUI has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe offsets, single-transaction commit/cancel semantics, candidate geometry and private Cocoa/IMM32/XIM bridges.
 - **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete** and consumed by T053.
 - **T023 — SVG/icon resources / PR #60:** **Complete.** Backend-neutral SVG resources and per-instance provider-backed caching are in the merged baseline.
 - **Lifecycle lane frontier:** **T042** follows merged #64 Decision B. T042 must stress current supported ownership paths—one standalone PROGRAM application-owner lifetime and independent `EmbeddedView` / `PUGL_MODULE` instances—without inventing a hidden simultaneous-standalone workaround. Shared-Application multi-window stress belongs to T060.
 - **Platform/package frontier:** **T048, T054 and T056 are Ready after this T047 merge.** T057 remains dependent on T056; T052 additionally depends on T048, T051 and T042.
-- **State/widget frontier:** **T030 Button is Ready** after merged T059. T030 must consume T059 effective enabled state and central focus/capture policy rather than add widget-local disabled traversal rules.
+- **State/widget frontier:** **T031 is Ready** after merged T030; later theme/accessibility/gallery work follows its declared dependencies.
 
 Parallel execution frontier:
 
@@ -39,9 +40,7 @@ platform/package: T053(done) -> T047(done) -> T048 -> T052
                                     |         
                                     +-> T056 -> T057
                                     +-> T054
-state/widgets:    T059(done) -> T030 -> T031
-                               |
-                               +-> T037 (with T032)
+state/widgets:    T059(done) -> T030(done) -> T031
 ```
 
 ## Milestone 0 — Baseline hardening
@@ -178,7 +177,7 @@ T029 PR #85 completes the text milestone with a neutral `CompositionEvent` strea
 
 ## Milestone 5 — Standard widget set
 
-**Status: T030/T032/T033/T034 Ready**
+**Status: T030 complete; T031/T032/T033/T034 Ready**
 
 **Goal:** cover most desktop/plugin UI needs without requiring Canvas implementations.
 
@@ -208,11 +207,11 @@ Tickets: `T030`–`T036`.
 Dependency frontier:
 
 ```text
-T059(done) -> T030 -> T031
+T059(done) -> T030(done) -> T031
 T034 -> T035 / T036
 ```
 
-T030 has high downstream unblock value because it also feeds later theme/accessibility/gallery tickets. T032 and T034 are independently Ready and high-unblock-value; T033 is independently Ready.
+T031 now follows the merged Button contract. T032 and T034 are independently Ready and high-unblock-value; T033 is independently Ready.
 
 ## Milestone 6 — Styling, theme and animation
 
@@ -241,7 +240,7 @@ Tickets: `T037`–`T040`.
 Dependency frontier:
 
 ```text
-T030 + T032 -> T037 -> T038 -> T039 / T040
+T030(done) + T032 -> T037 -> T038 -> T039 / T040
 ```
 
 ## Milestone 7 — Platform and embedded robustness
