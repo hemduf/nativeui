@@ -62,6 +62,7 @@
             input.shift = tab.shift;
             if (input.type == InputType::KeyDown && input.key == Key::Quit) {
                 should_close_ = true;
+                if (close_callback_) close_callback_();
             } else if (input.key != Key::None) {
                 ui_.dispatch(input, services_);
             }
