@@ -125,3 +125,20 @@ T042 also exposed a production Linux/X11 renderer crash before stress-specific l
 - No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
 
 After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
+
+## State/widget lane update — T031 completion candidate
+
+T031 / PR #95 is the active completion candidate after merged T030. The conflict-safe refresh over current main preserves the T048/package and lifecycle-lane records above while retaining the reviewed T031 implementation.
+
+Delivered T031 contract:
+
+- `Checkbox` binds one `State<bool>&`, reuses T030 pointer/Space activation semantics and intentionally does not activate on Enter;
+- typed `RadioGroup<T>` / `RadioButton<T>` binds one selected `State<T>&`, preserves an externally supplied no-match value, treats each group as one Tab stop and provides wrapped arrow navigation that skips unavailable options;
+- T059 remains authoritative for Disabled/Hidden/Collapsed targeting/focus/capture; ReadOnly remains targetable/focusable while value mutation is suppressed;
+- group identity and duplicate-live-value bookkeeping are owned per `RadioGroup<T>` with no process-global registry, singleton, `thread_local` state or label-keyed group map;
+- duplicate simultaneously-live option values are rejected deterministically and weak bookkeeping permits the same values after prior components are destroyed/remounted;
+- the dedicated unit suite and `t031_checkbox_radio --self-test` cover pointer/keyboard/cancel, typed values, no-match state, arrow/tab behavior, ReadOnly, group isolation, remount/reorder, observer reentrancy and visual states.
+
+Review history is clean after the duplicate-live-value RED→GREEN correction. The synchronized pre-documentation head `ceb42ecfac9e8f17535b2136a572a2c08179055d` preserves current-main T048 and lifecycle integration without changing T031 production behavior. This documentation update is part of the required completion cycle; the resulting exact head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before PR #95 can merge.
+
+After T031 merges, re-read live GitHub dependencies and priorities before selecting the next state/widget item; current roadmap candidates T032, T033 and T034 remain independent, with T032/T034 carrying stronger downstream unblock value.
