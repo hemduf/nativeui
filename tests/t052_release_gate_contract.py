@@ -67,11 +67,10 @@ def main() -> int:
     )
 
     dependencies = text("cmake/Dependencies.cmake")
-    require(
-        re.search(r'set\(NATIVEUI_PUGL_COMMIT\s+\"[0-9a-f]{40}\"', dependencies) is not None,
-        "Pugl must remain pinned to one exact commit",
-    )
-    require('set(NATIVEUI_SKIA_TAG "chrome/m149"' in dependencies, "Skia release tag must remain pinned")
+    pugl_match = re.search(r'set\(NATIVEUI_PUGL_COMMIT\s+\"([0-9a-f]{40})\"', dependencies)
+    skia_match = re.search(r'set\(NATIVEUI_SKIA_TAG\s+\"([^\"]+)\"', dependencies)
+    require(pugl_match is not None, "Pugl must remain pinned to one exact commit")
+    require(skia_match is not None, "Skia release tag must remain pinned")
     require('URL_HASH "${_skia_hash}"' in dependencies, "Skia CPM acquisition must enforce URL_HASH")
     require(len(re.findall(r'SHA256=[0-9a-f]{64}', dependencies)) >= 5,
             "supported Skia assets must carry explicit SHA-256 pins")
@@ -132,8 +131,14 @@ def main() -> int:
             "Capture one approved-base run and two candidate runs",
             "Prepare release-doc consumer from exact snippet",
             "Build release-doc consumer",
+            "Build T051 policy gate",
+            "./t052-benchmark-gate",
         ),
         "T052 release workflow",
+    )
+    require(
+        "candidate['median_ns_per_op']" not in release_gate,
+        "T052 must call T051's canonical C++ comparison entry point instead of duplicating thresholds in workflow Python",
     )
 
     release_notes = text("docs/releases/v0.1.0.md")
@@ -141,6 +146,8 @@ def main() -> int:
     require("developer preview" in release_notes_lower, "v0.1.0 must be identified as a developer preview")
     require("public api" in release_notes_lower and "may change" in release_notes_lower,
             "v0.1.0 must state that public APIs may change during 0.x")
+    require(f"`{pugl_match.group(1)}`" in release_notes, "release notes must match the exact pinned Pugl commit")
+    require(f"`{skia_match.group(1)}`" in release_notes, "release notes must match the exact pinned Skia tag")
     require_all(
         release_notes,
         (
