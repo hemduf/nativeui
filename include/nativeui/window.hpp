@@ -18,6 +18,44 @@ struct WindowDesc {
     bool resizable{true};
 };
 
+enum class QuitPolicy {
+    OnLastWindowClosed,
+    ExplicitOnly,
+};
+
+/// Explicit owner of the standalone application world/event loop.
+///
+/// Construction, polling, running and destruction are confined to the
+/// platform/UI thread. The object owns exactly one standalone Pugl PROGRAM
+/// world; v1 standalone windows attach explicitly to this instance.
+class Application final {
+public:
+    Application();
+    ~Application();
+
+    Application(const Application&) = delete;
+    Application& operator=(const Application&) = delete;
+    Application(Application&&) = delete;
+    Application& operator=(Application&&) = delete;
+
+    [[nodiscard]] bool valid() const noexcept;
+    [[nodiscard]] std::string_view last_error() const noexcept;
+
+    int run();
+    bool poll(double timeout_seconds = 0.0);
+
+    void request_quit();
+    [[nodiscard]] bool quit_requested() const noexcept;
+
+    void set_quit_policy(QuitPolicy policy) noexcept;
+    [[nodiscard]] QuitPolicy quit_policy() const noexcept;
+
+private:
+    friend class StandaloneWindow;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /// Standalone native window for one UI instance.
 ///
 /// Construction, use and destruction are confined to the platform/UI thread.
@@ -25,6 +63,10 @@ struct WindowDesc {
 /// a stable non-owning PlatformServices reference to this exact object.
 class StandaloneWindow final : public PlatformServices {
 public:
+    StandaloneWindow(Application& application, UI& ui, WindowDesc desc = {});
+
+    /// Pre-v1 single-window compatibility path. T069 removes this overload
+    /// from the 1.0 public API; it never uses a hidden shared Application.
     StandaloneWindow(UI& ui, WindowDesc desc = {});
     ~StandaloneWindow() override;
 
@@ -37,6 +79,7 @@ public:
     bool poll(double timeout_seconds = -1.0);
     void request_close();
 
+    [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] bool should_close() const noexcept;
     [[nodiscard]] Size size() const noexcept;
     [[nodiscard]] float scale_factor() const noexcept;
