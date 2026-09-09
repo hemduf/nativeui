@@ -14,6 +14,7 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
 
 jobs:
   contract:
@@ -34,6 +35,7 @@ jobs:
           {
             echo "release=0.1.0"
             echo "candidate_sha=${CANDIDATE_SHA}"
+            echo "baseline_sha=${BASELINE_SHA}"
             echo "contract_workflow=${GITHUB_RUN_ID}"
           } > t052-evidence/release-candidate.txt
 
@@ -111,11 +113,17 @@ jobs:
   benchmark:
     name: T052 exact-head T051 benchmark
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Checkout benchmark baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_SHA }}
+          path: t052-baseline-src
 
       - name: Install benchmark dependencies
         shell: bash
@@ -123,6 +131,19 @@ jobs:
           grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
           sudo apt-get update
           sudo apt-get install -y ninja-build libfontconfig1-dev
+
+      - name: Configure approved-base benchmark project
+        run: >-
+          cmake -S t052-baseline-src/tests/t051 -B build-t052-base -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}/t052-baseline-src
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ env.BASELINE_SHA }}
+
+      - name: Build approved-base benchmark project
+        run: |
+          cmake --build build-t052-base --parallel 2
+          ctest --test-dir build-t052-base --output-on-failure
+          ./build-t052-base/nativeui_benchmarks --self-test
 
       - name: Configure exact-head T051 benchmark project
         run: >-
@@ -137,13 +158,13 @@ jobs:
           ctest --test-dir build-t052-bench --output-on-failure
           ./build-t052-bench/nativeui_benchmarks --self-test
 
-      - name: Capture candidate baseline and two independent repeats
+      - name: Capture one approved-base run and two candidate runs
         run: |
-          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-a.json
-          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-b.json
-          ./build-t052-bench/nativeui_benchmarks --json t052-baseline-c.json
+          ./build-t052-base/nativeui_benchmarks --json t052-approved-base.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-candidate-a.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-candidate-b.json
 
-      - name: Validate exact SHA, idle hard gate and repeat stability
+      - name: Validate exact SHAs, idle hard gate and T051 regression budget
         shell: bash
         run: |
           python3 - <<'PY'
@@ -151,14 +172,13 @@ jobs:
           import os
           from pathlib import Path
 
-          candidate = os.environ['CANDIDATE_SHA']
-          documents = [
-              json.loads(Path(name).read_text())['results']
-              for name in ('t052-baseline-a.json', 't052-baseline-b.json', 't052-baseline-c.json')
-          ]
-          baseline, repeat_b, repeat_c = documents
-          if not (len(baseline) == len(repeat_b) == len(repeat_c)):
-              raise SystemExit('T052 benchmark repeat result-count mismatch')
+          baseline_sha = os.environ['BASELINE_SHA']
+          candidate_sha = os.environ['CANDIDATE_SHA']
+          baseline = json.loads(Path('t052-approved-base.json').read_text())['results']
+          candidate_a = json.loads(Path('t052-candidate-a.json').read_text())['results']
+          candidate_b = json.loads(Path('t052-candidate-b.json').read_text())['results']
+          if not (len(baseline) == len(candidate_a) == len(candidate_b)):
+              raise SystemExit('T052 benchmark result-count mismatch')
 
           compatible = (
               'schema_version', 'workload_version', 'benchmark_name', 'os',
@@ -166,49 +186,51 @@ jobs:
               'operations_per_sample'
           )
 
-          def timing_regression(base, candidate_run):
+          def timing_regression(base, candidate):
               return (
-                  candidate_run['median_ns_per_op'] > base['median_ns_per_op'] * 1.15
-                  and candidate_run['p95_ns_per_op'] > base['p95_ns_per_op'] * 1.20
+                  candidate['median_ns_per_op'] > base['median_ns_per_op'] * 1.15
+                  and candidate['p95_ns_per_op'] > base['p95_ns_per_op'] * 1.20
               )
 
-          def allocation_regression(base, candidate_run):
+          def allocation_regression(base, candidate):
               base_count = base['allocations_per_op']
               base_bytes = base['bytes_allocated_per_op']
-              cand_count = candidate_run['allocations_per_op']
-              cand_bytes = candidate_run['bytes_allocated_per_op']
-              count_bad = cand_count > 0 if base_count == 0 else cand_count > base_count * 1.10
-              bytes_bad = cand_bytes > 0 if base_bytes == 0 else cand_bytes > base_bytes * 1.10
+              candidate_count = candidate['allocations_per_op']
+              candidate_bytes = candidate['bytes_allocated_per_op']
+              count_bad = candidate_count > 0 if base_count == 0 else candidate_count > base_count * 1.10
+              bytes_bad = candidate_bytes > 0 if base_bytes == 0 else candidate_bytes > base_bytes * 1.10
               return count_bad or bytes_bad
 
-          for a, b, c in zip(baseline, repeat_b, repeat_c):
-              for other in (b, c):
+          for base, first, second in zip(baseline, candidate_a, candidate_b):
+              if base['commit_sha'] != baseline_sha:
+                  raise SystemExit(f'T052 baseline SHA mismatch for {base["benchmark_name"]}')
+              for candidate in (first, second):
                   for field in compatible:
-                      if a[field] != other[field]:
-                          raise SystemExit(f'T052 metadata mismatch for {a["benchmark_name"]}: {field}')
-                  if other['commit_sha'] != candidate or a['commit_sha'] != candidate:
-                      raise SystemExit(f'T052 benchmark SHA mismatch for {a["benchmark_name"]}')
+                      if base[field] != candidate[field]:
+                          raise SystemExit(f'T052 metadata mismatch for {base["benchmark_name"]}: {field}')
+                  if candidate['commit_sha'] != candidate_sha:
+                      raise SystemExit(f'T052 candidate SHA mismatch for {base["benchmark_name"]}')
 
-              name = a['benchmark_name']
+              name = base['benchmark_name']
               if name == 'idle_invalidation':
-                  for run in (a, b, c):
+                  for run in (base, first, second):
                       if run['median_ns_per_op'] != 0 or run['p95_ns_per_op'] != 0:
                           raise SystemExit('T052 idle_invalidation timing hard gate is not zero')
                       if run['allocations_per_op'] != 0 or run['bytes_allocated_per_op'] != 0:
                           raise SystemExit('T052 idle_invalidation allocation hard gate is not zero')
                   continue
 
-              if timing_regression(a, b) and timing_regression(a, c):
-                  raise SystemExit(f'T052 same-runner timing instability exceeds T051 budget twice: {name}')
-              if allocation_regression(a, b) and allocation_regression(a, c):
-                  raise SystemExit(f'T052 same-runner allocation instability exceeds T051 budget twice: {name}')
+              if timing_regression(base, first) and timing_regression(base, second):
+                  raise SystemExit(f'T052 timing regression exceeds T051 budget twice: {name}')
+              if allocation_regression(base, first) and allocation_regression(base, second):
+                  raise SystemExit(f'T052 allocation regression exceeds T051 budget twice: {name}')
           PY
 
       - uses: actions/upload-artifact@v4
         with:
           name: t052-v0.1-benchmark-baseline
           path: |
-            t052-baseline-a.json
-            t052-baseline-b.json
-            t052-baseline-c.json
+            t052-approved-base.json
+            t052-candidate-a.json
+            t052-candidate-b.json
           if-no-files-found: error
