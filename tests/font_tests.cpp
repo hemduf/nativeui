@@ -1,11 +1,14 @@
 #include "test_support.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef NATIVEUI_TEST_FONT_DIR
@@ -42,8 +45,71 @@ bool renders_red_ink(std::string text, const ui::TextStyle& style) {
     return false;
 }
 
+std::vector<std::uint8_t> render_canvas_text(std::string text, const ui::TextStyle& style) {
+    ui::UI canvas{ui::Canvas{320.0f, 48.0f, [text = std::move(text), style](ui::CanvasContext2D& g) {
+        g.text({12.0f, 24.0f}, text, style);
+    }}};
+    ui::HeadlessRenderer renderer{{320.0f, 48.0f}, 1.0f};
+    NUI_CHECK(renderer.render(canvas));
+    return renderer.rgba_pixels();
+}
+
 void suite() {
     ui::TextStyle system_style{};
+    // A JPEG header used to reach Skia unchanged even though the fallback
+    // decoder selected U+FFFD, aborting in macOS textToGlyphs/measureText.
+    const std::string jpeg_header{"\xFF\xD8\xFF\xE1", 4};
+    const std::string repaired_header =
+        "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD";
+    NUI_CHECK_NEAR(ui::TextService::measure(jpeg_header, system_style).width,
+                   ui::TextService::measure(repaired_header, system_style).width, 0.01f);
+
+    const std::string replacement{"\xEF\xBF\xBD"};
+    const std::array malformed{
+        std::pair{jpeg_header, repaired_header},
+        std::pair{std::string{"A\x80"}, "A" + replacement},
+        std::pair{std::string{"\xC0\xAF"}, replacement + replacement},
+        std::pair{std::string{"\xED\xA0\x80"}, replacement + replacement + replacement},
+        std::pair{std::string{"\xF4\x90\x80\x80"}, repaired_header},
+        std::pair{std::string{"A\xE2\x82"}, "A" + replacement + replacement},
+        std::pair{std::string{"\xF0\x9F\x92"}, replacement + replacement + replacement},
+        std::pair{std::string{"\xC3\xA9\xFF" "B"}, std::string{"\xC3\xA9"} + replacement + "B"},
+    };
+    for (const auto& [input, expected] : malformed) {
+        NUI_CHECK(!ui::text::utf8_prefix(input));
+        NUI_CHECK(ui::text::utf8_prefix(expected) == expected);
+        const auto actual_metrics = ui::TextService::measure(input, system_style);
+        const auto expected_metrics = ui::TextService::measure(expected, system_style);
+        NUI_CHECK(std::isfinite(actual_metrics.width));
+        NUI_CHECK_NEAR(actual_metrics.width, expected_metrics.width, 0.01f);
+        // Same-platform pixel equivalence proves painting uses the repaired
+        // bytes too, not only the safe measurement/fallback scalar values.
+        NUI_CHECK(render_canvas_text(input, system_style) == render_canvas_text(expected, system_style));
+    }
+
+    const std::string valid_text{"A\xC3\xA9\xF0\x9F\x9A\x80" "B"};
+    const std::array<std::size_t, 9> boundaries{0, 1, 1, 3, 3, 3, 3, 7, 8};
+    for (std::size_t limit = 0; limit < boundaries.size(); ++limit) {
+        const auto prefix = ui::text::utf8_prefix(valid_text, limit);
+        NUI_CHECK(prefix && prefix->size() == boundaries[limit]);
+        NUI_CHECK(prefix->data() == valid_text.data());
+    }
+    NUI_CHECK(ui::text::utf8_prefix("A\xFF", 1) == "A");
+    NUI_CHECK(!ui::text::utf8_prefix("A\xFF", 2));
+    // UTF-8 validity is not a file-type/control-character policy.
+    NUI_CHECK(ui::text::utf8_prefix(std::string_view{"a\0b", 3}).has_value());
+    NUI_CHECK(ui::text::utf8_prefix("").has_value());
+    for (unsigned int byte = 0; byte < 256; ++byte) {
+        const char character = static_cast<char>(byte);
+        const auto prefix = ui::text::utf8_prefix(std::string_view{&character, 1});
+        NUI_CHECK(prefix.has_value() == (byte < 0x80));
+    }
+
+    const auto repaired_layout = ui::detail::resolve_text_layout(jpeg_header, system_style);
+    const auto valid_layout = ui::detail::resolve_text_layout(replacement, system_style);
+    NUI_CHECK(valid_layout.repaired_text.empty());
+    NUI_CHECK(valid_layout.text_bytes(replacement).data() == replacement.data());
+    NUI_CHECK(repaired_layout.text_bytes(jpeg_header) == repaired_header);
     const auto system_match = ui::FontManager::match(system_style, U'A');
     NUI_CHECK(system_match);
     NUI_CHECK(!system_match.family.empty());
