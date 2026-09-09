@@ -60,7 +60,20 @@ void progress_meter_numeric_contract() {
     NUI_CHECK_NEAR(domain.fraction(0.0f), 0.5f, 0.0001f);
     NUI_CHECK_NEAR(domain.fraction(1.0f), 1.0f, 0.0001f);
 
+    // Finite endpoints remain a valid range even when their span would overflow
+    // binary32. Normalization must stay finite and deterministic at the full
+    // representable float range rather than producing Inf/Inf -> NaN geometry.
+    const float extreme = std::numeric_limits<float>::max();
+    const ui::detail::BoundedDisplayDomain wide{-extreme, extreme};
+    NUI_CHECK_NEAR(wide.fraction(-extreme), 0.0f, 0.0001f);
+    NUI_CHECK_NEAR(wide.fraction(0.0f), 0.5f, 0.0001f);
+    NUI_CHECK_NEAR(wide.fraction(extreme), 1.0f, 0.0001f);
+
     const ui::Rect bounds{10.0f, 20.0f, 200.0f, 100.0f};
+    const auto wide_full = wide.fill_rect(bounds, extreme, ui::ProgressOrientation::Horizontal);
+    NUI_CHECK(std::isfinite(wide_full.w));
+    NUI_CHECK_NEAR(wide_full.w, 200.0f, 0.0001f);
+
     const auto horizontal = domain.fill_rect(bounds, 0.0f, ui::ProgressOrientation::Horizontal);
     NUI_CHECK_NEAR(horizontal.x, 10.0f, 0.0001f);
     NUI_CHECK_NEAR(horizontal.y, 20.0f, 0.0001f);
