@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <limits>
+
 namespace {
 
 void value_widgets_respect_effective_read_only_state() {
@@ -37,6 +39,36 @@ void value_widgets_respect_effective_read_only_state() {
     tree.dispatch(test::key(ui::Key::Tab, true), platform);
     tree.dispatch(test::key(ui::Key::Right), platform);
     NUI_CHECK_NEAR(drive.get(), 0.51f, 0.0001f);
+}
+
+void progress_meter_contract() {
+    ui::State<float> progress{0.50f};
+    ui::State<float> meter{0.25f};
+
+    ui::UI tree{
+        ui::Column{
+            ui::ProgressBar{progress, 0.0f, 1.0f},
+            ui::Meter{meter, -1.0f, 1.0f}.orientation(ui::Orientation::Vertical),
+        }
+    };
+
+    test::MockPlatform platform;
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+
+    // T033 widgets are display-only: normal input cannot mutate their bound
+    // State and they never join focus traversal.
+    tree.dispatch(test::key(ui::Key::Tab), platform);
+    tree.dispatch(test::key(ui::Key::Right), platform);
+    NUI_CHECK_NEAR(progress.get(), 0.50f, 0.0001f);
+    NUI_CHECK_NEAR(meter.get(), 0.25f, 0.0001f);
+
+    // External out-of-range/non-finite values are presentation-clamped only;
+    // mounting/painting must never normalize application state in place.
+    progress.set(2.0f);
+    meter.set(std::numeric_limits<float>::quiet_NaN());
+    NUI_CHECK_NEAR(progress.get(), 2.0f, 0.0001f);
+    NUI_CHECK(std::isnan(meter.get()));
 }
 
 void suite() {
@@ -88,6 +120,7 @@ void suite() {
     NUI_CHECK(layout_tree.dirty());
 
     value_widgets_respect_effective_read_only_state();
+    progress_meter_contract();
 }
 
 } // namespace
