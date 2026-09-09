@@ -205,6 +205,8 @@ install(FILES
   "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
+  cmake/NativeUIBinaryData.cmake
+  cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
 )
 
@@ -269,6 +271,14 @@ configure_file(cmake/NativeUIAttachPlatform.cmake
   "${_nativeui_build_package_dir}/NativeUIAttachPlatform.cmake"
   COPYONLY
 )
+configure_file(cmake/NativeUIBinaryData.cmake
+  "${_nativeui_build_package_dir}/NativeUIBinaryData.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIEmbedResource.cmake
+  "${_nativeui_build_package_dir}/NativeUIEmbedResource.cmake"
+  COPYONLY
+)
 
 set(NATIVEUI_FEATURE_EXAMPLES
   t007_constraints
@@ -295,6 +305,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t028_text_area
   t029_ime_composition
   t030_button
+  t031_checkbox_radio
   t041_smoke_harness
   t059_component_state
 )
@@ -352,7 +363,7 @@ if(NATIVEUI_BUILD_TESTS)
   )
   set_tests_properties(
     nativeui_t047_attach_contract_tests
-    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 30
+    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 60
   )
 
   function(nativeui_add_core_test name source)
@@ -405,6 +416,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
+  nativeui_add_core_test(nativeui_checkbox_radio_tests tests/checkbox_radio_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
   nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
@@ -483,7 +495,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource embedded_resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

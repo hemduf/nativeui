@@ -6,7 +6,15 @@
 
 NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, generic state, drawing/widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio, host parameter semantics and a custom native windowing stack remain out of scope.
 
-Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is logical pixels; embedded polling is non-blocking; mutable instance-dependent process globals/singletons/thread-locals are forbidden; retained UI state is UI/main-thread confined; dependencies use CMake+CPM; Skia comes from pinned skia-builder binaries; macOS Objective-C runtime-visible platform classes must be consumer-specific.
+Non-negotiable rules:
+
+- widgets/layout stay platform-neutral and public geometry uses logical pixels;
+- embedded polling is non-blocking;
+- mutable instance-dependent process globals/singletons/`thread_local` state are forbidden;
+- retained UI state is UI/main-thread confined unless explicitly documented otherwise;
+- dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
+- macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
+- `CODE_REVIEW.md`, exact-head validation, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
 
 ## Pinned dependencies
 
@@ -16,64 +24,51 @@ Non-negotiable rules: widgets/layout stay platform-neutral; public geometry is l
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Merged baseline
+## Current baseline and platform/package lane
 
-The merged baseline is complete through T030 plus T023, #62, T053, #64 Decision B, T059, T047 and T048.
+Current `main` before the T056 integration merge is `4cd904466d05e4b403eb2b61386868e7c498c719` and already contains T042 lifecycle stress plus the earlier platform/package foundation.
 
-- T053 / PR #88 merged as `ad83ed05f1687fea31255bcc77329fae0f4efb69`: `NativeUI::Core` and portable Pugl C remain generic; the Cocoa Pugl/OpenGL/IME bridge is compiled per final consumer. `cmake/NativeUIConsumerPlatform.cmake` derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and has no runtime registry.
-- #64 / PR #90 merged as `b52d53eee65e5de91697e2c1f0685728b9646575`: independent overlapping `PUGL_PROGRAM` worlds are not a supported macOS multi-window ownership model. Legacy `StandaloneWindow(UI&, ...)` remains pre-v1/single-window; T060 owns one explicit `ui::Application` PROGRAM owner with multiple top-level windows.
-- T059 / PR #89 merged as `6d84bc6b7817b0dcaea4eefd81833d765ad7685d`: the retained tree centrally resolves Visible/Hidden/Collapsed, inherited enabled/disabled and read-only state with focus/capture teardown, reentrancy handling and FocusScope restoration.
-- T030 / PR #94 merged as `b32b09da473c70a857675e05f7fdc7c78e5f9361`: Button consumes the central T059 availability/focus/capture contract and is owned by the separate state/widget lane.
-- T047 / PR #92 merged as `df569e874539aaafb8600960938465f733a46f19`: the installed/build-tree v1 low-level package exports only `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`, preserves T053 consumer-scoped macOS bridges, carries pinned Skia/Pugl implementation assets privately, validates relocation and missing-pinned-dependency failure, and does not export/document `NativeUI::NativeUI` as a complete package target.
-- #97 / PR #98 merged as `864d2f35be1e7ae2976c14d2fac96ea4569f730f`: macOS Pugl MIN/MAX warning noise is removed from current main without changing the package/runtime contract.
-- #105 / PR #106 merged as `b1dd7393b95adc4667224cd3da4cfb15dfc3f746`: constructor-time platform callbacks are owned by each private per-instance implementation, preventing callbacks from observing an unassigned public-wrapper `impl_`.
-- #103 / PR #104 merged as `b6515836cd8bf571c66f5297a76fdb80d9924f83`: Linux/X11 Skia initialization uses the native GL interface under the Pugl-owned GLX context and the CI merge gate now includes a real Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
+Completed dependencies relevant to this lane:
 
-## T048 external relocated consumers — PR #99
+- T053 / PR #88: consumer-scoped macOS platform bridge.
+- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`.
+- T048 / PR #99: relocated external Core/standalone/embedded consumer qualification.
+- T042 / PR #93: deterministic supported-path lifecycle stress, merged before this T056 refresh.
 
-T048 validates the installed low-level package from genuinely independent out-of-tree consumer projects.
+## T056 binary resources — PR #111
 
-Delivered fixtures and gates:
+T056 is the current platform/package merge candidate. It adds:
 
-- `core`: `find_package(NativeUI CONFIG REQUIRED)` + `NativeUI::Core` only, with deterministic public headless rendering;
-- `standalone`: independent final executable using `NativeUI::Core` + `nativeui_attach_platform()` and stable reverse-DNS identity;
-- `embedded`: SDK-neutral final executable using the same public package surface, with a tiny native parent seam for real lifecycle smoke;
-- install to prefix A, copy to prefix B, delete A, then configure/build/run against B only;
-- static source-contract checks reject repository-private includes/targets/override variables;
-- every native fixture links its real attached platform symbols and runs deterministic relocated-Core `--self-test` on Linux/Windows/macOS;
-- macOS additionally executes the real standalone/embedded `--native-smoke` lifecycle and the T053/T047 two-consumer Objective-C class/metaclass/runtime coexistence proof;
-- hosted Windows lacks a reliable interactive desktop and Linux/Xvfb native external-window execution is not used as package acceptance, while the permanent root Linux renderer/lifecycle smoke still exercises the supported X11/GLX path.
+- installed/build-tree `nativeui_add_binary_data()` and `NativeUIEmbedResource.cmake` helpers;
+- backend-neutral `ui::EmbeddedResourceEntry` with immutable borrowed byte spans;
+- one deterministic generated resource object per source and one target-specific generated table/header;
+- exact SHA-256-derived payload symbols, sorted unique resource IDs, explicit aliases and symlink-aware BASE_DIR containment;
+- exact binary/NUL/empty-file round trips, deterministic clean-build output, incremental rebuild coverage, two-target namespace/symbol isolation and relocated installed-package consumers;
+- semicolon-safe handling for valid resource IDs and canonical source paths without relying on raw CMake list identity.
 
-TDD/review history:
+Review of pre-refresh head `4cc48ed083a493519b19e8481007a0a6315d0a71` completed all mandatory `CODE_REVIEW.md` categories. The review found one Important CMake-list identity defect for semicolon-containing IDs/paths; TDD regression coverage and the production correction are included in that head. Final pre-refresh review reports no remaining Blocking/Important finding.
 
-- RED `af34ed1c65409e054ba6c976d82cbdeff7234347` registered the source contract before fixtures existed and failed as intended;
-- GREEN/correction cycles added relocation, all three consumer shapes, platform-link validation, graphical-session separation and stronger portable UI rendering self-tests;
-- final pre-refresh code/review correction head `9904e2fe8f252a35e060bda128a82d18b9f5819a` passed CI #384 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including the T048 source contract, relocated consumers and macOS native/runtime-isolation gates;
-- completion-doc head `841318d92c389c60ec48982cb0e7d002d56bccdf` passed CI #394 across the same required matrix;
-- CODE_REVIEW.md review is clean after correcting the earlier weak self-test and obsolete Linux diagnostic residue; no runtime globals, private package paths or Objective-C naming shortcuts were introduced;
-- before merge, PR #99 was refreshed onto current main `b6515836cd8bf571c66f5297a76fdb80d9924f83`, preserving #105 constructor-lifetime fixes, #103 Linux renderer integration and the permanent Linux X11 renderer smoke while retaining all T048 package gates.
+Pre-refresh exact-head validation is green:
 
-PR #99 is merged as `ed81a201ea459ea2443ae51f27dfcac7af5d7e63`; issue #48 is closed as Done. Its delivered fixtures and CI gates are preserved by the #86 integration below.
+- normal CI run #451 (`34369151069`): Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan all passed, including T047/T048/T056 package/external-consumer checks;
+- T042 Lifecycle Stress run #23 passed on the same T056 head.
+
+The final T056 candidate is refreshed from current `main` rather than carrying the stale feature-branch `CMakeLists.txt`: it preserves merged T031 widget targets and the macOS drop smoke while applying only the T056 package/helper/header additions. `CONTEXT.md` and `ROADMAP.md` are synchronized in this same candidate. The refreshed exact head must rerun the required CI before merge; no earlier-SHA result substitutes for that gate.
 
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> #107(done by PR #108) -> T042 -> T051 -> T052
+lifecycle:        #64(done) -> T042(done) -> T051 -> T052
 platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                       |
-                                      +-> T054
-                                      +-> T056 -> T057
-state/widgets:    T059(done) -> T030(done) -> T031
+                                      +-> T054 (Ready)
+                                      +-> T056 (complete by this merge) -> T057
+state/widgets:    T059(done) -> T030(done) -> T031(done)
+                                      |
+                                      +-> T032 / T033 / T034 -> T035 / T036
 ```
 
-With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. The lifecycle lane must finish #107/PR #108 before refreshing and completing T042; #64 Decision B remains the ownership boundary.
-
-## Platform ownership reminders
-
-- Normal standalone validation currently uses one `PUGL_PROGRAM` owner lifetime.
-- Multiple independent `EmbeddedView` / `PUGL_MODULE` instances are supported and remain the current host/plugin coexistence path.
-- T060 owns the future shared `Application` multi-window standalone model.
-- No global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` is part of the normal package contract.
+After T056 merges, T057 becomes Ready because T022 is already complete. T054 is independently Ready because T047 and T053 are complete. For the platform/package lane, select the next P1 by repository priority/dependency-unblock rules; with no existing in-progress platform/package PR, T054 is the next recommended ticket, then T057.
 
 ## Build / validation
 
@@ -93,59 +88,11 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
 ```
 
-T048 additionally runs the source-contract script, relocated install-tree Core/standalone/embedded consumers, platform attachment/link tests, macOS native lifecycle and macOS two-consumer Objective-C namespace/runtime coexistence. Current Linux CI also retains the #103 Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
+T047/T048/T056 package validation additionally exercises source/configure contracts, relocation, external consumers and deterministic generated-resource behavior. Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy.
 
-## Next platform/package action
+## Next actions
 
-Re-read T054/T056 priorities/dependencies and continue the highest-unblock-value Ready platform/package ticket; do not enter the lifecycle or state/widget lanes. T048 / #48 completion is already recorded on GitHub.
-
-## Lifecycle/stress lane update — #105
-
-T042's deterministic lifecycle matrix exposed a constructor-time platform callback lifetime defect while exercising a focusable embedded view on macOS. Issue #105 / PR #106 fixes the defect without changing the public window/view API: each private `StandaloneWindow::Impl` and `EmbeddedView::Impl` is now its own per-instance `PlatformServices` bridge, so synchronous native callbacks during `ViewCore` construction never re-enter a public wrapper whose `impl_` has not yet been assigned.
-
-- Exact PR #106 code head `bf8e2ff055b4fe5ed2c2bd415bb3818f925f366b` passed CI `34344755454` on Linux X11, Windows/MSVC, macOS including two-consumer Objective-C isolation and clipboard/multi-instance lifecycle smoke, and Linux ASan+UBSan.
-- The stacked T042 validation head `97c2c19f09c60c537d538dc887660a0049fa35db` proves the original macOS `embedded_sequential_100` crash is GREEN; Linux X11 and Linux ASan+UBSan are also green.
-- Windows reaches the standalone stress path and exposes a separate documented `puglShow(PUGL_SHOW_RAISE)` non-fatal status handling defect, tracked independently as #107. That defect is not folded into #105.
-- #64 Decision B is unchanged: there is still no hidden application singleton, shared PROGRAM workaround, or mutable global/`thread_local` ownership state.
-
-After #105 and the independent #107 status fix are merged, refresh T042/PR #93 from current `main`, rerun the exact-head lifecycle matrix on macOS/Windows/Linux X11 plus Linux ASan+UBSan, complete the mandatory review, then merge T042 only if all supported-path acceptance gates are green.
-
-## Lifecycle/stress lane update — #103
-
-T042 also exposed a production Linux/X11 renderer crash before stress-specific lifecycle behavior: the first native exposure under Xvfb/Mesa llvmpipe entered Skia's assembled GL extension discovery and crashed in `GrGLExtensions::init`. Issue #103 / PR #104 keeps the fix in the platform renderer rather than weakening T042.
-
-- Linux now creates Skia's desktop-native GL interface from the Pugl-owned current GLX context. There is deliberately no Linux fallback to the assembled resolver that produced the crash; an unavailable interface returns through the existing controlled renderer-initialization failure path.
-- macOS and Windows retain the existing assembled Pugl-proc interface path.
-- CI `34343547392` passed the #103 code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan. The Linux lane now includes a permanent Xvfb/Mesa llvmpipe real renderer/lifecycle smoke and passes it.
-- A stacked T042 candidate reaches and completes Linux native lifecycle stress after this fix, confirming the stress harness is no longer stopped by first-exposure renderer initialization.
-- No mutable GL/context global, singleton or `thread_local` state is introduced; #64 Decision B is unaffected.
-
-After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
-
-## Lifecycle/stress lane completion — #107 / PR #108
-
-T042's Windows `standalone_sequential_50` fixture exposed a production integration bug rather than a stress-harness defect: pinned Pugl documents `PUGL_FAILURE` from `puglShow(..., PUGL_SHOW_RAISE)` as the non-fatal case where the view is shown but could not be raised. NativeUI previously treated every non-zero show status as fatal and destroyed that already-live standalone view during construction.
-
-PR #108 introduces one translation-unit-private show-status policy. It normalizes only `PUGL_SHOW_RAISE + PUGL_FAILURE` to success; every other Pugl status remains unchanged and therefore follows the existing cleanup/throw path. Embedded `PUGL_SHOW_PASSIVE` is unchanged. The correction introduces no mutable global/singleton/registry/`thread_local` state and does not alter #64 Decision B.
-
-- RED evidence: T042 stacked workflow `34344854224` failed Windows `standalone_sequential_50` at cycle 0 with `puglShow failed: Non-fatal failure` while the headless and embedded stress fixtures passed.
-- GREEN evidence: exact code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`; the identical show-policy blob is present in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e`.
-- Full lifecycle evidence: T042 workflow `34348551067` is green on Windows, Linux/X11, macOS and Linux ASan+UBSan, with all 50 Windows process-isolated standalone lifetimes completing.
-- Mandatory CODE_REVIEW.md review `5154415827` found no blocking issue. The branch was then refreshed from current main before this completion documentation pass.
-
-Once PR #108's documentation head passes fresh exact-head CI and merges, #107 closes as Done and T042/PR #93 must be refreshed from that main so the production fix disappears from the stress PR diff. Then rerun the exact T042 lifecycle matrix and complete its own CODE_REVIEW.md record before merge.
-
-## Drag-and-drop completion — #86 / PR #87
-
-Finder drops exposed a second integration defect after the Pugl backend-child destination fix: NativeUI discarded DropOffer/DropData whenever the window lost keyboard focus. The retained tree now routes drops while mounted but inactive, without reactivating focus or IME, preserving T059 availability and dispatch reconciliation. T018 now receives the first local regular file regardless of extension. Optional UTF-8 text preview is separate from successful file reception; a binary file shows its name and no preview. The read cap is 64 KiB plus three lookahead bytes; the displayed prefix is at most 120 complete-character bytes. Diagnostics log acceptance, drop size and preview size, never content.
-
-The user's image drop reached painting but crashed in macOS Skia text-to-glyph conversion: fallback decoded U+FFFD but still measured/rendered the original invalid bytes. The shared text layout now owns repaired UTF-8 only when needed. The subsequent `.txt` allow-list/duplicate example decoder were rejected by the user and removed; `ui::text::utf8_prefix` reuses the rendering decoder, and no filename or extension decides whether a drop succeeds.
-
-- TDD: the background-drop core test failed before the fix and passes after it; the malformed/NUL file-URI self-test likewise failed before hardening.
-- Main `ed81a201ea459ea2443ae51f27dfcac7af5d7e63` (merged T048 / PR #99) is integrated, preserving external-consumer fixtures/CI. The macOS drop fixture uses T053 consumer identity `org.nativeui.test.macos-drop`, not a manual runtime prefix; native coverage includes two embedded instances, sibling destruction and repeated cycles.
-- Image-crash TDD: four synthetic JPEG bytes reproduced SIGABRT (exit 134) in `nativeui_font_tests`, and T018's binary rejection test failed before correction. Headless pixel equivalence, malformed UTF-8 classes, byte-boundary truncation and image-to-text recovery now pass.
-- Cleanup TDD: a valid-text `.jpg` fixture failed under the allow-list, then passed after removal. The same contents now pass as `.txt`, `.md`, `.jpg` and extensionless files. Shared UTF-8 prefix checks cover all 256 single bytes, malformed sequences, borrowed lifetime and byte-limit boundaries. Local Release CTest is 63/63 PASS and targeted font/drop/example/native ASan+UBSan is 4/4 PASS, with no compiler warnings.
-- Cleanup head `696521fedda8488dd72f036c7c7c06c5d4812fbd` passed all four jobs in CI `34355603379`. The earlier Windows T047 timeout did not recur; no check was weakened. The exact main-integrated merge head must also pass the full matrix; final evidence is recorded in PR #87.
-- On 2026-09-09 the user explicitly confirmed real Finder `/tmp/hello.txt` content display, including after an image drop, and requested merging #87. This is user-reported interactive evidence, not a claim that direct Cocoa callbacks reproduce Finder's drag session.
-
-This merge completes #86 after the exact-head CI gate; no blocking code finding remains in the three-pass/CODE_REVIEW.md record in #87. The last independent completion is T048 / PR #99 (`ed81a20`). Next recommended platform/package work is the highest-priority Ready item among T054/T056 after checking current GitHub status; #86 changes neither that frontier nor milestone completion.
+1. Require all required workflows on the refreshed T056 PR #111 head to complete green.
+2. Re-check the exact refreshed diff/review and merge PR #111 only if no Blocking/Important finding exists.
+3. Mark #68 Done/`status:done` and close it only after merge.
+4. Re-read the platform/package frontier; resume an existing platform/package PR if one appeared, otherwise take T054 / #66 next, with T057 / #69 Ready after T056.

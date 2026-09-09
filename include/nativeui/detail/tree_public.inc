@@ -195,8 +195,18 @@
 
         if (event.type == InputType::KeyDown && event.key == Key::Tab) {
             if (!focus_active_) return finish(EventResult::Ignored);
-            event.shift ? focus_previous(platform) : focus_next(platform);
+            event.shift ? move_focus_group_aware(-1, platform)
+                        : move_focus_group_aware(1, platform);
             return finish(EventResult::Handled);
+        }
+
+        if (event.type == InputType::KeyDown && focus_active_) {
+            int group_direction = 0;
+            if (event.key == Key::Left || event.key == Key::Up) group_direction = -1;
+            if (event.key == Key::Right || event.key == Key::Down) group_direction = 1;
+            if (group_direction != 0 && move_focus_in_current_group(group_direction, platform)) {
+                return finish(EventResult::Handled);
+            }
         }
 
         if (event.type == InputType::Command || command_from_shortcut(event) != Command::None) {
