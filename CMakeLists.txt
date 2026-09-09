@@ -295,6 +295,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t028_text_area
   t029_ime_composition
   t030_button
+  t031_checkbox_radio
   t041_smoke_harness
   t059_component_state
 )
@@ -405,6 +406,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
+  nativeui_add_core_test(nativeui_checkbox_radio_tests tests/checkbox_radio_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
   nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
