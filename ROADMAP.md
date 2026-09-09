@@ -20,6 +20,8 @@ Feature examples are mandatory: every feature ticket ships a dedicated executabl
 
 **#86 / PR #87 — Complete by this merge:** the reviewed Pugl fork restores native drop delivery, including into inactive windows. T018 receives files independently of their extension and previews valid text through the shared UTF-8 decoder; malformed text is repaired before Skia measurement/painting, preventing the image-drop crash. Automated coverage includes native delivery/lifecycle, renamed-file equivalence and malformed-text rendering. On 2026-09-09 the user confirmed that a real Finder drop of `/tmp/hello.txt` displays its contents, including after an image drop. This M7 regression correction does not complete another milestone or change the dependency frontier below.
 
+**#107 / PR #108 — Complete by this merge:** T042's Windows stress exposed that NativeUI treated Pugl's documented `PUGL_SHOW_RAISE + PUGL_FAILURE` “shown but not raised” result as a fatal constructor error. The production correction normalizes only that exact non-fatal standalone raise result; all genuine show/realization errors remain fatal and embedded passive-show behavior is unchanged. Exact code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`; the same policy in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e` passed the complete lifecycle workflow `34348551067` on Windows, Linux/X11, macOS and Linux ASan+UBSan. #64 Decision B remains unchanged. After this merge T042 must refresh from current main so this production fix disappears from its stress-only diff.
+
 The merged baseline is complete through T030, including T023 and T053, plus the merged #64 Decision B ownership diagnosis, T059 component-availability contract, T047 low-level install/export package and T048 relocated external-consumer acceptance layer. PR #87 preserves the T048 fixtures and CI gates from main `ed81a201ea459ea2443ae51f27dfcac7af5d7e63`.
 
 - **T053 — consumer-scoped macOS platform bridge / PR #88:** **Complete and merged** as `ad83ed05f1687fea31255bcc77329fae0f4efb69`. `NativeUI::Core` and portable Pugl C code remain generic; only the small macOS Objective-C Pugl/OpenGL/IME bridge is instantiated per final consumer. The frozen helper derives `NUI_<fragment>_<digest12>_` from exact UTF-8 `CONSUMER_ID`, rejects duplicate target/identity registration at configure time and introduces no runtime registry. The macOS acceptance path validates two final consumers plus class/metaclass symbol isolation.
@@ -31,14 +33,14 @@ The merged baseline is complete through T030, including T023 and T053, plus the 
 - **T029 — advanced IME composition bridge / PR #85:** **Complete.** NativeUI has one shared platform-neutral composition model for `TextInput` and `TextArea`, transient underlined preedit rendering, UTF-8-safe offsets, single-transaction commit/cancel semantics, candidate geometry and private Cocoa/IMM32/XIM bridges.
 - **Cross-cutting P0 safety gate — #62 / PR #63:** **Complete** and consumed by T053.
 - **T023 — SVG/icon resources / PR #60:** **Complete.** Backend-neutral SVG resources and per-instance provider-backed caching are in the merged baseline.
-- **Lifecycle lane frontier:** **T042** follows merged #64 Decision B. T042 must stress current supported ownership paths—one standalone PROGRAM application-owner lifetime and independent `EmbeddedView` / `PUGL_MODULE` instances—without inventing a hidden simultaneous-standalone workaround. Shared-Application multi-window stress belongs to T060.
+- **Lifecycle lane frontier:** **#107 completes by PR #108, then T042 is the immediate lifecycle frontier.** T042 follows merged #64 Decision B and must stress current supported ownership paths—one standalone PROGRAM application-owner lifetime and independent `EmbeddedView` / `PUGL_MODULE` instances—without inventing a hidden simultaneous-standalone workaround. Shared-Application multi-window stress belongs to T060.
 - **Platform/package frontier:** **T054 and T056 are Ready after this T048 merge.** T057 remains dependent on T056. T052 has its T047/T048 package dependencies satisfied after this merge but still additionally requires T051 and T042.
 - **State/widget frontier:** **T031 is Ready** after merged T030; later theme/accessibility/gallery work follows its declared dependencies.
 
 Parallel execution frontier:
 
 ```text
-lifecycle:        #64(done) -> T042 -> T051 -> T052
+lifecycle:        #64(done) -> #107(done by PR #108) -> T042 -> T051 -> T052
 platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                     |
                                     +-> T056 -> T057
@@ -248,7 +250,7 @@ T030(done) + T032 -> T037 -> T038 -> T039 / T040
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: T041, #62 and #64 complete; T042/T043/T044/T046 remain independent work**
+**Status: T041, #62, #64, #103 and #105 complete; #107 completes by this merge; T042/T043/T044/T046 remain independent work**
 
 **Goal:** make NativeUI dependable inside real hosts and standalone applications.
 
@@ -279,7 +281,7 @@ The #62/PR #63 safety baseline removed unsafe wrapper move semantics, made proce
 
 Issue #64 freezes the top-level macOS ownership boundary as **Decision B**. Multiple independent `PUGL_PROGRAM` worlds are not the supported multi-window architecture. The exact reproducer demonstrates failure after destroy-A/continue-B, matching Pugl's application-world ownership model. Until T060 implements one explicit shared `ui::Application` PROGRAM owner, normal platform validation must use one standalone PROGRAM owner lifetime. Independent `EmbeddedView` / `PUGL_MODULE` instances remain fully supported and are the current multi-instance host/plugin path.
 
-T042 consumes that decision. Its stress helpers must remain separate from production API, exercise headless lifecycle and embedded A+B isolation/teardown heavily, and must not smuggle in a singleton or claim simultaneous legacy standalone support. Repeated/multi-window top-level stress under one PROGRAM owner becomes a T060 acceptance path once `ui::Application` exists.
+T042 consumes that decision. Its stress helpers must remain separate from production API, exercise headless lifecycle and embedded A+B isolation/teardown heavily, and must not smuggle in a singleton or claim simultaneous legacy standalone support. Repeated/multi-window top-level stress under one PROGRAM owner becomes a T060 acceptance path once `ui::Application` exists. The #107 production correction is intentionally separate from T042; after PR #108 merges, T042 must refresh from main and prove the supported-path matrix on the stress-only diff.
 
 ## Milestone 8 — Packaging, tooling and v1 release
 
@@ -389,3 +391,13 @@ T042 also exposed #103 before the intended stress interaction: the first Linux/X
 Linux now uses Skia's desktop-native GL interface while Pugl owns the current GLX context, and deliberately does not fall back to the assembled resolver that caused the crash. Interface/context/surface ownership remains per `SkiaGlRenderer`; macOS and Windows preserve the existing assembled Pugl-proc path. CI `34343547392` passed the code on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, and the Linux merge gate now permanently exercises a real Xvfb/Mesa llvmpipe renderer/lifecycle smoke.
 
 This fix does not change #64 Decision B or add mutable context globals. Once #103 and #107 are complete, T042 must be refreshed from current `main` and rerun as the exact supported-path lifecycle matrix before merge.
+
+## Lifecycle completion note — #107
+
+T042's Windows `standalone_sequential_50` fixture exposed #107 as a production integration defect: `puglShow(..., PUGL_SHOW_RAISE)` may return Pugl's documented non-fatal `PUGL_FAILURE` when the window is already shown but cannot be raised. NativeUI previously treated that status like a genuine show failure and tore down the live standalone view during construction.
+
+PR #108 adds one private show-status classifier. Only `PUGL_SHOW_RAISE + PUGL_FAILURE` is normalized to success. All other Pugl errors remain fatal through the existing cleanup path, and embedded `PUGL_SHOW_PASSIVE` behavior is unchanged. No platform-specific harness bypass, global application state, singleton, registry or `thread_local` owner is introduced; #64 Decision B is preserved.
+
+The RED stacked T042 workflow `34344854224` failed Windows cycle 0 with `puglShow failed: Non-fatal failure`. Exact #107 code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`. The identical policy in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e` passed workflow `34348551067` on Windows, Linux/X11, macOS and Linux ASan+UBSan, including all 50 process-isolated standalone lifetimes. CODE_REVIEW.md review `5154415827` has no blocking finding.
+
+The branch was refreshed from current `main` before this completion-doc pass. After the new exact-head CI is green, merge PR #108 and close #107. Then refresh T042/PR #93 from that main, remove the now-upstream production fix from its diff, rerun the complete stress matrix and complete T042's own final review/ROADMAP/CONTEXT merge gate.
