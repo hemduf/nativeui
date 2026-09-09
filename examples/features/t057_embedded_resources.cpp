@@ -54,8 +54,10 @@ int main(int argc, char** argv) {
         }}};
         ui::HeadlessRenderer renderer{{32.0f, 16.0f}, 1.0f};
         if (!renderer.render(tree)) return example::fail("embedded resource SVG render failed");
-        const auto left = renderer.pixel(4, 8);
-        const auto right = renderer.pixel(27, 8);
+        // The 2x2 square is contain-fitted into the 32x16 destination, so its
+        // rendered content occupies x=8..24 rather than the full rectangle.
+        const auto left = renderer.pixel(10, 8);
+        const auto right = renderer.pixel(22, 8);
         if (!(left.b > left.r && left.b > left.g &&
               right.r > 200 && right.g > 200 && right.b > 200)) {
             return example::fail("embedded resource SVG pixels changed");
