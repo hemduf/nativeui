@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` `005a207237a98726573160b8f58c9a9ebff262f9` contains the completed T054 native application package helper plus the earlier platform/package and lifecycle foundations.
+`main` `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` contains the completed T057 ResourceManager in addition to the established platform/package foundations.
 
 Completed foundations relevant to this lane:
 
@@ -36,26 +36,33 @@ Completed foundations relevant to this lane:
 - T051 / PR #116: reproducible Release benchmark and regression policy.
 - T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
 - T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging with sorted immutable generated tables.
+- T057 / PR #126: immutable non-owning `ResourceManager` plus explicit allocating `ResourceManagerProvider` adapter.
 
-## Active platform/package ticket — T057 / issue #69 / PR #126
+## T057 completed state
 
-T057 adds the runtime-neutral lookup layer over T056 generated tables without introducing ownership, a global registry or a cache.
+T057 is merged and issue #69 is closed Done.
 
-Current implementation contract:
+Delivered contract:
 
 - `ui::ResourceManager` borrows `std::span<const EmbeddedResourceEntry>` and performs one allocation-free O(N) validation pass;
 - valid IDs are non-empty and strictly ascending by exact unsigned-byte lexicographic comparison;
 - invalid tables fail atomically: direct lookup/enumeration APIs behave empty/false and retain only a small enum-backed diagnostic;
-- `find()` uses binary search, is allocation-free and returns `ResourceView` spans pointing to the original storage;
-- copy/move managers remain lightweight views over the same immutable storage; independent managers keep independent tables; concurrent read-only lookup needs no lock;
-- `ResourceManagerProvider` is the explicit compatibility seam for existing `ResourceProvider` users and copies successful non-empty payloads into the required owned vector; that path is intentionally not real-time safe;
+- `find()` uses binary search, is allocation-free and returns `ResourceView` spans pointing to original storage;
+- copy/move managers remain lightweight immutable views with no registry/cache/mutex; independent managers remain isolated and concurrent read-only lookup is safe for live immutable backing storage;
+- `ResourceManagerProvider` is the explicit compatibility seam for `ResourceProvider`; successful non-empty loads copy into the owned vector and are intentionally not real-time safe;
 - ImageCache and SvgCache consume the adapter without manager-specific decoding APIs;
-- the T056 external package consumer now constructs `ResourceManager` from the actual generated table in both build-tree and relocated install-tree validation;
-- `t057_embedded_resources --self-test` covers direct lookup, provider copy semantics and SVG rendering; the new public header has an isolated compile probe.
+- the actual T056 generated table is consumed by build-tree and relocated install-tree external consumers;
+- `t057_embedded_resources --self-test` covers direct lookup, provider copy semantics and SVG integration; the public header has an isolated compile probe.
 
-TDD correction cycles covered empty-resource ownership semantics, exact generated-table byte ordering, allocation instrumentation, extensible public-header source contracts and the contain-fit SVG self-test coordinates.
+TDD correction cycles covered empty-resource ownership semantics, exact generated-table byte ordering, allocation instrumentation, extensible public-header contracts and deterministic SVG contain-fit self-test sampling.
 
-Mandatory `CODE_REVIEW.md` pass on code head `2860f5ab7d1daa1e0aa2553f988a90b0f6b94ac9` found no Blocking/Important T057 finding. CI #599 has Linux ASan+UBSan and Linux X11 green while the remaining platform lanes complete. The separate T042 Linux/X11 `BadAtom` failure is owned by the excluded lifecycle/platform regression lane and is not part of T057.
+Final evidence:
+
+- exact PR head `20ec256241c9419b5a4d60f8f68968f4433d2855`;
+- CI #600 passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts;
+- final `CODE_REVIEW.md` pass reports no Blocking/Important finding and no unresolved review thread;
+- PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`;
+- issue #69 is closed with `status:done` and a completed review/validation record.
 
 ## Current DAG frontier
 
@@ -64,10 +71,12 @@ lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
                                        +-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057 (PR #126)
+                                       +-> T056(done) + T022(done) -> T057(done)
 ```
 
-T059, T030, #64 and T042 are owned by other lanes and must not be taken by this platform/package lane. After T057 merges, re-read live GitHub dependencies before selecting the next platform/package ticket; do not infer readiness from milestone ordering alone.
+T059, T030, #64 and T042 are owned by other lanes and must not be taken by this platform/package lane. #124 / PR #125 is also an independent Pugl/X11 regression stream and must not be folded into unrelated package/resource work.
+
+The next platform/package selection must be made from live GitHub dependency/status data. T064/T072 remain blocked by T065, while T065 is dependency-ready but shares an event-loop integration seam with the active T060 stream; re-check current branches/PRs and conflict risk before starting it. Platform-hardening tickets such as T043/T044 are separate issue scopes and should only be taken if they are the live unowned choice for this lane.
 
 ## Build / validation
 
@@ -79,12 +88,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, the T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T057 is not mergeable until the exact documentation-complete head passes the relevant required matrix.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T057 exact-head CI #600 is green in every required lane.
 
 ## Next actions
 
-1. Finish CI feedback on the current T057 code candidate without modifying excluded T042/#124 work.
-2. Commit the synchronized `CONTEXT.md`/`ROADMAP.md` completion state on the T057 branch.
-3. Re-run the mandatory exact-head CODE_REVIEW.md pass and required matrix on that final completion head.
-4. Refresh against live `main`; if acceptance remains satisfied and required executed checks are green, mark PR #126 ready, merge autonomously and close #69 Done.
-5. Re-read the dependency graph and resume only the next dependency-unblocked platform/package ticket.
+1. Keep T057 closed unless a real regression is discovered.
+2. Re-read live open PRs/issues before selecting the next platform/package item; resume existing work rather than duplicating it.
+3. Do not absorb T059, T030, #64, T042 or the independent #124 Pugl regression.
+4. Prefer a dependency-unblocked platform/package item that does not conflict with an active parallel branch; if T060 remains active, reassess T065 overlap before opening a competing implementation.
+5. Apply strict TDD, mandatory `CODE_REVIEW.md`, exact-head platform validation, and `CONTEXT.md`/`ROADMAP.md` synchronization on the selected ticket.
