@@ -28,8 +28,13 @@ function(_nativeui_validate_consumer_id consumer_id)
   endforeach()
 endfunction()
 
-function(nativeui_attach_platform)
-  cmake_parse_arguments(PARSE_ARGV 0 NUI "" "TARGET;CONSUMER_ID" "")
+# Keep argument/target/identity validation in a function so the public macro can
+# enable implementation languages at the consumer's file scope only after the
+# request has proved valid. CMake <= 4.4 does not support enable_language() from
+# inside a function; NativeUI supports CMake 3.24 and therefore must not depend
+# on CMP0220's newer relaxed behavior.
+function(_nativeui_validate_platform_attachment out_target out_consumer_id)
+  cmake_parse_arguments(PARSE_ARGV 2 NUI "" "TARGET;CONSUMER_ID" "")
   if(NUI_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR
       "NativeUI nativeui_attach_platform received unknown arguments: ${NUI_UNPARSED_ARGUMENTS}")
@@ -83,8 +88,35 @@ function(nativeui_attach_platform)
       "NativeUI package is missing its consumer platform implementation")
   endif()
 
+  set(${out_target} "${NUI_TARGET}" PARENT_SCOPE)
+  set(${out_consumer_id} "${NUI_CONSUMER_ID}" PARENT_SCOPE)
+endfunction()
+
+function(_nativeui_attach_platform_impl target consumer_id)
   _nativeui_attach_consumer_platform(
-    TARGET "${NUI_TARGET}"
-    CONSUMER_ID "${NUI_CONSUMER_ID}"
+    TARGET "${target}"
+    CONSUMER_ID "${consumer_id}"
   )
 endfunction()
+
+# This must remain a macro rather than a function. Platform attachment can add C
+# and, on macOS, Objective-C sources to an otherwise CXX-only consumer project.
+# CMake 3.24-4.4 requires enable_language() to execute at file scope in the
+# highest common directory of targets that use that language. A macro preserves
+# the caller's scope while retaining the requested function-like public API.
+macro(nativeui_attach_platform)
+  _nativeui_validate_platform_attachment(
+    _nativeui_attach_target _nativeui_attach_consumer_id ${ARGV})
+
+  if(NOT CMAKE_C_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  if(APPLE AND NOT CMAKE_OBJC_COMPILER_LOADED)
+    enable_language(OBJC)
+  endif()
+
+  _nativeui_attach_platform_impl(
+    "${_nativeui_attach_target}" "${_nativeui_attach_consumer_id}")
+  unset(_nativeui_attach_target)
+  unset(_nativeui_attach_consumer_id)
+endmacro()
