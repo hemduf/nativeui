@@ -217,6 +217,16 @@ function(_nativeui_attach_consumer_platform)
     if(COMMAND nativeui_enable_project_warnings)
       nativeui_enable_project_warnings("${_nativeui_bridge}")
     endif()
+
+    # Xcode's Foundation MIN/MAX macros use GNU statement expressions. Pugl's
+    # mac.m calls those system macros with side-effect-free arguments, so keep
+    # the project-wide pedantic warning policy and disable only Clang's narrow
+    # macro-expansion diagnostic for this Objective-C bridge.
+    if(CMAKE_OBJC_COMPILER_ID MATCHES "Clang")
+      target_compile_options("${_nativeui_bridge}" PRIVATE
+        -Wno-gnu-statement-expression-from-macro-expansion
+      )
+    endif()
   endif()
 
   target_link_libraries("${NUI_TARGET}" PRIVATE NativeUI::NativeUI)
