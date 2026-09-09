@@ -4,3 +4,4 @@
 #include <nativeui/detail/widgets_text_area.inc>
 #include <nativeui/detail/widgets_builders.inc>
 #include <nativeui/detail/widgets_button.inc>
+#include <nativeui/detail/widgets_slider.inc>
