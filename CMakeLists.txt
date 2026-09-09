@@ -172,6 +172,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t028_text_area
   t029_ime_composition
   t030_button
+  t031_checkbox_radio
   t041_smoke_harness
   t059_component_state
 )
