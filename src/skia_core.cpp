@@ -269,6 +269,7 @@ ResolvedFace resolve_face(const TextStyle& style,
 struct Utf8Scalar {
     char32_t codepoint{0xFFFD};
     std::size_t next{};
+    bool valid{true};
 };
 
 Utf8Scalar decode_utf8(std::string_view text, std::size_t offset) {
@@ -302,7 +303,7 @@ Utf8Scalar decode_utf8(std::string_view text, std::size_t offset) {
                             (u(offset + 3) & 0x3Fu);
         if (cp >= 0x10000u && cp <= 0x10FFFFu) return {cp, offset + 4};
     }
-    return {0xFFFD, offset + 1};
+    return {0xFFFD, offset + 1, false};
 }
 
 bool synthetic_bold(const sk_sp<SkTypeface>& typeface, const TextStyle& style) {
@@ -334,6 +335,24 @@ void include_metrics(TextMetrics& output, const SkFontMetrics& input, bool first
 
 ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& style) {
     ResolvedTextLayout layout{};
+    // Selecting a replacement glyph is not enough: Skia must also receive
+    // valid bytes. In particular its macOS UTF-8 glyph conversion can abort
+    // for malformed input. Valid text borrows the original buffer, with no
+    // repair allocation; malformed bytes each become one Unicode U+FFFD.
+    std::size_t copied_until = 0;
+    for (std::size_t offset = 0; offset < text.size();) {
+        const auto scalar = decode_utf8(text, offset);
+        if (!scalar.valid) {
+            layout.repaired_text.append(text.substr(copied_until, offset - copied_until));
+            layout.repaired_text.append("\xEF\xBF\xBD");
+            copied_until = scalar.next;
+        }
+        offset = scalar.next;
+    }
+    if (copied_until != 0) {
+        layout.repaired_text.append(text.substr(copied_until));
+        text = layout.text_bytes(text);
+    }
     const auto embedded = embedded_faces_snapshot();
     const auto manager = platform_font_manager();
 
@@ -390,6 +409,18 @@ ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& s
 } // namespace ui::detail
 
 namespace ui {
+
+std::optional<std::string_view> text::utf8_prefix(
+    std::string_view value, std::size_t max_bytes) noexcept {
+    std::size_t offset = 0;
+    while (offset < value.size() && offset < max_bytes) {
+        const auto scalar = detail::decode_utf8(value, offset);
+        if (!scalar.valid) return std::nullopt;
+        if (scalar.next > max_bytes) break;
+        offset = scalar.next;
+    }
+    return value.substr(0, offset);
+}
 
 bool FontManager::register_embedded_font(std::string_view family_alias,
                                          std::span<const std::byte> data) {
