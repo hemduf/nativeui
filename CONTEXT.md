@@ -58,7 +58,7 @@ PR #99 is merged as `ed81a201ea459ea2443ae51f27dfcac7af5d7e63`; issue #48 is clo
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042 -> T051 -> T052
+lifecycle:        #64(done) -> #107(done by PR #108) -> T042 -> T051 -> T052
 platform/package: T053(done) -> T047(done) -> T048(done) -> T052
                                       |
                                       +-> T054
@@ -66,7 +66,7 @@ platform/package: T053(done) -> T047(done) -> T048(done) -> T052
 state/widgets:    T059(done) -> T030(done) -> T031
 ```
 
-With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. This lane must not take T059, T030, #64 or T042.
+With T048 merged, T054 and T056 are the dependency-unblocked platform/package items. T052 has its T048 dependency satisfied but still requires T051 and T042. T057 remains dependent on T056. The lifecycle lane must finish #107/PR #108 before refreshing and completing T042; #64 Decision B remains the ownership boundary.
 
 ## Platform ownership reminders
 
@@ -122,6 +122,19 @@ T042 also exposed a production Linux/X11 renderer crash before stress-specific l
 
 After #103 merges, T042 still requires the independent #107 Windows show-status correction plus a fresh exact-head supported-path stress matrix before completion.
 
+## Lifecycle/stress lane completion — #107 / PR #108
+
+T042's Windows `standalone_sequential_50` fixture exposed a production integration bug rather than a stress-harness defect: pinned Pugl documents `PUGL_FAILURE` from `puglShow(..., PUGL_SHOW_RAISE)` as the non-fatal case where the view is shown but could not be raised. NativeUI previously treated every non-zero show status as fatal and destroyed that already-live standalone view during construction.
+
+PR #108 introduces one translation-unit-private show-status policy. It normalizes only `PUGL_SHOW_RAISE + PUGL_FAILURE` to success; every other Pugl status remains unchanged and therefore follows the existing cleanup/throw path. Embedded `PUGL_SHOW_PASSIVE` is unchanged. The correction introduces no mutable global/singleton/registry/`thread_local` state and does not alter #64 Decision B.
+
+- RED evidence: T042 stacked workflow `34344854224` failed Windows `standalone_sequential_50` at cycle 0 with `puglShow failed: Non-fatal failure` while the headless and embedded stress fixtures passed.
+- GREEN evidence: exact code head `04dc15c3f8aff444f3cc29b377966c2a97ed25b5` passed NativeUI CI `34348272543`; the identical show-policy blob is present in T042 head `a278e4dda275ada227d1f9b3b0d177c0bf388b9e`.
+- Full lifecycle evidence: T042 workflow `34348551067` is green on Windows, Linux/X11, macOS and Linux ASan+UBSan, with all 50 Windows process-isolated standalone lifetimes completing.
+- Mandatory CODE_REVIEW.md review `5154415827` found no blocking issue. The branch was then refreshed from current main before this completion documentation pass.
+
+Once PR #108's documentation head passes fresh exact-head CI and merges, #107 closes as Done and T042/PR #93 must be refreshed from that main so the production fix disappears from the stress PR diff. Then rerun the exact T042 lifecycle matrix and complete its own CODE_REVIEW.md record before merge.
+
 ## Drag-and-drop completion — #86 / PR #87
 
 Finder drops exposed a second integration defect after the Pugl backend-child destination fix: NativeUI discarded DropOffer/DropData whenever the window lost keyboard focus. The retained tree now routes drops while mounted but inactive, without reactivating focus or IME, preserving T059 availability and dispatch reconciliation. T018 now receives the first local regular file regardless of extension. Optional UTF-8 text preview is separate from successful file reception; a binary file shows its name and no preview. The read cap is 64 KiB plus three lookahead bytes; the displayed prefix is at most 120 complete-character bytes. Diagnostics log acceptance, drop size and preview size, never content.
@@ -141,6 +154,6 @@ This merge completes #86 after the exact-head CI gate; no blocking code finding 
 
 T031 / PR #95 is the active state/widget completion candidate after merged T030. Its reviewed implementation provides `Checkbox`, typed `RadioGroup<T>` / `RadioButton<T>`, one-Tab-stop radio groups, wrapped arrow navigation that skips unavailable options, T059 availability/read-only behavior, reentrancy-safe activation, and per-group weak duplicate-live-value bookkeeping with no global/singleton/`thread_local` state.
 
-After current `main` advanced with #86 / PR #87, dependency synchronization PR #113 was conflict-resolved by preserving the complete current-main drag/drop, package and lifecycle state while overlaying only the T031 code/tests/CMake registrations. The synchronized merge head is `12e5945f6e50d9cb1250f08aa9a6c9ea9927c2fa`; current main `0c4778278c86d2b8946ece593e684f4203ba38db` is now an ancestor of the T031 branch.
+Current `main` includes #86 / PR #87 and #107 / PR #108. This completion documentation preserves those merged platform/lifecycle records and adds only the T031 state/widget completion record. The final PR merge result must include the current main tree plus the reviewed T031 code/tests/CMake registrations.
 
-The prior mandatory review is clean after the duplicate-live-value RED→GREEN correction. This completion-document update is part of the final T031 merge cycle; the resulting exact head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before PR #95 is merged.
+The prior mandatory review is clean after the duplicate-live-value RED→GREEN correction. This completion-document update is part of the final T031 merge cycle; the resulting exact PR merge head must pass Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan before PR #95 is merged.
