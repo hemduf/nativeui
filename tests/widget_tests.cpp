@@ -39,6 +39,98 @@ void value_widgets_respect_effective_read_only_state() {
     NUI_CHECK_NEAR(drive.get(), 0.51f, 0.0001f);
 }
 
+void slider_pointer_keyboard_contract() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<float> value{0.0f};
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f).step(0.25f)};
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 100.0f, 30.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK_NEAR(value.get(), 0.5f, 0.0001f);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 200.0f, 30.0f), platform);
+        NUI_CHECK_NEAR(value.get(), 1.0f, 0.0001f);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 200.0f, 30.0f), platform);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+
+        value.set(0.5f);
+        tree.dispatch(test::key(ui::Key::Right, true), platform);
+        NUI_CHECK_NEAR(value.get(), 0.75f, 0.0001f);
+        tree.dispatch(test::key(ui::Key::Left), platform);
+        NUI_CHECK_NEAR(value.get(), 0.5f, 0.0001f);
+        tree.dispatch(test::key(ui::Key::Home), platform);
+        NUI_CHECK_NEAR(value.get(), 0.0f, 0.0001f);
+        tree.dispatch(test::key(ui::Key::End), platform);
+        NUI_CHECK_NEAR(value.get(), 1.0f, 0.0001f);
+    }
+
+    {
+        ui::State<float> value{50.0f};
+        ui::UI tree{ui::Slider{value}.range(0.0f, 100.0f)};
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+        tree.dispatch(test::key(ui::Key::Right), platform);
+        NUI_CHECK_NEAR(value.get(), 51.0f, 0.0001f);
+        tree.dispatch(test::key(ui::Key::Right, true), platform);
+        NUI_CHECK_NEAR(value.get(), 51.1f, 0.0001f);
+    }
+
+    {
+        ui::State<float> value{0.0f};
+        ui::UI tree{ui::Slider{value}
+                        .range(-1.0f, 1.0f)
+                        .orientation(ui::SliderOrientation::Vertical)};
+        tree.resize({60.0f, 200.0f});
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 0.0f), platform);
+        NUI_CHECK_NEAR(value.get(), 1.0f, 0.0001f);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 30.0f, 200.0f), platform);
+        NUI_CHECK_NEAR(value.get(), -1.0f, 0.0001f);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 200.0f), platform);
+    }
+}
+
+void slider_t059_contract() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<float> value{0.5f};
+        ui::State<bool> read_only{true};
+        int writes = 0;
+        auto observer = value.observe([&](const float&) { ++writes; });
+        ui::UI tree{ui::ReadOnly{read_only, ui::Slider{value}.range(0.0f, 1.0f)}};
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 180.0f, 30.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+        NUI_CHECK_NEAR(value.get(), 0.5f, 0.0001f);
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Right), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK_NEAR(value.get(), 0.5f, 0.0001f);
+        NUI_CHECK(writes == 0);
+    }
+
+    {
+        ui::State<float> value{0.5f};
+        ui::State<bool> enabled{true};
+        ui::UI tree{ui::Enabled{enabled, ui::Slider{value}.range(0.0f, 1.0f)}};
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 100.0f, 30.0f), platform);
+        enabled.set(false);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Right), platform) ==
+                  ui::EventResult::Ignored);
+    }
+}
+
 void suite() {
     ui::State<float> drive{0.50f};
     ui::State<float> tone{0.25f};
@@ -88,6 +180,8 @@ void suite() {
     NUI_CHECK(layout_tree.dirty());
 
     value_widgets_respect_effective_read_only_state();
+    slider_pointer_keyboard_contract();
+    slider_t059_contract();
 }
 
 } // namespace
