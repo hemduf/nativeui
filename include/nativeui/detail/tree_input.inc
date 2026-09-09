@@ -74,6 +74,7 @@
     bool focus_structure_dirty_{true};
     bool availability_structure_dirty_{};
     bool syncing_availability_{};
+    Node* availability_cleared_focus_{};
     std::size_t dispatch_depth_{};
     PlatformServices* active_platform_{};
     Size viewport_{720.0f, 520.0f};
