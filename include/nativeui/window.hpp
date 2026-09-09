@@ -67,6 +67,7 @@ public:
 
     /// Pre-v1 single-window compatibility path. T069 removes this overload
     /// from the 1.0 public API; it never uses a hidden shared Application.
+    [[deprecated("Use StandaloneWindow(Application&, UI&, WindowDesc) for the v1 standalone path")]]
     StandaloneWindow(UI& ui, WindowDesc desc = {});
     ~StandaloneWindow() override;
 
@@ -75,6 +76,9 @@ public:
     StandaloneWindow(StandaloneWindow&&) = delete;
     StandaloneWindow& operator=(StandaloneWindow&&) = delete;
 
+    /// Prefer Application::run()/poll() for the explicit v1 path. This method
+    /// remains only so the pre-v1 constructor can keep source compatibility
+    /// until T069 removes legacy per-window loop ownership.
     int run();
     bool poll(double timeout_seconds = -1.0);
     void request_close();
