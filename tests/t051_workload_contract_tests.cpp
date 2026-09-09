@@ -52,10 +52,10 @@ void suite() {
 
     {
         benchmark_allocation::Scope scope;
-        volatile std::uint64_t accumulator = 0;
+        std::uint64_t accumulator = 0;
         for (std::uint64_t i = 0; i < 64; ++i) accumulator += i;
-        (void)accumulator;
         const auto snapshot = scope.finish();
+        NUI_CHECK(accumulator == 2016);
         NUI_CHECK(snapshot.allocations == 0);
         NUI_CHECK(snapshot.bytes == 0);
     }
