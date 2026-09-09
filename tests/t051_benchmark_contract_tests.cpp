@@ -42,6 +42,18 @@ void suite() {
     }
     NUI_CHECK(rejected_wrong_sample_count);
 
+    std::uint64_t protocol_operations = 0;
+    int protocol_sample_setups = 0;
+    const auto protocol = nativeui::bench::run_fixed_protocol(
+        7,
+        [&] { ++protocol_sample_setups; },
+        [&] { ++protocol_operations; });
+    NUI_CHECK(protocol_sample_setups == 35);
+    NUI_CHECK(protocol_operations == 35u * 7u);
+    NUI_CHECK(protocol.measured_ns_per_op.size() == 30);
+    NUI_CHECK(protocol.summary.min_ns_per_op >= 0.0);
+    NUI_CHECK(protocol.summary.max_ns_per_op >= protocol.summary.min_ns_per_op);
+
     struct ExpectedWorkload {
         std::string_view name;
         std::uint64_t operations;
