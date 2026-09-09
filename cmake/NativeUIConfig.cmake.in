@@ -1,0 +1,70 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set(_nativeui_skia_root "@PACKAGE_NATIVEUI_INSTALL_SKIA_DIR@")
+set(_nativeui_skia_include "${_nativeui_skia_root}/include")
+set(_nativeui_skia_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_MAIN_FILENAME@")
+set(_nativeui_svg_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_SVG_FILENAME@")
+set(_nativeui_shaper_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_SHAPER_FILENAME@")
+set(_nativeui_unicode_icu_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_UNICODE_ICU_FILENAME@")
+set(_nativeui_unicode_core_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_UNICODE_CORE_FILENAME@")
+
+foreach(_nativeui_required IN ITEMS
+    "${_nativeui_skia_include}/include/core/SkCanvas.h"
+    "${_nativeui_skia_lib}"
+    "${_nativeui_svg_lib}"
+    "${_nativeui_shaper_lib}"
+    "${_nativeui_unicode_icu_lib}"
+    "${_nativeui_unicode_core_lib}")
+  if(NOT EXISTS "${_nativeui_required}")
+    set(NativeUI_FOUND FALSE)
+    set(NativeUI_NOT_FOUND_MESSAGE
+      "NativeUI package is incomplete: required pinned Skia file is missing: ${_nativeui_required}")
+    return()
+  endif()
+endforeach()
+
+if(NOT TARGET SkiaBuilder::skia)
+  add_library(SkiaBuilder::skia STATIC IMPORTED)
+  set_target_properties(SkiaBuilder::skia PROPERTIES
+    IMPORTED_LOCATION "${_nativeui_skia_lib}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_nativeui_skia_include}"
+  )
+
+  if(APPLE)
+    find_library(_nativeui_corefoundation CoreFoundation REQUIRED)
+    find_library(_nativeui_coretext CoreText REQUIRED)
+    find_library(_nativeui_coregraphics CoreGraphics REQUIRED)
+    set_property(TARGET SkiaBuilder::skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${_nativeui_corefoundation};${_nativeui_coretext};${_nativeui_coregraphics}")
+  elseif(WIN32)
+    set_property(TARGET SkiaBuilder::skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES dwrite)
+  elseif(UNIX)
+    find_dependency(Fontconfig REQUIRED)
+    set_property(TARGET SkiaBuilder::skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "Fontconfig::Fontconfig;pthread;${CMAKE_DL_LIBS}")
+  endif()
+endif()
+
+if(NOT TARGET SkiaBuilder::svg)
+  add_library(SkiaBuilder::svg STATIC IMPORTED)
+  set_target_properties(SkiaBuilder::svg PROPERTIES
+    IMPORTED_LOCATION "${_nativeui_svg_lib}"
+  )
+  set_property(TARGET SkiaBuilder::svg APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    "${_nativeui_shaper_lib};${_nativeui_unicode_icu_lib};${_nativeui_unicode_core_lib};SkiaBuilder::skia")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/NativeUITargets.cmake")
+
+# These package-owned source roots are intentionally install-relative. Pugl is
+# pinned and shipped as source because its platform backend is compiled into the
+# final consumer; NativeUI's small platform source set follows the same rule.
+set(NATIVEUI_PUGL_SOURCE_DIR "@PACKAGE_NATIVEUI_INSTALL_PUGL_DIR@")
+set(NATIVEUI_PLATFORM_SOURCE_ROOT "@PACKAGE_NATIVEUI_INSTALL_SOURCE_DIR@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/NativeUIConsumerPlatform.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/NativeUIAttachPlatform.cmake")
+
+check_required_components(NativeUI)
