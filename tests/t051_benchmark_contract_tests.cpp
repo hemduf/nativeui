@@ -4,6 +4,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -33,6 +34,41 @@ void suite() {
     NUI_CHECK(summary.min_ns_per_op == 1.0);
     NUI_CHECK(summary.max_ns_per_op == 30.0);
 
+    bool rejected_wrong_sample_count = false;
+    try {
+        (void)nativeui::bench::summarize_samples(std::vector<double>(29, 1.0));
+    } catch (const std::invalid_argument&) {
+        rejected_wrong_sample_count = true;
+    }
+    NUI_CHECK(rejected_wrong_sample_count);
+
+    struct ExpectedWorkload {
+        std::string_view name;
+        std::uint64_t operations;
+        bool timed;
+    };
+    constexpr ExpectedWorkload expected[] = {
+        {"layout_small", 100, true},
+        {"layout_large", 20, true},
+        {"hit_test_deep", 2000, true},
+        {"dispatch_pointer", 2000, true},
+        {"dispatch_keyboard", 1000, true},
+        {"text_edit_short", 500, true},
+        {"text_edit_multiline", 100, true},
+        {"paint_controls", 20, true},
+        {"paint_text", 50, true},
+        {"multi_instance", 20, true},
+        {"idle_invalidation", 1000, false},
+    };
+    NUI_CHECK(nativeui::bench::kFixedWorkloads.size() == std::size(expected));
+    for (const auto& item : expected) {
+        const auto* workload = nativeui::bench::find_workload(item.name);
+        NUI_CHECK(workload != nullptr);
+        NUI_CHECK(workload->operations_per_sample == item.operations);
+        NUI_CHECK(workload->timed == item.timed);
+    }
+    NUI_CHECK(nativeui::bench::find_workload("not-a-workload") == nullptr);
+
     const ComparisonMetadata linux_clang{
         .schema_version = 1,
         .workload_version = 1,
@@ -51,6 +87,9 @@ void suite() {
     NUI_CHECK(!nativeui::bench::metadata_compatible(linux_clang, incompatible));
     incompatible = linux_clang;
     incompatible.operations_per_sample = 20;
+    NUI_CHECK(!nativeui::bench::metadata_compatible(linux_clang, incompatible));
+    incompatible = linux_clang;
+    incompatible.workload_version = 2;
     NUI_CHECK(!nativeui::bench::metadata_compatible(linux_clang, incompatible));
 
     const RunMetrics baseline{.median_ns_per_op = 100.0, .p95_ns_per_op = 100.0};
