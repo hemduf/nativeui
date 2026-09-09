@@ -6,6 +6,7 @@ on:
     paths:
       - 'tests/t051/**'
       - 'tests/t051_benchmarks.cpp'
+      - 'tests/t051_workload_contract_tests.cpp'
       - 'tests/benchmarks/**'
       - '.github/workflows/t051-benchmarks.yml'
   workflow_dispatch:
@@ -39,6 +40,9 @@ jobs:
 
       - name: Build benchmark suite
         run: cmake --build build-t051 --parallel 2
+
+      - name: Workload and allocation contract tests
+        run: ctest --test-dir build-t051 --output-on-failure
 
       - name: Harness self-test
         run: ./build-t051/nativeui_benchmarks --self-test
