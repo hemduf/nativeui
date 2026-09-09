@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` before the T051 benchmark integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
+Current `main` is `ce86c86e663ad5f8464224874039312143146300`, including merged T051 / PR #116.
 
 Completed foundations relevant to the release/lifecycle lane:
 
@@ -35,31 +35,32 @@ Completed foundations relevant to the release/lifecycle lane:
 - T024: deterministic headless raster/golden foundation.
 - T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
 - T056 / PR #111: deterministic binary resource packaging.
+- T051 / PR #116: Release-only deterministic benchmark harness, canonical two-run regression policy and immutable JSON result artifacts.
 
-## T051 performance harness — PR #116
+## T052 v0.1 release gate — PR #120
 
-T051 is the current lifecycle/release-lane merge candidate. It provides one Release-only deterministic microbenchmark suite and the relative regression policy consumed by T052/T071.
+T052 is dependency-unblocked and is the current lifecycle/release-lane completion candidate. It is an aggregate validation/release ticket, not a feature implementation ticket.
 
-Delivered contract:
+Current contract:
 
-- fixed schema/workload versioning, compiler/OS/architecture/build/commit metadata and JSON round-trip support;
-- exact 5 warmup + 30 measured `steady_clock` sampling, median indices 14/15 and p95 index 28;
-- fixed batch counts for layout, deep hit testing, pointer/keyboard dispatch, short/multiline text editing, control/text headless paint and headless instance lifecycle;
-- deterministic `idle_invalidation` correctness gate: 1,000 logical 10 ms checkpoints (10 seconds logical idle) after the settled frame, requiring exactly zero framework invalidations;
-- benchmark-only allocation interception around measured operation scopes; it never changes `NativeUI::Core` or public allocator/lifetime APIs;
-- workload-contract coverage for exact node/action shapes plus known allocating and non-allocating counter scopes;
-- metadata-safe comparison entry point that rejects incompatible baseline/rerun environments before thresholds are evaluated;
-- timing gate: median >15% **and** p95 >20%, reproduced by two complete independent runs;
-- allocation gate: count or bytes/op >10% with two-run confirmation, or any recurring allocation for explicitly zero-allocation scenarios;
-- CI-generated immutable JSON artifacts; T052 selects/records the controlled v0.1 baseline artifact rather than committing universal machine-specific nanosecond constants.
+- exact candidate SHA carried explicitly by the release-gate workflow;
+- normal Linux/X11, Windows/MSVC, macOS and Linux ASan+UBSan validation remains mandatory on the same head;
+- T042 supported-path lifecycle stress remains an independent exact-head gate;
+- clean dependency/bootstrap builds start from an empty CPM cache on Linux/X11, Windows and macOS and verify the exact Pugl/Skia pin/hash contract;
+- the exact release-note `find_package(NativeUI CONFIG REQUIRED)` / `NativeUI::Core` / `nativeui_attach_platform()` snippet is materialized and built against the installed package on all supported desktop platforms;
+- T047/T048 package relocation and macOS two-consumer Objective-C namespace/runtime isolation remain part of normal CI;
+- one approved-base T051 benchmark run and two complete candidate runs are compared through T051's canonical C++ `compare_two_complete_runs()` policy rather than duplicated workflow thresholds;
+- `idle_invalidation` remains an exact zero timing/allocation hard gate;
+- v0.1 release notes explicitly identify developer-preview semantics, Decision B, known v1 gaps, pinned dependencies, reproducible exact-SHA tag procedure, and the `AGPL-3.0-only` / commercial dual-licensing model;
+- T047's installed package legal-payload contract remains required for `LICENSE.md`, `NOTICE.md`, `THIRD_PARTY.md`, `EULA.md`, `PRIVACY.md`, `TERMS.md` and `LEGAL.md`.
 
-The benchmark and baseline contract is documented in `docs/performance-benchmarks.md`. Normal benchmark execution never rewrites baselines.
+T052 must not merge until one exact final head passes all of the above and the aggregate `CODE_REVIEW.md` audit has no Blocking/Important finding.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
-platform/package:  T053(done) -> T047(done) -> T048(done) ----^
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(in review)
+platform/package:  T053(done) -> T047(done) -> T048(done) -----------^
                                        |
                                        +-> T054
                                        +-> T056(done) -> T057
@@ -68,7 +69,7 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        +-> T032 / T033 / T034 -> T035 / T036
 ```
 
-When T051 merges cleanly, T052 becomes dependency-unblocked and is the next high-priority lifecycle/release ticket.
+T052 is the current P0 release/lifecycle item. T071 remains the later full NativeUI 1.0 qualification gate.
 
 ## Build / validation
 
@@ -93,11 +94,12 @@ ctest --test-dir build-t051 --output-on-failure
 ./build-t051/nativeui_benchmarks --json t051-results.json
 ```
 
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate gate.
+Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress and T052 release qualification remain separate exact-head gates.
 
 ## Next actions
 
-1. Require exact-head T051 contract, Release benchmark, normal CI and T042 lifecycle-stress workflows to complete green.
-2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Merge PR #116 only after current-main synchronization and exact-head validation are both satisfied.
-4. Mark #51 Done/`status:done`, close it, then move T052 / #52 from Blocked to Ready and continue that release/lifecycle dependency chain.
+1. Require exact-head T052 release contract/bootstrap/benchmark workflow, normal CI, T042 lifecycle stress and T051 Release benchmark workflow to complete green on the same candidate.
+2. Perform the mandatory aggregate `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
+3. Refresh from current `main` immediately before merge; any source change invalidates previous exact-head evidence.
+4. Record exact run/SHA evidence, mark PR #120 ready, merge without rewriting the validated release candidate, then mark #52 Done/closed.
+5. Keep v0.1 developer-preview status distinct from the later T071 NativeUI 1.0 gate.

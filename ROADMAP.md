@@ -17,7 +17,7 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` before T051 integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
+Current `main` is `ce86c86e663ad5f8464224874039312143146300`, including merged T051 / PR #116.
 
 Recently completed foundations:
 
@@ -30,12 +30,13 @@ Recently completed foundations:
 - **T031 / PR #95:** Checkbox + typed RadioGroup/RadioButton.
 - **T042 / PR #93:** deterministic supported-path lifecycle stress.
 - **T056 / PR #111:** deterministic binary-resource packaging.
+- **T051 / PR #116:** reproducible Release benchmark harness and canonical relative-regression policy.
 
 Current dependency frontier:
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
-platform/package:  T053(done) -> T047(done) -> T048(done) --------^
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(in review)
+platform/package:  T053(done) -> T047(done) -> T048(done) -----------^
                                        |
                                        +-> T054
                                        +-> T056(done) -> T057
@@ -46,7 +47,7 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        +-> T034 -> T035 / T036
 ```
 
-T051 / PR #116 is the current benchmark/release-lane work. Once it merges, T052 is dependency-unblocked and becomes the next P0 release/lifecycle item.
+T052 / PR #120 is the current P0 release/lifecycle work. It qualifies the v0.1 developer-preview baseline without absorbing unrelated v1 feature work.
 
 ## Milestone 0 — Baseline hardening
 
@@ -104,7 +105,7 @@ T041/T042 and the above fixes provide the current supported-path qualification f
 
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: package foundation complete; T051 in final review; T052 blocked only by T051.**
+**Status: package/performance foundations complete; T052 is in final v0.1 qualification.**
 
 ### Delivered package foundation
 
@@ -127,7 +128,7 @@ nativeui_attach_platform(
 
 ### T051 — reproducible performance regression contract
 
-PR #116 implements the Release-only T051 microbenchmark harness consumed by T052/T071:
+T051 / PR #116 is merged and provides the Release-only microbenchmark harness consumed by T052/T071:
 
 - exact **5 warmup + 30 measured** `steady_clock` protocol;
 - fixed batch counts for layout, hit-testing, pointer/keyboard dispatch, text edit, headless paint and headless lifecycle construction;
@@ -141,36 +142,46 @@ PR #116 implements the Release-only T051 microbenchmark harness consumed by T052
 - deterministic workload-shape and allocator-scope contract coverage;
 - baseline policy documented in `docs/performance-benchmarks.md`: T052 selects the controlled v0.1 CI artifact; the benchmark never self-updates a baseline.
 
-T051 completion still requires the exact final head to pass the T051 contract gate, Release benchmark run, normal platform/sanitizer CI and T042 lifecycle-stress workflow, followed by a final `CODE_REVIEW.md` record with no Blocking/Important finding.
+### T052 — v0.1 developer-preview release gate
+
+PR #120 is the final qualification candidate and remains validation-only:
+
+- exact candidate SHA is recorded and all release evidence must match that head;
+- clean-cache Linux/X11, Windows and macOS bootstraps verify pinned Pugl/Skia acquisition and fail-closed checksum behavior;
+- the exact release-note low-level package CMake snippet is built against the installed package on all supported desktop platforms;
+- normal CI supplies T047/T048 relocation, macOS two-consumer Objective-C namespace/runtime isolation, feature/headless tests and Linux ASan+UBSan;
+- T042 stress independently requalifies supported lifecycle/multi-instance ownership paths while preserving #64 Decision B;
+- T051 benchmark comparison is delegated to the canonical C++ two-run policy entry point, with exact baseline/candidate SHA validation and the zero `idle_invalidation` hard gate;
+- release notes state v0.1 developer-preview semantics, known v1 gaps, pinned dependencies and reproducible exact-SHA tag procedure;
+- release/legal validation requires `LICENSE.md`, `NOTICE.md`, `THIRD_PARTY.md`, `EULA.md`, `PRIVACY.md`, `TERMS.md` and `LEGAL.md` and explicitly records the `AGPL-3.0-only` / commercial dual-licensing model.
 
 ### Remaining release frontier
 
 ```text
-T024(done) + T042(done) -> T051(in review) -> T052
-T047(done) + T048(done) ----------------------^
+T024(done) + T042(done) + T051(done) -> T052(in review)
+T047(done) + T048(done) ---------------------^
 
 T047(done) + T053(done) -> T054
 T056(done) + T022(done) -> T057
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-When T051 merges, T052 becomes Ready and owns the aggregate v0.1 developer-preview exact-head CI/package/lifecycle/performance baseline gate. T071 remains the later full NativeUI 1.0 qualification gate.
+T071 remains the later full NativeUI 1.0 qualification gate and is deliberately distinct from T052's v0.1 developer-preview baseline.
 
-## T051 completion protocol
+## T052 completion protocol
 
-- [x] frozen sampling/statistics and fixed workload/batch contracts implemented;
-- [x] benchmark-only allocation interception and allocation regression rules implemented;
-- [x] JSON schema/round-trip and environment metadata implemented;
-- [x] metadata-safe timing/allocation two-run comparison entry point implemented;
-- [x] deterministic workload shapes and allocating/non-allocating counter scopes covered;
-- [x] idle-invalidation hard gate implemented;
-- [x] current `main` synchronized into the T051 branch;
-- [x] benchmark/baseline contract documented;
+- [x] dependency frontier satisfied: T047/T048/T042/T051 merged;
+- [x] exact candidate/release source contract implemented;
+- [x] clean-cache bootstrap matrix and release-note installed-package consumer implemented;
+- [x] canonical T051 C++ two-run benchmark policy gate integrated;
+- [x] zero `idle_invalidation` hard gate preserved;
+- [x] v0.1 developer-preview/release/tag documentation implemented;
+- [x] licensing/legal payload contract and release-note references implemented;
 - [x] `CONTEXT.md` and `ROADMAP.md` synchronized in the completion candidate;
-- [ ] exact final-head T051 Release benchmark + contract workflow green;
-- [ ] exact final-head normal platform/sanitizer CI and T042 lifecycle stress green;
-- [ ] final mandatory `CODE_REVIEW.md` pass clean;
-- [ ] merge PR #116, mark #51 Done/closed and move T052 to Ready.
+- [ ] exact final-head T052 release workflow green;
+- [ ] exact final-head normal platform/sanitizer CI, T042 lifecycle stress and T051 Release benchmark workflows green;
+- [ ] aggregate mandatory `CODE_REVIEW.md` pass clean with no Blocking/Important finding;
+- [ ] merge PR #120 without rewriting the validated candidate, mark #52 Done/closed and retain exact v0.1 qualification evidence.
 
 ## Prioritization rule
 
