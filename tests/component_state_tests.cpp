@@ -19,9 +19,11 @@ struct AvailabilityProbeState {
     int paints{};
     int pointer_down{};
     int pointer_move{};
+    int pointer_up{};
     int pointer_wheel{};
     int pointer_cancel{};
     int key_down{};
+    int key_up{};
     int text_input{};
     int commands{};
     ui::ComponentAvailability last_paint_availability{};
@@ -70,6 +72,9 @@ public:
         case ui::InputType::PointerMove:
             ++state_->pointer_move;
             return ui::EventResult::Handled;
+        case ui::InputType::PointerUp:
+            ++state_->pointer_up;
+            return ui::EventResult::Handled;
         case ui::InputType::PointerWheel:
             ++state_->pointer_wheel;
             return ui::EventResult::Handled;
@@ -78,6 +83,9 @@ public:
             return ui::EventResult::Handled;
         case ui::InputType::KeyDown:
             ++state_->key_down;
+            return ui::EventResult::Handled;
+        case ui::InputType::KeyUp:
+            ++state_->key_up;
             return ui::EventResult::Handled;
         case ui::InputType::TextInput:
             ++state_->text_input;
@@ -199,6 +207,36 @@ void visibility_preserves_identity_and_lifecycle() {
     NUI_CHECK(probe->paints == visible_paints + 1);
     NUI_CHECK(probe->mounts == 1);
     NUI_CHECK(probe->activates == 1);
+    NUI_CHECK(probe->deactivates == 0);
+    NUI_CHECK(probe->unmounts == 0);
+}
+
+void collapsed_transition_cancels_capture_and_focus_without_lifecycle_churn() {
+    test::MockPlatform platform;
+    ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Visible};
+    auto probe = std::make_shared<AvailabilityProbeState>();
+    ui::UI tree{ui::Visibility{visibility, AvailabilityProbe{probe}}};
+    tree.resize({100.0f, 40.0f});
+    tree.activate(platform);
+
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+    NUI_CHECK(probe->pointer_down == 1);
+    NUI_CHECK(platform.text_input_active);
+
+    visibility.set(ui::VisibilityMode::Collapsed);
+
+    const auto collapsed = tree.component_availability(probe->node_id);
+    NUI_CHECK(collapsed.has_value());
+    NUI_CHECK(collapsed->visibility == ui::VisibilityMode::Collapsed);
+    NUI_CHECK(probe->pointer_cancel == 1);
+    NUI_CHECK(probe->last_input_availability.visibility == ui::VisibilityMode::Visible);
+    NUI_CHECK(probe->focus_out == 1);
+    NUI_CHECK(!platform.text_input_active);
+    NUI_CHECK(tree.layout_dirty());
+    NUI_CHECK(probe->mounts == 1);
+    NUI_CHECK(probe->activates == 1);
+    NUI_CHECK(probe->deactivates == 0);
+    NUI_CHECK(probe->unmounts == 0);
 }
 
 void disabled_subtree_is_removed_from_normal_input_and_focus() {
@@ -227,17 +265,23 @@ void disabled_subtree_is_removed_from_normal_input_and_focus() {
 
     tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
     tree.dispatch(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
     auto wheel = test::pointer(ui::InputType::PointerWheel, 20.0f, 20.0f);
     wheel.delta = {0.0f, 1.0f};
     tree.dispatch(wheel, platform);
     tree.dispatch(test::key(ui::Key::A), platform);
+    auto key_up = test::key(ui::Key::A);
+    key_up.type = ui::InputType::KeyUp;
+    tree.dispatch(key_up, platform);
     tree.dispatch(test::text("x"), platform);
     tree.dispatch(command(ui::Command::Copy), platform);
 
     NUI_CHECK(probe->pointer_down == 1);
     NUI_CHECK(probe->pointer_move == 0);
+    NUI_CHECK(probe->pointer_up == 0);
     NUI_CHECK(probe->pointer_wheel == 0);
     NUI_CHECK(probe->key_down == 0);
+    NUI_CHECK(probe->key_up == 0);
     NUI_CHECK(probe->text_input == 0);
     NUI_CHECK(probe->commands == 0);
 
@@ -378,6 +422,7 @@ void two_trees_keep_availability_and_capture_isolated() {
 
 void suite() {
     visibility_preserves_identity_and_lifecycle();
+    collapsed_transition_cancels_capture_and_focus_without_lifecycle_churn();
     disabled_subtree_is_removed_from_normal_input_and_focus();
     read_only_stays_targetable_and_is_paint_only();
     inherited_state_is_monotonic_and_equal_effective_updates_are_noops();
