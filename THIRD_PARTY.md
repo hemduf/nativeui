@@ -2,7 +2,7 @@
 
 NativeUI does not vendor binary dependency outputs in this source package. They are acquired by CPM at configure time.
 
-- **Pugl** — `lv2/pugl`, pinned to `b7637149ebe53124e5be90559e02a0185bbcbd73`, ISC license. NativeUI compiles the Pugl core and OpenGL backend statically.
+- **Pugl** — `hemduf/pugl`, pinned to `d12d63815b8cfe3f36293d3791a418e8f558ff1b`, ISC license. NativeUI compiles the Pugl core and OpenGL backend statically. This fork retains the upstream Pugl codebase and carries reviewed desktop drag-and-drop fixes required by NativeUI.
 - **Skia** — binary static libraries from `olilarkin/skia-builder`, release `chrome/m149`. The builder project is MIT-licensed; Skia itself uses its upstream BSD-style license and bundled third-party licenses.
 - **CPM.cmake** — dependency manager bootstrap pinned to 0.43.1 and distributed under its upstream MIT licence.
 
@@ -14,6 +14,6 @@ Consumers must comply with the upstream licence files, notices and attribution r
 
 When a dependency version or acquisition method changes, this file must be reviewed and updated before release.
 
-## Pugl drag-offer compatibility note
+## Pugl drag-and-drop integration note
 
-The pinned Pugl commit declares `puglRejectOffer()` in the public header, but the symbol is currently implemented only by the X11 backend. NativeUI therefore calls it only on X11. On macOS and Windows, an offer that is not accepted is left to the native backend's default rejection path. This avoids an unresolved `_puglRejectOffer` symbol while preserving portable `reject_drop()` semantics.
+The pinned Pugl fork implements `puglRejectOffer()` on macOS, Windows and X11, so NativeUI calls the public API directly and no longer carries a platform-specific rejection workaround. The pin fixes the Cocoa drag lifecycle so accepted drag data is delivered once at the actual drop boundary, registers the macOS backend render view as a drag destination so real AppKit routing reaches the Pugl wrapper, fixes Windows `WM_DROPFILES` UTF-8 byte accounting and lifetime cleanup, and preserves the portable `PUGL_DATA_OFFER` → accept/reject → `PUGL_DATA` contract on Windows before payload exposure. `WM_DROPFILES` still has no native hover-time negotiation phase, so Windows offer/reject decisions cannot change OS feedback before release, but rejected data is not delivered to NativeUI and accepted data keeps the actual drop coordinates.

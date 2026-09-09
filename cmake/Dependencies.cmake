@@ -7,8 +7,8 @@ if(NATIVEUI_BUILD_PLATFORM)
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
   set(NATIVEUI_PUGL_COMMIT
-      "b7637149ebe53124e5be90559e02a0185bbcbd73"
-      CACHE STRING "Pinned lv2/pugl commit")
+      "d12d63815b8cfe3f36293d3791a418e8f558ff1b"
+      CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
   if(NATIVEUI_PUGL_SOURCE)
@@ -16,7 +16,7 @@ if(NATIVEUI_BUILD_PLATFORM)
   else()
     CPMAddPackage(
       NAME pugl_src
-      GITHUB_REPOSITORY lv2/pugl
+      GITHUB_REPOSITORY hemduf/pugl
       GIT_TAG ${NATIVEUI_PUGL_COMMIT}
       DOWNLOAD_ONLY YES
     )
