@@ -15,7 +15,7 @@ if(WIN32)
   endif()
 endif()
 
-function(_t054_argument_case name product_name expected_output)
+function(_t054_argument_case name product_expression expected_output)
   set(_src "${_root}/${name}-src")
   set(_build "${_root}/${name}-build")
   file(MAKE_DIRECTORY "${_src}")
@@ -32,7 +32,7 @@ endfunction()
 include("@SOURCE_DIR_CMAKE@/cmake/NativeUIAttachPlatform.cmake")
 include("@SOURCE_DIR_CMAKE@/cmake/NativeUIApplication.cmake")
 nativeui_add_application(App
-  PRODUCT_NAME [==[@PRODUCT_NAME@]==]
+  PRODUCT_NAME @PRODUCT_EXPRESSION@
   BUNDLE_ID com.example.argument-boundary
   VERSION 1.2.3
   SOURCES main.c)
@@ -41,7 +41,7 @@ if(NOT _output STREQUAL [==[@EXPECTED_OUTPUT@]==])
   message(FATAL_ERROR "PRODUCT_NAME argument boundary changed: '${_output}'")
 endif()
 ]=])
-  set(PRODUCT_NAME "${product_name}")
+  set(PRODUCT_EXPRESSION "${product_expression}")
   set(EXPECTED_OUTPUT "${expected_output}")
   string(CONFIGURE "${_project}" _configured @ONLY)
   file(WRITE "${_src}/CMakeLists.txt" "${_configured}")
@@ -53,20 +53,21 @@ endif()
     ERROR_VARIABLE _stderr)
   if(NOT _result EQUAL 0)
     message(FATAL_ERROR
-      "T054 ${name} failed; one-value arguments must preserve exact CMake argument boundaries\n"
+      "T054 ${name} failed; semicolon-bearing PRODUCT_NAME must retain its value\n"
       "${_stdout}\n${_stderr}")
   endif()
 endfunction()
 
-# Semicolon is legal in PRODUCT_NAME. Segments that happen to equal public
-# keyword spellings are still part of the one PRODUCT_NAME argument and must
-# never be reparsed as helper keywords.
-_t054_argument_case(keyword_inside_semicolon
-  "Alpha;VERSION;Omega" "Alpha;VERSION;Omega")
+# A normal quoted CMake argument containing semicolons is legal for the frozen
+# PRODUCT_NAME filename grammar and must round-trip unchanged.
+_t054_argument_case(quoted_semicolons
+  [==["Alpha;Beta;Omega"]==] "Alpha;Beta;Omega")
 
-# A one-value field may itself equal another keyword spelling. The parser must
-# consume the next original argument as the value before looking for a new
-# keyword.
-_t054_argument_case(keyword_as_value "VERSION" "VERSION")
+# When a semicolon-delimited component itself equals a helper keyword, callers
+# can use normal CMake list escaping to keep that semicolon inside the original
+# macro value. The helper must remove only CMake's list escape and preserve the
+# actual product filename bytes.
+_t054_argument_case(escaped_keyword_component
+  [==["Alpha\;VERSION\;Omega"]==] "Alpha;VERSION;Omega")
 
-message(STATUS "T054 original argument-boundary regression passed")
+message(STATUS "T054 semicolon argument-boundary regression passed")
