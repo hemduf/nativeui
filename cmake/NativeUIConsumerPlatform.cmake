@@ -193,6 +193,7 @@ function(_nativeui_attach_consumer_platform)
       POSITION_INDEPENDENT_CODE ON
       C_VISIBILITY_PRESET hidden
       CXX_VISIBILITY_PRESET hidden
+      OBJC_VISIBILITY_PRESET hidden
       VISIBILITY_INLINES_HIDDEN YES
     )
     target_compile_features("${_nativeui_bridge}" PUBLIC c_std_99)

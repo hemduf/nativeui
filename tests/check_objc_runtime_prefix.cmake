@@ -23,11 +23,14 @@ if(NOT _nm_result EQUAL 0)
 endif()
 
 foreach(_class IN ITEMS PuglWindow PuglWindowDelegate PuglWrapperView PuglOpenGLView)
-  string(FIND "${_nm_output}" "${PREFIX}${_class}" _prefixed_index)
-  if(_prefixed_index EQUAL -1)
-    message(FATAL_ERROR
-      "Expected prefixed Objective-C runtime class ${PREFIX}${_class} in ${ARCHIVE}")
-  endif()
+  foreach(_kind IN ITEMS CLASS METACLASS)
+    set(_expected_symbol "OBJC_${_kind}_$_${PREFIX}${_class}")
+    string(FIND "${_nm_output}" "${_expected_symbol}" _prefixed_index)
+    if(_prefixed_index EQUAL -1)
+      message(FATAL_ERROR
+        "Expected prefixed Objective-C runtime symbol ${_expected_symbol} in ${ARCHIVE}")
+    endif()
+  endforeach()
 endforeach()
 
 # Pattern-based future-proof gate: every Objective-C class/metaclass emitted by
@@ -47,4 +50,4 @@ if(_unprefixed_pugl_runtime_symbols)
 endif()
 
 message(STATUS
-  "NativeUI Objective-C runtime classes use consumer prefix '${PREFIX}' and no unprefixed Pugl class/metaclass symbols remain")
+  "NativeUI Objective-C runtime classes/metaclasses use consumer prefix '${PREFIX}' and no unprefixed Pugl class/metaclass symbols remain")
