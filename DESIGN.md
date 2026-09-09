@@ -1,7 +1,7 @@
 # NativeUI Design — C++20 Retained-Mode UI with Pugl + Skia
 
 **Status:** active architecture baseline  
-**Updated:** September 7, 2026  
+**Updated:** September 9, 2026  
 **Targets:** Windows, macOS, Linux/X11  
 **Language:** C++20  
 **Distribution:** static libraries  
@@ -130,7 +130,7 @@ Pugl and Skia are implementation dependencies. Application-level widget code sho
 
 ## 4. Current implementation snapshot
 
-As of September 7, 2026, the implemented baseline includes:
+As of September 9, 2026, the implemented baseline includes:
 
 - observable `State<T>`;
 - declarative DSL compiled into a runtime component tree;
@@ -148,13 +148,12 @@ As of September 7, 2026, the implemented baseline includes:
 - `Header`, `Label`/`TextLabel`, `Knob`, `Toggle`, `TextInput`, multiline `TextArea` and interactive `Canvas`;
 - `TextEditModel` with UTF-8-aware single-line and multiline editing behavior;
 - platform-neutral font selection/fallback and embedded-font registration;
-- `StandaloneWindow` and `EmbeddedView` Pugl/OpenGL integration;
+- explicit `Application` ownership for one standalone `PUGL_PROGRAM` world with multiple top-level `StandaloneWindow` views;
+- independent `EmbeddedView` Pugl/OpenGL integration using `PUGL_MODULE`;
 - clipboard bridging and platform smoke-test infrastructure;
 - dedicated feature examples with `--self-test` coverage.
 
-SVG/icon resources are being implemented separately in T023/PR #60 and are not part of the merged baseline described above until that PR lands.
-
-A known macOS defect remains open in issue #64: multiple simultaneous `StandaloneWindow` instances currently expose a Pugl `PUGL_PROGRAM` application-world lifecycle problem. Multiple independent `EmbeddedView` instances are a separate path and are currently validated successfully.
+Standalone multi-window ownership follows #64 Decision B: one explicit `Application` owns the PROGRAM world/event pump and outlives every attached standalone window. Per-window retained UI, focus, capture, text and rendering state remains isolated. The legacy independent-world `StandaloneWindow(UI&, ...)` constructor is pre-v1 compatibility only and is scheduled for removal by T069; it is not a second supported multi-window model.
 
 ---
 
@@ -186,7 +185,7 @@ NativeUI currently pins:
 
 ```text
 repository: hemduf/pugl
-commit:     d12d63815b8cfe3f36293d3791a418e8f558ff1b
+commit:     195f79b22644010c81a5e0c3231c591856787ec6
 license:    ISC
 ```
 
@@ -194,33 +193,38 @@ The exact commit is mandatory. Pugl is acquired as source with CPM and NativeUI 
 
 The consumer is not required to install or invoke Meson.
 
-### 5.2 Pugl world modes
+### 5.2 Pugl world modes and standalone ownership
 
-Standalone views use:
+Standalone applications use one explicit application owner:
+
+```cpp
+ui::Application app;
+ui::StandaloneWindow main{app, main_ui, {.title = "Main"}};
+ui::StandaloneWindow settings{app, settings_ui, {.title = "Settings"}};
+return app.run();
+```
+
+`Application` owns exactly one:
 
 ```cpp
 puglNewWorld(PUGL_PROGRAM, 0);
 ```
 
-Embedded views use:
+Every v1 top-level `StandaloneWindow(Application&, ...)` borrows that world and owns only its own native view/render/UI/focus/capture/text state. `Application` is non-copyable and non-movable and must outlive every registered window. Registration is Application-local and lifetime-safe; NativeUI has no mutable process-global, singleton or `thread_local` current Application/window registry.
+
+`Application::run()` is the normal blocking standalone event loop. `Application::poll(timeout)` pumps the same PROGRAM world for every attached top-level window: a negative finite timeout waits indefinitely, zero is non-blocking, and a positive finite timeout is bounded. NaN/Inf and native pump failures transition the Application to a terminal error state. Normal requested/policy quit remains distinguishishable from error through `last_error()`.
+
+Default `QuitPolicy::OnLastWindowClosed` requests quit when the final valid registered window actually unregisters. `QuitPolicy::ExplicitOnly` keeps a zero-window Application runnable until `request_quit()` or an error. `request_quit()` is idempotent and stops the loop after the current callback unwinds; it does not destroy live windows.
+
+The old `StandaloneWindow(UI&, ...)` constructor and per-window blocking loop remain deprecated pre-v1 compatibility only until T069. They retain their independent-world behavior and never acquire a hidden shared Application singleton.
+
+Embedded views remain a separate host-owned integration path and use:
 
 ```cpp
 puglNewWorld(PUGL_MODULE, 0);
 ```
 
-Embedding uses Pugl's native parent mechanism internally.
-
-The event-pump contract is different:
-
-```cpp
-// standalone: waiting is allowed
-puglUpdate(world, -1.0);
-
-// embedded: never block the host
-puglUpdate(world, 0.0);
-```
-
-`EmbeddedView::poll()` is therefore always non-blocking.
+`EmbeddedView::poll()` is always non-blocking and an embedded view never registers with or borrows the standalone Application PROGRAM world.
 
 ### 5.3 No unnecessary platform abstraction layer
 
@@ -726,50 +730,51 @@ drop API delivers MIME type and owned payload bytes, never file-type policy.
 
 ---
 
-## 19. Standalone windows
+## 19. Standalone applications and windows
 
-The current public API owns a UI tree by reference and a window description:
+The v1 standalone API makes application/world ownership explicit:
 
 ```cpp
-ui::UI ui{root};
+ui::Application app;
+if (!app.valid())
+    return 1;
 
-ui::StandaloneWindow window{
-    ui,
-    ui::WindowDesc{
-        .title = "NativeUI Demo",
-        .size = {800.0f, 500.0f},
-        .resizable = true,
-    }
+ui::UI main_ui{main_root};
+ui::UI settings_ui{settings_root};
+
+ui::StandaloneWindow main{
+    app,
+    main_ui,
+    ui::WindowDesc{.title = "NativeUI Demo", .size = {800.0f, 500.0f}, .resizable = true}
+};
+ui::StandaloneWindow settings{
+    app,
+    settings_ui,
+    ui::WindowDesc{.title = "Settings", .size = {480.0f, 360.0f}, .resizable = true}
 };
 
-return window.run();
+if (!main.valid() || !settings.valid())
+    return 1;
+return app.run();
 ```
 
-`StandaloneWindow` provides:
+`Application` is the sole normal blocking v1 event-loop owner. It owns one PROGRAM world and tracks only lifetime-safe Application-local window registrations. `StandaloneWindow` owns its own view/render/UI/focus/capture/text state and unregisters exactly once before world-dependent resources become inaccessible.
 
-- `run()`;
-- `poll(timeout)`;
-- `request_close()`;
-- logical `size()` and `set_size()`;
-- `scale_factor()`;
-- native view handle access for integration;
-- platform services for text input, clipboard and drops.
+The standalone ownership contract is:
+
+- one `Application` -> exactly one `PUGL_PROGRAM` world;
+- many top-level windows may borrow that world simultaneously;
+- destroying window A must not mutate or invalidate surviving window B;
+- `OnLastWindowClosed` requests quit only when the final valid window actually unregisters;
+- `ExplicitOnly` allows a zero-window Application to remain runnable until explicit quit/error;
+- `request_quit()` stops the loop after the current callback unwinds and never implicitly destroys live window objects;
+- invalid Application/window construction is represented through `valid()` / `last_error()` rather than a hidden second ownership path;
+- native operations and event pumping remain UI/main-thread confined;
+- there is no mutable process-global, singleton or `thread_local` current Application/window registry.
+
+The deprecated `StandaloneWindow(UI&, WindowDesc)` constructor and per-window loop remain bounded pre-v1 compatibility only. They keep their independent-world behavior and are removed/privatized by T069; they must never be used to infer that multiple independent PROGRAM worlds are a supported multi-window model.
 
 The standalone loop may wait between events. Active animation/timer work must use bounded waits or Pugl timers rather than a permanent 60 Hz redraw loop.
-
-### 19.1 Known macOS multi-window limitation
-
-Issue #64 currently tracks a crash when multiple `StandaloneWindow` objects create multiple `PUGL_PROGRAM` worlds in the same macOS process.
-
-The architecture requirement is not to hide this behind a mutable singleton. The fix must establish explicit application/world ownership while preserving:
-
-- per-window state;
-- independent destruction;
-- multiple simultaneous windows;
-- plug-in-safe process coexistence;
-- deterministic lifecycle.
-
-A likely design direction is an explicit application/context owner or another ownership model consistent with upstream Pugl's `PUGL_PROGRAM` lifecycle, but the issue must be validated before this document commits to one exact implementation.
 
 ---
 
@@ -978,7 +983,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=d12d63815b8cfe3f36293d3791a418e8f558ff1b
+NATIVEUI_PUGL_COMMIT=195f79b22644010c81a5e0c3231c591856787ec6
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149
@@ -1015,7 +1020,7 @@ Pugl is source-only and compiled statically by NativeUI:
 ```cmake
 CPMAddPackage(
   NAME pugl_src
-  GITHUB_REPOSITORY lv2/pugl
+  GITHUB_REPOSITORY hemduf/pugl
   GIT_TAG ${NATIVEUI_PUGL_COMMIT}
   DOWNLOAD_ONLY YES
 )
@@ -1238,14 +1243,14 @@ NativeUI's value is concentrated in:
 
 The two structural third-party dependencies remain:
 
-- `lv2/pugl` at an exact pinned commit, vendored/compiled statically;
+- `hemduf/pugl` at an exact pinned commit, vendored/compiled statically;
 - `olilarkin/skia-builder` as the source of pinned prebuilt Skia static binaries.
 
 The main platform risks remain isolated rather than allowed to distort the toolkit architecture:
 
 1. native Wayland support is not provided by the current Pugl baseline;
 2. full IME pre-edit/composition may require narrow platform extensions;
-3. macOS `PUGL_PROGRAM` ownership for multiple standalone windows requires an explicit lifecycle fix.
+3. the legacy independent-PROGRAM-world standalone constructor remains only until T069 and must not become a second multi-window ownership model.
 
 None of these currently justifies reimplementing Win32, Cocoa and X11 windowing inside NativeUI.
 
