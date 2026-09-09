@@ -53,7 +53,6 @@ jobs:
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-          -DNATIVEUI_OBJC_RUNTIME_PREFIX=HemdufNativeUICITest_
 
       # skia-builder's Windows archive is built with the MSVC ABI. Do not use
       # Ninja from Git Bash here: on hosted runners that can select MinGW and
@@ -76,10 +75,10 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
 
-      # CODE_REVIEW.md requires proof that two independently built plug-in
-      # consumers do not register the same Objective-C runtime class names.
-      # Configure and build the pinned Pugl bridge twice with distinct consumer
-      # prefixes, then inspect both archives for isolated runtime namespaces.
+      # T053/CODE_REVIEW.md requires proof that two final consumers configured
+      # together derive different Objective-C runtime namespaces while sharing
+      # one generic Core/platform-C layer, and that both bridge images load in
+      # one process without duplicate runtime classes.
       - name: macOS two-consumer Objective-C runtime isolation
         if: runner.os == 'macOS'
         run: >-

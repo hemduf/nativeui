@@ -124,23 +124,20 @@ Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)`
 
 The project bootstraps CPM.cmake, then:
 
-1. fetches Pugl source at the pinned commit `b7637149ebe53124e5be90559e02a0185bbcbd73` and compiles only its native core + OpenGL backend as a static target;
+1. fetches Pugl source at the pinned commit `b7637149ebe53124e5be90559e02a0185bbcbd73`; Windows/Linux compile the normal generic platform sources, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
 2. downloads the pinned `skia-builder` `chrome/m149` release ZIP for the current platform and imports its static `skia` library.
 
 The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/Ninja Skia build is part of NativeUI.
 
-### macOS plug-in runtime prefix
+### macOS consumer-scoped platform bridge
 
-The pinned Pugl macOS OpenGL backend contains Objective-C runtime classes. Because Objective-C class names are process-global and NativeUI/Pugl is statically linked, a macOS platform build must supply a prefix unique to the **final application or plug-in bundle**, normally derived from its bundle identifier:
+The pinned Pugl macOS backend contains Objective-C runtime classes, whose names are process-global. T053 therefore does **not** build one generic Cocoa/OpenGL archive with a framework-level prefix. Instead, `NativeUI::Core` and Pugl's portable C core remain generic, while `mac.m`, `mac_gl.m` and NativeUI's Cocoa IME bridge are compiled into a small static bridge for each final consumer target.
 
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
-```
+Each final application/module/shared-library consumer supplies one stable `CONSUMER_ID`. NativeUI derives the Objective-C prefix in exactly one CMake function from the exact UTF-8 identity bytes using the frozen `NUI_<fragment>_<sha256-12>_` algorithm, then renames every Pugl runtime class in that consumer bridge. NativeUI's own source-tree examples and smoke tests register distinct identities internally, so a normal source checkout no longer needs a global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` cache variable.
 
-NativeUI applies that prefix to every Pugl Objective-C class compiled by the selected macOS backend and CI verifies that the original unprefixed runtime names are absent. There is deliberately no generic `NativeUI`/`Pugl` fallback: one fixed framework-level prefix is still unsafe if the same static platform archive is copied into several plug-ins loaded by one host process.
+CI builds two independently identified macOS consumers in one configure, audits both bridge archives for prefixed class **and metaclass** symbols, rejects every unprefixed `Pugl*` Objective-C runtime class/metaclass, and loads both final modules in one process to prove runtime coexistence.
 
-For packaging, a generic `NativeUI::Core` library can remain reusable. A precompiled macOS platform/Pugl static archive is only safe when its runtime naming remains unique to the final consumer; otherwise the platform bridge must be built as part of the consumer.
+The installed/public low-level `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)` helper is owned by T047. Until that package ticket lands, source-tree application/test targets use NativeUI's internal consumer attachment primitive; do not copy the prefix derivation or restore a manual global prefix path.
 
 ### Default assets
 
@@ -233,17 +230,14 @@ On mismatch, NativeUI emits `actual.ppm` and `diff.ppm` artifacts plus pixel sta
 
 ## Platform lifecycle smoke tests
 
-T041 adds native standalone and embedded smoke executables:
+T041 adds native standalone and embedded smoke executables. T053 assigns separate consumer identities to these targets automatically on macOS:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProductSmoke_
+  -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
 cmake --build build -j
 ctest --test-dir build -L smoke --output-on-failure
 ```
-
-`NATIVEUI_OBJC_RUNTIME_PREFIX` is required on macOS platform builds and harmless on other platforms.
 
 Targets can also be run directly:
 
@@ -256,17 +250,16 @@ The embedded smoke creates a `PUGL_PROGRAM` parent and a real `PUGL_MODULE` chil
 
 ## Build
 
-Choose a collision-resistant value unique to the final binary when building the macOS platform backend. Passing the variable is harmless on Linux/Windows, so one cross-platform command can be used:
+The normal source-tree build is the same on all supported platforms; macOS consumer identities for NativeUI-owned executable targets are registered internally:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
 
-Core-only builds with `-DNATIVEUI_BUILD_PLATFORM=OFF` do not require an Objective-C prefix.
+Core-only builds use `-DNATIVEUI_BUILD_PLATFORM=OFF` and compile no consumer platform bridge.
 
 ### skia-builder archive layout
 
@@ -296,17 +289,16 @@ The normal build always uses CPM. For local/offline validation you can point to 
 ```bash
 cmake -S . -B build \
   -DNATIVEUI_PUGL_SOURCE=/path/to/pugl \
-  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive \
-  -DNATIVEUI_OBJC_RUNTIME_PREFIX=ComVendorProduct_
+  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive
 ```
 
-The Objective-C prefix is only required when configuring a macOS platform build.
+These dependency overrides do not change the T053 consumer identity/prefix contract.
 
 ## Platform build requirements
 
 CPM manages the source/binary dependencies, but the native SDK development packages still come from the platform:
 
-- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks) plus a consumer-specific `NATIVEUI_OBJC_RUNTIME_PREFIX` for platform builds.
+- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks). Consumer-scoped Objective-C runtime naming is handled by NativeUI's T053 target machinery rather than a global cache variable.
 - **Windows**: Windows SDK + OpenGL + DirectWrite; select the Skia `/MD` or `/MT` package with `NATIVEUI_SKIA_WINDOWS_CRT`.
 - **Linux/X11**: X11, OpenGL/GLX and Fontconfig development packages. On Debian/Ubuntu this is typically `libx11-dev libgl1-mesa-dev libfontconfig1-dev`.
 
