@@ -10,7 +10,7 @@ Non-negotiable rules:
 
 - widgets/layout stay platform-neutral and public geometry uses logical pixels;
 - embedded polling is non-blocking;
-- mutable instance-dependent process globals/singletons/`thread_local` state are forbidden;
+- mutable instance-dependent production globals/singletons/`thread_local` state are forbidden;
 - retained UI state is UI/main-thread confined unless explicitly documented otherwise;
 - dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
 - macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
@@ -18,61 +18,76 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
+- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b` on the T054 package candidate. The independent P0 platform regression #124 / PR #125 owns any later Pugl pin change and must not be folded into T054.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline and platform/package lane
+## Current baseline
 
-Current `main` before the T056 integration merge is `4cd904466d05e4b403eb2b61386868e7c498c719` and already contains T042 lifecycle stress plus the earlier platform/package foundation.
+`main` `ce86c86e663ad5f8464224874039312143146300` contains T051 and the earlier lifecycle/package foundations. T054 / issue #66 / PR #119 is the current platform/package merge candidate and is refreshed from that baseline in the completion candidate.
 
-Completed dependencies relevant to this lane:
+Completed foundations relevant to the active lanes:
 
-- T053 / PR #88: consumer-scoped macOS platform bridge.
-- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`.
-- T048 / PR #99: relocated external Core/standalone/embedded consumer qualification.
-- T042 / PR #93: deterministic supported-path lifecycle stress, merged before this T056 refresh.
+- #64 / PR #90: standalone ownership Decision B — one application-level `PUGL_PROGRAM` world.
+- T042 / PR #93: deterministic supported-path lifecycle stress.
+- T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
+- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
+- T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
+- T051 / PR #116: reproducible Release benchmark and regression policy.
+- T056 / PR #111: deterministic binary-resource packaging.
 
-## T056 binary resources — PR #111
+## T054 application package helper — PR #119
 
-T056 is the current platform/package merge candidate. It adds:
+T054 adds the public high-level CMake application helper while preserving T047/T053 as the only platform-attachment/runtime-identity authority:
 
-- installed/build-tree `nativeui_add_binary_data()` and `NativeUIEmbedResource.cmake` helpers;
-- backend-neutral `ui::EmbeddedResourceEntry` with immutable borrowed byte spans;
-- one deterministic generated resource object per source and one target-specific generated table/header;
-- exact SHA-256-derived payload symbols, sorted unique resource IDs, explicit aliases and symlink-aware BASE_DIR containment;
-- exact binary/NUL/empty-file round trips, deterministic clean-build output, incremental rebuild coverage, two-target namespace/symbol isolation and relocated installed-package consumers;
-- semicolon-safe handling for valid resource IDs and canonical source paths without relying on raw CMake list identity.
+```cmake
+find_package(NativeUI CONFIG REQUIRED)
 
-Review of pre-refresh head `4cc48ed083a493519b19e8481007a0a6315d0a71` completed all mandatory `CODE_REVIEW.md` categories. The review found one Important CMake-list identity defect for semicolon-containing IDs/paths; TDD regression coverage and the production correction are included in that head. Final pre-refresh review reports no remaining Blocking/Important finding.
+nativeui_add_application(MyApp
+  PRODUCT_NAME "My App"
+  BUNDLE_ID "com.example.myapp"
+  VERSION "1.2.3"
+  SOURCES src/main.cpp
+  # MACOS_ICON path/to/icon.icns
+  # WINDOWS_ICON path/to/icon.ico
+)
+```
 
-Pre-refresh exact-head validation is green:
+Delivered contract:
 
-- normal CI run #451 (`34369151069`): Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan all passed, including T047/T048/T056 package/external-consumer checks;
-- T042 Lifecycle Stress run #23 passed on the same T056 head.
+- exact caller argument boundaries are preserved, including valid semicolons and keyword spellings inside one-value fields;
+- `PRODUCT_NAME`, reverse-DNS `BUNDLE_ID`, exact decimal `MAJOR.MINOR.PATCH`, required sources and platform icon inputs are validated deterministically;
+- final targets link `NativeUI::Core` and delegate platform ownership through `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`; T054 does not duplicate Pugl source lists or Objective-C prefix logic;
+- macOS creates a real `.app` bundle with deterministic plist metadata and optional `.icns` resource; two T054 apps are audited against distinct T053 bridge archives/runtime prefixes;
+- Windows creates a GUI-subsystem executable with one target-specific `.rc`/icon path; Linux creates a normal executable and ignores non-native icon options without side effects;
+- build-tree and relocated install-tree packages expose the same helper and external consumers configure, build and execute;
+- helper-created targets remain caller-owned and composable after creation;
+- configuration, argument-boundary, platform package, icon/resource, relocation and isolation regressions are wired into normal CI.
 
-The final T056 candidate is refreshed from current `main` rather than carrying the stale feature-branch `CMakeLists.txt`: it preserves merged T031 widget targets and the macOS drop smoke while applying only the T056 package/helper/header additions. `CONTEXT.md` and `ROADMAP.md` are synchronized in this same candidate. The refreshed exact head must rerun the required CI before merge; no earlier-SHA result substitutes for that gate.
+Review/correction history includes the CMake macro argument-flattening bug, missing-target diagnostic interception, leaked PUBLIC C99 bridge requirement, uppercase source-name misclassification, real macOS icon-resource and two-app symbol-audit gaps, diagnostic line-wrap fragility, and pre-list reverse-DNS byte validation. Each behavior correction was locked by a RED regression before the GREEN change. The latest CODE_REVIEW.md pass reports no unresolved Blocking/Important T054 finding; one final pass is required on the exact refreshed completion head.
+
+The T054 completion tree deliberately restores the current-main Pugl pin so #124 / PR #125 remains an independent dependency/platform change. T042 is likewise not modified by T054.
 
 ## Current DAG frontier
 
 ```text
-lifecycle:        #64(done) -> T042(done) -> T051 -> T052
-platform/package: T053(done) -> T047(done) -> T048(done) -> T052
-                                      |
-                                      +-> T054 (Ready)
-                                      +-> T056 (complete by this merge) -> T057
-state/widgets:    T059(done) -> T030(done) -> T031(done)
-                                      |
-                                      +-> T032 / T033 / T034 -> T035 / T036
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
+platform/package:  T053(done) -> T047(done) -> T048(done) ----^
+                                       |
+                                       +-> T054 (complete by PR #119 merge)
+                                       +-> T056(done) -> T057 (Ready)
+state/widgets:     T059(done) -> T030(done) -> T031(done)
+                                       |
+                                       +-> T032 / T033 / T034 -> T035 / T036
 ```
 
-After T056 merges, T057 becomes Ready because T022 is already complete. T054 is independently Ready because T047 and T053 are complete. For the platform/package lane, select the next P1 by repository priority/dependency-unblock rules; with no existing in-progress platform/package PR, T054 is the next recommended ticket, then T057.
+After T054 merges, T057 is the next dependency-unblocked planned ticket in this platform/package lane (`T056 + T022` are already complete). #124 / PR #125 is an independent P0 platform dependency regression and should remain isolated from T054.
 
 ## Build / validation
 
-Source-tree Release:
+Normal source-tree Release validation:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -80,19 +95,11 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Offline dependency overrides:
-
-```bash
-cmake -S . -B build \
-  -DNATIVEUI_PUGL_SOURCE=/path/to/pugl \
-  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder
-```
-
-T047/T048/T056 package validation additionally exercises source/configure contracts, relocation, external consumers and deterministic generated-resource behavior. Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy.
+T054 additionally runs its source/argument contracts and external package consumers from `.github/workflows/ci.yml` on Linux X11, Windows/MSVC and macOS, with the normal Linux ASan+UBSan lane retained. The macOS package consumer audits two application bridge archives with `tests/check_objc_runtime_prefix.cmake` and verifies the actual bundled icon bytes.
 
 ## Next actions
 
-1. Require all required workflows on the refreshed T056 PR #111 head to complete green.
-2. Re-check the exact refreshed diff/review and merge PR #111 only if no Blocking/Important finding exists.
-3. Mark #68 Done/`status:done` and close it only after merge.
-4. Re-read the platform/package frontier; resume an existing platform/package PR if one appeared, otherwise take T054 / #66 next, with T057 / #69 Ready after T056.
+1. Validate the exact current-main-refreshed T054 completion head on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan.
+2. Perform the final mandatory `CODE_REVIEW.md` pass on that exact head and fix any Blocking/Important finding through TDD.
+3. Mark PR #119 ready and merge only when the required T054/platform/package gates are green.
+4. Mark #66 Done/closed after merge, then continue with T057 in the platform/package lane. Keep #124/T042 and other excluded parallel lanes separate.

@@ -13,11 +13,11 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 - every behavior/configuration change uses test-first RED -> GREEN -> REFACTOR;
 - every code-changing ticket requires exact-head validation plus a `CODE_REVIEW.md` record;
 - every completion cycle synchronizes `CONTEXT.md` and this roadmap;
-- feature tickets ship the required interactive + `--self-test` example; infrastructure tickets use their dedicated external/configuration fixtures.
+- feature tickets ship the required interactive + `--self-test` example; infrastructure tickets use dedicated test/consumer/benchmark artifacts.
 
 ## Current execution snapshot
 
-Current `main` before the T056 integration merge is `4cd904466d05e4b403eb2b61386868e7c498c719`.
+Current `main` baseline for the T054 completion candidate is `ce86c86e663ad5f8464224874039312143146300`, which includes T051.
 
 Recently completed foundations:
 
@@ -28,22 +28,26 @@ Recently completed foundations:
 - **T047 / PR #92:** relocatable low-level package with `NativeUI::Core` + `nativeui_attach_platform()`.
 - **T048 / PR #99:** relocated external package consumers and macOS two-consumer isolation.
 - **T031 / PR #95:** Checkbox + typed RadioGroup/RadioButton.
-- **T042 / PR #93:** deterministic supported-path lifecycle stress, merged as current `main`.
+- **T042 / PR #93:** deterministic supported-path lifecycle stress.
+- **T051 / PR #116:** reproducible Release benchmark harness and regression policy.
+- **T056 / PR #111:** deterministic binary-resource packaging.
 
-Parallel dependency frontier with T056 completing in this merge:
+Current dependency frontier:
 
 ```text
-lifecycle:        #64(done) -> T042(done) -> T051 -> T052
-platform/package: T053(done) -> T047(done) -> T048(done) -> T052
-                                      |
-                                      +-> T054 (Ready)
-                                      +-> T056 (done by this merge) -> T057 (Ready after merge)
-state/widgets:    T059(done) -> T030(done) -> T031(done)
-                                      |
-                                      +-> T032
-                                      +-> T033
-                                      +-> T034 -> T035 / T036
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
+platform/package:  T053(done) -> T047(done) -> T048(done) --------^
+                                       |
+                                       +-> T054 (complete by PR #119 merge)
+                                       +-> T056(done) -> T057 (Ready)
+state/widgets:     T059(done) -> T030(done) -> T031(done)
+                                       |
+                                       +-> T032
+                                       +-> T033
+                                       +-> T034 -> T035 / T036
 ```
+
+T054 / issue #66 / PR #119 is the active platform/package completion candidate. T057 is already dependency-unblocked by T056 + T022 and is the next planned ticket in this lane after T054. The independent P0 Pugl/X11 regression #124 / PR #125 and T042 remain separate work and must not be folded into T054.
 
 ## Milestone 0 — Baseline hardening
 
@@ -67,7 +71,7 @@ state/widgets:    T059(done) -> T030(done) -> T031(done)
 
 ## Milestone 5 — Standard widget set
 
-**Status: T030/T031 complete; T032/T033/T034 Ready.** Button and Checkbox/Radio are merged. Slider/RangeSlider, ProgressBar/Meter and the next selection/container widgets remain dependency-driven work in the widget lane.
+**Status: T030/T031 complete; remaining widgets proceed through their explicit issue DAG.** Button and Checkbox/Radio are merged. Slider/RangeSlider, ProgressBar/Meter and subsequent selection/container widgets belong to the parallel widget lane.
 
 Current widget frontier:
 
@@ -97,13 +101,13 @@ Delivered safety includes:
 - #107 documented non-fatal standalone raise handling;
 - T042 deterministic headless/embedded/standalone lifecycle stress.
 
-T041, T042 and the above fixes provide the current supported-path qualification foundation. T043/T044/T046 and later application/platform tickets remain governed by their explicit dependencies.
+The P0 Pugl/X11 empty-clipboard regression is tracked independently as #124 / PR #125. It owns any shared Pugl pin change and associated dependency documentation; T054 does not absorb that change.
 
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: T053/T047/T048 complete; T056 completes by this merge; T054 Ready; T057 becomes Ready after this merge; T055 Not planned.**
+**Status: low-level package, external-consumer qualification, benchmark harness and binary resources are complete; T054 application helper completes the high-level native application package surface in PR #119.**
 
-### Delivered package foundation
+### Delivered low-level package foundation
 
 The low-level public package contract is:
 
@@ -120,73 +124,84 @@ nativeui_attach_platform(
 - **T053:** exact consumer-scoped macOS Objective-C runtime naming and bridge ownership.
 - **T047:** install/export package exposing Core plus the platform-attach helper; no unsafe generic precompiled macOS Objective-C bridge.
 - **T048:** independent relocated Core/standalone/embedded consumers on supported platforms, including macOS two-consumer symbol/runtime isolation.
+- **T056:** deterministic `nativeui_add_binary_data()` resources with stable IDs, exact bytes, package relocation and no runtime registry.
 
-### T056 — deterministic binary resources
+### T054 — `nativeui_add_application()`
 
-**Complete by PR #111 merge.** The final contract is:
+PR #119 adds the frozen high-level native application helper:
 
 ```cmake
-nativeui_add_binary_data(MyResources
-    NAMESPACE myapp::resources
-    [BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}]
-    SOURCES ...
-    [ALIASES "source=logical/id" ...]
+nativeui_add_application(MyApp
+  PRODUCT_NAME "My App"
+  BUNDLE_ID "com.example.myapp"
+  VERSION "1.2.3"
+  SOURCES src/main.cpp
+  # MACOS_ICON path/to/icon.icns
+  # WINDOWS_ICON path/to/icon.ico
 )
 ```
 
-Delivered scope:
+The helper:
 
-- one normal STATIC resource target per helper call;
-- public backend-neutral `ui::EmbeddedResourceEntry` containing immutable non-owning `id`/byte spans;
-- deterministic generated header `nativeui_binary_data/<Target>/resources.hpp` exposing one namespaced `table()`;
-- namespace, source/base containment, alias and duplicate-ID validation;
-- exact byte-lexicographic sorted unique IDs, including supported punctuation/Unicode text without CMake-list corruption;
-- one CMake-script-generated payload `.cpp` per input for bounded incremental rebuilds;
-- exact internal symbol form `nativeui_bd_<target SHA256 first12>_<ID SHA256 first16>`;
-- exact text/binary/NUL/empty payload preservation with immutable static lifetime and no runtime registry/startup copy;
-- deterministic clean-build generated output containing no timestamp, host/user identity or absolute source/build paths;
-- independent same-ID/different-bytes targets/namespaces;
-- build-tree and relocated install-tree consumers using only CMake/package API.
+- validates portable product names, exact reverse-DNS consumer IDs, decimal `MAJOR.MINOR.PATCH`, required caller sources and platform-specific icon inputs;
+- preserves original CMake argument boundaries, including semicolons/keyword spellings inside one-value arguments;
+- creates a macOS `.app`, Windows GUI executable or normal Linux executable as appropriate;
+- links only `NativeUI::Core` directly and delegates platform attachment to T047 with the exact `BUNDLE_ID` as `CONSUMER_ID`;
+- leaves the target caller-owned and composable after helper creation;
+- exposes identical behavior from build-tree and relocated install-tree packages;
+- verifies real macOS plist/icon bundle output and two-application T053 Objective-C archive/prefix isolation;
+- verifies target-specific Windows RC/icon generation and Linux absence of non-native packaging side effects;
+- keeps the independent #124 Pugl pin change out of the T054 completion diff.
 
-TDD/review correction: the first implementation used raw CMake list storage in places where valid semicolon-containing resource IDs/source paths could split list elements. Regression tests were added first, then final IDs were moved to exact UTF-8 hex ordering/storage and canonical source identity to exact hex-keyed variables. Final pre-refresh `CODE_REVIEW.md` review on head `4cc48ed083a493519b19e8481007a0a6315d0a71` has no remaining Blocking/Important finding.
+The implementation has completed multiple RED -> GREEN correction cycles for CMake argument flattening, missing-target diagnostics, private C-language bridge requirements, SOURCES parsing, bundle-resource coverage, Objective-C two-app audit coverage, portable UTF-8/control-byte validation, diagnostic formatting and consumer-ID grammar validation. Mandatory CODE_REVIEW.md passes currently report no unresolved Blocking/Important finding. The exact current-main-refreshed completion head still requires its final platform/package matrix and one final exact-head review before merge.
 
-Pre-refresh exact-head evidence:
+Once PR #119 reaches `main` through those gates, T054 is complete and issue #66 can be marked Done/closed.
 
-- CI #451 (`34369151069`) passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan, including T047/T048/T056 package/external-consumer contracts;
-- T042 Lifecycle Stress #23 passed on the same head.
+### T051 — reproducible performance regression contract
 
-Before merge, PR #111 is refreshed from current `main`, preserving merged T031/T042/platform work while applying only the T056 package additions and these documentation updates. The refreshed exact head must rerun all required gates; earlier-SHA green results do not substitute for that final validation.
+T051 / PR #116 is merged. It provides the Release-only microbenchmark harness and relative regression policy consumed by T052/T071:
 
-### Remaining package/release frontier
+- exact **5 warmup + 30 measured** `steady_clock` protocol;
+- fixed workload/batch contracts for layout, hit-testing, input dispatch, text editing, headless paint and lifecycle construction;
+- schema/workload metadata including compiler, OS/architecture, build type and exact NativeUI commit SHA;
+- benchmark-only allocation count/bytes instrumentation isolated from production NativeUI;
+- exact JSON round-trip and immutable CI result artifacts;
+- metadata compatibility before threshold comparison;
+- timing blocker = median **>15%** and p95 **>20%**, reproduced by two complete independent runs;
+- allocation blocker = allocations/op or bytes/op **>10%**, reproduced twice; explicit zero-recurring-allocation scenarios block on any recurring allocation;
+- deterministic `idle_invalidation` hard gate at zero framework invalidations.
+
+The benchmark/baseline contract remains documented in `docs/performance-benchmarks.md`.
+
+### Remaining release frontier
 
 ```text
-#62(done) -> T053(done) -> T047(done) -> T048(done) ----\
-                                              |          +-> T052
-                                              +-> T056(done) -> T057
+T024(done) + T042(done) -> T051(done) -> T052
+T047(done) + T048(done) -------------------^
 
-T047(done) + T053(done) -> T054
-T024(done) + T042(done) -> T051 -> T052
+T047(done) + T053(done) -> T054 (complete by PR #119 merge)
+T056(done) + T022(done) -> T057 (Ready)
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-After T056 merges:
+T052 is dependency-unblocked by T051 and belongs to the release/lifecycle lane. T057 is the next dependency-unblocked planned ticket in the platform/package lane after T054.
 
-- **T054 / #66** is Ready and remains the next recommended platform/package ticket when no existing platform/package PR supersedes it;
-- **T057 / #69** becomes Ready because T056 and T022 are complete;
-- **T051** is Ready because T024/T042 are complete; it belongs to the benchmark/release lane rather than this platform/package lane;
-- **T052** remains blocked on T051 only with its package/lifecycle dependencies satisfied.
+## T054 completion protocol
 
-## T056 completion protocol
+- [x] frozen helper signature and platform semantics implemented;
+- [x] source/configuration contracts established RED before implementation;
+- [x] build-tree and relocated install-tree consumers covered;
+- [x] macOS real bundle/icon output and two-application T053 runtime namespace audits covered;
+- [x] Windows GUI/RC and Linux normal-executable behavior covered;
+- [x] caller target composability covered;
+- [x] review findings corrected through regression-first cycles;
+- [x] implementation refreshed against current `main` for the completion candidate;
+- [x] `CONTEXT.md` and `ROADMAP.md` reconciled with the concurrent lanes in the same completion candidate;
+- [ ] exact final-head Linux X11 / Windows / macOS / Linux ASan+UBSan T054/platform-package matrix green;
+- [ ] final exact-head `CODE_REVIEW.md` pass clean;
+- [ ] merge PR #119 and mark #66 Done/closed.
 
-- [x] strict TDD/configuration-contract coverage implemented;
-- [x] deterministic binary/resource/package fixtures implemented;
-- [x] semicolon identity review finding reproduced RED and corrected GREEN;
-- [x] full pre-refresh four-platform + sanitizer CI green;
-- [x] mandatory `CODE_REVIEW.md` review complete with no remaining Blocking/Important finding;
-- [x] refreshed merge candidate preserves current-main CMake/platform/widget additions;
-- [x] `CONTEXT.md` and `ROADMAP.md` synchronized in the merge candidate;
-- final merge requires the refreshed exact-head required workflows to be green and an exact-head review refresh;
-- after merge, #68 is marked Done/`status:done` and closed; T057 becomes Ready.
+The unchecked items are pre-merge gates. Once this candidate reaches `main`, they have necessarily been satisfied by the repository merge rules and T054 is complete.
 
 ## Prioritization rule
 
