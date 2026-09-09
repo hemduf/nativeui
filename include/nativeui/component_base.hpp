@@ -41,6 +41,24 @@ struct ChildPlacement {
 using NodeId = std::uint64_t;
 inline constexpr NodeId kInvalidNodeId = 0;
 
+enum class VisibilityMode {
+    Visible,
+    Hidden,
+    Collapsed,
+};
+
+struct ComponentAvailability {
+    VisibilityMode visibility{VisibilityMode::Visible};
+    bool enabled{true};
+    bool read_only{};
+
+    [[nodiscard]] bool interactive() const noexcept {
+        return visibility == VisibilityMode::Visible && enabled;
+    }
+
+    bool operator==(const ComponentAvailability&) const = default;
+};
+
 class PaintContext {
 public:
     PaintContext(Painter& painter, Rect bounds, bool focused, PlatformServices& platform)
@@ -304,11 +322,13 @@ public:
     MountContext(NodeId node_id,
                  std::function<void()> invalidate,
                  std::function<void()> invalidate_layout,
-                 std::function<void()> invalidate_focus)
+                 std::function<void()> invalidate_focus,
+                 std::function<void()> invalidate_availability = {})
         : node_id_(node_id),
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)),
-          invalidate_focus_(std::move(invalidate_focus)) {}
+          invalidate_focus_(std::move(invalidate_focus)),
+          invalidate_availability_(std::move(invalidate_availability)) {}
 
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     /// Long-lived callback for state changes that only affect painting.
@@ -317,12 +337,17 @@ public:
     [[nodiscard]] std::function<void()> layout_invalidator() const { return invalidate_layout_; }
     /// Long-lived callback for state changes that affect focus availability/scopes.
     [[nodiscard]] std::function<void()> focus_invalidator() const { return invalidate_focus_; }
+    /// Long-lived callback for local visibility/enabled/read-only state changes.
+    [[nodiscard]] std::function<void()> availability_invalidator() const {
+        return invalidate_availability_ ? invalidate_availability_ : std::function<void()>{[] {}};
+    }
 
 private:
     NodeId node_id_{kInvalidNodeId};
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
     std::function<void()> invalidate_focus_;
+    std::function<void()> invalidate_availability_;
 };
 
 class LifecycleContext {
@@ -353,6 +378,23 @@ public:
     virtual ~Component() = default;
 
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
+
+    /// Local availability supplied by generic wrappers/custom components. The
+    /// retained tree resolves this monotonically through ancestry and stores the
+    /// effective result on each component instance.
+    [[nodiscard]] virtual ComponentAvailability local_availability() const noexcept { return {}; }
+    [[nodiscard]] ComponentAvailability effective_availability() const noexcept {
+        return effective_availability_;
+    }
+    [[nodiscard]] VisibilityMode effective_visibility() const noexcept {
+        return effective_availability_.visibility;
+    }
+    [[nodiscard]] bool effective_enabled() const noexcept {
+        return effective_availability_.enabled;
+    }
+    [[nodiscard]] bool effective_read_only() const noexcept {
+        return effective_availability_.read_only;
+    }
 
     /// Focus-scope metadata used by the tree focus manager. Normal components
     /// are not scopes and therefore remain unaffected by scope state.
@@ -431,6 +473,14 @@ public:
     }
 
     virtual void paint(PaintContext&) const = 0;
+
+private:
+    friend class Tree;
+    void set_effective_availability(ComponentAvailability value) noexcept {
+        effective_availability_ = value;
+    }
+
+    ComponentAvailability effective_availability_{};
 };
 
 struct Node {

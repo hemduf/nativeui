@@ -5,8 +5,9 @@
     }
 
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
-        if (!node) return false;
+        if (!node || !node->component->effective_availability().interactive()) return false;
         for (auto* current = node; current; current = current->parent) {
+            if (!current->component->effective_availability().interactive()) return false;
             if (current->component->is_focus_scope() &&
                 !current->component->focus_scope_active()) {
                 return false;
@@ -23,7 +24,8 @@
 
     [[nodiscard]] Node* trapping_scope_for(const Node* node) const noexcept {
         for (auto* current = node; current; current = current->parent) {
-            if (current->component->is_focus_scope() &&
+            if (current->component->effective_availability().interactive() &&
+                current->component->is_focus_scope() &&
                 current->component->focus_scope_active() &&
                 current->component->focus_scope_traps()) {
                 return const_cast<Node*>(current);
@@ -88,10 +90,12 @@
     }
 
     [[nodiscard]] static bool scope_effectively_active(const Node& scope) noexcept {
-        if (!scope.component->is_focus_scope() || !scope.component->focus_scope_active()) {
+        if (!scope.component->effective_availability().interactive() ||
+            !scope.component->is_focus_scope() || !scope.component->focus_scope_active()) {
             return false;
         }
         for (auto* parent = scope.parent; parent; parent = parent->parent) {
+            if (!parent->component->effective_availability().interactive()) return false;
             if (parent->component->is_focus_scope() &&
                 !parent->component->focus_scope_active()) {
                 return false;
