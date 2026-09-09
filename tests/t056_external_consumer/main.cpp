@@ -12,7 +12,7 @@ int main() {
   const auto entries = t056_external::resources::table();
   if (entries.size() != 2) return 1;
   if (entries[0].id != "message") return 2;
-  if (entries[1].id != "punct;semi") return 3;
+  if (entries[1].id != "punct;../semi") return 3;
 
   constexpr std::string_view message = "hello from installed NativeUI\n";
   if (entries[0].bytes.size() != message.size()) return 4;
