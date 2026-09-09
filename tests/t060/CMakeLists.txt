@@ -16,6 +16,23 @@ set(NATIVEUI_BUILD_PLATFORM ON CACHE BOOL "" FORCE)
 add_subdirectory("${NATIVEUI_SOURCE_DIR}" nativeui)
 enable_testing()
 
+# NativeUI's source-tree helper resolves the pinned Pugl root in its own
+# directory scope. Recover that exact source root from the already-created Pugl
+# target so this outer acceptance project does not guess a CPM _deps path.
+if(TARGET nativeui_pugl_common)
+  get_target_property(_t060_pugl_sources nativeui_pugl_common SOURCES)
+elseif(TARGET nativeui_pugl)
+  get_target_property(_t060_pugl_sources nativeui_pugl SOURCES)
+else()
+  message(FATAL_ERROR "T060 application tests could not locate NativeUI's Pugl target")
+endif()
+list(GET _t060_pugl_sources 0 _t060_pugl_source)
+get_filename_component(_t060_pugl_src_dir "${_t060_pugl_source}" DIRECTORY)
+get_filename_component(NATIVEUI_PUGL_SOURCE_DIR "${_t060_pugl_src_dir}" DIRECTORY)
+if(NOT EXISTS "${NATIVEUI_PUGL_SOURCE_DIR}/include/pugl/pugl.h")
+  message(FATAL_ERROR "T060 derived invalid Pugl source root: ${NATIVEUI_PUGL_SOURCE_DIR}")
+endif()
+
 add_executable(nativeui_t060_application_contract
   "${NATIVEUI_SOURCE_DIR}/tests/t060_application_tests.cpp"
 )
