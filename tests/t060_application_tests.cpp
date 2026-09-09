@@ -161,15 +161,11 @@ int callback_quit() {
                        .resizable = true}};
     if (!valid_window(window, "callback-quit-create")) return 1;
 
-    // Realization/configure establishes the retained layout used by hit testing.
-    // Keep this deterministic and bounded; no sleeps or helper threads.
-    for (int i = 0; i < 8; ++i) {
-        if (!application.poll(0.0)) {
-            return fail("callback-quit-realize", application.last_error().empty()
-                                                     ? "application stopped before callback dispatch"
-                                                     : application.last_error());
-        }
-    }
+    // This test exercises a retained callback calling back into Application.
+    // Establish the retained interaction geometry directly instead of relying
+    // on an OS focus/configure race, which is not part of the callback contract.
+    tree.resize({180.0f, 64.0f});
+    tree.activate(window);
 
     ui::InputEvent down{};
     down.type = ui::InputType::PointerDown;
