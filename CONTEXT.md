@@ -26,49 +26,46 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` before the T051 benchmark integration is `3a87070ae1b236a9d68f73e20f489ca5256da2ae`.
+Current `main` before the T060 integration is `ce86c86e663ad5f8464224874039312143146300`.
 
-Completed foundations relevant to the release/lifecycle lane:
+Completed lifecycle/platform foundations relevant to T060:
 
-- #64 / PR #90: standalone ownership frozen as Decision B — one application-level `PUGL_PROGRAM` world; no hidden singleton/shared-world workaround in the legacy constructor path.
-- T042 / PR #93: deterministic headless/embedded/standalone lifecycle stress for every currently supported ownership path.
-- T024: deterministic headless raster/golden foundation.
+- #64 / PR #90: **Decision B** — a standalone application owns one explicit application-level `PUGL_PROGRAM` world; multiple independent PROGRAM worlds are not the supported multi-window model.
+- T042 / PR #93: deterministic supported-path lifecycle stress for headless, embedded and legacy standalone ownership paths.
 - T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
-- T056 / PR #111: deterministic binary resource packaging.
+- T051 / PR #116: deterministic performance harness and regression policy; T052 is now independently in progress as the v0.1 release gate.
 
-## T051 performance harness — PR #116
+## T060 explicit Application ownership — PR #118
 
-T051 is the current lifecycle/release-lane merge candidate. It provides one Release-only deterministic microbenchmark suite and the relative regression policy consumed by T052/T071.
+T060 is the current lifecycle/stress-lane implementation candidate. It turns #64 Decision B into the public standalone ownership model without introducing a hidden singleton or process-global application registry.
 
-Delivered contract:
+Delivered contract on the current branch:
 
-- fixed schema/workload versioning, compiler/OS/architecture/build/commit metadata and JSON round-trip support;
-- exact 5 warmup + 30 measured `steady_clock` sampling, median indices 14/15 and p95 index 28;
-- fixed batch counts for layout, deep hit testing, pointer/keyboard dispatch, short/multiline text editing, control/text headless paint and headless instance lifecycle;
-- deterministic `idle_invalidation` correctness gate: 1,000 logical 10 ms checkpoints (10 seconds logical idle) after the settled frame, requiring exactly zero framework invalidations;
-- benchmark-only allocation interception around measured operation scopes; it never changes `NativeUI::Core` or public allocator/lifetime APIs;
-- workload-contract coverage for exact node/action shapes plus known allocating and non-allocating counter scopes;
-- metadata-safe comparison entry point that rejects incompatible baseline/rerun environments before thresholds are evaluated;
-- timing gate: median >15% **and** p95 >20%, reproduced by two complete independent runs;
-- allocation gate: count or bytes/op >10% with two-run confirmation, or any recurring allocation for explicitly zero-allocation scenarios;
-- CI-generated immutable JSON artifacts; T052 selects/records the controlled v0.1 baseline artifact rather than committing universal machine-specific nanosecond constants.
+- `ui::Application` is non-copyable/non-movable, owns exactly one `PUGL_PROGRAM` world and is UI/main-thread confined;
+- v1 standalone construction is `StandaloneWindow(Application&, UI&, WindowDesc)`; explicit windows borrow the Application world and keep their own UI/ViewCore state;
+- Application-local registration uses monotonically increasing IDs and no raw process-global/window registry;
+- Application must outlive every attached standalone window; destroying it with a registered live window terminates deterministically rather than allowing a dangling borrowed world;
+- `Application::poll()` maps negative/zero/positive finite timeouts to blocking/non-blocking/bounded Pugl updates and rejects NaN/Inf as terminal errors;
+- `QuitPolicy::OnLastWindowClosed` is the default; `ExplicitOnly` suppresses last-window auto-quit;
+- `request_quit()` is idempotent, makes the Application non-runnable and does not destroy/close live windows;
+- PUGL native close and NativeUI quit-key paths notify the same per-Application window bookkeeping;
+- embedded views remain independent `PUGL_MODULE` instances with non-blocking host polling;
+- the old `StandaloneWindow(UI&, ...)` constructor remains only as a deprecated pre-v1 compatibility path and still owns its own world; it does not hide a shared Application.
 
-The benchmark and baseline contract is documented in `docs/performance-benchmarks.md`. Normal benchmark execution never rewrites baselines.
+Dedicated `tests/t060` acceptance coverage includes simultaneous A+B, destroy-A/continue-B, repeated secondary-window creation/destruction, ExplicitOnly, direct and callback-requested quit, negative/zero/positive polling, NaN/Inf rejection, rejected-window behavior on a terminal Application and deterministic Application-before-window lifetime failure. `examples/features/t060_multi_window_application.cpp` supplies interactive and `--self-test` coverage.
+
+A dedicated `T060 Application Contract` workflow validates Linux/X11, Windows/MSVC, macOS and Linux ASan+UBSan. Earlier RED runs exposed and corrected missing outer-project Pugl-source resolution and a callback-test setup dependency on native configure/focus timing; the callback fixture now establishes retained layout/activation directly so it tests callback reentrancy rather than an OS focus race.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(in review) -> T052
-platform/package:  T053(done) -> T047(done) -> T048(done) ----^
-                                       |
-                                       +-> T054
-                                       +-> T056(done) -> T057
-state/widgets:     T059(done) -> T030(done) -> T031(done)
-                                       |
-                                       +-> T032 / T033 / T034 -> T035 / T036
+standalone lifecycle: #64(done) -> T042(done) -> T060(in review)
+release baseline:     T042(done) + T047(done) + T048(done) + T051(done) -> T052(doing)
+platform/package:     T053(done) -> T047(done) -> T048(done)
+state/widgets:        T059(done) -> T030(done) -> T031(done)
 ```
 
-When T051 merges cleanly, T052 becomes dependency-unblocked and is the next high-priority lifecycle/release ticket.
+T060 remains separate from T052: T052 explicitly does not require the multi-window Application API for the v0.1 developer-preview gate.
 
 ## Build / validation
 
@@ -80,24 +77,21 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T051 Release benchmark validation:
+Dedicated T060 native acceptance project:
 
 ```bash
-cmake -S tests/t051 -B build-t051 -G Ninja \
+cmake -S tests/t060 -B build-t060 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_SOURCE_DIR="$PWD" \
-  -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)"
-cmake --build build-t051 --parallel
-ctest --test-dir build-t051 --output-on-failure
-./build-t051/nativeui_benchmarks --self-test
-./build-t051/nativeui_benchmarks --json t051-results.json
+  -DNATIVEUI_SOURCE_DIR="$PWD"
+cmake --build build-t060 --parallel
+ctest --test-dir build-t060 --output-on-failure
 ```
 
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate gate.
+Linux runs the native tests under Xvfb/Mesa; macOS and Windows use their native platform backends. The dedicated sanitizer configuration enables Linux ASan+UBSan for the same T060 contract.
 
 ## Next actions
 
-1. Require exact-head T051 contract, Release benchmark, normal CI and T042 lifecycle-stress workflows to complete green.
-2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Merge PR #116 only after current-main synchronization and exact-head validation are both satisfied.
-4. Mark #51 Done/`status:done`, close it, then move T052 / #52 from Blocked to Ready and continue that release/lifecycle dependency chain.
+1. Require the exact current T060 head to pass the dedicated Linux/X11, Windows, macOS and Linux ASan+UBSan contract matrix plus the repository normal CI and T042 lifecycle-stress workflow.
+2. Complete the mandatory `CODE_REVIEW.md` pass against that exact head and resolve every Blocking/Important finding.
+3. Update `DESIGN.md` and `ROADMAP.md` with the final explicit Application ownership contract.
+4. Refresh from current `main` again if it advances, revalidate the exact merge candidate, then merge PR #118 and mark #72 Done/closed.
