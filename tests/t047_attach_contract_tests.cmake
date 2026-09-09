@@ -12,6 +12,20 @@ set(_root "${CMAKE_CURRENT_BINARY_DIR}/t047-attach-contract")
 file(REMOVE_RECURSE "${_root}")
 file(MAKE_DIRECTORY "${_root}")
 
+# The contract intentionally configures many isolated consumer projects so one
+# fatal validation case cannot contaminate another. Visual Studio generator
+# discovery dominates that configure-only test on hosted Windows runners and
+# previously exceeded CTest's 30 s bound even though the same contract passed as
+# a direct CI step. Prefer Ninja for these disposable configure fixtures when it
+# is available; assertions and target semantics are generator-independent.
+set(_t047_generator_args)
+if(WIN32)
+  find_program(_t047_ninja NAMES ninja ninja-build)
+  if(_t047_ninja)
+    list(APPEND _t047_generator_args -G Ninja)
+  endif()
+endif()
+
 function(_t047_run_case case expect_success body)
   set(_src "${_root}/${case}-src")
   set(_build "${_root}/${case}-build")
@@ -44,6 +58,7 @@ endfunction()
 
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -S "${_src}" -B "${_build}"
+      ${_t047_generator_args}
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _stdout
     ERROR_VARIABLE _stderr
