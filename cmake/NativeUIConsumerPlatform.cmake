@@ -357,7 +357,7 @@ function(_nativeui_attach_consumer_platform)
       OBJC_VISIBILITY_PRESET hidden
       VISIBILITY_INLINES_HIDDEN YES
     )
-    target_compile_features("${_nativeui_bridge}" PUBLIC c_std_99)
+    target_compile_features("${_nativeui_bridge}" PRIVATE c_std_99)
     target_include_directories("${_nativeui_bridge}"
       PUBLIC "${_pugl_root}/include"
       PRIVATE "${_pugl_root}/src"
