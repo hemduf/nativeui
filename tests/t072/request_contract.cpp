@@ -28,14 +28,18 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    if (!calls.complete(client_a, first, LinuxDbusCompletion{LinuxDbusErrorCode::None}) ||
+    if (!calls.complete(
+            client_a, first,
+            LinuxDbusCompletion{LinuxDbusErrorCode::None, {}, {}}) ||
         calls.pending_count() != 0 || ledger.pending_request_count() != 0 ||
         !completions.empty()) {
         return EXIT_FAILURE;
     }
     if (owner.checkpoint() != 1 || completions.size() != 1 ||
         completions.front() != LinuxDbusErrorCode::None ||
-        calls.complete(client_a, first, LinuxDbusCompletion{LinuxDbusErrorCode::RemoteError}) ||
+        calls.complete(
+            client_a, first,
+            LinuxDbusCompletion{LinuxDbusErrorCode::RemoteError, {}, {}}) ||
         calls.cancel(client_a, first)) {
         return EXIT_FAILURE;
     }
@@ -78,8 +82,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    if (!calls.complete(client_a, saturated.front(),
-                        LinuxDbusCompletion{LinuxDbusErrorCode::None}) ||
+    if (!calls.complete(
+            client_a, saturated.front(),
+            LinuxDbusCompletion{LinuxDbusErrorCode::None, {}, {}}) ||
         calls.pending_count() != kLinuxDbusMaxPendingCalls - 1 ||
         ledger.pending_request_count() != kLinuxDbusMaxPendingCalls - 1) {
         return EXIT_FAILURE;
@@ -108,8 +113,9 @@ int main() {
         return EXIT_FAILURE;
     }
     rejected_owner.shutdown();
-    if (!rejected_calls.complete(client_a, rejected,
-                                 LinuxDbusCompletion{LinuxDbusErrorCode::None}) ||
+    if (!rejected_calls.complete(
+            client_a, rejected,
+            LinuxDbusCompletion{LinuxDbusErrorCode::None, {}, {}}) ||
         rejected_callback_ran || rejected_ledger.pending_request_count() != 0) {
         return EXIT_FAILURE;
     }
@@ -124,8 +130,9 @@ int main() {
             client_a, teardown_dispatcher, 30s,
             [&](LinuxDbusCompletion) { teardown_callback_ran = true; });
         if (teardown_id == kInvalidLinuxDbusRequestId ||
-            !teardown_calls.complete(client_a, teardown_id,
-                                     LinuxDbusCompletion{LinuxDbusErrorCode::None}) ||
+            !teardown_calls.complete(
+                client_a, teardown_id,
+                LinuxDbusCompletion{LinuxDbusErrorCode::None, {}, {}}) ||
             teardown_ledger.pending_request_count() != 0) {
             return EXIT_FAILURE;
         }
