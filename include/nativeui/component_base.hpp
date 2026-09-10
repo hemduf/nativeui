@@ -465,6 +465,12 @@ public:
 
     virtual void focus_changed(bool, FocusContext&) {}
 
+    /// Called on ancestors after keyboard focus moves to one of their descendants.
+    /// The descendant bounds are expressed in this component's local logical
+    /// coordinates for the current layout. The hook is not repeated when focus is
+    /// merely refreshed on the same node.
+    virtual void descendant_focus_changed(Rect) {}
+
     /// Handle a targeted input event. Returning `Handled` consumes the event;
     /// returning `Ignored` leaves it unconsumed. The current tree routes to one
     /// leaf target first, then bubbles ignored input through ancestors.
