@@ -52,6 +52,14 @@ struct LinuxDbusCompletion final {
 
 using LinuxDbusCompletionCallback = std::function<void(LinuxDbusCompletion)>;
 
+struct LinuxDbusMethodCall final {
+    std::string destination;
+    std::string path;
+    std::string interface;
+    std::string member;
+    std::chrono::milliseconds timeout{kLinuxDbusDefaultTimeout};
+};
+
 [[nodiscard]] bool linux_dbus_library_probe() noexcept;
 [[nodiscard]] bool linux_dbus_initialize_threads() noexcept;
 [[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
@@ -90,10 +98,10 @@ private:
 };
 
 /// Internal terminal-state registry for outbound method calls. It owns no
-/// DBusPendingCall objects yet: the libdbus send/reply layer binds to this seam
-/// in the following TDD unit. Completion removes transport capacity before it
-/// posts the copied result to the owning T065 Dispatcher. Dispatcher rejection
-/// is terminal and never falls back to the D-Bus I/O thread.
+/// DBusPendingCall objects: the libdbus layer binds its pending objects to this
+/// registry. Completion removes transport capacity before it posts the copied
+/// result to the owning T065 Dispatcher. Dispatcher rejection is terminal and
+/// never falls back to the D-Bus I/O thread.
 class LinuxDbusPendingCallSet final {
 public:
     explicit LinuxDbusPendingCallSet(LinuxDbusResourceLedger& ledger);
@@ -136,6 +144,16 @@ public:
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::string unique_name() const;
+
+    /// Thread-safe non-blocking method call. Arguments/reply values are added
+    /// by the value-codec unit; this seam already owns reply/error/timeout and
+    /// cancellation lifetime. Invalid syntax or inactive transport returns 0.
+    [[nodiscard]] LinuxDbusRequestId call_method(LinuxDbusClientId client,
+                                                 ui::Dispatcher dispatcher,
+                                                 const LinuxDbusMethodCall& call,
+                                                 LinuxDbusCompletionCallback callback);
+    [[nodiscard]] bool cancel_request(LinuxDbusClientId client, LinuxDbusRequestId id);
+    [[nodiscard]] std::size_t pending_request_count() const noexcept;
 
 private:
     struct Impl;
