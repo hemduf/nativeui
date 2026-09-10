@@ -409,6 +409,13 @@ public:
         }
     }
 
+    void descendant_focus_changed(Rect descendant_bounds) override {
+        const auto offset = state_->offset();
+        descendant_bounds.x += offset.x;
+        descendant_bounds.y += offset.y;
+        (void)ensure_visible(*state_, descendant_bounds, ScrollAlignment::Nearest);
+    }
+
     void deactivate(LifecycleContext&) override { pan_active_ = false; }
 
     void paint(PaintContext&) const override {}
