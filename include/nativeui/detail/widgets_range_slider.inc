@@ -192,14 +192,16 @@ private:
 
     [[nodiscard]] RangeSliderThumb choose_thumb(
         float raw_target, const RangeValue& effective) const noexcept {
-        const float lower_distance = std::abs(raw_target - effective.low);
-        const float upper_distance = std::abs(raw_target - effective.high);
+        const double lower_distance = std::abs(
+            static_cast<double>(raw_target) - static_cast<double>(effective.low));
+        const double upper_distance = std::abs(
+            static_cast<double>(raw_target) - static_cast<double>(effective.high));
         if (lower_distance < upper_distance) return RangeSliderThumb::Lower;
         if (upper_distance < lower_distance) return RangeSliderThumb::Upper;
         return has_active_thumb_ ? active_thumb_ : RangeSliderThumb::Lower;
     }
 
-    [[nodiscard]] RangeValue edited_value(float raw_target) const noexcept {
+    [[nodiscard]] RangeValue edited_value(double raw_target) const noexcept {
         const auto effective = effective_range(state_.get());
         RangeValue next = effective;
         const float normalized = domain_.normalize(raw_target);
@@ -269,27 +271,27 @@ private:
         const float current = active_thumb_ == RangeSliderThumb::Lower
             ? effective.low
             : effective.high;
-        const float increment = domain_.keyboard_increment(event.shift);
-        float target = current;
+        const double increment = domain_.keyboard_increment(event.shift);
+        double target = static_cast<double>(current);
 
         switch (event.key) {
             case Key::Left:
             case Key::Down:
-                target = current - increment;
+                target = static_cast<double>(current) - increment;
                 break;
             case Key::Right:
             case Key::Up:
-                target = current + increment;
+                target = static_cast<double>(current) + increment;
                 break;
             case Key::Home:
                 target = active_thumb_ == RangeSliderThumb::Lower
-                    ? domain_.minimum()
-                    : effective.low;
+                    ? static_cast<double>(domain_.minimum())
+                    : static_cast<double>(effective.low);
                 break;
             case Key::End:
                 target = active_thumb_ == RangeSliderThumb::Lower
-                    ? effective.high
-                    : domain_.maximum();
+                    ? static_cast<double>(effective.high)
+                    : static_cast<double>(domain_.maximum());
                 break;
             default:
                 return EventResult::Ignored;
