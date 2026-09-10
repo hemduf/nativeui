@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace ui::detail {
 
@@ -42,6 +44,154 @@ enum class LinuxDbusErrorCode {
     LocalProtocolError,
     Cancelled,
     Shutdown,
+};
+
+enum class LinuxDbusValueKind {
+    Boolean,
+    Byte,
+    Int16,
+    UInt16,
+    Int32,
+    UInt32,
+    Int64,
+    UInt64,
+    Double,
+    String,
+    ObjectPath,
+    Signature,
+    Array,
+    Dictionary,
+    Variant,
+    Struct,
+};
+
+/// Internal plain-value representation shared by the Portal/accessibility
+/// clients. It contains no libdbus objects and owns all text/container data.
+/// Container shape is validated before encoding; malformed values fail
+/// atomically rather than being partially interpreted by callers.
+struct LinuxDbusValue final {
+    LinuxDbusValueKind kind{LinuxDbusValueKind::String};
+    bool boolean_value{};
+    std::uint8_t byte_value{};
+    std::int16_t int16_value{};
+    std::uint16_t uint16_value{};
+    std::int32_t int32_value{};
+    std::uint32_t uint32_value{};
+    std::int64_t int64_value{};
+    std::uint64_t uint64_value{};
+    double double_value{};
+    std::string text;
+    std::string element_signature;
+    std::vector<LinuxDbusValue> elements;
+    std::vector<std::pair<std::string, LinuxDbusValue>> entries;
+
+    [[nodiscard]] static LinuxDbusValue boolean(bool value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Boolean;
+        result.boolean_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue byte(std::uint8_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Byte;
+        result.byte_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue int16(std::int16_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Int16;
+        result.int16_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue uint16(std::uint16_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::UInt16;
+        result.uint16_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue int32(std::int32_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Int32;
+        result.int32_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue uint32(std::uint32_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::UInt32;
+        result.uint32_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue int64(std::int64_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Int64;
+        result.int64_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue uint64(std::uint64_t value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::UInt64;
+        result.uint64_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue floating(double value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Double;
+        result.double_value = value;
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue string(std::string value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::String;
+        result.text = std::move(value);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue object_path(std::string value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::ObjectPath;
+        result.text = std::move(value);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue signature(std::string value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Signature;
+        result.text = std::move(value);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue array(std::string element_type,
+                                              std::vector<LinuxDbusValue> values) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Array;
+        result.element_signature = std::move(element_type);
+        result.elements = std::move(values);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue dictionary(
+        std::vector<std::pair<std::string, LinuxDbusValue>> values) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Dictionary;
+        result.entries = std::move(values);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue variant(LinuxDbusValue value) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Variant;
+        result.elements.push_back(std::move(value));
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue variant_many(std::vector<LinuxDbusValue> values) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Variant;
+        result.elements = std::move(values);
+        return result;
+    }
+    [[nodiscard]] static LinuxDbusValue structure(std::vector<LinuxDbusValue> values) {
+        LinuxDbusValue result;
+        result.kind = LinuxDbusValueKind::Struct;
+        result.elements = std::move(values);
+        return result;
+    }
+
+    bool operator==(const LinuxDbusValue&) const = default;
 };
 
 struct LinuxDbusCompletion final {

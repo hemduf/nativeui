@@ -15,6 +15,7 @@ function(nativeui_add_linux_dbus_transport)
 
   add_library(nativeui_linux_dbus STATIC
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../src/linux_dbus.cpp"
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../src/linux_dbus_codec.cpp"
   )
   set_target_properties(nativeui_linux_dbus PROPERTIES
     POSITION_INDEPENDENT_CODE ON
