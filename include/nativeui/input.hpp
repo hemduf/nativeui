@@ -116,9 +116,9 @@ struct InputEvent {
     bool primary{};
 
     [[nodiscard]] bool primary_shortcut() const noexcept { return primary; }
-    [[nodiscard]] bool offers_drop_type(std::string_view type) const noexcept {
+    [[nodiscard]] bool offers_drop_type(std::string_view requested_type) const noexcept {
         for (const auto& offered : drop_types) {
-            if (offered == type) return true;
+            if (offered == requested_type) return true;
         }
         return false;
     }

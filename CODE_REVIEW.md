@@ -14,6 +14,8 @@ Review findings are classified as:
 - **Important** — correctness, performance, ownership or maintainability defect that is likely to become a production issue. Fix before merge unless explicitly split into a tracked follow-up with no current correctness risk.
 - **Advisory** — style or non-critical improvement.
 
+An unapproved compiler warning from NativeUI-owned code is a **Blocking** finding. NativeUI-owned targets must pass with the default empty `NATIVEUI_ALLOWED_WARNINGS`; an exception is valid only when the exact diagnostic is documented in the ticket/PR and explicitly enabled through that CMake cache setting. Target/source-local suppression (`-Wno-*`, `/wd*`, diagnostic pragmas, `COMPILE_WARNING_AS_ERROR=OFF`, or equivalent) is not an acceptable substitute for the explicit warning policy.
+
 Plugin-host safety takes precedence over convenience. "It works in the standalone example" is not sufficient validation.
 
 ## 2. Per-instance isolation — mandatory
@@ -284,7 +286,7 @@ Every code ticket must run the smallest applicable subset plus the full relevant
 
 - [ ] targeted unit/integration tests for the change;
 - [ ] full relevant CTest suite;
-- [ ] compiler warnings reviewed;
+- [ ] NativeUI-owned targets emit zero compiler warnings with the default empty `NATIVEUI_ALLOWED_WARNINGS`; any approved diagnostic is documented and explicitly opted in through CMake;
 - [ ] ownership/lifetime review;
 - [ ] global/static mutable-state review;
 - [ ] callback/reentrancy review;
