@@ -22,6 +22,23 @@ void nativeui_header_compile_t038_visual_state() {
     (void)interaction;
 }
 
+void nativeui_header_compile_t038_button_style(const ui::Theme& theme) {
+    ui::ButtonStyle style{};
+    style.base.fill = ui::Color{0.1f, 0.2f, 0.3f, 1.0f};
+    style.hovered.fill = ui::Color{0.2f, 0.3f, 0.4f, 1.0f};
+    style.pressed.border_width = 3.0f;
+    style.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    style.focused.border = ui::Color{0.9f, 0.8f, 0.1f, 1.0f};
+    style.read_only.text_size = 12.0f;
+
+    auto inherited = ui::default_button_style(theme);
+    const auto resolved = ui::resolve_button_style(
+        inherited,
+        style,
+        ui::VisualState{.enabled = true, .hovered = true, .focused = true});
+    (void)resolved;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
