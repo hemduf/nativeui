@@ -1,0 +1,153 @@
+name: T044 Native Pointer Capture
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/t044-pointer-capture.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/nativeui/**'
+      - 'src/**'
+      - 'tests/t044/**'
+      - 'tests/t044_pointer_capture_smoke.cpp'
+      - 'tests/pointer_capture_tests.cpp'
+      - 'tests/test_support.hpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t044-pointer-capture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-capture:
+    name: T044 ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+          - name: Linux X11
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S tests/t044 -B build-t044 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S tests/t044 -B build-t044 -A x64
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build T044 native smoke
+        run: cmake --build build-t044 --config Release --parallel 2
+
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build-t044\Release\opengl32.dll -Force
+          Copy-Item $gallium.FullName build-t044\Release\libgallium_wgl.dll -Force
+
+      - name: Test Linux X11
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
+          sh -c 'glxinfo -B && ctest --test-dir build-t044 --output-on-failure -C Release'
+
+      - name: Test Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GALLIUM_DRIVER = 'llvmpipe'
+          ctest --test-dir build-t044 --output-on-failure -C Release
+
+      - name: Test macOS
+        if: runner.os == 'macOS'
+        run: ctest --test-dir build-t044 --output-on-failure -C Release
+
+  linux-sanitizers:
+    name: T044 Linux ASan + UBSan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+
+      - name: Configure sanitized T044 smoke
+        run: >-
+          cmake -S tests/t044 -B build-t044-sanitize -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_ENABLE_SANITIZERS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Build sanitized T044 smoke
+        run: cmake --build build-t044-sanitize --parallel 2
+
+      - name: Test sanitized T044 smoke
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
+          ctest --test-dir build-t044-sanitize --output-on-failure
