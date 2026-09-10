@@ -114,5 +114,26 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    LinuxDbusResourceLedger teardown_ledger;
+    DispatcherOwner teardown_owner;
+    const auto teardown_dispatcher = teardown_owner.dispatcher();
+    bool teardown_callback_ran = false;
+    {
+        LinuxDbusPendingCallSet teardown_calls{teardown_ledger};
+        const auto teardown_id = teardown_calls.begin(
+            client_a, teardown_dispatcher, 30s,
+            [&](LinuxDbusCompletion) { teardown_callback_ran = true; });
+        if (teardown_id == kInvalidLinuxDbusRequestId ||
+            !teardown_calls.complete(client_a, teardown_id,
+                                     LinuxDbusCompletion{LinuxDbusErrorCode::None}) ||
+            teardown_ledger.pending_request_count() != 0) {
+            return EXIT_FAILURE;
+        }
+        teardown_calls.shutdown();
+    }
+    if (teardown_owner.checkpoint() != 1 || teardown_callback_ran) {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
