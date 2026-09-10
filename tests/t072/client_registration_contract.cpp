@@ -1,5 +1,7 @@
 #include "detail/linux_dbus.hpp"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+
 #include <cstdlib>
 #include <limits>
 
@@ -14,6 +16,46 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    DispatcherOwner owner;
+    constexpr LinuxDbusClientId unregistered =
+        std::numeric_limits<LinuxDbusClientId>::max();
+    const LinuxDbusSignalMatch match{
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameOwnerChanged",
+    };
+
+    bool unregistered_rejected = true;
+    if (transport.call_method(
+            unregistered,
+            owner.dispatcher(),
+            LinuxDbusMethodCall{
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetId",
+            },
+            [](LinuxDbusCompletion) {}) != kInvalidLinuxDbusRequestId) {
+        unregistered_rejected = false;
+    }
+    if (transport.subscribe_signal(
+            unregistered, owner.dispatcher(), match,
+            [](LinuxDbusSignal) {}) != kInvalidLinuxDbusSubscriptionId) {
+        unregistered_rejected = false;
+    }
+    if (transport.register_object_path(
+            unregistered,
+            "/org/nativeui/T072/Unregistered",
+            [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            }) != kInvalidLinuxDbusObjectRegistrationId) {
+        unregistered_rejected = false;
+    }
+    if (!unregistered_rejected) {
+        return EXIT_FAILURE;
+    }
+
     const auto client_a = transport.register_client();
     const auto client_b = transport.register_client();
     if (client_a == kInvalidLinuxDbusClientId ||
@@ -23,26 +65,36 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    constexpr LinuxDbusClientId unregistered =
-        std::numeric_limits<LinuxDbusClientId>::max();
-    if (transport.register_object_path(
-            unregistered,
-            "/org/nativeui/T072/Unregistered",
-            [](const LinuxDbusMethodRequest&) {
-                return LinuxDbusMethodReply::method_return({});
-            }) != kInvalidLinuxDbusObjectRegistrationId) {
-        return EXIT_FAILURE;
-    }
+    transport.release_client(client_a);
+    transport.release_client(client_a);
 
-    transport.release_client(client_a);
-    transport.release_client(client_a);
-    if (transport.client_count() != 1 ||
-        transport.register_object_path(
+    bool released_rejected = true;
+    if (transport.call_method(
+            client_a,
+            owner.dispatcher(),
+            LinuxDbusMethodCall{
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetId",
+            },
+            [](LinuxDbusCompletion) {}) != kInvalidLinuxDbusRequestId) {
+        released_rejected = false;
+    }
+    if (transport.subscribe_signal(
+            client_a, owner.dispatcher(), match,
+            [](LinuxDbusSignal) {}) != kInvalidLinuxDbusSubscriptionId) {
+        released_rejected = false;
+    }
+    if (transport.register_object_path(
             client_a,
             "/org/nativeui/T072/Released",
             [](const LinuxDbusMethodRequest&) {
                 return LinuxDbusMethodReply::method_return({});
             }) != kInvalidLinuxDbusObjectRegistrationId) {
+        released_rejected = false;
+    }
+    if (!released_rejected || transport.client_count() != 1) {
         return EXIT_FAILURE;
     }
 
