@@ -2,6 +2,7 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <utility>
@@ -70,12 +71,18 @@ public:
         return pending_request_;
     }
 
+    [[nodiscard]] bool observe_scale(float reported_scale) noexcept {
+        if (!valid_scale(reported_scale)) return false;
+        last_valid_scale_ = reported_scale;
+        return true;
+    }
+
     /// Apply one authoritative native configure snapshot. A valid reported
     /// scale is adopted even if the physical extent is transiently zero, but
     /// zero/non-finite extents preserve the last valid logical viewport and do
     /// not produce a layout size.
     [[nodiscard]] std::optional<Size> configure(Size physical, float reported_scale) noexcept {
-        last_valid_scale_ = retain_last_valid_scale(reported_scale, last_valid_scale_);
+        (void)observe_scale(reported_scale);
         if (!valid_physical_extent(physical)) {
             renderable_ = false;
             return std::nullopt;
@@ -104,7 +111,7 @@ private:
     float last_valid_scale_{1.0f};
     Size logical_size_{};
     Size physical_size_{};
-    bool renderable_{true};
+    bool renderable_{};
     std::optional<Size> pending_request_;
 };
 
