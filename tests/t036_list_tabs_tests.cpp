@@ -125,13 +125,13 @@ void external_list_selection_reveals_selected_row() {
 
     ui::HeadlessRenderer renderer{{120.0f, 60.0f}, 1.0f};
     NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(20, 15), ui::colors::selection));
+    NUI_CHECK(pixel_matches(renderer.pixel(8, 15), ui::colors::accent));
 
     // T036 requires selection changes, not only user-navigation writes, to
     // keep the selected row visible through the shared T034 ScrollState path.
     selected.set(5);
     NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(20, 45), ui::colors::selection));
+    NUI_CHECK(pixel_matches(renderer.pixel(8, 45), ui::colors::accent));
 }
 
 void deterministic_headless_states() {
@@ -142,8 +142,8 @@ void deterministic_headless_states() {
             .item(2, ui::Spacer{120.0f, 30.0f})};
         ui::HeadlessRenderer renderer{{120.0f, 60.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(20, 15), ui::colors::selection));
-        NUI_CHECK(!pixel_matches(renderer.pixel(20, 45), ui::colors::selection));
+        NUI_CHECK(pixel_matches(renderer.pixel(8, 15), ui::colors::accent));
+        NUI_CHECK(!pixel_matches(renderer.pixel(8, 45), ui::colors::accent));
     }
 
     {
@@ -153,13 +153,13 @@ void deterministic_headless_states() {
             .tab(2, "Two", ui::Spacer{200.0f, 40.0f})};
         ui::HeadlessRenderer renderer{{200.0f, 100.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(pixel_matches(renderer.pixel(20, 18), ui::colors::selection));
+        NUI_CHECK(pixel_matches(renderer.pixel(20, 18), ui::colors::input));
         NUI_CHECK(pixel_matches(renderer.pixel(150, 18), ui::colors::panel));
 
         selected.set(2);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 18), ui::colors::panel));
-        NUI_CHECK(pixel_matches(renderer.pixel(150, 18), ui::colors::selection));
+        NUI_CHECK(pixel_matches(renderer.pixel(150, 18), ui::colors::input));
     }
 }
 
