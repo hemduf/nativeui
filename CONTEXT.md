@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-09
+**Updated:** 2026-09-10
 
 ## Mission and invariants
 
@@ -18,65 +18,72 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
+- Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`. This reviewed pin includes the X11 `SelectionNotify.property == None` guard owned by #124 / PR #125 in addition to the established drag-and-drop fixes.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current merged baseline
+## Current baseline
 
-Current `main` before T032 integration is `ce86c86e663ad5f8464224874039312143146300`.
+`main` `15df68e8f72f02abadbccdba579ab6c1b0ee8409` contains the completed T057 ResourceManager and its post-merge recovery/roadmap synchronization. PR #125 is the active P0 dependency-correction candidate on top of that baseline.
 
-Completed foundations relevant to the current widget/release frontier:
+Completed foundations relevant to this lane:
 
-- #64 / PR #90: standalone ownership frozen as Decision B; one application-level `PUGL_PROGRAM` world and no hidden singleton/shared-world workaround in the legacy constructor path.
-- T042 / PR #93: deterministic headless/embedded/standalone lifecycle stress for every currently supported ownership path.
-- T053 / T047 / T048: consumer-scoped macOS bridge plus relocatable low-level package/external-consumer qualification.
-- T056 / PR #111: deterministic binary-resource packaging.
-- T059 / PR #89: generic inherited visibility/enabled/read-only component state.
-- T030 / PR #94: Button.
-- T031 / PR #95: Checkbox and typed RadioGroup/RadioButton.
-- T051 / PR #116: reproducible Release benchmark harness and regression-budget policy, merged in current `main`.
+- T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
+- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
+- T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
+- T051 / PR #116: reproducible Release benchmark and regression policy.
+- T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
+- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging with sorted immutable generated tables.
+- T057 / PR #126: immutable non-owning `ResourceManager` plus explicit allocating `ResourceManagerProvider` adapter.
 
-T052 / issue #52 is an independent release-lane work item and is already in progress. It must not absorb or serialize the widget lane.
+## T057 completed state
 
-## T032 Slider / RangeSlider — PR #115
-
-T032 is the current retained-state/widget completion candidate. It is refreshed from current `main` while preserving the merged T051 release infrastructure.
+T057 is merged and issue #69 is closed Done.
 
 Delivered contract:
 
-- one shared `detail::SliderDomain` validates finite `minimum < maximum`, finite non-negative step, quantize-then-clamp user writes and safe render-only external-state fallback;
-- `ui::Slider` supports horizontal/vertical pointer capture, Arrow/Home/End keyboard editing, exact stepped/continuous increments, optional display-only formatting and T059 Disabled/Hidden/Collapsed/ReadOnly semantics;
-- `ui::RangeSlider` / `RangeValue` uses the same numeric domain, selects the nearest thumb from raw pointer position before quantization, keeps the selected thumb stable for the interaction and enforces no crossing;
-- external NaN/Inf/out-of-range state is made finite/clamped only for rendering/hit testing and is never silently rewritten by mount/paint;
-- interaction bookkeeping is completed before synchronous `State::set()` boundaries so observer reentrancy cannot cause duplicate writes or stale `InputContext` access;
-- visual state is per instance and covers Normal/Hover/Pressed/Focused/Disabled/ReadOnly;
-- no platform/native control, process-global widget registry, singleton or `thread_local` state is introduced;
-- dedicated value-domain, completion/reentrancy, headless visual and existing widget integration tests are registered;
-- `examples/features/t032_slider.cpp` provides the required interactive example and deterministic `--self-test`.
+- `ui::ResourceManager` borrows `std::span<const EmbeddedResourceEntry>` and performs one allocation-free O(N) validation pass;
+- valid IDs are non-empty and strictly ascending by exact unsigned-byte lexicographic comparison;
+- invalid tables fail atomically: direct lookup/enumeration APIs behave empty/false and retain only a small enum-backed diagnostic;
+- `find()` uses binary search, is allocation-free and returns `ResourceView` spans pointing to original storage;
+- copy/move managers remain lightweight immutable views with no registry/cache/mutex; independent managers remain isolated and concurrent read-only lookup is safe for live immutable backing storage;
+- `ResourceManagerProvider` is the explicit compatibility seam for `ResourceProvider`; successful non-empty loads copy into the owned vector and are intentionally not real-time safe;
+- ImageCache and SvgCache consume the adapter without manager-specific decoding APIs;
+- the actual T056 generated table is consumed by build-tree and relocated install-tree external consumers;
+- `t057_embedded_resources --self-test` covers direct lookup, provider copy semantics and SVG integration; the public header has an isolated compile probe.
 
-Mandatory review found and corrected one Important defect: RangeSlider initially selected a thumb after step quantization, which could manufacture a false tie. The corrected implementation chooses from the raw pointer-domain value and only quantizes the eventual State write. The current production diff has no known Blocking/Important finding.
+TDD correction cycles covered empty-resource ownership semantics, exact generated-table byte ordering, allocation instrumentation, extensible public-header contracts and deterministic SVG contain-fit self-test sampling.
 
-The branch has been structurally synchronized with current `main`; exact-head normal CI and T042 Lifecycle Stress must be green again after this synchronization/documentation update before merge.
+Final evidence:
+
+- exact PR head `20ec256241c9419b5a4d60f8f68968f4433d2855`;
+- CI #600 passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts;
+- final `CODE_REVIEW.md` pass reports no Blocking/Important finding and no unresolved review thread;
+- PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`;
+- issue #69 is closed with `status:done` and a completed review/validation record.
+
+## Active P0 platform correction — #124 / PR #125
+
+PR #125 advances the shared Pugl pin to `195f79b22644010c81a5e0c3231c591856787ec6`. The defect was in the X11 failed-selection path: `SelectionNotify.property == None` could reach `XGetWindowProperty()` as atom `None`, causing `BadAtom` during lifecycle/clipboard stress. The reviewed Pugl correction rejects that path before the X11 property read; NativeUI does not weaken the T042 fixture or introduce a local workaround.
+
+The pre-refresh dependency-only candidate passed normal CI and T042 Lifecycle Stress. After synchronization with current `main` and the required dependency documentation, the final exact head must pass the same relevant gates before merge.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(Doing)
-platform/package:  T053(done) -> T047(done) -> T048(done) ----^
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
+platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
-                                       +-> T054
-                                       +-> T056(done) -> T057
-state/widgets:     T059(done) -> T030(done) -> T031(done)
-                                       |
-                                       +-> T032(current) -> T037
-                                       +-> T033(Ready)
-                                       +-> T034(Ready) -> T035 / T036
+                                       +-> T054(done)
+                                       +-> T056(done) + T022(done) -> T057(done)
+platform fix:       #124 / PR #125 (active P0 Pugl pin correction)
 ```
 
-After T032 merges, T037 becomes dependency-unblocked because T030 is already complete. T033 and T034 remain independent Ready widget work.
+T059, T030, #64 and T042 are owned by other lanes and must not be folded into unrelated package/resource work. #124 / PR #125 remains an independent Pugl/X11 correction stream.
+
+The next platform/package selection must be made from live GitHub dependency/status data. T064/T072 remain blocked by T065, while T065 is dependency-ready but shares an event-loop integration seam with the active T060 stream; re-check current branches/PRs and conflict risk before starting it. Platform-hardening tickets such as T043/T044 are separate issue scopes and should only be taken if they are the live unowned choice for this lane.
 
 ## Build / validation
 
@@ -88,13 +95,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T051's Release benchmark suite remains available independently under `tests/t051` and is consumed by T052; T032 must preserve it unchanged.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T042 lifecycle stress remains an independent exact-head gate for the Pugl correction.
 
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate required gate.
+## Next actions
 
-## Next state/widget actions
-
-1. Require exact-head T032 normal CI and T042 Lifecycle Stress to complete green after current-main synchronization.
-2. Refresh the mandatory `CODE_REVIEW.md` record against that exact head and resolve any Blocking/Important finding regression-first.
-3. Merge PR #115 only when current-main synchronization, exact-head validation and final review are all satisfied; mark #32 Done/closed.
-4. Move T037 to Ready if its other explicit dependencies are complete, then continue the highest-value dependency-unblocked widget work without taking platform/package/lifecycle tickets.
+1. Finish exact-head normal CI and T042 validation for PR #125 after current-main synchronization and documentation completion.
+2. Perform the mandatory final `CODE_REVIEW.md` pass; merge #125 only with no Blocking/Important finding.
+3. Synchronize #124/ROADMAP completion state in the merge cycle and close the issue Done.
+4. Re-evaluate the open T032/T060/T052/T033 branches against the new Pugl baseline and refresh them without widening their scopes.
+5. Continue dependency-unblocked work using strict TDD, exact-head platform validation and the repository review policy.
