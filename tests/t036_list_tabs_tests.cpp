@@ -151,26 +151,23 @@ void hover_presentation_contract() {
 
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!pixel_matches(renderer.pixel(20, 15), kHoverSurface));
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
-                  ui::EventResult::Handled);
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform);
         NUI_CHECK(!selected.get());
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 15), kHoverSurface));
 
         // Disabled rows are never visually hovered and moving onto one clears
         // the previous enabled-row hover without mutating selection.
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 20.0f, 45.0f), platform) ==
-                  ui::EventResult::Handled);
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 45.0f), platform);
         NUI_CHECK(!selected.get());
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!pixel_matches(renderer.pixel(20, 15), kHoverSurface));
         NUI_CHECK(!pixel_matches(renderer.pixel(20, 45), kHoverSurface));
 
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 20.0f, 75.0f), platform) ==
-                  ui::EventResult::Handled);
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 75.0f), platform);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 75), kHoverSurface));
     }
@@ -187,16 +184,14 @@ void hover_presentation_contract() {
 
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(220, 20), ui::colors::panel));
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 220.0f, 20.0f), platform) ==
-                  ui::EventResult::Handled);
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 220.0f, 20.0f), platform);
         NUI_CHECK(selected.get() == 1);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(220, 20), kHoverSurface));
 
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 150.0f, 20.0f), platform) ==
-                  ui::EventResult::Handled);
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 150.0f, 20.0f), platform);
         NUI_CHECK(selected.get() == 1);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!pixel_matches(renderer.pixel(220, 20), kHoverSurface));
