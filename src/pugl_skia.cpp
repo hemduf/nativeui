@@ -1,5 +1,12 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
+#if defined(__APPLE__)
+#  include <CoreFoundation/CFRunLoop.h>
+#elif defined(__linux__)
+struct _XDisplay;
+extern "C" int XFlush(_XDisplay* display);
+#endif
+
 #include <mutex>
 #include <vector>
 
