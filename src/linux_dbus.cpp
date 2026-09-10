@@ -1,4 +1,5 @@
 #include "detail/linux_dbus.hpp"
+#include "detail/linux_dbus_codec.hpp"
 
 #include <dbus/dbus.h>
 
@@ -35,10 +36,21 @@ bool g_dbus_threads_initialized = false;
         return false;
     }
 
-    return dbus_validate_bus_name(call.destination.c_str(), nullptr) != FALSE &&
-           dbus_validate_path(call.path.c_str(), nullptr) != FALSE &&
-           dbus_validate_interface(call.interface.c_str(), nullptr) != FALSE &&
-           dbus_validate_member(call.member.c_str(), nullptr) != FALSE;
+    if (dbus_validate_bus_name(call.destination.c_str(), nullptr) == FALSE ||
+        dbus_validate_path(call.path.c_str(), nullptr) == FALSE ||
+        dbus_validate_interface(call.interface.c_str(), nullptr) == FALSE ||
+        dbus_validate_member(call.member.c_str(), nullptr) == FALSE) {
+        return false;
+    }
+
+    for (const auto& argument : call.arguments) {
+        std::string signature;
+        std::string error;
+        if (!linux_dbus_value_signature(argument, signature, error)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <typename Map>
@@ -383,7 +395,15 @@ struct LinuxDbusTransport::Impl final {
 
         const int type = dbus_message_get_type(reply);
         if (type == DBUS_MESSAGE_TYPE_METHOD_RETURN) {
-            return LinuxDbusCompletion{};
+            LinuxDbusCompletion completion;
+            std::string decode_error;
+            if (!linux_dbus_decode_values(reply, completion.values, decode_error)) {
+                completion.code = LinuxDbusErrorCode::LocalProtocolError;
+                completion.message = decode_error.empty()
+                    ? "Unable to decode D-Bus method-return values"
+                    : std::move(decode_error);
+            }
+            return completion;
         }
         if (type != DBUS_MESSAGE_TYPE_ERROR) {
             return LinuxDbusCompletion{LinuxDbusErrorCode::LocalProtocolError, {},
@@ -626,68 +646,81 @@ LinuxDbusRequestId LinuxDbusTransport::call_method(
                     "Unable to allocate D-Bus method-call message"};
                 complete_immediately = true;
             } else {
-                DBusPendingCall* pending = nullptr;
-                const int timeout_ms = static_cast<int>(call.timeout.count());
-                const dbus_bool_t sent = dbus_connection_send_with_reply(
-                    impl_->connection, message, &pending, timeout_ms);
-                dbus_message_unref(message);
-
-                if (sent == FALSE) {
+                std::string encode_error;
+                if (!linux_dbus_append_values(message, call.arguments, encode_error)) {
+                    dbus_message_unref(message);
                     immediate_completion = LinuxDbusCompletion{
                         LinuxDbusErrorCode::LocalProtocolError, {},
-                        "Unable to queue D-Bus method call"};
-                    complete_immediately = true;
-                } else if (pending == nullptr) {
-                    immediate_completion = LinuxDbusCompletion{
-                        LinuxDbusErrorCode::Disconnected, {},
-                        "D-Bus connection disconnected before method call was queued"};
+                        encode_error.empty() ? "Unable to encode D-Bus method-call arguments"
+                                             : std::move(encode_error)};
                     complete_immediately = true;
                 } else {
-                    auto* context = new (std::nothrow) Impl::NotifyContext{impl_.get(), client, id};
-                    if (context == nullptr) {
-                        dbus_pending_call_cancel(pending);
-                        dbus_pending_call_unref(pending);
+                    DBusPendingCall* pending = nullptr;
+                    const int timeout_ms = static_cast<int>(call.timeout.count());
+                    const dbus_bool_t sent = dbus_connection_send_with_reply(
+                        impl_->connection, message, &pending, timeout_ms);
+                    dbus_message_unref(message);
+
+                    if (sent == FALSE) {
                         immediate_completion = LinuxDbusCompletion{
                             LinuxDbusErrorCode::LocalProtocolError, {},
-                            "Unable to allocate D-Bus pending-call notification state"};
+                            "Unable to queue D-Bus method call"};
+                        complete_immediately = true;
+                    } else if (pending == nullptr) {
+                        immediate_completion = LinuxDbusCompletion{
+                            LinuxDbusErrorCode::Disconnected, {},
+                            "D-Bus connection disconnected before method call was queued"};
                         complete_immediately = true;
                     } else {
-                        dbus_pending_call_ref(pending);
-                        bool inserted = false;
-                        try {
-                            std::lock_guard pending_lock{impl_->pending_mutex};
-                            inserted = impl_->pending_calls
-                                           .try_emplace(id, Impl::NativePendingCall{client, pending})
-                                           .second;
-                        } catch (...) {
-                            inserted = false;
-                        }
-
-                        if (!inserted) {
+                        auto* context =
+                            new (std::nothrow) Impl::NotifyContext{impl_.get(), client, id};
+                        if (context == nullptr) {
                             dbus_pending_call_cancel(pending);
                             dbus_pending_call_unref(pending);
-                            dbus_pending_call_unref(pending);
-                            delete context;
                             immediate_completion = LinuxDbusCompletion{
                                 LinuxDbusErrorCode::LocalProtocolError, {},
-                                "Unable to retain D-Bus pending-call state"};
-                            complete_immediately = true;
-                        } else if (dbus_pending_call_set_notify(
-                                       pending, &Impl::pending_notify, context,
-                                       &Impl::free_notify_context) == FALSE) {
-                            auto native = impl_->take_pending(client, id, pending);
-                            dbus_pending_call_cancel(pending);
-                            if (native) {
-                                dbus_pending_call_unref(native->pending);
-                            }
-                            dbus_pending_call_unref(pending);
-                            delete context;
-                            immediate_completion = LinuxDbusCompletion{
-                                LinuxDbusErrorCode::LocalProtocolError, {},
-                                "Unable to register D-Bus pending-call notification"};
+                                "Unable to allocate D-Bus pending-call notification state"};
                             complete_immediately = true;
                         } else {
-                            dbus_pending_call_unref(pending);
+                            dbus_pending_call_ref(pending);
+                            bool inserted = false;
+                            try {
+                                std::lock_guard pending_lock{impl_->pending_mutex};
+                                inserted = impl_->pending_calls
+                                               .try_emplace(
+                                                   id,
+                                                   Impl::NativePendingCall{client, pending})
+                                               .second;
+                            } catch (...) {
+                                inserted = false;
+                            }
+
+                            if (!inserted) {
+                                dbus_pending_call_cancel(pending);
+                                dbus_pending_call_unref(pending);
+                                dbus_pending_call_unref(pending);
+                                delete context;
+                                immediate_completion = LinuxDbusCompletion{
+                                    LinuxDbusErrorCode::LocalProtocolError, {},
+                                    "Unable to retain D-Bus pending-call state"};
+                                complete_immediately = true;
+                            } else if (dbus_pending_call_set_notify(
+                                           pending, &Impl::pending_notify, context,
+                                           &Impl::free_notify_context) == FALSE) {
+                                auto native = impl_->take_pending(client, id, pending);
+                                dbus_pending_call_cancel(pending);
+                                if (native) {
+                                    dbus_pending_call_unref(native->pending);
+                                }
+                                dbus_pending_call_unref(pending);
+                                delete context;
+                                immediate_completion = LinuxDbusCompletion{
+                                    LinuxDbusErrorCode::LocalProtocolError, {},
+                                    "Unable to register D-Bus pending-call notification"};
+                                complete_immediately = true;
+                            } else {
+                                dbus_pending_call_unref(pending);
+                            }
                         }
                     }
                 }
