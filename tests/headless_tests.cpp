@@ -2,6 +2,112 @@
 
 namespace {
 
+struct OverlayProbeState {
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+};
+
+class OverlayProbeComponent final : public ui::Component {
+public:
+    explicit OverlayProbeComponent(std::shared_ptr<OverlayProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {24.0f, 16.0f};
+    }
+
+    void mount(ui::MountContext&) override { ++state_->mounts; }
+    void activate(ui::LifecycleContext&) override { ++state_->activates; }
+    void deactivate(ui::LifecycleContext&) override { ++state_->deactivates; }
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<OverlayProbeState> state_;
+};
+
+class OverlayProbe {
+public:
+    explicit OverlayProbe(std::shared_ptr<OverlayProbeState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<OverlayProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<OverlayProbeState> state_;
+};
+
+ui::OverlaySpec centered_overlay(ui::Spec content) {
+    ui::OverlaySpec spec;
+    spec.placement = ui::OverlayPlacement::Center;
+    spec.content = std::move(content);
+    return spec;
+}
+
+void overlay_structural_queue_contract() {
+    test::MockPlatform platform;
+    auto state = std::make_shared<OverlayProbeState>();
+
+    ui::UI tree{
+        ui::Canvas{ui::Size{96.0f, 48.0f}, [](ui::CanvasContext2D&) {}}
+    };
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+
+    const auto handle = tree.show_overlay(
+        centered_overlay(ui::make_spec(OverlayProbe{state})));
+    NUI_CHECK(handle.valid());
+    NUI_CHECK(state->mounts == 0);
+
+    // show() participates in T058's deferred structural checkpoint. The
+    // overlay cannot mount synchronously on the caller's stack.
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(state->mounts == 1);
+    NUI_CHECK(state->activates == 1);
+
+    NUI_CHECK(tree.close_overlay(handle));
+    NUI_CHECK(!handle.valid());
+    NUI_CHECK(state->unmounts == 0);
+
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(state->deactivates == 1);
+    NUI_CHECK(state->unmounts == 1);
+    NUI_CHECK(!tree.close_overlay(handle));
+
+    // A show immediately closed before the structural checkpoint coalesces to
+    // no retained child and therefore emits no lifecycle callbacks.
+    auto coalesced = std::make_shared<OverlayProbeState>();
+    const auto transient = tree.show_overlay(
+        centered_overlay(ui::make_spec(OverlayProbe{coalesced})));
+    NUI_CHECK(tree.close_overlay(transient));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(coalesced->mounts == 0);
+    NUI_CHECK(coalesced->unmounts == 0);
+
+    // Handles are UI-owned and the structurally invalid modal/pointer-ignore
+    // combination is rejected before any retained work is queued.
+    ui::UI other{
+        ui::Canvas{ui::Size{96.0f, 48.0f}, [](ui::CanvasContext2D&) {}}
+    };
+    const auto owned = tree.show_overlay(centered_overlay(ui::make_spec(OverlayProbe{coalesced})));
+    NUI_CHECK(!other.close_overlay(owned));
+    NUI_CHECK(tree.close_overlay(owned));
+
+    auto invalid = centered_overlay(ui::make_spec(OverlayProbe{coalesced}));
+    invalid.mode = ui::OverlayMode::Modal;
+    invalid.pointer_policy = ui::OverlayPointerPolicy::Ignore;
+    NUI_CHECK(!tree.show_overlay(std::move(invalid)).valid());
+}
+
 void suite() {
     ui::HeadlessRenderer renderer{{96.0f, 48.0f}, 1.0f};
 
@@ -64,6 +170,8 @@ void suite() {
     NUI_CHECK(!tree.layout_dirty());
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(!tree.dirty());
+
+    overlay_structural_queue_contract();
 }
 
 } // namespace
