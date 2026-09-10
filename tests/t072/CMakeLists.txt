@@ -44,3 +44,4 @@ target_link_libraries(t072_value_codec_contract PRIVATE PkgConfig::NATIVEUI_DBUS
 t072_add_test(t072_object_path_contract object_path_contract.cpp)
 t072_add_test(t072_signal_contract signal_contract.cpp)
 t072_add_test(t072_client_lifetime_contract client_lifetime_contract.cpp)
+t072_add_test(t072_client_registration_contract client_registration_contract.cpp)
