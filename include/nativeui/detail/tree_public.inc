@@ -195,10 +195,10 @@
         };
 
         // Pointer targeting is intentionally independent from keyboard focus.
-        // This lets non-focusable retained containers such as ScrollView receive
-        // wheel/pan input while preserving the existing focus traversal contract.
         // Reverse child order matches paint stacking: later/overlay children are
-        // input-frontmost. Inactive focus scopes remain unavailable to normal input.
+        // input-frontmost. Inert visual/layout nodes retain the historic behavior
+        // of not blocking an interactive sibling below them unless they explicitly
+        // opt into pointer targetability. Inactive focus scopes remain unavailable.
         auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
             if (inherited_clip.empty() || !inherited_clip.contains(point) ||
                 !node.component->effective_availability().interactive()) {
@@ -217,7 +217,7 @@
                     if (auto* result = self(self, **it, point, child_clip)) return result;
                 }
             }
-            return node.bounds.contains(point) ? &node : nullptr;
+            return node.bounds.contains(point) && node.component->pointer_targetable() ? &node : nullptr;
         };
 
         auto focus_nearest_ancestor = [this, &platform](Node* target) {
