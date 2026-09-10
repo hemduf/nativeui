@@ -43,7 +43,8 @@ public:
         // NativeUI public geometry is logical. Keep one per-view last-valid
         // scale and convert the initial request exactly once at the platform
         // boundary. Native configure remains authoritative for the actual size.
-        (void)geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_)));
+        record_scale_observation(
+            geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
         const auto initial_physical = geometry_.physical_request(desc.size);
         if (!initial_physical) {
             cleanup_and_throw(PUGL_BAD_PARAMETER, "invalid initial logical size");
@@ -76,7 +77,8 @@ public:
             cleanup_and_throw(PUGL_FAILURE, "native IME bridge initialization failed");
         }
 
-        (void)geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_)));
+        record_scale_observation(
+            geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
         // Initial layout uses the requested logical size so synchronous focus
         // and IME callbacks during show have valid bounds. Subsequent size
         // changes are driven only by authoritative configure snapshots.
@@ -277,6 +279,12 @@ public:
     }
 
 private:
+    void record_scale_observation(bool accepted) {
+        if (!accepted) {
+            last_error_ = "NativeUI ignored invalid platform scale factor";
+        }
+    }
+
     void queue_preferred_size() {
         if (!preferred_size_callback_) return;
         preferred_size_state_.queue(ui_.measure().preferred);
@@ -356,5 +364,6 @@ private:
     PuglStatus on_event(const PuglEvent* event) {
         switch (event->type) {
         case PUGL_REALIZE:
-            (void)geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_)));
+            record_scale_observation(
+                geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
             return PUGL_SUCCESS;
