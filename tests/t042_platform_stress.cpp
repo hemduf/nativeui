@@ -415,11 +415,10 @@ int run_embedded_capture_focus_teardown() {
 int run_standalone_once(int cycle) {
     constexpr std::string_view fixture = "standalone_sequential_50";
 
-    // #64 Decision B only guarantees one PROGRAM owner lifetime per process
-    // until T060 introduces ui::Application. This process-isolated fixture
-    // therefore exercises exactly create/poll/resize/close/destroy; active
-    // focus/capture/text-input teardown belongs to the embedded teardown
-    // fixture where multi-instance ownership is currently supported.
+    // #64 Decision B still forbids simultaneous independent PROGRAM worlds.
+    // T060 now provides the supported shared-Application multi-window path;
+    // this process-isolated fixture intentionally retains legacy-constructor
+    // compatibility coverage until T069 removes that constructor.
     ui::UI app{
         ui::Column{
             ui::Header{"NativeUI T042 standalone isolated cycle"},
