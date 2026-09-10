@@ -39,6 +39,36 @@ void nativeui_header_compile_t038_button_style(const ui::Theme& theme) {
     (void)resolved;
 }
 
+void nativeui_header_compile_t038_choice_styles(const ui::Theme& theme) {
+    ui::CheckboxStyle checkbox{};
+    checkbox.base.box_fill = ui::Color{0.1f, 0.2f, 0.3f, 1.0f};
+    checkbox.checked.box_fill = ui::Color{0.2f, 0.5f, 0.8f, 1.0f};
+    checkbox.hovered.box_border = ui::Color{0.7f, 0.4f, 0.2f, 1.0f};
+    checkbox.pressed.box_border = ui::Color{0.9f, 0.3f, 0.2f, 1.0f};
+    checkbox.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    checkbox.focused.box_border_width = 2.0f;
+    checkbox.read_only.checkmark = ui::Color{0.6f, 0.6f, 0.6f, 1.0f};
+    const auto resolved_checkbox = ui::resolve_checkbox_style(
+        ui::default_checkbox_style(theme),
+        checkbox,
+        ui::VisualState{.enabled = true, .focused = true, .checked = true});
+    (void)resolved_checkbox;
+
+    ui::RadioStyle radio{};
+    radio.base.outer_fill = ui::Color{0.2f, 0.2f, 0.2f, 1.0f};
+    radio.selected.mark_fill = ui::Color{0.2f, 0.5f, 0.8f, 1.0f};
+    radio.hovered.outer_fill = ui::Color{0.7f, 0.4f, 0.2f, 1.0f};
+    radio.pressed.outer_fill = ui::Color{0.9f, 0.3f, 0.2f, 1.0f};
+    radio.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    radio.focused.outer_radius = 10.0f;
+    radio.read_only.mark_fill = ui::Color{0.6f, 0.6f, 0.6f, 1.0f};
+    const auto resolved_radio = ui::resolve_radio_style(
+        ui::default_radio_style(theme),
+        radio,
+        ui::VisualState{.enabled = true, .focused = true, .selected = true});
+    (void)resolved_radio;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
