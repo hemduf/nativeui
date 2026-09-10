@@ -1,5 +1,8 @@
 #include "test_support.hpp"
+#include "../src/detail/view_geometry.hpp"
 
+#include <cmath>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -84,7 +87,90 @@ private:
     ui::State<int>* observed_{};
 };
 
+void check_size(ui::Size actual, ui::Size expected) {
+    NUI_CHECK_NEAR(actual.w, expected.w, 0.00001f);
+    NUI_CHECK_NEAR(actual.h, expected.h, 0.00001f);
+}
+
+void t043_geometry_contract() {
+    ui::detail::ViewGeometryState geometry{{160.0f, 90.0f}};
+    NUI_CHECK_NEAR(geometry.last_valid_scale(), 1.0f, 0.00001f);
+
+    for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f}) {
+        const auto configured = geometry.configure({160.0f * scale, 90.0f * scale}, scale);
+        NUI_CHECK(configured.has_value());
+        check_size(*configured, {160.0f, 90.0f});
+        NUI_CHECK_NEAR(geometry.last_valid_scale(), scale, 0.00001f);
+    }
+
+    NUI_CHECK(geometry.configure({240.0f, 135.0f}, 1.5f).has_value());
+    for (const float invalid : {0.0f,
+                                -1.0f,
+                                std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()}) {
+        const auto configured = geometry.configure({300.0f, 150.0f}, invalid);
+        NUI_CHECK(configured.has_value());
+        check_size(*configured, {200.0f, 100.0f});
+        NUI_CHECK_NEAR(geometry.last_valid_scale(), 1.5f, 0.00001f);
+    }
+
+    const auto last_logical = geometry.logical_size();
+    NUI_CHECK(!geometry.configure({0.0f, 150.0f}, 2.0f).has_value());
+    NUI_CHECK(!geometry.renderable());
+    check_size(geometry.logical_size(), last_logical);
+    NUI_CHECK_NEAR(geometry.last_valid_scale(), 2.0f, 0.00001f);
+
+    NUI_CHECK(!geometry.physical_request({0.0f, 20.0f}).has_value());
+    NUI_CHECK(!geometry.physical_request({std::numeric_limits<float>::quiet_NaN(), 20.0f}).has_value());
+    const auto request = geometry.physical_request({100.25f, 50.25f});
+    NUI_CHECK(request.has_value());
+    check_size(*request, {201.0f, 101.0f});
+    NUI_CHECK(!geometry.pending_request().has_value());
+    geometry.record_successful_request({100.25f, 50.25f});
+    NUI_CHECK(geometry.pending_request().has_value());
+
+    const auto physical = ui::detail::logical_to_physical_covering_rect(
+        {0.2f, 1.2f, 10.2f, 4.2f}, 1.5f);
+    NUI_CHECK_NEAR(physical.x, 0.0f, 0.00001f);
+    NUI_CHECK_NEAR(physical.y, 1.0f, 0.00001f);
+    NUI_CHECK_NEAR(physical.w, 16.0f, 0.00001f);
+    NUI_CHECK_NEAR(physical.h, 8.0f, 0.00001f);
+
+    const auto point = ui::detail::physical_to_logical_point({18.75f, 11.25f}, 1.25f);
+    NUI_CHECK_NEAR(point.x, 15.0f, 0.00001f);
+    NUI_CHECK_NEAR(point.y, 9.0f, 0.00001f);
+
+    ui::detail::ViewGeometryState other{{100.0f, 50.0f}};
+    NUI_CHECK(other.configure({200.0f, 100.0f}, 2.0f).has_value());
+    NUI_CHECK_NEAR(other.last_valid_scale(), 2.0f, 0.00001f);
+    NUI_CHECK_NEAR(geometry.last_valid_scale(), 2.0f, 0.00001f);
+
+    ui::detail::PreferredSizeState preferred;
+    std::vector<ui::Size> notifications;
+    preferred.queue({100.0f, 50.0f});
+    NUI_CHECK(preferred.dispatch_once([&](ui::Size size) {
+        notifications.push_back(size);
+        preferred.queue({120.0f, 60.0f});
+        NUI_CHECK(!preferred.dispatch_once([&](ui::Size) { NUI_CHECK(false); }));
+    }));
+    NUI_CHECK(notifications.size() == 1);
+    NUI_CHECK(preferred.dispatch_once([&](ui::Size size) { notifications.push_back(size); }));
+    NUI_CHECK(notifications.size() == 2);
+
+    preferred.queue({120.0001f, 60.0f});
+    NUI_CHECK(!preferred.dispatch_once([&](ui::Size) { NUI_CHECK(false); }));
+    preferred.queue({120.00011f, 60.0f});
+    NUI_CHECK(preferred.dispatch_once([&](ui::Size size) { notifications.push_back(size); }));
+
+    preferred.queue({130.0f, 70.0f});
+    preferred.queue({140.0f, 80.0f});
+    NUI_CHECK(preferred.dispatch_once([&](ui::Size size) { notifications.push_back(size); }));
+    check_size(notifications.back(), {140.0f, 80.0f});
+}
+
 void suite() {
+    t043_geometry_contract();
+
     // Existing focus/resize lifecycle regression.
     {
         auto probe = std::make_shared<test::ProbeState>();
