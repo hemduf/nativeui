@@ -1,5 +1,7 @@
 #include <nativeui/detail/slider_value.hpp>
 
+#include "t036_list_tabs_contract.inc"
+
 #include <cmath>
 #include <limits>
 #include <stdexcept>
