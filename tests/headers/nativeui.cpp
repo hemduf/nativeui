@@ -34,3 +34,8 @@ void nativeui_header_compile_t058_for_each(
         [](const NativeUIHeaderT058Item& item) { return ui::Spacer{item.extent, item.extent}; }});
     (void)spec;
 }
+
+void nativeui_header_compile_t058_structural_diagnostic(ui::UI& tree) {
+    const auto diagnostic = tree.structural_diagnostic();
+    (void)diagnostic;
+}
