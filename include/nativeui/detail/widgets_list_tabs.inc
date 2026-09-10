@@ -163,6 +163,10 @@ public:
     explicit ListContentComponent(std::shared_ptr<ListViewRuntime<T>> runtime)
         : runtime_(std::move(runtime)) {}
 
+    [[nodiscard]] bool is_focus_scope() const noexcept override { return true; }
+    [[nodiscard]] bool focus_scope_active() const noexcept override { return false; }
+    [[nodiscard]] bool focus_scope_traps() const noexcept override { return false; }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         Size result{};
         for (const auto& child : children) {
