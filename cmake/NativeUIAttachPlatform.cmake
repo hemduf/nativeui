@@ -151,6 +151,19 @@ macro(nativeui_attach_platform)
 
   _nativeui_attach_platform_impl(
     "${_nativeui_attach_target}" "${_nativeui_attach_consumer_id}")
+
+  # Linux standalone consumers need the single private T072 implementation that
+  # backs Application-owned Portal/accessibility clients. This remains below
+  # the public API: macOS/Windows never discover libdbus and no D-Bus type leaks
+  # through nativeui_attach_platform(). The module links itself to the already
+  # prepared source-tree or package platform target.
+  if(UNIX AND NOT APPLE)
+    if(NOT COMMAND nativeui_add_linux_dbus_transport)
+      include("${CMAKE_CURRENT_LIST_DIR}/NativeUILinuxDbus.cmake")
+    endif()
+    nativeui_add_linux_dbus_transport()
+  endif()
+
   unset(_nativeui_attach_target)
   unset(_nativeui_attach_consumer_id)
 endmacro()
