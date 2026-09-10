@@ -1,3 +1,173 @@
+enum class ScrollAlignment {
+    Nearest,
+    Start,
+    Center,
+    End,
+};
+
+namespace detail {
+
+[[nodiscard]] inline bool scroll_axis_horizontal(ScrollAxis axis) noexcept {
+    return axis == ScrollAxis::Horizontal || axis == ScrollAxis::Both;
+}
+
+[[nodiscard]] inline bool scroll_axis_vertical(ScrollAxis axis) noexcept {
+    return axis == ScrollAxis::Vertical || axis == ScrollAxis::Both;
+}
+
+[[nodiscard]] inline float ensure_visible_axis(
+    float current,
+    float viewport_extent,
+    float descendant_start,
+    float descendant_extent,
+    ScrollAlignment alignment) noexcept {
+    if (!std::isfinite(current) || !std::isfinite(viewport_extent) || viewport_extent <= 0.0f ||
+        !std::isfinite(descendant_start) || !std::isfinite(descendant_extent) ||
+        descendant_extent < 0.0f) {
+        return current;
+    }
+
+    const float descendant_end = descendant_start + descendant_extent;
+    if (!std::isfinite(descendant_end)) return current;
+
+    switch (alignment) {
+    case ScrollAlignment::Start:
+        return descendant_start;
+    case ScrollAlignment::Center:
+        return descendant_start - (viewport_extent - descendant_extent) * 0.5f;
+    case ScrollAlignment::End:
+        return descendant_end - viewport_extent;
+    case ScrollAlignment::Nearest:
+        if (descendant_extent > viewport_extent) return descendant_start;
+        if (descendant_start < current) return descendant_start;
+        if (descendant_end > current + viewport_extent) {
+            return descendant_end - viewport_extent;
+        }
+        return current;
+    }
+    return current;
+}
+
+struct ScrollbarAxisGeometry {
+    bool visible{};
+    Rect track{};
+    Rect thumb{};
+};
+
+struct ScrollViewBars {
+    ScrollbarAxisGeometry horizontal{};
+    ScrollbarAxisGeometry vertical{};
+};
+
+[[nodiscard]] inline ScrollbarAxisGeometry make_horizontal_scrollbar(
+    const ScrollState& state,
+    Rect viewport,
+    bool vertical_visible,
+    float thickness,
+    float min_thumb) noexcept {
+    ScrollbarAxisGeometry result;
+    const auto content = state.content_size();
+    const auto metrics_viewport = state.viewport_size();
+    const auto maximum = state.max_offset();
+    if (!scroll_axis_horizontal(state.axis()) || !(content.w > metrics_viewport.w) ||
+        !(maximum.x > 0.0f)) {
+        return result;
+    }
+
+    const float track_length = std::max(0.0f, viewport.w - (vertical_visible ? thickness : 0.0f));
+    if (!(track_length > 0.0f)) return result;
+
+    result.visible = true;
+    result.track = Rect{viewport.x, viewport.y + std::max(0.0f, viewport.h - thickness),
+                        track_length, thickness};
+    const float requested = track_length * (metrics_viewport.w / content.w);
+    const float thumb_length = std::clamp(std::max(min_thumb, requested), 0.0f, track_length);
+    const float travel = std::max(0.0f, track_length - thumb_length);
+    const float fraction = std::clamp(state.offset().x / maximum.x, 0.0f, 1.0f);
+    result.thumb = Rect{result.track.x + travel * fraction, result.track.y,
+                        thumb_length, thickness};
+    return result;
+}
+
+[[nodiscard]] inline ScrollbarAxisGeometry make_vertical_scrollbar(
+    const ScrollState& state,
+    Rect viewport,
+    bool horizontal_visible,
+    float thickness,
+    float min_thumb) noexcept {
+    ScrollbarAxisGeometry result;
+    const auto content = state.content_size();
+    const auto metrics_viewport = state.viewport_size();
+    const auto maximum = state.max_offset();
+    if (!scroll_axis_vertical(state.axis()) || !(content.h > metrics_viewport.h) ||
+        !(maximum.y > 0.0f)) {
+        return result;
+    }
+
+    const float track_length = std::max(0.0f, viewport.h - (horizontal_visible ? thickness : 0.0f));
+    if (!(track_length > 0.0f)) return result;
+
+    result.visible = true;
+    result.track = Rect{viewport.x + std::max(0.0f, viewport.w - thickness), viewport.y,
+                        thickness, track_length};
+    const float requested = track_length * (metrics_viewport.h / content.h);
+    const float thumb_length = std::clamp(std::max(min_thumb, requested), 0.0f, track_length);
+    const float travel = std::max(0.0f, track_length - thumb_length);
+    const float fraction = std::clamp(state.offset().y / maximum.y, 0.0f, 1.0f);
+    result.thumb = Rect{result.track.x, result.track.y + travel * fraction,
+                        thickness, thumb_length};
+    return result;
+}
+
+[[nodiscard]] inline ScrollViewBars scroll_view_bars(
+    const ScrollState& state,
+    Rect viewport,
+    float thickness = 8.0f,
+    float min_thumb = 18.0f) noexcept {
+    thickness = std::isfinite(thickness) ? std::max(0.0f, thickness) : 0.0f;
+    min_thumb = std::isfinite(min_thumb) ? std::max(0.0f, min_thumb) : 0.0f;
+
+    const auto content = state.content_size();
+    const auto metrics_viewport = state.viewport_size();
+    const bool horizontal_visible = scroll_axis_horizontal(state.axis()) &&
+                                    content.w > metrics_viewport.w &&
+                                    state.max_offset().x > 0.0f;
+    const bool vertical_visible = scroll_axis_vertical(state.axis()) &&
+                                  content.h > metrics_viewport.h &&
+                                  state.max_offset().y > 0.0f;
+
+    ScrollViewBars result;
+    result.horizontal = make_horizontal_scrollbar(
+        state, viewport, vertical_visible, thickness, min_thumb);
+    result.vertical = make_vertical_scrollbar(
+        state, viewport, horizontal_visible, thickness, min_thumb);
+    return result;
+}
+
+} // namespace detail
+
+[[nodiscard]] inline bool ensure_visible(
+    ScrollState& state,
+    Rect descendant_bounds,
+    ScrollAlignment alignment = ScrollAlignment::Nearest) {
+    const auto before = state.offset();
+    auto target = before;
+    const auto viewport = state.viewport_size();
+
+    if (detail::scroll_axis_horizontal(state.axis())) {
+        target.x = detail::ensure_visible_axis(
+            before.x, viewport.w, descendant_bounds.x, descendant_bounds.w, alignment);
+    }
+    if (detail::scroll_axis_vertical(state.axis())) {
+        target.y = detail::ensure_visible_axis(
+            before.y, viewport.h, descendant_bounds.y, descendant_bounds.h, alignment);
+    }
+
+    state.set_offset(target);
+    const auto after = state.offset();
+    return after.x != before.x || after.y != before.y;
+}
+
 class ScrollViewComponent final : public Component {
 public:
     ScrollViewComponent(ScrollState& state, bool pointer_pan)
