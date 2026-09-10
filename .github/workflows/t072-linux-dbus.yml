@@ -32,7 +32,7 @@ jobs:
       - name: Install Linux D-Bus build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev
+          sudo apt-get install -y ninja-build pkg-config dbus libdbus-1-dev
 
       - name: Static integration contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t072_linux_dbus_build_contract.cmake
@@ -43,5 +43,5 @@ jobs:
       - name: Build isolated contract
         run: cmake --build build-t072 --parallel 2
 
-      - name: Test isolated contract
-        run: ctest --test-dir build-t072 --output-on-failure
+      - name: Test isolated contract in a private session bus
+        run: dbus-run-session -- ctest --test-dir build-t072 --output-on-failure

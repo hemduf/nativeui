@@ -32,3 +32,4 @@ endfunction()
 
 t072_add_test(t072_build_contract build_contract.cpp)
 t072_add_test(t072_validation_contract validation_contract.cpp)
+t072_add_test(t072_lifecycle_contract lifecycle_contract.cpp)
