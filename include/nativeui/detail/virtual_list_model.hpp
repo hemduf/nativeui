@@ -73,6 +73,31 @@ struct VirtualListRange {
     return VirtualListRange{first_visible - before, last_visible + after};
 }
 
+[[nodiscard]] inline std::optional<std::vector<std::size_t>> virtual_list_materialized_indices(
+    std::size_t item_count,
+    VirtualListRange range,
+    std::optional<std::size_t> focused_index,
+    std::optional<std::size_t> captured_index) {
+    if (range.first > range.last || range.last > item_count) return std::nullopt;
+
+    std::vector<std::size_t> result;
+    result.reserve(range.size() + 2);
+    for (std::size_t index = range.first; index < range.last; ++index) {
+        result.push_back(index);
+    }
+
+    const auto add_exception = [&](std::optional<std::size_t> index) {
+        if (!index || *index >= item_count) return;
+        if (std::find(result.begin(), result.end(), *index) == result.end()) {
+            result.push_back(*index);
+        }
+    };
+    add_exception(focused_index);
+    add_exception(captured_index);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
 template <class Key>
 class VirtualListDatasetModel {
 public:
@@ -118,13 +143,18 @@ public:
         return index < entries_.size() ? &entries_[index].encoded_key : nullptr;
     }
 
-    [[nodiscard]] std::optional<VirtualSemanticItemToken> token_for_key(const Key& key) const {
+    [[nodiscard]] std::optional<std::size_t> index_of_key(const Key& key) const {
         const auto encoded = encode_dynamic_key(key);
         const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& entry) {
             return entry.encoded_key == encoded;
         });
         if (it == entries_.end()) return std::nullopt;
-        return it->token;
+        return static_cast<std::size_t>(std::distance(entries_.begin(), it));
+    }
+
+    [[nodiscard]] std::optional<VirtualSemanticItemToken> token_for_key(const Key& key) const {
+        const auto index = index_of_key(key);
+        return index ? std::optional<VirtualSemanticItemToken>{entries_[*index].token} : std::nullopt;
     }
 
     [[nodiscard]] bool replace(std::vector<Item> items) {
