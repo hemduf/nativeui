@@ -1,4 +1,4 @@
-#include "detail/view_geometry.hpp"
+#include "../src/detail/view_geometry.hpp"
 
 #include <cassert>
 #include <cmath>
