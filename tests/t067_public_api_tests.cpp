@@ -150,10 +150,9 @@ void suite() {
         NUI_CHECK(activated == 50);
     }
 
-    // Pointer capture belongs to the materialized logical row, not the stable
-    // ListView shell. That keeps one off-range captured row alive, and lets T058
-    // deliver PointerCancel before destroying a captured row removed by a data
-    // replacement.
+    // Focus and capture are two independent bounded exceptions. Keep logical
+    // focus on row 99, capture row 0, then scroll the normal window to row 50.
+    // The materialized set may exceed the normal 9-row window by at most two.
     {
         ui::State<std::optional<int>> selected{std::nullopt};
         auto lifetime = std::make_shared<RowLifetime>();
@@ -178,7 +177,17 @@ void suite() {
         ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(lifetime->live.size() == 7);
+
+        // Move the composite logical focus to 99, then clear only selection so
+        // row 99 remains the focused off-range exception during pointer tests.
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::End), platform) == ui::EventResult::Handled);
+        NUI_CHECK(selected.get() && *selected.get() == 99);
+        selected.set(std::nullopt);
+        NUI_CHECK(state.scroll_to_index(0, ui::ScrollAlignment::Start));
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(lifetime->live.contains(0));
+        NUI_CHECK(lifetime->live.contains(99));
+        NUI_CHECK(lifetime->live.size() <= 8);
 
         NUI_CHECK(tree.dispatch(
                       test::pointer(ui::InputType::PointerDown, 20.0f, 10.0f), platform) ==
@@ -188,13 +197,17 @@ void suite() {
         NUI_CHECK(state.scroll_to_index(50, ui::ScrollAlignment::Start));
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(lifetime->live.contains(0));
-        NUI_CHECK(lifetime->live.size() <= 10);
+        NUI_CHECK(lifetime->live.contains(99));
+        NUI_CHECK(lifetime->live.size() <= 11);
 
         NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!lifetime->live.contains(0));
+        NUI_CHECK(lifetime->live.contains(99));
         NUI_CHECK(!selected.get());
 
+        // Removing a captured logical key must make T058 deliver PointerCancel
+        // before destroying its dynamic row. The tree then owns no capture.
         NUI_CHECK(state.scroll_to_index(0, ui::ScrollAlignment::Start));
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(lifetime->live.contains(0));
