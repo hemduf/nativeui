@@ -379,6 +379,11 @@ public:
 
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
 
+    /// Whether this component may start a pointer route independently of keyboard focus.
+    /// The default preserves the historic retained-tree contract: focusable components are
+    /// pointer targets, while non-focusable components must explicitly opt in.
+    [[nodiscard]] virtual bool pointer_targetable() const noexcept { return focusable(); }
+
     /// Local availability supplied by generic wrappers/custom components. The
     /// retained tree resolves this monotonically through ancestry and stores the
     /// effective result on each component instance.
@@ -464,6 +469,12 @@ public:
     virtual void unmount(LifecycleContext&) {}
 
     virtual void focus_changed(bool, FocusContext&) {}
+
+    /// Called on ancestors after keyboard focus moves to one of their descendants.
+    /// The descendant bounds are expressed in this component's local logical
+    /// coordinates for the current layout. The hook is not repeated when focus is
+    /// merely refreshed on the same node.
+    virtual void descendant_focus_changed(Rect) {}
 
     /// Handle a targeted input event. Returning `Handled` consumes the event;
     /// returning `Ignored` leaves it unconsumed. The current tree routes to one
