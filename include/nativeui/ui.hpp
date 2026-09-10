@@ -48,6 +48,7 @@ public:
     void activate(PlatformServices& platform) {
         tree_.activate_focus(platform);
         prepare_overlay_layout();
+        enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
         close_anchored_overlays();
@@ -56,8 +57,11 @@ public:
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         // Resolve dynamic/availability/layout changes before using retained
-        // overlay bounds for pointer containment or dismissal.
+        // overlay bounds for pointer containment or dismissal. A newly-created
+        // modal also terminates any capture established by lower content before
+        // this event can be routed through the modal barrier.
         prepare_overlay_layout();
+        enforce_new_modal_capture_barrier(platform);
 
         // Overlay dismissal is policy that must run before normal retained-tree
         // delivery: an outside-dismiss PointerDown is consumed and must never
@@ -105,7 +109,14 @@ public:
             }
         }
 
-        return tree_.dispatch(event, platform);
+        const auto result = tree_.dispatch(event, platform);
+
+        // A callback may have captured the pointer and shown a modal in the
+        // same dispatch. T058 mounts that modal only after the callback stack
+        // unwinds; cancel the now-lower capture here, after Tree::dispatch has
+        // reached that safe checkpoint, never reentrantly inside PointerDown.
+        enforce_new_modal_capture_barrier(platform);
+        return result;
     }
     EventResult cancel_pointer(PlatformServices& platform) {
         return tree_.cancel_pointer(platform);
@@ -140,6 +151,7 @@ public:
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         prepare_overlay_layout();
+        enforce_new_modal_capture_barrier(platform);
         tree_.paint(canvas, platform);
     }
 
@@ -160,6 +172,27 @@ public:
 private:
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+    }
+
+    [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {
+        for (auto it = overlay_state_->entries.rbegin();
+             it != overlay_state_->entries.rend(); ++it) {
+            if (it->spec.mode == OverlayMode::Modal) return it->id;
+        }
+        return 0;
+    }
+
+    void enforce_new_modal_capture_barrier(PlatformServices& platform) {
+        const auto modal_id = newest_modal_id();
+        if (modal_id == 0 || modal_id <= last_modal_capture_barrier_id_) return;
+
+        // IDs are monotonic for the UI lifetime. A newly observed modal was
+        // created after every currently possible capture owner, so that owner
+        // is necessarily below the new modal in creation-order stacking. Mark
+        // the modal observed before invoking PointerCancel because that callback
+        // is allowed to show/close overlays reentrantly.
+        last_modal_capture_barrier_id_ = modal_id;
+        (void)tree_.cancel_pointer(platform);
     }
 
     [[nodiscard]] bool synchronize_overlay_anchors() {
@@ -214,6 +247,7 @@ private:
     std::shared_ptr<detail::OverlayState> overlay_state_;
     Tree tree_;
     Size viewport_{};
+    std::uint64_t last_modal_capture_barrier_id_{};
 };
 
 using PluginUI = UI; // compatibility alias for the original POC
