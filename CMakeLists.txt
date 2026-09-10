@@ -316,6 +316,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t033_progress_meter
   t034_scroll_view
   t036_list_tabs
+  t037_theme
   t041_smoke_harness
   t057_embedded_resources
   t058_dynamic_composition
@@ -552,7 +553,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets overlay ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets overlay ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
