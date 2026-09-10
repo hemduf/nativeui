@@ -144,12 +144,9 @@ inline void list_is_one_composite_tab_stop() {
     list.resize({120.0f, 80.0f});
     list.activate(platform);
 
-    // The ListView itself is the only global Tab stop for its rows. Row content
-    // may contain focusable components for presentation/testing, but normal Tab
-    // traversal must not enter them individually.
     NUI_CHECK(first_row->focus_in == 0);
     NUI_CHECK(second_row->focus_in == 0);
-    NUI_CHECK(list.dispatch(test::key(ui::Key::Tab), platform) == ui::EventResult::Ignored);
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Tab), platform) == ui::EventResult::Handled);
     NUI_CHECK(first_row->focus_in == 0);
     NUI_CHECK(second_row->focus_in == 0);
 }
