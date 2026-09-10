@@ -114,14 +114,15 @@ public:
         const Color track = colors::input;
         const Color active = slider_active_color(state);
         const bool focused = state == SliderVisualState::Focused;
+        const auto axis = slider_track_axis(bounds, orientation_);
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
             const float y = bounds.y + bounds.h * 0.5f;
-            const float x0 = bounds.x + 8.0f;
-            const float x1 = std::max(x0, bounds.x + bounds.w - 8.0f);
-            const float low_x = x0 + (x1 - x0) * low_fraction;
-            const float high_x = x0 + (x1 - x0) * high_fraction;
+            const float x0 = axis.start;
+            const float x1 = axis.end;
+            const float low_x = axis.position(low_fraction);
+            const float high_x = axis.position(high_fraction);
             painter.fill_rounded_rect(Rect{x0, y - 2.0f, x1 - x0, 4.0f}, 2.0f, track);
             painter.fill_rounded_rect(
                 Rect{low_x, y - 2.0f, std::max(0.0f, high_x - low_x), 4.0f},
@@ -135,10 +136,10 @@ public:
             painter.circle(Point{high_x, y}, 7.0f, active);
         } else {
             const float x = bounds.x + bounds.w * 0.5f;
-            const float y0 = bounds.y + 8.0f;
-            const float y1 = std::max(y0, bounds.y + bounds.h - 8.0f);
-            const float low_y = y1 - (y1 - y0) * low_fraction;
-            const float high_y = y1 - (y1 - y0) * high_fraction;
+            const float y0 = axis.start;
+            const float y1 = axis.end;
+            const float low_y = axis.position(low_fraction);
+            const float high_y = axis.position(high_fraction);
             painter.fill_rounded_rect(Rect{x - 2.0f, y0, 4.0f, y1 - y0}, 2.0f, track);
             painter.fill_rounded_rect(
                 Rect{x - 2.0f, high_y, 4.0f, std::max(0.0f, low_y - high_y)},
@@ -180,14 +181,11 @@ private:
 
     [[nodiscard]] float raw_value_from_pointer(
         const InputEvent& event, const InputContext& context) const noexcept {
-        const auto bounds = context.bounds();
-        if (orientation_ == SliderOrientation::Horizontal) {
-            if (bounds.w <= 0.0f) return domain_.minimum();
-            return domain_.raw_value_from_fraction((event.position.x - bounds.x) / bounds.w);
-        }
-        if (bounds.h <= 0.0f) return domain_.minimum();
-        return domain_.raw_value_from_fraction(
-            1.0f - (event.position.y - bounds.y) / bounds.h);
+        const auto axis = slider_track_axis(context.bounds(), orientation_);
+        const float coordinate = orientation_ == SliderOrientation::Horizontal
+            ? event.position.x
+            : event.position.y;
+        return domain_.raw_value_from_fraction(axis.fraction(coordinate));
     }
 
     [[nodiscard]] RangeSliderThumb choose_thumb(
