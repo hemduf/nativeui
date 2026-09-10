@@ -28,7 +28,7 @@ Non-negotiable rules:
 
 `main` contains the explicit T060 Application/multi-window ownership model, the post-T060 T042 lifecycle qualification from #139, the completed standard widgets through T033, and the T052 v0.1 developer-preview release gate after PR #120 merges.
 
-Cross-cutting rendering regression #152 / PR #153 removes Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is therefore consumer/component-owned; the regression test seeds a headless surface and verifies an otherwise empty Tree does not modify it.
+Cross-cutting rendering regression #152 / PR #153 removes Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is therefore consumer/component-owned. The headless renderer now mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
 
 Relevant completed foundations:
 
