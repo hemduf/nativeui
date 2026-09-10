@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace ui::detail {
 
@@ -37,5 +38,8 @@ enum class LinuxDbusErrorCode {
 };
 
 [[nodiscard]] bool linux_dbus_library_probe() noexcept;
+[[nodiscard]] bool linux_dbus_initialize_threads() noexcept;
+[[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
+[[nodiscard]] bool linux_dbus_valid_object_path(std::string_view path) noexcept;
 
 } // namespace ui::detail
