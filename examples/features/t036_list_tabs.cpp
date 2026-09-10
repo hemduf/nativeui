@@ -1,6 +1,8 @@
 #include "example_support.hpp"
 
 #include <optional>
+#include <string>
+#include <utility>
 
 namespace {
 
@@ -10,40 +12,88 @@ struct DemoState {
     int last_activated{};
 };
 
+ui::Canvas list_item(std::string label, bool enabled = true) {
+    return ui::Canvas{
+        {248.0f, 42.0f},
+        [label = std::move(label), enabled](ui::CanvasContext2D& context) {
+            context.text(
+                {18.0f, context.height() * 0.5f},
+                label,
+                13.0f,
+                enabled ? ui::colors::text : ui::Color{0.39f, 0.42f, 0.47f, 1.0f},
+                ui::TextAlign::Left);
+        }};
+}
+
+ui::Canvas panel_content(std::string title, std::string description) {
+    return ui::Canvas{
+        {334.0f, 174.0f},
+        [title = std::move(title), description = std::move(description)](
+            ui::CanvasContext2D& context) {
+            context.text({20.0f, 30.0f}, title, 17.0f, ui::colors::text, ui::TextAlign::Left);
+            context.text(
+                {20.0f, 56.0f}, description, 12.0f, ui::colors::textMuted,
+                ui::TextAlign::Left);
+            context.line(
+                {20.0f, 78.0f}, {context.width() - 20.0f, 78.0f}, 1.0f,
+                ui::Color{0.20f, 0.22f, 0.25f, 0.85f});
+            context.fill_rounded_rect(
+                {20.0f, 98.0f, 112.0f, 34.0f}, 7.0f, ui::colors::input);
+            context.text(
+                {76.0f, 115.0f}, "Selected state", 11.0f, ui::colors::textMuted,
+                ui::TextAlign::Center);
+            context.fill_rounded_rect(
+                {142.0f, 98.0f, 86.0f, 34.0f}, 7.0f, ui::colors::input);
+            context.text(
+                {185.0f, 115.0f}, "Retained", 11.0f, ui::colors::textMuted,
+                ui::TextAlign::Center);
+        }};
+}
+
 ui::UI make_ui(DemoState& state) {
     return ui::UI{
         ui::Column{
-            ui::Header{"T036 — ListView and Tabs"},
+            ui::Label{"T036 — ListView and Tabs"}.size(22.0f).bold(),
             ui::Label{
-                "ListView is a single composite focus stop with key-based selection and automatic "
-                "scroll reveal. Tabs use automatic activation and collapse inactive panels."
+                "Keyboard and pointer interaction with stable, application-owned selection state."
             }.size(12.0f).color(ui::colors::textMuted),
             ui::Row{
                 ui::Column{
-                    ui::Header{"ListView"},
-                    ui::Label{
-                        "Use Up/Down/Home/End, Enter/Space, or the pointer. The disabled row is skipped."
-                    }.size(11.0f).color(ui::colors::textMuted),
+                    ui::Label{"LIST VIEW"}.size(11.0f).bold().color(ui::colors::textMuted),
                     ui::ListView<int>{state.list_selection}
-                        .item(1, example::Box{"Oscillator", {240.0f, 42.0f}})
-                        .item(2, example::Box{"Filter", {240.0f, 42.0f}, ui::colors::input})
-                        .item(3, example::Box{"Disabled row", {240.0f, 42.0f}}, false)
-                        .item(4, example::Box{"Envelope", {240.0f, 42.0f}, ui::colors::input})
-                        .item(5, example::Box{"Effects", {240.0f, 42.0f}})
-                        .on_activate([&state](const int& key) { state.last_activated = key; })
-                }.gap(8.0f),
+                        .item(1, list_item("Oscillator"))
+                        .item(2, list_item("Filter"))
+                        .item(3, list_item("Disabled row", false), false)
+                        .item(4, list_item("Envelope"))
+                        .item(5, list_item("Effects"))
+                        .on_activate([&state](const int& key) { state.last_activated = key; }),
+                    ui::Label{"↑ ↓ navigate  ·  Home / End  ·  Enter activates"}
+                        .size(11.0f)
+                        .color(ui::colors::textMuted)
+                }.gap(9.0f),
                 ui::Column{
-                    ui::Header{"Tabs"},
-                    ui::Label{
-                        "Use Left/Right/Home/End or click a header. The disabled tab is skipped."
-                    }.size(11.0f).color(ui::colors::textMuted),
+                    ui::Label{"TABS"}.size(11.0f).bold().color(ui::colors::textMuted),
                     ui::Tabs<int>{state.tab_selection}
-                        .tab(1, "Overview", example::Box{"Overview panel", {320.0f, 174.0f}})
-                        .tab(2, "Disabled", example::Box{"Disabled panel", {320.0f, 174.0f}}, false)
-                        .tab(3, "Details", example::Box{"Details panel", {320.0f, 174.0f}, ui::colors::input})
-                }.gap(8.0f)
-            }.gap(20.0f)
-        }.gap(14.0f).padding(16.0f)
+                        .tab(
+                            1, "Overview",
+                            panel_content(
+                                "Overview",
+                                "Automatic activation keeps selection and visible panel in sync."))
+                        .tab(
+                            2, "Disabled",
+                            panel_content("Disabled", "Unavailable tabs are skipped by keyboard navigation."),
+                            false)
+                        .tab(
+                            3, "Details",
+                            panel_content(
+                                "Details",
+                                "Inactive panels collapse completely instead of remaining in layout.")),
+                    ui::Label{"← → switches tab  ·  Home / End  ·  click a segment"}
+                        .size(11.0f)
+                        .color(ui::colors::textMuted)
+                }.gap(9.0f)
+            }.gap(24.0f)
+        }.gap(14.0f).padding(20.0f)
     };
 }
 
@@ -126,5 +176,5 @@ int main(int argc, char** argv) {
 
     DemoState state;
     auto tree = make_ui(state);
-    return example::run_window(tree, "NativeUI T036 ListView and Tabs", {720.0f, 420.0f});
+    return example::run_window(tree, "NativeUI T036 ListView and Tabs", {760.0f, 430.0f});
 }
