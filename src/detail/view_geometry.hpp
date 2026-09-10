@@ -74,6 +74,9 @@ public:
         : logical_size_(valid_logical_size(initial_logical) ? initial_logical : Size{}) {}
 
     [[nodiscard]] float last_valid_scale() const noexcept { return last_valid_scale_; }
+    [[nodiscard]] bool last_scale_observation_valid() const noexcept {
+        return last_scale_observation_valid_;
+    }
     [[nodiscard]] Size logical_size() const noexcept { return logical_size_; }
     [[nodiscard]] Size physical_size() const noexcept { return physical_size_; }
     [[nodiscard]] bool renderable() const noexcept { return renderable_; }
@@ -82,7 +85,8 @@ public:
     }
 
     [[nodiscard]] bool observe_scale(float reported_scale) noexcept {
-        if (!valid_scale(reported_scale)) return false;
+        last_scale_observation_valid_ = valid_scale(reported_scale);
+        if (!last_scale_observation_valid_) return false;
         last_valid_scale_ = reported_scale;
         return true;
     }
@@ -90,7 +94,9 @@ public:
     /// Apply one authoritative native configure snapshot. A valid reported
     /// scale is adopted even if the physical extent is transiently zero, but
     /// zero/non-finite extents preserve the last valid logical viewport and do
-    /// not produce a layout size.
+    /// not produce a layout size. The most recent scale-observation validity is
+    /// retained so the platform owner can publish a bounded diagnostic without
+    /// changing the non-fatal fallback behavior.
     [[nodiscard]] std::optional<Size> configure(Size physical, float reported_scale) noexcept {
         (void)observe_scale(reported_scale);
         if (!valid_physical_extent(physical)) {
@@ -119,6 +125,7 @@ public:
 
 private:
     float last_valid_scale_{1.0f};
+    bool last_scale_observation_valid_{true};
     Size logical_size_{};
     Size physical_size_{};
     bool renderable_{};
