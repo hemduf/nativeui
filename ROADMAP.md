@@ -17,15 +17,15 @@ This roadmap turns NativeUI into a reusable desktop retained-mode UI toolkit whi
 
 ## Current execution snapshot
 
-`main` is `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675` and includes T034 / PR #135, the supported T060 multi-window lifecycle model, post-T060 T042 stress qualification, the T052 v0.1 developer-preview release/package gate, and merged Tree paint-ownership regression #152 / PR #153. T036 / PR #155 is the active UI/accessibility critical-path completion candidate; T065 / PR #133 remains the active critical platform completion candidate.
+`main` includes T036 / PR #155 as `cbf68026fc0780f1e5d04e2120cae76b188ed780`, plus T065 / PR #133, T034 / PR #135, the supported T060 multi-window lifecycle model, post-T060 T042 stress qualification, the T052 v0.1 developer-preview release/package gate, and merged Tree paint-ownership regression #152 / PR #153. T045 is now the next UI/accessibility dependency-unblocked item. T072 is active in the independent platform lane after T065 completion.
 
 Cross-cutting rendering regression #152 / PR #153 removed implicit Tree-level visual decoration: `Tree::paint()` no longer paints a default viewport background or the hard-coded `TAB / SHIFT+TAB...` instruction line. Visual backgrounds and overlays belong to consumer/component composition, with a headless regression protecting that ownership boundary.
 
 Current dependency frontier:
 
 ```text
-critical UI:       T034(done) -> T036(completion PR #155) -> T045 -> T067 -> T068
-                                              T058(done required) ----^      ^
+critical UI:       T034(done) -> T036(done) -> T045 -> T067 -> T068
+                                           T058(done required) ----^      ^
 
 widgets/overlay:   T034(done) + T061 -> T035 ---------------------------> T068
                    T061 + T034 -> T063 -------------------------------> T068
@@ -37,7 +37,7 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(completion PR #133) -> T072 -> T064
+critical platform: T060(done) -> T065(done) -> T072(active) -> T064
                    T041(done) -> T043(active PR #142) -> T066
                                               |-------> T068
                    T065 + T072 + T043 + remaining feature deps -> T068 -> T069
@@ -65,7 +65,7 @@ critical platform: T060(done) -> T065(completion PR #133) -> T072 -> T064
 
 ## Milestone 5 — Standard widget set
 
-**Status: T030–T034 complete; T036 is in completion qualification.**
+**Status: T030–T034 and T036 complete.**
 
 ### T030 — Button
 
@@ -99,7 +99,7 @@ Delivered contract:
 
 ### T036 — ListView and Tabs
 
-T036 / issue #36 / PR #155 is the current UI/accessibility critical-path completion candidate. The branch is refreshed through current `main` as `9706f8b69f8692ba529de5600070c5dca8a76195` before this completion documentation update.
+Complete in PR #155 and squash-merged to `main` as `cbf68026fc0780f1e5d04e2120cae76b188ed780`.
 
 Delivered contract:
 
@@ -113,13 +113,13 @@ Delivered contract:
 - ReadOnly remains navigation-capable while Disabled suppresses normal targeting/focus;
 - dedicated tests cover public/data model, interaction, composite focus, O(N) fully-retained construction baseline, two-instance isolation and deterministic headless states; `t036_list_tabs --self-test` is the feature acceptance executable.
 
-The final review found one Important application-selection reveal gap. Test-only exact head `4f02e22e2989442e7a7dacf5940e714214ab8e50` failed the new offscreen reveal assertion on Linux ASan+UBSan, Linux X11 and Windows while all other tests passed. GREEN commit `fe51752e9093df0f23a68c4db0e1ef9532b16da7` extends the already-owned per-row selection observer so only the matching selected row applies `ensure_visible`; user-driven selection remains idempotent because it already reveals before State notification. Review `5167235343` reports no remaining Blocking/Important code finding. Merge remains gated on the exact documentation-synchronized normal/platform/sanitizer/lifecycle/release validation set.
+The completion review found one Important application-selection reveal gap and corrected it test-first in `fe51752e9093df0f23a68c4db0e1ef9532b16da7`. Exact completion head `458b48ed60e187a1a89587b39735da3d387b0532` then passed CI #861 on Linux ASan+UBSan, Linux X11, Windows and macOS, plus T042 Lifecycle Stress #433, T052 Release Gate #178, T060 Application Contract #256 and T065 Dispatcher Contract #82. No Blocking/Important review finding remained at merge.
 
-After T036 merges, T045 is the next owned critical-path item. T067 waits on T036 + T045 + T058; T068 then converges this chain with its other explicit overlay/platform dependencies. T035 remains separate and additionally waits for T061.
+T045 is now the next UI/accessibility item. T067 waits on T045 + T058 before T068. T035 remains separate and additionally waits for T061.
 
 ## Milestone 6 — Styling, theme and animation
 
-**In progress through independent dependencies.** T037 -> T038 -> T039 owns typed theme/style/scoped inheritance. T040 additionally depends on T065 for deterministic timers and must not create a second scheduler.
+**In progress through independent dependencies.** T037 -> T038 -> T039 owns typed theme/style/scoped inheritance. T040 consumes the now-complete T065 deterministic timer service and must not create a second scheduler.
 
 ## Milestone 7 — Platform and embedded robustness
 
@@ -130,11 +130,12 @@ Core lifecycle/consumer-safety baseline is delivered:
 - T053 consumer-specific Objective-C bridge naming;
 - T042 deterministic lifecycle stress;
 - T060 explicit one-Application/one-PROGRAM-world multi-window ownership;
-- #139 / PR #140 post-T060 T042 qualification.
+- #139 / PR #140 post-T060 T042 qualification;
+- T065 bounded UI-thread dispatcher/timer service.
 
 ### T065 — Dispatcher/timer service
 
-T065 / issue #77 / PR #133 is the current critical platform completion candidate.
+T065 / issue #77 / PR #133 is complete and merged.
 
 Implemented contract includes:
 
@@ -148,16 +149,14 @@ Implemented contract includes:
 - host-driven non-blocking EmbeddedView dispatch;
 - deterministic core/platform tests and `t065_ui_dispatcher --self-test`.
 
-The platform lane owns T065 exact-head completion and downstream T072/T043/T064/T066 work; the UI/accessibility lane must not duplicate it.
-
 ### Critical downstream platform order
 
-After T065:
+With T065 complete:
 
-1. **T072 / issue #84** — shared bounded Linux `libdbus-1` transport. It directly unlocks both T064 and the Linux side of T068.
-2. **T043 / issue #43 / PR #142** — resize/scale contract. It may advance while T065 waits only on external CI and is required by T066 and T068.
-3. **T064 / issue #76** — DesktopServices, after T065 + T072.
-4. **T066 / issue #78** — final standalone window controls, after T060 + T043.
+1. **T072 / issue #84** — shared bounded Linux `libdbus-1` transport is active. It directly unlocks both T064 and the Linux side of T068.
+2. **T043 / issue #43 / PR #142** — resize/scale contract may progress independently and is required by T066 and T068.
+3. **T064 / issue #76** — DesktopServices, after T072.
+4. **T066 / issue #78** — final standalone window controls, after T043.
 
 T044 remains a T071 release dependency but is not on the T068/T069 critical path; defer substantive T044 work until the above prerequisites unless its existing PR is already exact-head green and needs only final review/metadata/merge.
 
@@ -174,23 +173,24 @@ The gate validates clean-cache pinned Pugl/Skia bootstrap and fail-closed checks
 Remaining release/package frontier:
 
 ```text
-T036 -> T045 -> T067 ----\
-T058 --------------------+--> T068 -> T069 -> T070 -> T071
-T035/T063 ---------------+
-T065 -> T072/T064 -------+
-T043 -> T066 ------------/
-other explicit T069 deps -/
+T036(done) -> T045 -> T067 ----\
+T058 --------------------------+--> T068 -> T069 -> T070 -> T071
+T035/T063 ---------------------+
+T065(done) -> T072 -> T064 ----+
+T043 -----------> T066 --------/
+other explicit T069 deps -------/
 ```
 
 T069 is the final v1 public API freeze and must not start until every explicit dependency in issue #81 is complete. T070 then validates the production reference application/Getting Started against that frozen API. T071 is validation/release-only on one exact RC SHA.
 
 ## Immediate cross-lane plan
 
-1. Finish exact-head qualification/review/docs and merge T036 / PR #155; then immediately start T045.
-2. Keep T067 blocked until T036 + T045 + T058 are complete; then prioritize it because T068 depends on its immutable virtual semantic metadata model.
-3. In parallel, finish T065, then T072, while T043 advances whenever T065 is waiting only on CI.
-4. Let the dynamic/overlay lane finish T058 -> T061 and then T035/T063; those converge at T068.
-5. Keep T069/T070/T071 dependency-gated; do not freeze the v1 API early.
+1. Move T045 to Ready and start it as the next UI/accessibility critical-path item.
+2. Keep T067 blocked until T045 + T058 are complete; then prioritize it because T068 depends on its immutable virtual semantic metadata model.
+3. Continue active T072; once complete, advance T064.
+4. Continue T043 / PR #142 independently, then T066.
+5. Let the dynamic/overlay lane finish T058 -> T061 and then T035/T063; those converge at T068.
+6. Keep T069/T070/T071 dependency-gated; do not freeze the v1 API early.
 
 ## Prioritization rule
 
