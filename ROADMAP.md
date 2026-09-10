@@ -17,9 +17,9 @@ This roadmap turns NativeUI into a reusable desktop retained-mode UI toolkit whi
 
 ## Current execution snapshot
 
-`main` is `645679b3c375d54c68227753583c9cb0a74fd801` and includes T034 / PR #135, the supported T060 multi-window lifecycle model, post-T060 T042 stress qualification, and the T052 v0.1 developer-preview release/package gate. T065 / PR #133 is the active critical platform completion candidate and has been refreshed onto this main baseline.
+The pre-T058 merge baseline is `main` at `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675`. It contains T034, T065, the supported T060 multi-window lifecycle model, post-T060 T042 stress qualification, and the T052 v0.1 developer-preview release/package gate.
 
-Cross-cutting rendering regression #152 / PR #153 removes implicit Tree-level visual decoration: `Tree::paint()` no longer paints a default viewport background or the hard-coded `TAB / SHIFT+TAB...` instruction line. Visual backgrounds and overlays belong to consumer/component composition, with a headless regression protecting that ownership boundary.
+Cross-cutting rendering regression #152 / PR #153 removed implicit Tree-level visual decoration: `Tree::paint()` no longer paints a default viewport background or hard-coded instruction line. Visual backgrounds and overlays belong to consumer/component composition; renderer framebuffer clear remains separate.
 
 Current dependency frontier:
 
@@ -28,7 +28,13 @@ widgets/layout:    T059(done) -> T030(done) -> T031(done)
                                        |-> T032(done)
                                        |-> T033(done)
                                        +-> T034(done) -> T036
-                                                      -> T035 only after T061
+                                                      -> T035 after T061
+
+dynamic/overlay:   T058(PR #154) -> T061 -> T035 -> T063
+                                   |             ^
+                                   +------------ T063 also requires T034(done)
+                                   +-> T062 after T065(done)
+                   T058 ----------> T067 / T068 dependency paths
 
 lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
                    T042(done) -> T051(done) ---------------------> T052(done)
@@ -37,10 +43,10 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(completion PR #133) -> T072 -> T064
-                   T041(done) -> T043(active PR #142) -> T066
-                                              |-------> T068
-                   T065 + T072 + T043 + remaining feature deps -> T068 -> T069
+critical platform: T065(done) -> T072 -> T064
+                   T041(done) -> T043 -> T066
+                                      |-> T068
+                   feature/platform convergence -> T068 -> T069 -> T070 -> T071
 ```
 
 ## Milestone 0 — Baseline hardening
@@ -77,31 +83,31 @@ Complete in PR #95. Checkbox and typed RadioGroup/RadioButton share deterministi
 
 ### T032 — Slider and RangeSlider
 
-Complete in PR #115, squash-merged as `7228ea9e78ab244027337a0e34e73ccbbf33eac1`. Shared numeric-domain and track-axis helpers handle finite ranges, horizontal/vertical mapping, keyboard editing, nearest-thumb RangeSlider selection, no crossing, T059 read-only/disabled behavior and bounded reentrancy.
+Complete in PR #115. Shared numeric-domain and track-axis helpers handle finite ranges, horizontal/vertical mapping, keyboard editing, nearest-thumb RangeSlider selection, no crossing, T059 read-only/disabled behavior and bounded reentrancy.
 
 ### T033 — ProgressBar and Meter
 
-Complete in PR #123, squash-merged as `44626fef8d70f73428aa6ce906357a922cb010f5`. The widgets are display-only, use finite presentation normalization without State writeback, support horizontal/vertical fill and optional formatting, and add no hidden timer or interaction state.
+Complete in PR #123. The widgets are display-only, use finite presentation normalization without State writeback, support horizontal/vertical fill and optional formatting, and add no hidden timer or interaction state.
 
 ### T034 — ScrollView
 
-Complete in PR #135 and merged to `main` as `645679b3c375d54c68227753583c9cb0a74fd801`.
+Complete in PR #135.
 
 Delivered contract:
 
 - `ScrollState` remains the sole offset/metrics authority;
-- wheel events are handled only when effective offset changes, allowing natural nested boundary bubbling;
+- wheel events are handled only when effective offset changes, allowing nested boundary bubbling;
 - optional pointer panning uses toolkit capture with no inertia/timer;
-- retained overlay scrollbars use fixed 8 logical px thickness and 18 px minimum thumb, deterministic thumb drag, handled/no-jump track clicks and both-axis corner shortening;
+- retained overlay scrollbars use fixed 8 logical px thickness and 18 px minimum thumb;
 - public Nearest/Start/Center/End `ensure_visible` plus focused-descendant reveal;
 - T059 Disabled/Hidden/Collapsed interaction suppression/cancellation while ReadOnly remains scrollable;
-- generic `pointer_targetable()` separates pointer targeting from keyboard focus so scroll overlays remain interactive without polluting focus traversal.
+- generic pointer targetability is independent from keyboard focus.
 
-T036 is now the preferred dependency-unblocked widget/layout continuation. T035 additionally waits for T061.
+T036 is an independent widget/layout continuation. T035 additionally waits for T061 and is owned by the dynamic/overlay critical chain.
 
 ## Milestone 6 — Styling, theme and animation
 
-**In progress through independent dependencies.** T037 -> T038 -> T039 owns typed theme/style/scoped inheritance. T040 additionally depends on T065 for deterministic timers and must not create a second scheduler.
+**In progress through independent dependencies.** T037 -> T038 -> T039 owns typed theme/style/scoped inheritance. T040 consumes the completed T065 dispatcher/timer service and remains in the style/animation lane.
 
 ## Milestone 7 — Platform and embedded robustness
 
@@ -112,63 +118,88 @@ Core lifecycle/consumer-safety baseline is delivered:
 - T053 consumer-specific Objective-C bridge naming;
 - T042 deterministic lifecycle stress;
 - T060 explicit one-Application/one-PROGRAM-world multi-window ownership;
-- #139 / PR #140 post-T060 T042 qualification.
+- #139 post-T060 T042 qualification;
+- T065 bounded dispatcher/timer service with native wake integration.
 
 ### T065 — Dispatcher/timer service
 
-T065 / issue #77 / PR #133 is the current critical completion candidate.
-
-Implemented contract includes:
-
-- exact per-owner limits: 65,536 pending tasks, 8,192 active timers and 1,024 callbacks per checkpoint;
-- weak thread-safe Dispatcher handles and deterministic per-owner FIFO execution;
-- one-shot/fixed-delay repeating timers, fake monotonic time, cancellation and queue-saturation retry;
-- user callback/capture destruction outside internal dispatcher locks;
-- independent task/timer namespaces even when standalone windows share one Application wake backend;
-- worker wake via captured native primitives rather than concurrent Pugl calls;
-- Application waits interrupted by worker posts and bounded by timer deadlines without busy polling;
-- host-driven non-blocking EmbeddedView dispatch;
-- deterministic core/platform tests and `t065_ui_dispatcher --self-test`.
-
-Exact code head `d12064ab485aa9f21128eeb2059d40b1f8c3f969` passed normal CI, T065 core and platform workflows, T060 Application Contract, T042 Lifecycle Stress and T052 Release Gate. The PR was then cleanly refreshed onto current T034 main. The documentation-synchronized completion head must receive a fresh exact-head matrix and final `CODE_REVIEW.md` review before autonomous merge.
+T065 / issue #77 is Done. Its contract includes exact per-owner limits (65,536 pending tasks, 8,192 active timers, 1,024 callbacks per checkpoint), weak thread-safe Dispatcher handles, deterministic FIFO execution, one-shot/fixed-delay timers, fake monotonic time, callback destruction outside locks, native worker wake integration and host-driven non-blocking EmbeddedView dispatch.
 
 ### Critical downstream platform order
 
-After T065:
-
-1. **T072 / issue #84** — shared bounded Linux `libdbus-1` transport. It directly unlocks both T064 and the Linux side of T068.
-2. **T043 / issue #43 / PR #142** — resize/scale contract. It may advance while T065 waits only on external CI and is required by T066 and T068.
+1. **T072 / issue #84** — shared bounded Linux `libdbus-1` transport; unlocks T064 and Linux T068.
+2. **T043 / issue #43** — resize/scale contract; required by T066 and T068.
 3. **T064 / issue #76** — DesktopServices, after T065 + T072.
 4. **T066 / issue #78** — final standalone window controls, after T060 + T043.
 
-T044 remains a T071 release dependency but is not on the T068/T069 critical path; defer substantive T044 work until the above prerequisites unless its existing PR is already exact-head green and needs only final review/metadata/merge.
+T044 remains a T071 release dependency but is not on the T068/T069 critical path.
 
-## Milestone 8 — Packaging, tooling and release
+## Milestone 8 — Dynamic UI, packaging, tooling and release
 
-Delivered foundations include T047 low-level package export, T048 relocated external consumers, T051 performance-regression harness, T052 v0.1 developer-preview release gate, T054 native application helper, T056 deterministic binary-data generation and T057 ResourceManager.
+Delivered package foundations include T047 low-level package export, T048 relocated external consumers, T051 performance-regression harness, T052 v0.1 developer-preview release gate, T054 native application helper, T056 deterministic binary-data generation and T057 ResourceManager.
+
+### T058 — Dynamic subtree composition
+
+T058 / issue #70 / PR #154 is the current dynamic/overlay critical-chain merge candidate.
+
+Delivered scope:
+
+- explicit `If`, `Switch` and keyed `ForEach` retained dynamic containers only; ordinary static `Spec` remains one-time construction data;
+- per-tree dirty dynamic records with no global reconciler/registry;
+- observers enqueue work rather than mutating retained structure reentrantly;
+- unchanged keys preserve retained component/NodeId identity through insert/remove/reorder;
+- duplicate-key snapshots reject atomically without partial teardown;
+- capture/focus cleanup occurs while removed nodes remain valid, followed by deactivate/unmount/destruction before replacement construction;
+- stale focus-restore targets and removed subscriptions/invalidators are purged safely;
+- runtime NodeIds are monotonic for the Tree lifetime and are not recycled after removal;
+- lifecycle-triggered writes are deferred to later reconciliation passes;
+- exact 32-pass top-level checkpoint limit; pass-33 work remains queued for a later checkpoint and emits `structural reconciliation pass limit exceeded`;
+- nested trapping FocusScope rehoming is deterministic;
+- interactive `t058_dynamic_composition` example plus deterministic `--self-test`.
+
+The final T058 candidate is refreshed against current `main`, preserving #153's consumer-owned Tree paint contract while retaining all dynamic checkpoint hooks. Merge requires the exact-head platform/sanitizer/regression matrix and final mandatory `CODE_REVIEW.md` audit to be green/clean.
+
+### Owned v1 overlay critical chain
+
+After T058 merges, execute strictly:
+
+```text
+T058 -> T061
+          |-> T035 after T034(done)
+          |-> T063 after T034(done)
+          +-> T062 after T065(done)
+```
+
+When T035, T063 and T062 are simultaneously Ready, prioritize **T035 -> T063 -> T062** because that order maximizes T068/T069 unblock value.
+
+- **T061 / #73**: generic per-UI overlay/portal stack, using T058's safe mutation checkpoints rather than a second reconciler.
+- **T035 / #35**: ComboBox/PopupMenu on T061, with snapshot options, deterministic focus/dismissal and close-before-callback behavior.
+- **T063 / #75**: one-modal-per-UI Dialog policy over T061/T034 with exact close/result/reentrancy rules.
+- **T062 / #74**: text-only Tooltip over T061 + completed T065 timers, with deterministic hover/focus delays and pointer-transparent overlay behavior.
+
+T058 also unlocks independent T067/T068 dependency paths, but those tickets remain owned by their separate lanes.
 
 ### T052 — v0.1 developer-preview release gate
 
-T052 / issue #52 / PR #120 is complete and merged as `bc5e38e7e87168d6faf1edcb15f9beb3b725c070`. It establishes the infrastructure/package release baseline without claiming NativeUI 1.0 product completeness.
+T052 / issue #52 / PR #120 is complete. It establishes infrastructure/package release validation without claiming NativeUI 1.0 product completeness: pinned dependency bootstrap/checksums, relocated low-level package consumption, T053 Objective-C namespace isolation, lifecycle/performance/idle gates, and developer-preview release/legal documentation.
 
-The gate validates clean-cache pinned Pugl/Skia bootstrap and fail-closed checksums on Linux X11, Windows and macOS; relocated low-level package consumption through `NativeUI::Core + nativeui_attach_platform()`; macOS consumer-specific T053 Objective-C namespaces; the supported T060/#139 lifecycle path; T051 comparative performance policy and exact-zero idle invalidation; and developer-preview release/legal documentation.
-
-Remaining release/package frontier:
+### Final v1 package/release frontier
 
 ```text
-T065 -> T072 -> T064 ----\
-T043 ---------> T066 -----+-> remaining v1 feature/platform convergence -> T068 -> T069 -> T070 -> T071
-other explicit T069 deps -/
+dynamic/widget/platform convergence ----\
+T065 -> T072 -> T064 --------------------+-> T068 -> T069 -> T070 -> T071
+T043 -> T066 ----------------------------/
+other explicit T069 dependencies -------/
 ```
 
-T069 is the final v1 public API freeze and must not start until every explicit dependency in issue #81 is complete. T070 then validates the production reference application/Getting Started against that frozen API. T071 is validation/release-only on one exact RC SHA.
+T069 is the final v1 public API freeze and must not start until every explicit dependency in issue #81 is complete. T070 validates the production reference application/Getting Started against that frozen API. T071 is validation/release-only on one exact RC SHA.
 
 ## Immediate cross-lane plan
 
-1. Finish fresh exact-head qualification, final review and merge of T065 / PR #133.
-2. Start T072 immediately after T065 merges.
-3. Advance existing T043 / PR #142 whenever T065 is waiting only on CI, then merge it before T066/T068.
-4. Finish T064 and T066 as their dependencies become satisfied, prioritizing whichever existing stream is farther along or longer while the other waits only on CI.
+1. Finish final exact-head qualification/review and merge T058 / PR #154.
+2. Start T061 immediately after T058 merges.
+3. After T061, advance T035 first, T063 second and T062 third whenever their explicit dependencies are satisfied.
+4. In parallel lanes, continue T043 and T072/T064 plus the independent style/widget/accessibility chains without duplicate ownership.
 5. Keep T069/T070/T071 dependency-gated; do not freeze the v1 API early.
 
 ## Prioritization rule
@@ -179,7 +210,7 @@ Preserve the architectural direction:
 core correctness
   -> layout/input/render/text foundations
   -> widgets and styles
-  -> platform/lifecycle services
+  -> dynamic/overlay + platform/lifecycle services
   -> accessibility/public API freeze
   -> reference package/release
 ```
