@@ -73,8 +73,7 @@ public:
 
     ui::Spec spec() && {
         auto state = std::move(state_);
-        return ui::Spec{
-            [state] { return std::make_unique<CaptureProbe>(state); }, {}};
+        return ui::Spec{[state] { return std::make_unique<CaptureProbe>(state); }, {}};
     }
 
 private:
@@ -117,11 +116,23 @@ public:
         return static_cast<Window>(window.native_handle());
     }
 
+    bool place(const ui::StandaloneWindow& window, int x, int y) {
+        if (!display_) return false;
+        const Window target = native_window(window);
+        if (!target) return false;
+        XMoveWindow(display_, target, x, y);
+        XMapRaised(display_, target);
+        XSync(display_, False);
+
+        XWindowAttributes attrs{};
+        return XGetWindowAttributes(display_, target, &attrs) && attrs.map_state == IsViewable;
+    }
+
     bool activate(const ui::StandaloneWindow& window) {
         if (!display_) return false;
         const Window target = native_window(window);
         if (!target) return false;
-        XMapRaised(display_, target);
+        XRaiseWindow(display_, target);
         XSetInputFocus(display_, target, RevertToParent, CurrentTime);
         XWarpPointer(display_, 0, target, 0, 0, 0, 0, 24, 24);
         XSync(display_, False);
@@ -130,22 +141,22 @@ public:
 
     bool press_inside(const ui::StandaloneWindow& window) {
         if (!activate(window)) return false;
-        if (!XTestFakeButtonEvent(display_, 1, True, CurrentTime)) return false;
+        if (!XTestFakeButtonEvent(display_, 1, True, 0)) return false;
         XSync(display_, False);
-        return true;
+        return button_one_is_down();
     }
 
     bool move_outside(const ui::StandaloneWindow& window, int extra = 0) {
         Geometry g{};
         if (!geometry(window, g)) return false;
         const int screen = DefaultScreen(display_);
-        const int x = std::clamp(g.root_x + g.width + 60 + extra,
+        const int x = std::clamp(g.root_x + 24 + extra,
                                  0,
                                  DisplayWidth(display_, screen) - 1);
-        const int y = std::clamp(g.root_y + g.height + 60 + extra,
+        const int y = std::clamp(g.root_y + g.height + 72 + extra,
                                  0,
                                  DisplayHeight(display_, screen) - 1);
-        if (!XTestFakeMotionEvent(display_, screen, x, y, CurrentTime)) return false;
+        if (!XTestFakeMotionEvent(display_, screen, x, y, 0)) return false;
         XSync(display_, False);
         return true;
     }
@@ -161,9 +172,9 @@ public:
 
     bool release() {
         if (!display_) return false;
-        if (!XTestFakeButtonEvent(display_, 1, False, CurrentTime)) return false;
+        if (!XTestFakeButtonEvent(display_, 1, False, 0)) return false;
         XSync(display_, False);
-        return true;
+        return !button_one_is_down();
     }
 
 private:
@@ -178,7 +189,10 @@ private:
         if (!display_) return false;
         const Window target = native_window(window);
         XWindowAttributes attrs{};
-        if (!target || !XGetWindowAttributes(display_, target, &attrs)) return false;
+        if (!target || !XGetWindowAttributes(display_, target, &attrs) ||
+            attrs.map_state != IsViewable) {
+            return false;
+        }
         Window child{};
         if (!XTranslateCoordinates(display_, target, DefaultRootWindow(display_), 0, 0,
                                    &out.root_x, &out.root_y, &child)) {
@@ -189,21 +203,36 @@ private:
         return true;
     }
 
-    bool pointer_is_inside(Window expected) const {
+    bool query_pointer(Window window,
+                       int& win_x,
+                       int& win_y,
+                       unsigned int& mask) const {
         Window root{};
         Window child{};
         int root_x{};
         int root_y{};
+        return XQueryPointer(display_, window, &root, &child,
+                             &root_x, &root_y, &win_x, &win_y, &mask) != False;
+    }
+
+    bool pointer_is_inside(Window expected) const {
         int win_x{};
         int win_y{};
         unsigned int mask{};
-        if (!XQueryPointer(display_, expected, &root, &child,
-                           &root_x, &root_y, &win_x, &win_y, &mask)) {
+        if (!query_pointer(expected, win_x, win_y, mask)) return false;
+        XWindowAttributes attrs{};
+        if (!XGetWindowAttributes(display_, expected, &attrs) || attrs.map_state != IsViewable) {
             return false;
         }
-        XWindowAttributes attrs{};
-        if (!XGetWindowAttributes(display_, expected, &attrs)) return false;
         return win_x >= 0 && win_y >= 0 && win_x < attrs.width && win_y < attrs.height;
+    }
+
+    bool button_one_is_down() const {
+        int x{};
+        int y{};
+        unsigned int mask{};
+        if (!query_pointer(DefaultRootWindow(display_), x, y, mask)) return false;
+        return (mask & Button1Mask) != 0;
     }
 
     Display* display_{};
@@ -220,13 +249,14 @@ bool outside_release_cycle(ui::Application& app,
     const int up = state->up;
     const int cancel = state->cancel;
 
-    if (!driver.press_inside(window) || !pump(app)) return false;
+    if (!expect(driver.press_inside(window), stage, "failed to synthesize a held button press")) return false;
+    if (!pump(app)) return false;
     if (!expect(state->down == down + 1, stage, "pointer down not delivered")) return false;
-    if (!driver.move_outside(window) || !pump(app)) return false;
-    if (!driver.move_outside(window, 20) || !pump(app)) return false;
+    if (!expect(driver.move_outside(window), stage, "first outside motion injection failed") || !pump(app)) return false;
+    if (!expect(driver.move_outside(window, 20), stage, "second outside motion injection failed") || !pump(app)) return false;
     if (!expect(state->move >= move + 2, stage, "captured outside motion was lost")) return false;
     if (!expect(state->outside_move >= outside + 2, stage, "outside coordinates were not delivered")) return false;
-    if (!driver.release() || !pump(app)) return false;
+    if (!expect(driver.release(), stage, "button release injection failed") || !pump(app)) return false;
     if (!expect(state->up == up + 1, stage, "outside release was lost")) return false;
     return expect(state->cancel == cancel, stage, "normal release synthesized cancel");
 }
@@ -252,6 +282,9 @@ int main() {
     X11Driver driver;
     if (!driver.valid()) return fail("driver", "XOpenDisplay failed");
     if (!pump(app, 16)) return 1;
+    if (!expect(driver.place(*a, 40, 40), "placement", "failed to place A")) return 1;
+    if (!expect(driver.place(*b, 420, 40), "placement", "failed to place B")) return 1;
+    if (!pump(app)) return 1;
 
     if (!outside_release_cycle(app, driver, *a, a_state, "outside-a")) return 1;
     if (!expect(b_state->down == 0 && b_state->move == 0 && b_state->up == 0,
@@ -260,15 +293,15 @@ int main() {
 
     const int cancel_before = a_state->cancel;
     const int up_before = a_state->up;
-    if (!driver.press_inside(*a) || !pump(app)) return 1;
-    if (!driver.activate(*b) || !pump(app)) return 1;
+    if (!expect(driver.press_inside(*a), "focus-loss", "failed to press A") || !pump(app)) return 1;
+    if (!expect(driver.activate(*b), "focus-loss", "failed to focus B") || !pump(app)) return 1;
     if (!expect(a_state->cancel == cancel_before + 1,
                 "focus-loss", "focus loss did not cancel retained capture")) return 1;
     const int b_move_before = b_state->move;
-    if (!driver.move_inside(*b) || !pump(app)) return 1;
+    if (!expect(driver.move_inside(*b), "focus-loss", "failed to move into B") || !pump(app)) return 1;
     if (!expect(b_state->move > b_move_before,
                 "focus-loss", "X11 grab remained owned by A after retained cancellation")) return 1;
-    if (!driver.release() || !pump(app)) return 1;
+    if (!expect(driver.release(), "focus-loss", "failed to release held button") || !pump(app)) return 1;
     if (!expect(a_state->up == up_before,
                 "focus-loss", "cancelled capture received a duplicate release")) return 1;
 
@@ -277,16 +310,17 @@ int main() {
     auto c = std::make_unique<ui::StandaloneWindow>(
         app, *c_ui, ui::WindowDesc{.title = "T044 X11 C", .size = {240.0f, 170.0f}, .resizable = true});
     if (!c->valid()) return fail("window-c", c->last_error());
-    if (!driver.press_inside(*c) || !pump(app)) return 1;
+    if (!expect(driver.place(*c, 40, 400), "destroy", "failed to place C") || !pump(app)) return 1;
+    if (!expect(driver.press_inside(*c), "destroy", "failed to press C") || !pump(app)) return 1;
     if (!expect(c_state->down == 1, "destroy", "view C did not receive pointer down")) return 1;
     c.reset();
     c_ui.reset();
     if (!pump(app)) return 1;
     const int after_destroy = b_state->move;
-    if (!driver.move_inside(*b) || !pump(app)) return 1;
+    if (!expect(driver.move_inside(*b), "destroy", "failed to move into B") || !pump(app)) return 1;
     if (!expect(b_state->move > after_destroy,
                 "destroy", "destroyed X11 view retained pointer grab")) return 1;
-    if (!driver.release() || !pump(app)) return 1;
+    if (!expect(driver.release(), "destroy", "failed to release held button") || !pump(app)) return 1;
 
     for (int i = 0; i < 32; ++i) {
         if (!outside_release_cycle(app, driver, *a, a_state, "stress")) return 1;
