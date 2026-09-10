@@ -1,7 +1,5 @@
 #pragma once
 
-#include <nativeui/component_base.hpp>
-#include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/virtual_list_model.hpp>
 
 #include <algorithm>
@@ -15,15 +13,26 @@
 
 namespace ui::detail {
 
-template <class Key>
+template <class Key, class Payload>
 class VirtualListMaterializationWindow {
 public:
     using Model = VirtualListDatasetModel<Key>;
     using Item = typename Model::Item;
-    using RowFactory = std::function<Spec(const Item&)>;
+    using PayloadFactory = std::function<Payload(const Item&)>;
 
-    VirtualListMaterializationWindow(Model& model, float row_height, RowFactory row_factory)
-        : model_(&model), row_height_(row_height), row_factory_(std::move(row_factory)) {}
+    struct MaterializedItem {
+        std::string key;
+        std::size_t index{};
+        std::shared_ptr<const Payload> payload;
+    };
+
+    VirtualListMaterializationWindow(
+        Model& model,
+        float row_height,
+        PayloadFactory payload_factory)
+        : model_(&model),
+          row_height_(row_height),
+          payload_factory_(std::move(payload_factory)) {}
 
     [[nodiscard]] bool update(
         float scroll_y,
@@ -40,9 +49,9 @@ public:
             std::move(captured_key));
         if (!next_indices) return false;
 
-        std::vector<Slot> next_slots;
+        std::vector<MaterializedItem> next_items;
         std::vector<std::string> next_keys;
-        next_slots.reserve(next_indices->size());
+        next_items.reserve(next_indices->size());
         next_keys.reserve(next_indices->size());
 
         for (const auto index : *next_indices) {
@@ -52,24 +61,24 @@ public:
 
             const std::string retained_key = "virtual-list:" + *encoded_key;
             const auto existing = std::find_if(
-                slots_.begin(), slots_.end(), [&](const Slot& slot) {
-                    return slot.key == retained_key;
+                items_.begin(), items_.end(), [&](const MaterializedItem& materialized) {
+                    return materialized.key == retained_key;
                 });
 
-            std::shared_ptr<const Spec> spec;
-            if (existing != slots_.end()) {
-                spec = existing->spec;
+            std::shared_ptr<const Payload> payload;
+            if (existing != items_.end()) {
+                payload = existing->payload;
             } else {
-                spec = std::make_shared<const Spec>(row_factory_(*item));
+                payload = std::make_shared<const Payload>(payload_factory_(*item));
             }
 
             next_keys.push_back(retained_key);
-            next_slots.push_back(Slot{retained_key, index, std::move(spec)});
+            next_items.push_back(MaterializedItem{retained_key, index, std::move(payload)});
         }
 
         indices_ = *next_indices;
         keys_ = std::move(next_keys);
-        slots_ = std::move(next_slots);
+        items_ = std::move(next_items);
         return true;
     }
 
@@ -81,28 +90,17 @@ public:
         return keys_;
     }
 
-    [[nodiscard]] std::vector<DynamicChildSpec> children() const {
-        std::vector<DynamicChildSpec> result;
-        result.reserve(slots_.size());
-        for (const auto& slot : slots_) {
-            result.push_back(DynamicChildSpec{slot.key, *slot.spec});
-        }
-        return result;
+    [[nodiscard]] const std::vector<MaterializedItem>& items() const noexcept {
+        return items_;
     }
 
 private:
-    struct Slot {
-        std::string key;
-        std::size_t index{};
-        std::shared_ptr<const Spec> spec;
-    };
-
     Model* model_{};
     float row_height_{};
-    RowFactory row_factory_;
+    PayloadFactory payload_factory_;
     std::vector<std::size_t> indices_;
     std::vector<std::string> keys_;
-    std::vector<Slot> slots_;
+    std::vector<MaterializedItem> items_;
 };
 
 } // namespace ui::detail
