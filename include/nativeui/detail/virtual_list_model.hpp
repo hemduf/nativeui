@@ -73,6 +73,60 @@ struct VirtualListRange {
     return VirtualListRange{first_visible - before, last_visible + after};
 }
 
+enum class VirtualListAlignment {
+    Nearest,
+    Start,
+    Center,
+    End,
+};
+
+[[nodiscard]] inline std::optional<float> virtual_list_scroll_offset(
+    std::size_t item_count,
+    float row_height,
+    float viewport_height,
+    float current_offset,
+    std::size_t index,
+    VirtualListAlignment alignment) noexcept {
+    const auto content_height = virtual_list_content_height(item_count, row_height);
+    if (!content_height || index >= item_count || !std::isfinite(viewport_height) ||
+        viewport_height < 0.0f || !std::isfinite(current_offset) || current_offset < 0.0f) {
+        return std::nullopt;
+    }
+
+    const double content = static_cast<double>(*content_height);
+    const double viewport = static_cast<double>(viewport_height);
+    const double maximum_offset = std::max(0.0, content - viewport);
+    const double current = std::clamp(static_cast<double>(current_offset), 0.0, maximum_offset);
+    const double row = static_cast<double>(row_height);
+    const double item_start = static_cast<double>(index) * row;
+    const double item_end = item_start + row;
+
+    double target = current;
+    switch (alignment) {
+    case VirtualListAlignment::Start:
+        target = item_start;
+        break;
+    case VirtualListAlignment::Center:
+        target = item_start + row * 0.5 - viewport * 0.5;
+        break;
+    case VirtualListAlignment::End:
+        target = item_end - viewport;
+        break;
+    case VirtualListAlignment::Nearest:
+        if (row > viewport) {
+            target = item_start;
+        } else if (item_start < current) {
+            target = item_start;
+        } else if (item_end > current + viewport) {
+            target = item_end - viewport;
+        }
+        break;
+    }
+
+    target = std::clamp(target, 0.0, maximum_offset);
+    return static_cast<float>(target);
+}
+
 [[nodiscard]] inline std::optional<std::vector<std::size_t>> virtual_list_materialized_indices(
     std::size_t item_count,
     VirtualListRange range,
