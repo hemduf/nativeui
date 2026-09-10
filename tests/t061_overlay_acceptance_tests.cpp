@@ -393,8 +393,11 @@ void reentrant_show_contract() {
     NUI_CHECK(ui::handled(tree.dispatch(down, platform)));
     NUI_CHECK(state->pointer_downs == 1);
     NUI_CHECK(state->handle.valid());
-    NUI_CHECK(lifecycle->mounts == 0);
     NUI_CHECK(!state->mounted_reentrantly);
+    // T058 owns the safe structural checkpoint at top-level dispatch exit:
+    // mounting after the callback has unwound is expected and must not be
+    // delayed to a second overlay-specific queue/checkpoint.
+    NUI_CHECK(lifecycle->mounts == 1);
 
     tree.resize({96.0f, 48.0f});
     NUI_CHECK(lifecycle->mounts == 1);

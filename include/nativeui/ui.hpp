@@ -56,6 +56,19 @@ public:
     }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // Keep the no-overlay path as close as possible to the pre-T061 UI
+        // dispatch contract. A root callback may still show an overlay while
+        // Tree::dispatch is active, so re-check afterwards and enforce a newly
+        // created modal capture barrier without paying overlay layout/policy
+        // costs for the steady-state empty stack.
+        if (overlay_state_->entries.empty()) {
+            const auto result = tree_.dispatch(event, platform);
+            if (!overlay_state_->entries.empty()) {
+                enforce_new_modal_capture_barrier(platform);
+            }
+            return result;
+        }
+
         // Resolve dynamic/availability/layout changes before using retained
         // overlay bounds for pointer containment or dismissal. A newly-created
         // modal also terminates any capture established by lower content before
@@ -150,6 +163,10 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (overlay_state_->entries.empty()) {
+            tree_.paint(canvas, platform);
+            return;
+        }
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
         tree_.paint(canvas, platform);
