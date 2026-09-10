@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -211,23 +212,32 @@ void progress_meter_visual_and_idle_contract() {
         NUI_CHECK(std::isnan(value.get()));
     }
 
-    // Meter owns no animation/timer source: ignored input does not schedule any
-    // redraw beyond the tree's pre-existing activation exposure. The next new
-    // invalidation must come from an external State update.
+    // Meter owns no animation/timer source. First settle the activation/layout
+    // exposure so invalidation coalescing cannot hide the next external State
+    // update behind an already-dirty tree.
     {
         ui::State<float> value{0.2f};
         ui::UI tree{ui::Meter{value}};
         test::MockPlatform platform;
         tree.resize({200.0f, 40.0f});
         tree.activate(platform);
+        ui::HeadlessRenderer renderer{{200.0f, 40.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
+
         int invalidations = 0;
         tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
-        const int activation_exposures = invalidations;
         tree.dispatch(test::pointer(ui::InputType::PointerMove, 30.0f, 20.0f), platform);
         tree.dispatch(test::key(ui::Key::Right), platform);
-        NUI_CHECK(invalidations == activation_exposures);
+        NUI_CHECK(invalidations == 0);
+        NUI_CHECK(!tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
+
         value.set(0.8f);
-        NUI_CHECK(invalidations > activation_exposures);
+        NUI_CHECK(invalidations == 1);
+        NUI_CHECK(tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
     }
 
     // Formatter is presentation-only; invoking it during paint cannot write
