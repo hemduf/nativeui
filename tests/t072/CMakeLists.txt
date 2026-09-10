@@ -16,16 +16,19 @@ target_include_directories(t072_core_stub INTERFACE
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/NativeUILinuxDbus.cmake")
 nativeui_add_linux_dbus_transport()
 
-add_executable(t072_build_contract build_contract.cpp)
-target_include_directories(t072_build_contract PRIVATE
-  "${CMAKE_CURRENT_LIST_DIR}/../../src"
-)
-target_link_libraries(t072_build_contract PRIVATE nativeui_linux_dbus)
+function(t072_add_test name source)
+  add_executable(${name} ${source})
+  target_include_directories(${name} PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../src"
+  )
+  target_link_libraries(${name} PRIVATE nativeui_linux_dbus)
+  if(MSVC)
+    target_compile_options(${name} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${name} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
 
-if(MSVC)
-  target_compile_options(t072_build_contract PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(t072_build_contract PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_test(NAME t072_build_contract COMMAND t072_build_contract)
+t072_add_test(t072_build_contract build_contract.cpp)
+t072_add_test(t072_validation_contract validation_contract.cpp)
