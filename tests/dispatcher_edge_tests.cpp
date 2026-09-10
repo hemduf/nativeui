@@ -9,7 +9,9 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -17,6 +19,9 @@ namespace {
 using namespace std::chrono_literals;
 
 struct ReentrantLifetimeProbe final {
+    ReentrantLifetimeProbe(ui::Dispatcher target, std::atomic<int>* count)
+        : dispatcher(std::move(target)), destructions(count) {}
+
     ui::Dispatcher dispatcher;
     std::atomic<int>* destructions{};
 
@@ -124,8 +129,7 @@ void suite() {
         }
 
         std::atomic<int> destructions{0};
-        auto probe = std::make_shared<ReentrantLifetimeProbe>(
-            ReentrantLifetimeProbe{dispatcher, &destructions});
+        auto probe = std::make_shared<ReentrantLifetimeProbe>(dispatcher, &destructions);
         auto rejected = [probe] {};
         probe.reset();
 
@@ -140,8 +144,7 @@ void suite() {
         ui::detail::DispatcherOwner owner;
         const auto dispatcher = owner.dispatcher();
         std::atomic<int> destructions{0};
-        auto probe = std::make_shared<ReentrantLifetimeProbe>(
-            ReentrantLifetimeProbe{dispatcher, &destructions});
+        auto probe = std::make_shared<ReentrantLifetimeProbe>(dispatcher, &destructions);
         const auto timer = dispatcher.schedule_after(1s, [probe] {});
         probe.reset();
         NUI_CHECK(timer.valid());
@@ -157,8 +160,7 @@ void suite() {
         ui::detail::DispatcherOwner owner;
         const auto dispatcher = owner.dispatcher();
         std::atomic<int> destructions{0};
-        auto probe = std::make_shared<ReentrantLifetimeProbe>(
-            ReentrantLifetimeProbe{dispatcher, &destructions});
+        auto probe = std::make_shared<ReentrantLifetimeProbe>(dispatcher, &destructions);
         const auto timer = dispatcher.schedule_after(1s, [probe] {});
         probe.reset();
         NUI_CHECK(timer.valid());
