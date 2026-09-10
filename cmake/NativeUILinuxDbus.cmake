@@ -1,4 +1,5 @@
 include_guard(GLOBAL)
+include(CMakeParseArguments)
 
 function(_nativeui_linux_dbus_source_root out_var)
   if(DEFINED NATIVEUI_PLATFORM_SOURCE_ROOT AND
@@ -25,11 +26,23 @@ function(_nativeui_link_linux_dbus_transport target)
 endfunction()
 
 function(nativeui_add_linux_dbus_transport)
+  cmake_parse_arguments(PARSE_ARGV 0 NUI "TRANSPORT_ONLY" "" "")
+  if(NUI_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR
+      "nativeui_add_linux_dbus_transport received unknown arguments: ${NUI_UNPARSED_ARGUMENTS}")
+  endif()
+
   if(NOT UNIX OR APPLE)
     message(FATAL_ERROR "nativeui_add_linux_dbus_transport() is Linux/Unix-only")
   endif()
 
   if(TARGET nativeui_linux_dbus)
+    get_target_property(_nativeui_existing_transport_only
+      nativeui_linux_dbus NATIVEUI_LINUX_DBUS_TRANSPORT_ONLY)
+    if(_nativeui_existing_transport_only AND NOT NUI_TRANSPORT_ONLY)
+      message(FATAL_ERROR
+        "NativeUI Linux D-Bus transport was created in TRANSPORT_ONLY mode and cannot be reused for production Application integration")
+    endif()
     _nativeui_link_linux_dbus_transport(nativeui_linux_dbus)
     return()
   endif()
@@ -54,15 +67,21 @@ function(nativeui_add_linux_dbus_transport)
   find_package(Threads REQUIRED)
   pkg_check_modules(NATIVEUI_DBUS REQUIRED IMPORTED_TARGET dbus-1)
 
-  add_library(nativeui_linux_dbus STATIC
+  set(_nativeui_linux_dbus_sources
     "${_nativeui_source_root}/src/linux_dbus.cpp"
     "${_nativeui_source_root}/src/linux_dbus_codec.cpp"
-    "${_nativeui_source_root}/src/linux_application_backend.cpp"
   )
+  if(NOT NUI_TRANSPORT_ONLY)
+    list(APPEND _nativeui_linux_dbus_sources
+      "${_nativeui_source_root}/src/linux_application_backend.cpp")
+  endif()
+
+  add_library(nativeui_linux_dbus STATIC ${_nativeui_linux_dbus_sources})
   set_target_properties(nativeui_linux_dbus PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
+    NATIVEUI_LINUX_DBUS_TRANSPORT_ONLY "${NUI_TRANSPORT_ONLY}"
   )
   target_compile_features(nativeui_linux_dbus PUBLIC cxx_std_20)
   target_include_directories(nativeui_linux_dbus PRIVATE
