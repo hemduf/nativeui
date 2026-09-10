@@ -96,13 +96,12 @@ struct VirtualSemanticItem {
     bool selected{};
     Rect logical_bounds{};
     std::vector<SemanticAction> actions;
-
-    bool operator==(const VirtualSemanticItem&) const = default;
 };
 
 class VirtualSemanticChildren {
 public:
-    VirtualSemanticChildren() : items_(empty_items()) {}
+    VirtualSemanticChildren()
+        : items_(std::make_shared<const std::vector<VirtualSemanticItem>>()) {}
 
     [[nodiscard]] static VirtualSemanticChildren from_items(
         std::vector<VirtualSemanticItem> items) {
@@ -137,12 +136,6 @@ private:
         std::shared_ptr<const std::vector<VirtualSemanticItem>> items)
         : items_(std::move(items)) {}
 
-    [[nodiscard]] static std::shared_ptr<const std::vector<VirtualSemanticItem>> empty_items() {
-        static const auto empty =
-            std::make_shared<const std::vector<VirtualSemanticItem>>();
-        return empty;
-    }
-
     std::shared_ptr<const std::vector<VirtualSemanticItem>> items_;
 };
 
@@ -153,8 +146,6 @@ struct SemanticNodeSnapshot {
     Rect bounds{};
     std::vector<SemanticId> children;
     std::optional<VirtualSemanticChildren> virtual_children;
-
-    bool operator==(const SemanticNodeSnapshot&) const = default;
 };
 
 } // namespace ui
