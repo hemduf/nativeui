@@ -187,6 +187,19 @@ void test_preferred_dispatch_survives_owner_teardown() {
     NUI_CHECK(!preferred);
 }
 
+void test_pugl_view_span_rounding_and_limit() {
+    using ui::detail::physical_to_pugl_view_span;
+
+    NUI_CHECK(physical_to_pugl_view_span(1.0f) == 1U);
+    NUI_CHECK(physical_to_pugl_view_span(1.01f) == 2U);
+    NUI_CHECK(physical_to_pugl_view_span(9999.0f) == 9999U);
+    NUI_CHECK(physical_to_pugl_view_span(9999.01f) == 10000U);
+    NUI_CHECK(physical_to_pugl_view_span(10000.0f) == 10000U);
+    NUI_CHECK(physical_to_pugl_view_span(10000.01f) == 10000U);
+    NUI_CHECK(physical_to_pugl_view_span(std::numeric_limits<float>::max()) == 10000U);
+    NUI_CHECK(physical_to_pugl_view_span(std::numeric_limits<float>::infinity()) == 10000U);
+}
+
 void suite() {
     test_scale_validation_and_conversion();
     test_invalid_scale_retains_last_valid();
@@ -196,6 +209,7 @@ void suite() {
     test_two_view_scale_isolation();
     test_preferred_size_epsilon_coalescing_and_reentrancy();
     test_preferred_dispatch_survives_owner_teardown();
+    test_pugl_view_span_rounding_and_limit();
 }
 
 } // namespace
