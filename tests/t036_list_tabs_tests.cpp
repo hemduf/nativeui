@@ -235,8 +235,10 @@ void hover_presentation_contract() {
     ui::HeadlessRenderer right_renderer{{200.0f, 100.0f}, 1.0f};
     NUI_CHECK(left_renderer.render(left));
     NUI_CHECK(right_renderer.render(right));
-    NUI_CHECK(pixel_matches(left_renderer.pixel(150, 20), kHoverSurface));
-    NUI_CHECK(!pixel_matches(right_renderer.pixel(150, 20), kHoverSurface));
+    // Sample away from the centered tab label so this checks the hover surface,
+    // not a foreground text glyph rendered on top of it.
+    NUI_CHECK(pixel_matches(left_renderer.pixel(120, 20), kHoverSurface));
+    NUI_CHECK(!pixel_matches(right_renderer.pixel(120, 20), kHoverSurface));
 }
 
 void deterministic_headless_states() {
