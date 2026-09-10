@@ -1290,6 +1290,58 @@ std::size_t LinuxDbusTransport::subscription_count() const noexcept {
     return impl_->signals.size();
 }
 
+bool LinuxDbusTransport::send_signal(
+    std::string_view path,
+    std::string_view interface,
+    std::string_view member,
+    const std::vector<LinuxDbusValue>& arguments) {
+    if (path.empty() || interface.empty() || member.empty() ||
+        contains_nul(path) || contains_nul(interface) || contains_nul(member)) {
+        return false;
+    }
+
+    try {
+        const std::string path_text{path};
+        const std::string interface_text{interface};
+        const std::string member_text{member};
+        if (dbus_validate_path(path_text.c_str(), nullptr) == FALSE ||
+            dbus_validate_interface(interface_text.c_str(), nullptr) == FALSE ||
+            dbus_validate_member(member_text.c_str(), nullptr) == FALSE) {
+            return false;
+        }
+        for (const auto& argument : arguments) {
+            std::string signature;
+            std::string error;
+            if (!linux_dbus_value_signature(argument, signature, error)) {
+                return false;
+            }
+        }
+
+        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        if (impl_->destroying || impl_->connection == nullptr ||
+            !impl_->running.load(std::memory_order_acquire) ||
+            impl_->stop_requested.load(std::memory_order_acquire)) {
+            return false;
+        }
+
+        DBusMessage* message = dbus_message_new_signal(
+            path_text.c_str(), interface_text.c_str(), member_text.c_str());
+        if (message == nullptr) {
+            return false;
+        }
+        std::string encode_error;
+        if (!linux_dbus_append_values(message, arguments, encode_error)) {
+            dbus_message_unref(message);
+            return false;
+        }
+        const dbus_bool_t sent = dbus_connection_send(impl_->connection, message, nullptr);
+        dbus_message_unref(message);
+        return sent != FALSE;
+    } catch (...) {
+        return false;
+    }
+}
+
 LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
     LinuxDbusClientId client,
     std::string path,
