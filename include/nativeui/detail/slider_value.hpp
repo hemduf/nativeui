@@ -26,16 +26,24 @@ public:
     [[nodiscard]] float step() const noexcept { return step_; }
 
     // Normalize a value written by user interaction: finite fallback first,
-    // then the ticket's exact quantize-to-grid formula, then range clamp.
-    [[nodiscard]] float normalize(float value) const noexcept {
+    // then the ticket's exact quantize-to-grid formula, then range clamp. Use
+    // double intermediates because two valid finite float endpoints can have a
+    // span that is not itself representable as float.
+    [[nodiscard]] float normalize(double value) const noexcept {
         if (!std::isfinite(value)) return minimum_;
 
-        float normalized = value;
+        double normalized = value;
         if (step_ > 0.0f) {
-            const float steps = std::round((value - minimum_) / step_);
-            normalized = minimum_ + steps * step_;
+            const double steps = std::round(
+                (value - static_cast<double>(minimum_)) / static_cast<double>(step_));
+            normalized = static_cast<double>(minimum_) +
+                         steps * static_cast<double>(step_);
         }
-        return std::clamp(normalized, minimum_, maximum_);
+        normalized = std::clamp(
+            normalized,
+            static_cast<double>(minimum_),
+            static_cast<double>(maximum_));
+        return static_cast<float>(normalized);
     }
 
     // External State values are never rewritten or silently snapped merely for
@@ -46,8 +54,11 @@ public:
     }
 
     [[nodiscard]] float fraction(float value) const noexcept {
-        const float effective = effective_external(value);
-        return (effective - minimum_) / (maximum_ - minimum_);
+        const double effective = static_cast<double>(effective_external(value));
+        const double minimum = static_cast<double>(minimum_);
+        const double span = static_cast<double>(maximum_) - minimum;
+        const double fraction = (effective - minimum) / span;
+        return static_cast<float>(std::clamp(fraction, 0.0, 1.0));
     }
 
     // Continuous pointer-domain value before step quantization. RangeSlider
@@ -56,17 +67,21 @@ public:
     // through normalize().
     [[nodiscard]] float raw_value_from_fraction(float fraction) const noexcept {
         if (!std::isfinite(fraction)) return minimum_;
-        const float clamped = std::clamp(fraction, 0.0f, 1.0f);
-        return minimum_ + clamped * (maximum_ - minimum_);
+        const double clamped = std::clamp(static_cast<double>(fraction), 0.0, 1.0);
+        const double minimum = static_cast<double>(minimum_);
+        const double maximum = static_cast<double>(maximum_);
+        const double value = minimum + clamped * (maximum - minimum);
+        return static_cast<float>(std::clamp(value, minimum, maximum));
     }
 
     [[nodiscard]] float value_from_fraction(float fraction) const noexcept {
-        return normalize(raw_value_from_fraction(fraction));
+        return normalize(static_cast<double>(raw_value_from_fraction(fraction)));
     }
 
-    [[nodiscard]] float keyboard_increment(bool shift) const noexcept {
-        if (step_ > 0.0f) return step_;
-        return (maximum_ - minimum_) / (shift ? 1000.0f : 100.0f);
+    [[nodiscard]] double keyboard_increment(bool shift) const noexcept {
+        if (step_ > 0.0f) return static_cast<double>(step_);
+        const double span = static_cast<double>(maximum_) - static_cast<double>(minimum_);
+        return span / (shift ? 1000.0 : 100.0);
     }
 
 private:

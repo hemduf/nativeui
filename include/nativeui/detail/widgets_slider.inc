@@ -258,16 +258,16 @@ private:
     EventResult key_down(const InputEvent& event, InputContext& context) {
         float target = state_.get();
         const float effective = domain_.effective_external(target);
-        const float increment = domain_.keyboard_increment(event.shift);
+        const double increment = domain_.keyboard_increment(event.shift);
 
         switch (event.key) {
             case Key::Left:
             case Key::Down:
-                target = domain_.normalize(effective - increment);
+                target = domain_.normalize(static_cast<double>(effective) - increment);
                 break;
             case Key::Right:
             case Key::Up:
-                target = domain_.normalize(effective + increment);
+                target = domain_.normalize(static_cast<double>(effective) + increment);
                 break;
             case Key::Home:
                 target = domain_.normalize(domain_.minimum());
