@@ -173,6 +173,14 @@ public:
     ScrollViewComponent(ScrollState& state, bool pointer_pan)
         : state_(&state), pointer_pan_(pointer_pan) {}
 
+    // The current retained tree routes ordinary pointer events to focusable
+    // targets before bubbling. T034 needs the viewport itself to be targetable
+    // when its content has no interactive descendant, so this is the smallest
+    // GREEN for the existing RED wheel/pan contract. The final T034 review must
+    // still separate pointer-targetability from keyboard focus if the overlay
+    // architecture requires non-focusable scrollbar targets.
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+
     [[nodiscard]] bool clips_children() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
