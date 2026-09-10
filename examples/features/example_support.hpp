@@ -157,10 +157,12 @@ inline int run_window(ui::UI& ui, std::string title, ui::Size size) {
     (void)size;
     return fail("window mode is disabled in self-test-only validation builds");
 #else
+    ui::Application application;
     ui::StandaloneWindow window{
+        application,
         ui,
         ui::WindowDesc{.title = std::move(title), .size = size, .resizable = true}};
-    return window.run();
+    return application.run();
 #endif
 }
 

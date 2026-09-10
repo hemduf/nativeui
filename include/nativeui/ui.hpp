@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 
 #include <functional>
+#include <string>
 #include <utility>
 
 namespace ui {
@@ -43,6 +44,9 @@ public:
     [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
+    }
+    [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
+        return tree_.structural_diagnostic();
     }
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {

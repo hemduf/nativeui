@@ -318,6 +318,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t036_list_tabs
   t041_smoke_harness
   t057_embedded_resources
+  t058_dynamic_composition
   t059_component_state
 )
 
@@ -464,6 +465,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t036_list_tabs_tests tests/t036_list_tabs_tests.cpp)
   nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
+  nativeui_add_core_test(nativeui_dynamic_composition_tests tests/dynamic_composition_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
   nativeui_add_core_test(nativeui_checkbox_radio_tests tests/checkbox_radio_tests.cpp)

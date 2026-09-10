@@ -320,6 +320,7 @@
     }
 
     void mount_node(Node& node) {
+        if (dynamic_source(node)) register_dynamic_node(node);
         MountContext context{
             node.id,
             paint_invalidator(node),
@@ -354,6 +355,10 @@
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
         node.component->unmount(context);
+        if (auto* source = dynamic_source(node)) {
+            source->set_structure_invalidator({});
+            unregister_dynamic_node(node.id);
+        }
     }
 
     void paint_node(
