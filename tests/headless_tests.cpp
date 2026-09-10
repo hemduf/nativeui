@@ -146,7 +146,6 @@ void overlay_placement_contract() {
             viewport, anchor, content, ui::OverlayPlacement::Auto),
         {40.0f, 50.0f, 20.0f, 10.0f});
 
-    // Requested side falls back to its opposite before comparing clipped area.
     check_overlay_rect(
         ui::detail::overlay_placement_bounds(
             viewport,
@@ -155,7 +154,6 @@ void overlay_placement_contract() {
             ui::OverlayPlacement::AnchorBelow),
         {40.0f, 75.0f, 20.0f, 20.0f});
 
-    // Auto uses Below, Above, Right, Left as its exact full-fit priority.
     check_overlay_rect(
         ui::detail::overlay_placement_bounds(
             viewport,
@@ -164,7 +162,6 @@ void overlay_placement_contract() {
             ui::OverlayPlacement::Auto),
         {40.0f, 75.0f, 20.0f, 20.0f});
 
-    // Equal clipped areas preserve requested-side priority before final clamp.
     check_overlay_rect(
         ui::detail::overlay_placement_bounds(
             viewport,
@@ -180,7 +177,6 @@ void overlay_placement_contract() {
             ui::OverlayPlacement::AnchorAbove),
         {20.0f, 0.0f, 60.0f, 60.0f});
 
-    // Oversized content keeps natural size and clamps to a finite viewport origin.
     check_overlay_rect(
         ui::detail::overlay_placement_bounds(
             viewport, anchor, {140.0f, 120.0f}, ui::OverlayPlacement::Center),
@@ -233,6 +229,51 @@ void overlay_pointer_stack_contract() {
     NUI_CHECK(tree.close_overlay(ignored_handle));
 }
 
+void overlay_modal_pointer_barrier_contract() {
+    test::MockPlatform platform;
+    auto root = std::make_shared<PointerProbeState>();
+    auto modal = std::make_shared<PointerProbeState>();
+    auto above = std::make_shared<PointerProbeState>();
+
+    ui::UI tree{PointerProbe{{96.0f, 48.0f}, root}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+
+    auto modal_spec = centered_pointer_overlay(modal);
+    modal_spec.mode = ui::OverlayMode::Modal;
+    const auto modal_handle = tree.show_overlay(std::move(modal_spec));
+    tree.resize({96.0f, 48.0f});
+
+    ui::InputEvent outside;
+    outside.type = ui::InputType::PointerDown;
+    outside.position = {4.0f, 4.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(outside, platform)));
+    NUI_CHECK(root->pointer_downs == 0);
+    NUI_CHECK(modal->pointer_downs == 0);
+
+    const auto above_handle = tree.show_overlay(centered_pointer_overlay(above));
+    tree.resize({96.0f, 48.0f});
+
+    ui::InputEvent inside;
+    inside.type = ui::InputType::PointerDown;
+    inside.position = {48.0f, 24.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(inside, platform)));
+    NUI_CHECK(above->pointer_downs == 1);
+    NUI_CHECK(modal->pointer_downs == 0);
+    NUI_CHECK(root->pointer_downs == 0);
+
+    NUI_CHECK(tree.close_overlay(above_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(ui::handled(tree.dispatch(inside, platform)));
+    NUI_CHECK(modal->pointer_downs == 1);
+    NUI_CHECK(root->pointer_downs == 0);
+
+    NUI_CHECK(tree.close_overlay(modal_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(ui::handled(tree.dispatch(outside, platform)));
+    NUI_CHECK(root->pointer_downs == 1);
+}
+
 void overlay_structural_queue_contract() {
     test::MockPlatform platform;
     auto state = std::make_shared<OverlayProbeState>();
@@ -248,8 +289,6 @@ void overlay_structural_queue_contract() {
     NUI_CHECK(handle.valid());
     NUI_CHECK(state->mounts == 0);
 
-    // show() participates in T058's deferred structural checkpoint. The
-    // overlay cannot mount synchronously on the caller's stack.
     tree.resize({96.0f, 48.0f});
     NUI_CHECK(state->mounts == 1);
     NUI_CHECK(state->activates == 1);
@@ -263,8 +302,6 @@ void overlay_structural_queue_contract() {
     NUI_CHECK(state->unmounts == 1);
     NUI_CHECK(!tree.close_overlay(handle));
 
-    // A show immediately closed before the structural checkpoint coalesces to
-    // no retained child and therefore emits no lifecycle callbacks.
     auto coalesced = std::make_shared<OverlayProbeState>();
     const auto transient = tree.show_overlay(
         centered_overlay(ui::make_spec(OverlayProbe{coalesced})));
@@ -273,8 +310,6 @@ void overlay_structural_queue_contract() {
     NUI_CHECK(coalesced->mounts == 0);
     NUI_CHECK(coalesced->unmounts == 0);
 
-    // Handles are UI-owned and the structurally invalid modal/pointer-ignore
-    // combination is rejected before any retained work is queued.
     ui::UI other{
         ui::Canvas{ui::Size{96.0f, 48.0f}, [](ui::CanvasContext2D&) {}}
     };
@@ -291,9 +326,6 @@ void overlay_structural_queue_contract() {
 void suite() {
     ui::HeadlessRenderer renderer{{96.0f, 48.0f}, 1.0f};
 
-    // Seed the raster surface, then render an otherwise empty retained tree.
-    // The renderer owns the same black framebuffer clear as the GPU path;
-    // Tree itself must add neither a styled background nor instructional text.
     ui::UI seed{
         ui::Canvas{
             ui::Size{96.0f, 48.0f},
@@ -336,15 +368,12 @@ void suite() {
     NUI_CHECK(renderer.pixel_height() == 48);
     NUI_CHECK(renderer.rgba_pixels().size() == 96U * 48U * 4U);
 
-    // The same logical surface at 2x produces exactly twice the physical
-    // dimensions while keeping UI layout coordinates logical.
     renderer.resize({96.0f, 48.0f}, 2.0f);
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(renderer.pixel_width() == 192);
     NUI_CHECK(renderer.pixel_height() == 96);
     NUI_CHECK(renderer.rgba_pixels().size() == 192U * 96U * 4U);
 
-    // A state-only repaint is consumable headlessly without a layout invalidation.
     enabled.set(false);
     NUI_CHECK(tree.paint_dirty());
     NUI_CHECK(!tree.layout_dirty());
@@ -353,6 +382,7 @@ void suite() {
 
     overlay_placement_contract();
     overlay_pointer_stack_contract();
+    overlay_modal_pointer_barrier_contract();
     overlay_structural_queue_contract();
 }
 
