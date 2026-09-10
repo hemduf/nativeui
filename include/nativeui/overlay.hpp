@@ -311,8 +311,6 @@ public:
         : mode_(mode), pointer_policy_(pointer_policy) {}
 
     [[nodiscard]] bool focusable() const noexcept override {
-        // A modal with no focusable content still needs a focus target so the
-        // previously focused root cannot keep receiving keyboard activation.
         return mode_ == OverlayMode::Modal;
     }
 
@@ -321,8 +319,6 @@ public:
     }
 
     [[nodiscard]] bool pointer_descendants_targetable() const noexcept override {
-        // Ignore is visual-only for pointer routing. Descendant paint/layout
-        // and explicit keyboard focus remain intact.
         return pointer_policy_ == OverlayPointerPolicy::Normal;
     }
 
@@ -339,8 +335,6 @@ public:
     }
 
     [[nodiscard]] std::size_t focus_scope_default_index() const noexcept override {
-        // Index zero is this wrapper. Prefer the first real focusable child,
-        // with default_focus_for_scope() falling back to the wrapper itself.
         return 1;
     }
 
@@ -384,6 +378,31 @@ private:
     OverlayPointerPolicy pointer_policy_{};
 };
 
+/// Invisible full-viewport sibling placed immediately below one modal overlay.
+/// Reverse retained hit testing means overlays created above that modal remain
+/// interactive, the modal content itself wins inside its bounds, and this node
+/// absorbs pointer input everywhere else before any lower overlay/root content.
+/// It owns no second routing queue or global state.
+class OverlayModalBarrierComponent final : public Component {
+public:
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        return {};
+    }
+
+    EventResult input(const InputEvent& event, InputContext&) override {
+        const bool pointer_event = event.type == InputType::PointerDown ||
+                                   event.type == InputType::PointerMove ||
+                                   event.type == InputType::PointerUp ||
+                                   event.type == InputType::PointerCancel ||
+                                   event.type == InputType::PointerWheel;
+        return pointer_event ? EventResult::Handled : EventResult::Ignored;
+    }
+
+    void paint(PaintContext&) const override {}
+};
+
 class OverlayHostComponent final : public Component, public DynamicChildrenSource {
 public:
     OverlayHostComponent(std::shared_ptr<OverlayState> state, std::shared_ptr<const Spec> root)
@@ -409,25 +428,36 @@ public:
                          std::vector<ChildPlacement>& placements) const override {
         if (placements.empty()) return;
         placements.front().bounds = bounds;
-        const auto overlay_count = (std::min)(state_->entries.size(), placements.size() - 1);
-        for (std::size_t i = 0; i < overlay_count; ++i) {
-            const auto size = children[i + 1].preferred;
-            auto& entry = state_->entries[i];
+
+        std::size_t child_index = 1;
+        for (auto& entry : state_->entries) {
+            if (entry.spec.mode == OverlayMode::Modal) {
+                if (child_index >= placements.size()) break;
+                placements[child_index].bounds = bounds;
+                ++child_index;
+            }
+            if (child_index >= placements.size() || child_index >= children.size()) break;
+
+            const auto size = children[child_index].preferred;
             const bool has_anchor = entry.spec.anchor.has_value() && entry.anchor_bounds.has_value();
             const Rect anchor = has_anchor ? *entry.anchor_bounds : bounds;
             const OverlayPlacement placement = has_anchor
                 ? entry.spec.placement
                 : OverlayPlacement::Center;
             entry.resolved_bounds = overlay_placement_bounds(bounds, anchor, size, placement);
-            placements[i + 1].bounds = entry.resolved_bounds;
+            placements[child_index].bounds = entry.resolved_bounds;
+            ++child_index;
         }
     }
 
     [[nodiscard]] std::vector<std::string> desired_keys() const override {
         std::vector<std::string> keys;
-        keys.reserve(state_->entries.size() + 1);
+        keys.reserve(state_->entries.size() * 2 + 1);
         keys.emplace_back("root");
         for (const auto& entry : state_->entries) {
+            if (entry.spec.mode == OverlayMode::Modal) {
+                keys.push_back("modal-barrier:" + std::to_string(entry.id));
+            }
             keys.push_back("overlay:" + std::to_string(entry.id));
         }
         return keys;
@@ -435,9 +465,15 @@ public:
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
         std::vector<DynamicChildSpec> children;
-        children.reserve(state_->entries.size() + 1);
+        children.reserve(state_->entries.size() * 2 + 1);
         children.push_back(DynamicChildSpec{"root", *root_});
         for (const auto& entry : state_->entries) {
+            if (entry.spec.mode == OverlayMode::Modal) {
+                children.push_back(DynamicChildSpec{
+                    "modal-barrier:" + std::to_string(entry.id),
+                    Spec{[] { return std::make_unique<OverlayModalBarrierComponent>(); }, {}}});
+            }
+
             Spec wrapper{
                 [mode = entry.spec.mode, pointer_policy = entry.spec.pointer_policy] {
                     return std::make_unique<OverlayEntryComponent>(mode, pointer_policy);
