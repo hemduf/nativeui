@@ -343,6 +343,7 @@ public:
                                 LinuxDbusRequestId id,
                                 LinuxDbusCompletion completion);
     [[nodiscard]] bool cancel(LinuxDbusClientId client, LinuxDbusRequestId id);
+    void discard_client(LinuxDbusClientId client) noexcept;
     void shutdown() noexcept;
 
     [[nodiscard]] std::size_t pending_count() const noexcept;
@@ -399,6 +400,11 @@ public:
     [[nodiscard]] bool unregister_object_path(LinuxDbusClientId client,
                                               LinuxDbusObjectRegistrationId id);
     [[nodiscard]] std::size_t object_path_count() const noexcept;
+
+    /// Tear down every resource owned by one logical client. Pending and
+    /// already-posted callbacks for that client are suppressed; sibling clients
+    /// sharing the same Application transport remain live.
+    void release_client(LinuxDbusClientId client) noexcept;
 
 private:
     struct Impl;
