@@ -7,9 +7,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 enable_testing()
 
-add_library(t072_core_stub INTERFACE)
+add_library(t072_core_stub STATIC
+  "${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp"
+)
 add_library(NativeUI::Core ALIAS t072_core_stub)
-target_include_directories(t072_core_stub INTERFACE
+target_include_directories(t072_core_stub PUBLIC
   "${CMAKE_CURRENT_LIST_DIR}/../../include"
 )
 
@@ -34,3 +36,4 @@ t072_add_test(t072_build_contract build_contract.cpp)
 t072_add_test(t072_validation_contract validation_contract.cpp)
 t072_add_test(t072_lifecycle_contract lifecycle_contract.cpp)
 t072_add_test(t072_resource_limits_contract resource_limits_contract.cpp)
+t072_add_test(t072_request_contract request_contract.cpp)
