@@ -7,8 +7,10 @@
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/dispatcher.hpp>
+#include <nativeui/semantics.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>
+#include <nativeui/theme.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/resource.hpp>
 #include <nativeui/embedded_resource.hpp>
