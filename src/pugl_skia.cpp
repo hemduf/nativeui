@@ -2,11 +2,21 @@
 
 #if defined(__APPLE__)
 #  include <CoreFoundation/CFRunLoop.h>
+#elif defined(_WIN32)
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
 #elif defined(__linux__)
 #  include <X11/Xlib.h>
+#  include <poll.h>
 #  undef None
 #endif
 
+#include <algorithm>
+#include <cerrno>
+#include <climits>
+#include <cmath>
 #include <mutex>
 #include <vector>
 
