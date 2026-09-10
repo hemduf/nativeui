@@ -13,10 +13,12 @@ namespace t036_contract {
 inline void public_builder_contract() {
     ui::State<std::optional<int>> list_selection{std::nullopt};
     ui::State<int> tab_selection{1};
+    int activated = 0;
 
     auto list = ui::ListView<int>{list_selection}
                     .item(1, ui::Label{"One"})
-                    .item(2, ui::Label{"Two"}, false);
+                    .item(2, ui::Label{"Two"}, false)
+                    .on_activate([&activated](const int& key) { activated = key; });
     auto tabs = ui::Tabs<int>{tab_selection}
                     .tab(1, "One", ui::Label{"Panel one"})
                     .tab(2, "Two", ui::Label{"Panel two"}, false);
@@ -91,6 +93,48 @@ inline void list_keyboard_pointer_and_read_only_contract() {
     NUI_CHECK(read_only_list.dispatch(test::key(ui::Key::Down), platform) ==
               ui::EventResult::Handled);
     NUI_CHECK(read_only_selected.get() && *read_only_selected.get() == 2);
+}
+
+inline void list_activation_contract() {
+    test::MockPlatform platform;
+    ui::State<std::optional<int>> selected{1};
+    int activations = 0;
+    int activated_key = 0;
+
+    ui::UI list{ui::ListView<int>{selected}
+        .item(1, ui::Spacer{100.0f, 30.0f})
+        .item(2, ui::Spacer{100.0f, 30.0f})
+        .item(3, ui::Spacer{100.0f, 30.0f}, false)
+        .on_activate([&](const int& key) {
+            ++activations;
+            activated_key = key;
+        })};
+    list.resize({100.0f, 60.0f});
+    list.activate(platform);
+
+    // Navigation selects but does not activate.
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Down), platform) == ui::EventResult::Handled);
+    NUI_CHECK(selected.get() && *selected.get() == 2);
+    NUI_CHECK(activations == 0);
+
+    // Enter/Space activate the current row exactly once per key event.
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Enter), platform) == ui::EventResult::Handled);
+    NUI_CHECK(activations == 1);
+    NUI_CHECK(activated_key == 2);
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Space), platform) == ui::EventResult::Handled);
+    NUI_CHECK(activations == 2);
+    NUI_CHECK(activated_key == 2);
+
+    // Pointer activation selects first, then invokes the callback once.
+    NUI_CHECK(list.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 20.0f, 10.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(list.dispatch(
+                  test::pointer(ui::InputType::PointerUp, 20.0f, 10.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(selected.get() && *selected.get() == 1);
+    NUI_CHECK(activations == 3);
+    NUI_CHECK(activated_key == 1);
 }
 
 inline void tabs_keyboard_pointer_focus_and_read_only_contract() {
@@ -200,6 +244,7 @@ inline void behavior_contract() {
     public_builder_contract();
     duplicate_key_contract();
     list_keyboard_pointer_and_read_only_contract();
+    list_activation_contract();
     tabs_keyboard_pointer_focus_and_read_only_contract();
     missing_selection_and_two_instance_contract();
 }
