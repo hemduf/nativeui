@@ -323,7 +323,12 @@ public:
     }
 
     [[nodiscard]] bool is_focus_scope() const noexcept override {
-        return mode_ == OverlayMode::Modal;
+        // Modal entries are active trapping scopes. Pointer-transparent entries
+        // are deliberately inactive focus boundaries so their focusable
+        // descendants do not enter ordinary Tab traversal merely because a
+        // tooltip/visual overlay was shown.
+        return mode_ == OverlayMode::Modal ||
+               pointer_policy_ == OverlayPointerPolicy::Ignore;
     }
 
     [[nodiscard]] bool focus_scope_active() const noexcept override {
