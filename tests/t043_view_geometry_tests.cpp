@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -170,6 +171,22 @@ void test_preferred_size_epsilon_coalescing_and_reentrancy() {
     assert(!preferred.dispatch_once([&](ui::Size) { assert(false); }));
 }
 
+void test_preferred_dispatch_survives_owner_teardown() {
+    auto preferred = std::make_unique<ui::detail::PreferredSizeState>();
+    preferred->queue({100.0f, 50.0f});
+
+    bool callback_called = false;
+    auto* const in_flight = preferred.get();
+    assert(in_flight->dispatch_once([&](ui::Size size) {
+        callback_called = true;
+        assert(same(size, {100.0f, 50.0f}));
+        preferred.reset();
+    }));
+
+    assert(callback_called);
+    assert(!preferred);
+}
+
 } // namespace
 
 int main() {
@@ -180,5 +197,6 @@ int main() {
     test_fractional_dirty_and_pointer_conversion();
     test_two_view_scale_isolation();
     test_preferred_size_epsilon_coalescing_and_reentrancy();
+    test_preferred_dispatch_survives_owner_teardown();
     return 0;
 }
