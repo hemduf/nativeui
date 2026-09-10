@@ -32,11 +32,24 @@ public:
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
         return tree_.measure(constraints);
     }
-    void resize(Size viewport) { tree_.layout(viewport); }
-    void activate(PlatformServices& platform) { tree_.activate_focus(platform); }
-    void deactivate(PlatformServices& platform) { tree_.deactivate_focus(platform); }
+    void resize(Size viewport) {
+        viewport_ = viewport;
+        prepare_overlay_layout();
+    }
+    void activate(PlatformServices& platform) {
+        tree_.activate_focus(platform);
+        prepare_overlay_layout();
+    }
+    void deactivate(PlatformServices& platform) {
+        close_anchored_overlays();
+        tree_.deactivate_focus(platform);
+    }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // Resolve dynamic/availability/layout changes before using retained
+        // overlay bounds for pointer containment or dismissal.
+        prepare_overlay_layout();
+
         // Overlay dismissal is policy that must run before normal retained-tree
         // delivery: an outside-dismiss PointerDown is consumed and must never
         // click through to lower content in the same event, while Escape is
@@ -116,7 +129,10 @@ public:
     void invalidate() { tree_.invalidate(); }
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
-    void paint(SkCanvas& canvas, PlatformServices& platform) { tree_.paint(canvas, platform); }
+    void paint(SkCanvas& canvas, PlatformServices& platform) {
+        prepare_overlay_layout();
+        tree_.paint(canvas, platform);
+    }
 
     /// Queue one in-view overlay through the same T058 structural checkpoint
     /// used by explicit dynamic containers. show/close never splice retained
@@ -133,10 +149,62 @@ public:
     }
 
 private:
+    [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
+        return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+    }
+
+    [[nodiscard]] bool synchronize_overlay_anchors() {
+        bool changed = false;
+        std::vector<std::uint64_t> stale;
+
+        for (auto& entry : overlay_state_->entries) {
+            if (!entry.spec.anchor) continue;
+
+            const auto availability = tree_.component_availability(*entry.spec.anchor);
+            const auto bounds = tree_.overlay_anchor_bounds(*entry.spec.anchor);
+            if (!availability || !bounds ||
+                availability->visibility != VisibilityMode::Visible) {
+                stale.push_back(entry.id);
+                continue;
+            }
+
+            if (!entry.anchor_bounds || !same_rect(*entry.anchor_bounds, *bounds)) {
+                entry.anchor_bounds = *bounds;
+                changed = true;
+            }
+        }
+
+        for (const auto id : stale) {
+            changed = overlay_state_->close_id(id) || changed;
+        }
+
+        if (changed) tree_.invalidate_layout();
+        return changed;
+    }
+
+    void prepare_overlay_layout() {
+        // First pass makes root/anchor geometry authoritative for this viewport
+        // and flushes pending T058 structural mutations. A changed/missing
+        // anchor then invalidates overlay placement or closes the overlay; the
+        // second pass consumes that update before input or paint observes it.
+        tree_.layout(viewport_);
+        if (synchronize_overlay_anchors()) tree_.layout(viewport_);
+    }
+
+    void close_anchored_overlays() {
+        std::vector<std::uint64_t> anchored;
+        anchored.reserve(overlay_state_->entries.size());
+        for (const auto& entry : overlay_state_->entries) {
+            if (entry.spec.anchor) anchored.push_back(entry.id);
+        }
+        for (const auto id : anchored) (void)overlay_state_->close_id(id);
+    }
+
     // State must outlive Tree because the retained OverlayHost clears its T058
     // structural invalidator during tree teardown.
     std::shared_ptr<detail::OverlayState> overlay_state_;
     Tree tree_;
+    Size viewport_{};
 };
 
 using PluginUI = UI; // compatibility alias for the original POC
