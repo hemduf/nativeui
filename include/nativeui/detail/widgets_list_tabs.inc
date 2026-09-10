@@ -137,8 +137,20 @@ public:
 
     void mount(MountContext& context) override {
         auto invalidate = context.invalidator();
+        auto runtime = runtime_;
+        const auto index = index_;
         subscription_ = runtime_->selection->observe(
-            [invalidate = std::move(invalidate)](const std::optional<T>&) { invalidate(); });
+            [runtime = std::move(runtime), index, invalidate = std::move(invalidate)](
+                const std::optional<T>& selected) {
+                if (selected && index < runtime->keys.size() &&
+                    runtime->keys[index] == *selected && index < runtime->row_bounds.size()) {
+                    (void)ensure_visible(
+                        runtime->scroll,
+                        runtime->row_bounds[index],
+                        ScrollAlignment::Nearest);
+                }
+                invalidate();
+            });
     }
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
