@@ -17,12 +17,14 @@
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
+        const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
 
     /// Immediately recompute layout for an externally supplied viewport (for
     /// example a window resize), and dirty the complete new viewport.
     void layout(Size viewport) {
+        flush_dynamic_mutations();
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
@@ -34,6 +36,7 @@
     }
 
     void activate_focus(PlatformServices& platform) {
+        flush_dynamic_mutations();
         if (active_) return;
         active_ = true;
         activate_node(*root_);
@@ -48,6 +51,7 @@
     }
 
     void refresh_focus(PlatformServices& platform) {
+        flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
         sync_focus_structure(platform);
@@ -59,6 +63,7 @@
     }
 
     void deactivate_focus(PlatformServices& platform) {
+        flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
 
@@ -114,6 +119,9 @@
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
     }
+    [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
+        return structural_diagnostic_;
+    }
 
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
@@ -151,11 +159,13 @@
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
     void focus_next(PlatformServices& platform) {
+        flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(1, platform);
     }
 
     void focus_previous(PlatformServices& platform) {
+        flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(-1, platform);
     }
@@ -181,6 +191,7 @@
         // or restoring keyboard focus/text input as a side effect.
         const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
         if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
+        flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
 
@@ -188,6 +199,7 @@
         auto finish = [this, &platform](EventResult result) {
             if (dispatch_depth_ > 0) --dispatch_depth_;
             if (dispatch_depth_ == 0) {
+                flush_dynamic_mutations();
                 sync_availability_structure(platform);
                 if (active_) sync_focus_structure(platform);
             }
@@ -324,11 +336,13 @@
     /// Explicitly cancel the active pointer capture, if any. The current owner
     /// receives one PointerCancel event before capture is cleared.
     EventResult cancel_pointer(PlatformServices& platform) {
+        flush_dynamic_mutations();
         sync_availability_structure(platform);
         return cancel_pointer_capture(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
             sync_focus_structure(platform);

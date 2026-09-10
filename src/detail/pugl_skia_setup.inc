@@ -70,6 +70,10 @@ sk_sp<const GrGLInterface> make_skia_gl_interface() {
 #endif
 }
 
+} // namespace
+
+namespace detail {
+
 class SkiaGlRenderer {
 public:
     void reset() {
@@ -157,6 +161,10 @@ private:
     int width_{};
     int height_{};
 };
+
+} // namespace detail
+
+namespace {
 
 [[nodiscard]] bool platform_primary_modifier(PuglMods mods) noexcept {
 #if defined(__APPLE__)
