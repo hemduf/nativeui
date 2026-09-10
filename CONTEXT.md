@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` is `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675`, which includes T034 / PR #135, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, standard widgets through T034, the T052 v0.1 developer-preview release gate, and the merged Tree paint-ownership correction #152 / PR #153.
+`main` is `cbf68026fc0780f1e5d04e2120cae76b188ed780`, which includes T036 / PR #155, T065 / PR #133, T034 / PR #135, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the T052 v0.1 developer-preview release gate, and the merged Tree paint-ownership correction #152 / PR #153.
 
 Cross-cutting rendering regression #152 / PR #153 removed Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is consumer/component-owned. The headless renderer mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
 
@@ -40,6 +40,7 @@ Relevant completed foundations:
 - T032 / PR #115: Slider + RangeSlider.
 - T033 / PR #123: ProgressBar + Meter.
 - T034 / PR #135: ScrollView with change-based wheel bubbling, optional pointer pan, retained overlay scrollbars, focus reveal and T059 availability integration.
+- T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable key/value selection, composite focus, keyboard/pointer interaction, ScrollView reveal, Collapsed tab panels, deterministic tests and feature example.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
 - T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
 - T051 / PR #116: reproducible Release benchmark and regression policy.
@@ -48,11 +49,12 @@ Relevant completed foundations:
 - T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
 - T057 / PR #126: immutable non-owning `ResourceManager` plus allocating provider adapter.
 - T060 / PR #118: one explicit `ui::Application` owns one standalone `PUGL_PROGRAM` world and multiple independent `StandaloneWindow(Application&, ...)` views.
+- T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration and deterministic timer/fairness semantics.
 - #139 / PR #140: T042 stress qualification of the supported T060 multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM compatibility path.
 
-## T036 UI/accessibility lane — completion candidate
+## T036 UI/accessibility lane — complete
 
-T036 / issue #36 / PR #155 is the active UI/accessibility critical-path candidate, on top of merged T034. The branch has been refreshed through current `main` `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675` as merge head `9706f8b69f8692ba529de5600070c5dca8a76195`.
+T036 / issue #36 / PR #155 is complete and squash-merged to `main` as `cbf68026fc0780f1e5d04e2120cae76b188ed780`.
 
 Delivered behavior:
 
@@ -66,13 +68,13 @@ Delivered behavior:
 - T059 ReadOnly remains navigation-capable while Disabled suppresses normal targeting/focus;
 - dedicated T036 tests, non-virtualized O(N) baseline, two-instance coverage, deterministic headless selected-state checks, and `examples/features/t036_list_tabs.cpp --self-test`.
 
-The final review found one Important gap: application-originated ListView selection did not reveal an offscreen selected row. Exact RED head `4f02e22e2989442e7a7dacf5940e714214ab8e50` failed only the T036 reveal assertion in normal CI on Linux ASan+UBSan, Linux X11 and Windows. GREEN commit `fe51752e9093df0f23a68c4db0e1ef9532b16da7` reuses the existing per-row State subscription; the matching selected row applies T034 `ensure_visible` while all rows retain their existing paint invalidation. Review `5167235343` reports no remaining Blocking/Important code finding. Final merge still requires the exact documentation-synchronized head to pass the required normal/platform/sanitizer/lifecycle/release gates.
+The completion review found and corrected one Important gap: application-originated ListView selection did not reveal an offscreen selected row. GREEN commit `fe51752e9093df0f23a68c4db0e1ef9532b16da7` reuses the per-row State subscription so the matching selected row applies T034 `ensure_visible`. Exact completion head `458b48ed60e187a1a89587b39735da3d387b0532` passed CI #861 on Linux ASan+UBSan, Linux X11, Windows and macOS plus T042 #433, T052 #178, T060 #256 and T065 #82. Final `CODE_REVIEW.md` review reports no remaining Blocking/Important finding.
 
-When T036 is Done, T045 becomes the next owned critical-path item. T067 additionally waits for T045 and T058; T068 then converges the UI/accessibility chain with its explicit overlay/platform dependencies.
+T045 is now the next UI/accessibility dependency. T067 additionally waits for T045 and T058; T068 then converges the UI/accessibility chain with its explicit overlay/platform dependencies.
 
-## T065 platform/event lane — completion candidate
+## T065 platform/event lane — complete
 
-T065 / issue #77 / PR #133 is the active critical platform prerequisite.
+T065 / issue #77 / PR #133 is complete and merged.
 
 Delivered behavior:
 
@@ -89,15 +91,13 @@ Delivered behavior:
 - `EmbeddedView` dispatch remains host-driven and non-blocking with no background polling thread;
 - dedicated `examples/features/t065_ui_dispatcher.cpp` provides interactive worker/timer behavior plus deterministic `--self-test`.
 
-TDD/review corrections already incorporated include stable mutable repeating callback state, root CMake/header/test registration, dedicated workflow path coverage, safe worker wake primitives, X11 portability fixes, the test-only self-post LSan cycle, and lock-free user-capture destruction boundaries.
-
 The legacy `StandaloneWindow(UI&, ...)` path remains pre-v1 compatibility only and is removed by T069. T065 does not introduce a hidden shared Application or a second supported PROGRAM-world ownership model.
 
 ## Current dependency frontier
 
 ```text
-critical UI:       T034(done) -> T036(completion PR #155) -> T045 -> T067 -> T068
-                                              T058(done required) ----^      ^
+critical UI:       T034(done) -> T036(done) -> T045 -> T067 -> T068
+                                           T058(done required) ----^      ^
 
 widgets/overlay:   T034(done) + T061 -> T035 ---------------------------> T068
                    T061 + T034 -> T063 -------------------------------> T068
@@ -109,13 +109,13 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(completion PR #133) -> T072 -> T064
+critical platform: T060(done) -> T065(done) -> T072(active) -> T064
                    T041(done) -> T043(active PR #142) -> T066
                                               |-------> T068
                    T065 + T072 + T043 + other feature deps ------> T068 -> T069
 ```
 
-T072 must not start until T065 is merged. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently while T065 is waiting only on CI. T044 is not on the T068/T069 critical path and remains lower priority until these prerequisites are complete.
+T045 is dependency-unblocked by T036 completion and should move to Ready. T072 is already active after T065 completion. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently. T044 is not on the T068/T069 critical path and remains lower priority until these prerequisites are complete.
 
 ## Build / validation
 
@@ -127,12 +127,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T036 completion requires the dedicated T036 contract/tests/example self-test, normal Linux X11/Windows/macOS/Linux ASan+UBSan CI, T042 Lifecycle Stress, T060 Application Contract and current release-regression gates on the exact final head. T065 has its own dedicated dispatcher/platform qualification in its lane.
+T036 completion exact head `458b48ed60e187a1a89587b39735da3d387b0532` passed the dedicated T036 contract/tests/example self-test, normal Linux X11/Windows/macOS/Linux ASan+UBSan CI, T042 Lifecycle Stress, T060 Application Contract, T052 release gate and T065 dispatcher contract before merge.
 
 ## Next actions
 
-1. Complete exact-head qualification of T036 / PR #155 after the external-selection reveal fix, final review and this documentation synchronization; merge only when all required executed gates are green.
-2. Immediately after T036 merges, start T045 / issue #45; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
-3. Keep T067 dependency-gated until T036 + T045 + T058 are Done, then implement it before T068.
-4. In the independent platform lane, finish T065, then T072, while T043 progresses whenever T065 waits only on CI.
+1. Move T045 / issue #45 to Ready and start it as the next UI/accessibility critical-path item; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
+2. Keep T067 dependency-gated until T045 + T058 are Done, then implement it before T068.
+3. Continue active T072 in the independent platform lane; after it completes, T064 becomes available.
+4. Continue T043 / PR #142 independently and finish it before T066/T068.
 5. Keep unrelated style/dynamic/overlay/release work in their own lanes and do not duplicate active PRs.
