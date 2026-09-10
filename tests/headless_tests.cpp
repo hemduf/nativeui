@@ -46,10 +46,66 @@ private:
     std::shared_ptr<OverlayProbeState> state_;
 };
 
+struct PointerProbeState {
+    int pointer_downs{};
+};
+
+class PointerProbeComponent final : public ui::Component {
+public:
+    PointerProbeComponent(ui::Size size, std::shared_ptr<PointerProbeState> state)
+        : size_(size), state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return size_;
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+        ++state_->pointer_downs;
+        return ui::EventResult::Handled;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    ui::Size size_{};
+    std::shared_ptr<PointerProbeState> state_;
+};
+
+class PointerProbe {
+public:
+    PointerProbe(ui::Size size, std::shared_ptr<PointerProbeState> state)
+        : size_(size), state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        const auto size = size_;
+        auto state = std::move(state_);
+        return ui::Spec{
+            [size, state = std::move(state)] {
+                return std::make_unique<PointerProbeComponent>(size, state);
+            },
+            {}};
+    }
+
+private:
+    ui::Size size_{};
+    std::shared_ptr<PointerProbeState> state_;
+};
+
 ui::OverlaySpec centered_overlay(ui::Spec content) {
     ui::OverlaySpec spec;
     spec.placement = ui::OverlayPlacement::Center;
     spec.content = std::move(content);
+    return spec;
+}
+
+ui::OverlaySpec centered_pointer_overlay(
+    const std::shared_ptr<PointerProbeState>& state,
+    ui::OverlayPointerPolicy policy = ui::OverlayPointerPolicy::Normal) {
+    auto spec = centered_overlay(ui::make_spec(PointerProbe{{24.0f, 16.0f}, state}));
+    spec.pointer_policy = policy;
     return spec;
 }
 
@@ -129,6 +185,52 @@ void overlay_placement_contract() {
         ui::detail::overlay_placement_bounds(
             viewport, anchor, {140.0f, 120.0f}, ui::OverlayPlacement::Center),
         {0.0f, 0.0f, 140.0f, 120.0f});
+}
+
+void overlay_pointer_stack_contract() {
+    test::MockPlatform platform;
+    auto root = std::make_shared<PointerProbeState>();
+    auto lower = std::make_shared<PointerProbeState>();
+    auto upper = std::make_shared<PointerProbeState>();
+    auto ignored = std::make_shared<PointerProbeState>();
+
+    ui::UI tree{PointerProbe{{96.0f, 48.0f}, root}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+
+    const auto lower_handle = tree.show_overlay(centered_pointer_overlay(lower));
+    const auto upper_handle = tree.show_overlay(centered_pointer_overlay(upper));
+    tree.resize({96.0f, 48.0f});
+
+    ui::InputEvent down;
+    down.type = ui::InputType::PointerDown;
+    down.position = {48.0f, 24.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(down, platform)));
+    NUI_CHECK(upper->pointer_downs == 1);
+    NUI_CHECK(lower->pointer_downs == 0);
+    NUI_CHECK(root->pointer_downs == 0);
+
+    NUI_CHECK(tree.close_overlay(upper_handle));
+    NUI_CHECK(tree.close_overlay(lower_handle));
+    tree.resize({96.0f, 48.0f});
+
+    const auto visible_handle = tree.show_overlay(centered_pointer_overlay(lower));
+    const auto ignored_handle = tree.show_overlay(
+        centered_pointer_overlay(ignored, ui::OverlayPointerPolicy::Ignore));
+    tree.resize({96.0f, 48.0f});
+
+    NUI_CHECK(ui::handled(tree.dispatch(down, platform)));
+    NUI_CHECK(ignored->pointer_downs == 0);
+    NUI_CHECK(lower->pointer_downs == 1);
+    NUI_CHECK(root->pointer_downs == 0);
+
+    NUI_CHECK(tree.close_overlay(visible_handle));
+    tree.resize({96.0f, 48.0f});
+
+    NUI_CHECK(ui::handled(tree.dispatch(down, platform)));
+    NUI_CHECK(ignored->pointer_downs == 0);
+    NUI_CHECK(root->pointer_downs == 1);
+    NUI_CHECK(tree.close_overlay(ignored_handle));
 }
 
 void overlay_structural_queue_contract() {
@@ -250,6 +352,7 @@ void suite() {
     NUI_CHECK(!tree.dirty());
 
     overlay_placement_contract();
+    overlay_pointer_stack_contract();
     overlay_structural_queue_contract();
 }
 
