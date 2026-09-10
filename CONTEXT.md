@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` is `cbf68026fc0780f1e5d04e2120cae76b188ed780`, which includes T036 / PR #155, T065 / PR #133, T034 / PR #135, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the T052 v0.1 developer-preview release gate, and the merged Tree paint-ownership correction #152 / PR #153.
+The current `main` baseline contains T036 / PR #155, squash-merged as `cbf68026fc0780f1e5d04e2120cae76b188ed780`, plus T065 / PR #133, T034 / PR #135, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the T052 v0.1 developer-preview release gate, and the merged Tree paint-ownership correction #152 / PR #153.
 
 Cross-cutting rendering regression #152 / PR #153 removed Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is consumer/component-owned. The headless renderer mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
 
@@ -70,7 +70,7 @@ Delivered behavior:
 
 The completion review found and corrected one Important gap: application-originated ListView selection did not reveal an offscreen selected row. GREEN commit `fe51752e9093df0f23a68c4db0e1ef9532b16da7` reuses the per-row State subscription so the matching selected row applies T034 `ensure_visible`. Exact completion head `458b48ed60e187a1a89587b39735da3d387b0532` passed CI #861 on Linux ASan+UBSan, Linux X11, Windows and macOS plus T042 #433, T052 #178, T060 #256 and T065 #82. Final `CODE_REVIEW.md` review reports no remaining Blocking/Important finding.
 
-T045 is now the next UI/accessibility dependency. T067 additionally waits for T045 and T058; T068 then converges the UI/accessibility chain with its explicit overlay/platform dependencies.
+T045 is now Ready as the next UI/accessibility dependency. T067 additionally waits for T045 and T058; T068 then converges the UI/accessibility chain with its explicit overlay/platform dependencies.
 
 ## T065 platform/event lane — complete
 
@@ -96,8 +96,8 @@ The legacy `StandaloneWindow(UI&, ...)` path remains pre-v1 compatibility only a
 ## Current dependency frontier
 
 ```text
-critical UI:       T034(done) -> T036(done) -> T045 -> T067 -> T068
-                                           T058(done required) ----^      ^
+critical UI:       T034(done) -> T036(done) -> T045(ready) -> T067 -> T068
+                                                  T058(done required) ----^      ^
 
 widgets/overlay:   T034(done) + T061 -> T035 ---------------------------> T068
                    T061 + T034 -> T063 -------------------------------> T068
@@ -115,7 +115,7 @@ critical platform: T060(done) -> T065(done) -> T072(active) -> T064
                    T065 + T072 + T043 + other feature deps ------> T068 -> T069
 ```
 
-T045 is dependency-unblocked by T036 completion and should move to Ready. T072 is already active after T065 completion. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently. T044 is not on the T068/T069 critical path and remains lower priority until these prerequisites are complete.
+T045 is dependency-unblocked by T036 completion and has `status:ready`. T072 is already active after T065 completion. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently. T044 is not on the T068/T069 critical path and remains lower priority until these prerequisites are complete.
 
 ## Build / validation
 
@@ -131,7 +131,7 @@ T036 completion exact head `458b48ed60e187a1a89587b39735da3d387b0532` passed the
 
 ## Next actions
 
-1. Move T045 / issue #45 to Ready and start it as the next UI/accessibility critical-path item; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
+1. Start T045 / issue #45 as the next UI/accessibility critical-path item; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
 2. Keep T067 dependency-gated until T045 + T058 are Done, then implement it before T068.
 3. Continue active T072 in the independent platform lane; after it completes, T064 becomes available.
 4. Continue T043 / PR #142 independently and finish it before T066/T068.
