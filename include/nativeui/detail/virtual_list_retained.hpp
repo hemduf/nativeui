@@ -42,6 +42,10 @@ public:
         selection_ = &selection;
     }
 
+    [[nodiscard]] State<std::optional<Key>>* selection_state() const noexcept {
+        return selection_;
+    }
+
     void set_activation_callback(ActivationCallback callback) {
         activation_callback_ = std::move(callback);
     }
