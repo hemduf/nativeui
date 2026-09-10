@@ -8,6 +8,8 @@
 #include <optional>
 #include <utility>
 
+#include "t067_retained_contract.inc"
+
 namespace {
 
 bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 3) {
@@ -169,6 +171,7 @@ void suite() {
     disabled_and_two_instance_contract();
     external_list_selection_reveals_selected_row();
     deterministic_headless_states();
+    t067_retained_contract::behavior_contract();
 }
 
 } // namespace
