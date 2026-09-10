@@ -26,15 +26,13 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` is `c5270a1a971d1d409a53b3715df0340fc445fb33`. It contains the completed T060 explicit Application/multi-window ownership model and its recovery-context synchronization on top of the reviewed Pugl X11 correction.
+`main` `c5270a1a971d1d409a53b3715df0340fc445fb33` contains the completed T060 explicit Application/multi-window ownership model and its completion-context synchronization on top of the reviewed Pugl X11 correction.
 
-Completed foundations relevant to current release/platform work:
+Completed foundations relevant to the platform/package lane:
 
 - T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
 - T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
-- #64 / PR #90: standalone ownership frozen as Decision B.
-- T042 / PR #93: deterministic supported-path lifecycle/multi-instance stress.
 - T051 / PR #116: reproducible Release benchmark and regression policy.
 - T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
 - T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
@@ -44,46 +42,35 @@ Completed foundations relevant to current release/platform work:
 
 T060 exact merge candidate `0e4cce56bd8874545794fdf1137d1c7ec5489dde` passed T060 Application Contract `34422787634`, T042 Lifecycle Stress `34422787683`, and normal CI `34422787695`. Final `CODE_REVIEW.md` review `5161881319` reported no Blocking/Important finding. PR #118 merged as `352bdf0e734df46e8edcb53a0a81a07c9e0d7d6d`; issue #72 is closed Done.
 
-## Active lifecycle/release work — T052 / issue #52 / PR #120
+## Lifecycle qualification update — #139 / PR #140
 
-T052 is dependency-unblocked and is the active P0 v0.1 developer-preview release gate. It is aggregate validation/release infrastructure only and must not absorb unrelated feature work.
+T042's `standalone_supported_multi_instance` gate is being upgraded from the pre-T060 Decision-B marker to an executable stress of the now-supported T060 ownership path. The fixture keeps one explicit `ui::Application` / one `PUGL_PROGRAM` world alive across 50 deterministic A+B cycles, validates distinct native windows, independent resize/close state, destroys A while B survives and continues polling/resizing, and uses `QuitPolicy::ExplicitOnly` to exercise zero-window intervals without inventing a hidden singleton, mutable process-global owner or `thread_local` owner.
 
-Current contract:
+The legacy process-isolated standalone constructor stress remains as compatibility coverage until T069; independent simultaneous legacy `PUGL_PROGRAM` worlds remain forbidden by #64 Decision B. Embedded T042 stress remains unchanged.
 
-- exact candidate SHA and approved-base SHA are explicit release-gate inputs;
-- exact-head normal Linux/X11, Windows/MSVC, macOS and Linux ASan+UBSan validation is mandatory;
-- T042 supported-path lifecycle stress remains an independent exact-head gate and preserves #64 Decision B plus the T060 explicit Application ownership model;
-- clean dependency/bootstrap builds start from an empty CPM cache on Linux/X11, Windows and macOS and verify the exact Pugl/Skia pin/hash contract;
-- the exact release-note `find_package(NativeUI CONFIG REQUIRED)` / `NativeUI::Core` / `nativeui_attach_platform()` snippet is materialized and built against the installed package on all supported desktop platforms;
-- T047/T048 package relocation and macOS two-consumer Objective-C namespace/runtime isolation remain part of normal CI;
-- one approved-base T051 benchmark run and two complete candidate runs are compared through T051's canonical C++ `compare_two_complete_runs()` policy rather than duplicated workflow thresholds;
-- `idle_invalidation` remains an exact-zero timing/allocation hard gate;
-- v0.1 release notes explicitly identify developer-preview semantics, Decision B/T060 ownership, known v1 gaps, pinned dependencies, reproducible exact-SHA tag procedure, and the `AGPL-3.0-only` / commercial dual-licensing model;
-- T047's installed package legal-payload contract remains required for `LICENSE.md`, `NOTICE.md`, `THIRD_PARTY.md`, `EULA.md`, `PRIVACY.md`, `TERMS.md` and `LEGAL.md`.
+Initial GREEN head `1b917ec157a938b997e0afc6979454495b90effb` passed T060 Application Contract `34431532321`, T042 Lifecycle Stress `34431532386` on Linux/X11, Windows, macOS and Linux ASan+UBSan, and normal CI `34431532332`. Mandatory review then found stale pre-T060 diagnostic wording and missing direct GDB/LLDB diagnosis for the new Application stress path. The correction stream updates those diagnostics before final exact-head qualification. #139 remains a blocking validation dependency for T052 / PR #120; after #139 merges, T052 must refresh from that new `main` and rerun its release qualification set.
 
-The T052 branch has now been refreshed from exact current `main` through merge PR #138, preserving history. Any further source change creates a new exact candidate and requires fresh T052 Release Gate, normal CI, T042 Lifecycle Stress and T051 Release Benchmarks before final merge.
-
-## Current dependency frontier
+## Current platform/package frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(in review)
-platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |-> T054(done)
-                     T056(done) + T022(done) -> T057(done)
+T053(done) -> T047(done) -> T048(done)
+                         |-> T054(done)
+T056(done) + T022(done) -> T057(done)
 
 #64(done) -> T060(done) -> T065(active PR #133) -> T072 -> T064
                      |
+                     +-> #139(active PR #140; T042 post-T060 qualification)
                      +-> T066 (also depends on T043)
 
 T043 ready
 T044 ready
 ```
 
-T052 owns only the release/lifecycle lane. T065/T072/T064 and T043/T044 remain separate platform work; widget/state tickets remain in their own lane.
+T059, T030 and unrelated widget work remain owned by their parallel lane and must not be folded into platform/lifecycle work. T052 is the separate release gate. T032/T033/T034 are widget-lane work. T060 is merged, so T065 no longer needs to wait for the Application ownership architecture; its existing PR must be synchronized with current `main` before native dispatcher exposure/wake integration continues.
 
-## Active platform work — T065 / issue #77 / PR #133
+## Active work — T065 / issue #77 / PR #133
 
-The existing T065 stream delivers the bounded Core dispatcher/timer engine and root integration. Its reviewed contract includes per-owner bounded queues/timers, deterministic fake time, FIFO ordering, finite drain fairness, owner shutdown semantics and no process-global dispatcher.
+The existing T065 stream already delivers the bounded Core dispatcher/timer engine and root integration. Its current reviewed contract includes per-owner bounded queues/timers, deterministic fake time, FIFO ordering, finite drain fairness, owner shutdown semantics and no process-global dispatcher.
 
 Remaining T065 work after T060 merge:
 
@@ -106,25 +93,11 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T051 Release benchmark validation:
-
-```bash
-cmake -S tests/t051 -B build-t051 -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DNATIVEUI_SOURCE_DIR="$PWD" \
-  -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)"
-cmake --build build-t051 --parallel
-ctest --test-dir build-t051 --output-on-failure
-./build-t051/nativeui_benchmarks --self-test
-./build-t051/nativeui_benchmarks --json t051-results.json
-```
-
-The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, package/relocation contracts, macOS consumer isolation and feature/platform smokes. T042 lifecycle stress and T052 release qualification remain separate exact-head gates.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, package/relocation contracts, macOS consumer isolation and feature/platform smokes. Platform/lifecycle tickets additionally run their dedicated exact-head workflows where defined.
 
 ## Next actions
 
-1. Require T052 v0.1 Release Gate, normal CI, T042 Lifecycle Stress and T051 Release Benchmarks to complete green on the exact post-refresh candidate head.
-2. Perform the aggregate mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Re-check `main` immediately before final merge; any source advance requires another refresh and fresh exact-head qualification.
-4. Merge PR #120 without rewriting the validated candidate, mark #52 Done/closed, and keep v0.1 developer-preview status distinct from the later T071 NativeUI 1.0 gate.
-5. Leave T065 and all unrelated platform/widget lanes to their existing owners.
+1. Finish #139 / PR #140 exact-head diagnostic correction, final review and lifecycle/platform qualification; merge only when all required gates are green.
+2. After #139 merges, T052 / PR #120 must refresh from the new lifecycle-qualified `main` before release qualification can complete.
+3. Keep the existing T065 PR #133 as its own stream; do not duplicate it.
+4. Keep unrelated widget/package lanes untouched.
