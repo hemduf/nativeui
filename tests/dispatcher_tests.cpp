@@ -81,6 +81,11 @@ void suite() {
         NUI_CHECK(count == 2);
         NUI_CHECK(owner.checkpoint() == 1);
         NUI_CHECK(count == 3);
+
+        // The self-post fixture intentionally owns itself while exercising the
+        // callback. Break that test-only cycle once the sequence is complete so
+        // LeakSanitizer continues to validate Dispatcher-owned lifetime leaks.
+        *self = {};
     }
 
     {
