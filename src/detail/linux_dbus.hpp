@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <string_view>
 
 namespace ui::detail {
@@ -41,5 +43,26 @@ enum class LinuxDbusErrorCode {
 [[nodiscard]] bool linux_dbus_initialize_threads() noexcept;
 [[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
 [[nodiscard]] bool linux_dbus_valid_object_path(std::string_view path) noexcept;
+
+class LinuxDbusTransport final {
+public:
+    LinuxDbusTransport();
+    ~LinuxDbusTransport();
+
+    LinuxDbusTransport(const LinuxDbusTransport&) = delete;
+    LinuxDbusTransport& operator=(const LinuxDbusTransport&) = delete;
+    LinuxDbusTransport(LinuxDbusTransport&&) = delete;
+    LinuxDbusTransport& operator=(LinuxDbusTransport&&) = delete;
+
+    [[nodiscard]] LinuxDbusErrorCode start();
+    void stop() noexcept;
+
+    [[nodiscard]] bool running() const noexcept;
+    [[nodiscard]] std::string unique_name() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 } // namespace ui::detail

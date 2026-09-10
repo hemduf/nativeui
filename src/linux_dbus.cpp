@@ -2,7 +2,10 @@
 
 #include <dbus/dbus.h>
 
+#include <atomic>
 #include <mutex>
+#include <thread>
+#include <utility>
 
 namespace ui::detail {
 namespace {
@@ -66,6 +69,102 @@ bool linux_dbus_library_probe() noexcept {
     const auto valid = dbus_validate_path("/", &error) != FALSE;
     dbus_error_free(&error);
     return valid;
+}
+
+struct LinuxDbusTransport::Impl final {
+    mutable std::mutex lifecycle_mutex;
+    DBusConnection* connection{};
+    std::thread io_thread;
+    std::atomic<bool> stop_requested{false};
+    std::atomic<bool> running{false};
+    std::string unique_name;
+};
+
+LinuxDbusTransport::LinuxDbusTransport()
+    : impl_(std::make_unique<Impl>()) {}
+
+LinuxDbusTransport::~LinuxDbusTransport() {
+    stop();
+}
+
+LinuxDbusErrorCode LinuxDbusTransport::start() {
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    if (impl_->running.load(std::memory_order_acquire)) {
+        return LinuxDbusErrorCode::None;
+    }
+
+    if (!linux_dbus_initialize_threads()) {
+        return LinuxDbusErrorCode::InitializationFailed;
+    }
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusConnection* connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
+    if (connection == nullptr) {
+        dbus_error_free(&error);
+        return LinuxDbusErrorCode::BusUnavailable;
+    }
+    dbus_error_free(&error);
+
+    dbus_connection_set_exit_on_disconnect(connection, FALSE);
+    const char* unique_name = dbus_bus_get_unique_name(connection);
+    if (unique_name == nullptr || *unique_name == '\0') {
+        dbus_connection_close(connection);
+        dbus_connection_unref(connection);
+        return LinuxDbusErrorCode::LocalProtocolError;
+    }
+
+    impl_->connection = connection;
+    impl_->unique_name = unique_name;
+    impl_->stop_requested.store(false, std::memory_order_release);
+    impl_->running.store(true, std::memory_order_release);
+
+    try {
+        Impl* state = impl_.get();
+        impl_->io_thread = std::thread([state] {
+            while (!state->stop_requested.load(std::memory_order_acquire)) {
+                if (dbus_connection_read_write_dispatch(state->connection, 100) == FALSE) {
+                    break;
+                }
+            }
+            state->running.store(false, std::memory_order_release);
+        });
+    } catch (...) {
+        impl_->running.store(false, std::memory_order_release);
+        impl_->connection = nullptr;
+        impl_->unique_name.clear();
+        dbus_connection_close(connection);
+        dbus_connection_unref(connection);
+        return LinuxDbusErrorCode::InitializationFailed;
+    }
+
+    return LinuxDbusErrorCode::None;
+}
+
+void LinuxDbusTransport::stop() noexcept {
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    impl_->stop_requested.store(true, std::memory_order_release);
+
+    if (impl_->io_thread.joinable()) {
+        impl_->io_thread.join();
+    }
+
+    if (impl_->connection != nullptr) {
+        dbus_connection_close(impl_->connection);
+        dbus_connection_unref(impl_->connection);
+        impl_->connection = nullptr;
+    }
+
+    impl_->running.store(false, std::memory_order_release);
+}
+
+bool LinuxDbusTransport::running() const noexcept {
+    return impl_->running.load(std::memory_order_acquire);
+}
+
+std::string LinuxDbusTransport::unique_name() const {
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    return impl_->unique_name;
 }
 
 } // namespace ui::detail
