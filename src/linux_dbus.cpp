@@ -4,6 +4,7 @@
 #include <dbus/dbus.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -369,6 +370,38 @@ struct LinuxDbusTransport::Impl final {
         LinuxDbusRequestId id{};
     };
 
+    struct ObjectPathEntry final {
+        LinuxDbusClientId client{};
+        std::string path;
+        LinuxDbusObjectPathHandler handler;
+        mutable std::mutex mutex;
+        std::condition_variable idle;
+        bool active{true};
+        std::size_t in_flight{};
+    };
+
+    struct ObjectPathContext final {
+        Impl* owner{};
+        LinuxDbusObjectRegistrationId id{};
+    };
+
+    struct ObjectInvocationGuard final {
+        std::shared_ptr<ObjectPathEntry> entry;
+
+        ~ObjectInvocationGuard() {
+            if (!entry) {
+                return;
+            }
+            std::lock_guard lock{entry->mutex};
+            if (entry->in_flight > 0) {
+                --entry->in_flight;
+            }
+            if (entry->in_flight == 0) {
+                entry->idle.notify_all();
+            }
+        }
+    };
+
     Impl()
         : calls(ledger) {}
 
@@ -465,8 +498,176 @@ struct LinuxDbusTransport::Impl final {
         dbus_pending_call_unref(native->pending);
     }
 
+    [[nodiscard]] std::shared_ptr<ObjectPathEntry> begin_object_invocation(
+        LinuxDbusObjectRegistrationId id) {
+        std::shared_ptr<ObjectPathEntry> entry;
+        {
+            std::lock_guard lock{object_mutex};
+            const auto found = object_paths.find(id);
+            if (found == object_paths.end()) {
+                return {};
+            }
+            entry = found->second;
+        }
+        {
+            std::lock_guard lock{entry->mutex};
+            if (!entry->active) {
+                return {};
+            }
+            ++entry->in_flight;
+        }
+        return entry;
+    }
+
+    [[nodiscard]] static std::string copy_message_string(const char* value) {
+        return value == nullptr ? std::string{} : std::string{value};
+    }
+
+    [[nodiscard]] static DBusMessage* create_object_reply(
+        DBusMessage* request,
+        LinuxDbusMethodReply reply) {
+        if (reply.is_error) {
+            if (reply.error_name.empty() || contains_nul(reply.error_name) ||
+                contains_nul(reply.error_message) ||
+                dbus_validate_error_name(reply.error_name.c_str(), nullptr) == FALSE) {
+                return dbus_message_new_error(
+                    request, "org.nativeui.DBus.LocalProtocolError",
+                    "Object-path handler returned an invalid D-Bus error");
+            }
+            return dbus_message_new_error(request, reply.error_name.c_str(),
+                                          reply.error_message.c_str());
+        }
+
+        DBusMessage* response = dbus_message_new_method_return(request);
+        if (response == nullptr) {
+            return nullptr;
+        }
+        std::string encode_error;
+        if (!linux_dbus_append_values(response, reply.values, encode_error)) {
+            dbus_message_unref(response);
+            const char* diagnostic = encode_error.empty()
+                ? "Object-path handler returned invalid values"
+                : encode_error.c_str();
+            return dbus_message_new_error(
+                request, "org.nativeui.DBus.LocalProtocolError", diagnostic);
+        }
+        return response;
+    }
+
+    [[nodiscard]] DBusHandlerResult handle_object_message(
+        LinuxDbusObjectRegistrationId id,
+        DBusConnection* callback_connection,
+        DBusMessage* message) {
+        if (callback_connection == nullptr || message == nullptr ||
+            dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_METHOD_CALL) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+
+        auto entry = begin_object_invocation(id);
+        if (!entry) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+        ObjectInvocationGuard invocation{entry};
+
+        LinuxDbusMethodRequest request;
+        request.sender = copy_message_string(dbus_message_get_sender(message));
+        request.path = copy_message_string(dbus_message_get_path(message));
+        request.interface = copy_message_string(dbus_message_get_interface(message));
+        request.member = copy_message_string(dbus_message_get_member(message));
+
+        std::string decode_error;
+        LinuxDbusMethodReply reply;
+        if (!linux_dbus_decode_values(message, request.arguments, decode_error)) {
+            reply = LinuxDbusMethodReply::error(
+                "org.nativeui.DBus.LocalProtocolError",
+                decode_error.empty() ? "Unable to decode D-Bus method arguments"
+                                     : std::move(decode_error));
+        } else {
+            try {
+                reply = entry->handler(request);
+            } catch (...) {
+                reply = LinuxDbusMethodReply::error(
+                    "org.nativeui.DBus.HandlerFailed",
+                    "Object-path handler threw an exception");
+            }
+        }
+
+        DBusMessage* response = create_object_reply(message, std::move(reply));
+        if (response == nullptr) {
+            return DBUS_HANDLER_RESULT_NEED_MEMORY;
+        }
+        const dbus_bool_t sent = dbus_connection_send(callback_connection, response, nullptr);
+        dbus_message_unref(response);
+        return sent != FALSE ? DBUS_HANDLER_RESULT_HANDLED
+                             : DBUS_HANDLER_RESULT_NEED_MEMORY;
+    }
+
+    static void object_path_unregistered(DBusConnection*, void* data) {
+        delete static_cast<ObjectPathContext*>(data);
+    }
+
+    static DBusHandlerResult object_path_message(DBusConnection* callback_connection,
+                                                 DBusMessage* message,
+                                                 void* data) {
+        auto* context = static_cast<ObjectPathContext*>(data);
+        if (context == nullptr || context->owner == nullptr) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+        Impl* owner = context->owner;
+        const LinuxDbusObjectRegistrationId id = context->id;
+        try {
+            return owner->handle_object_message(id, callback_connection, message);
+        } catch (...) {
+            return DBUS_HANDLER_RESULT_NEED_MEMORY;
+        }
+    }
+
+    [[nodiscard]] static const DBusObjectPathVTable& object_path_vtable() noexcept {
+        static const DBusObjectPathVTable vtable{
+            &Impl::object_path_unregistered,
+            &Impl::object_path_message,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+        };
+        return vtable;
+    }
+
+    void unregister_all_object_paths(DBusConnection* current_connection) noexcept {
+        std::vector<std::pair<LinuxDbusObjectRegistrationId,
+                              std::shared_ptr<ObjectPathEntry>>> entries;
+        try {
+            {
+                std::lock_guard lock{object_mutex};
+                entries.reserve(object_paths.size());
+                for (const auto& [id, entry] : object_paths) {
+                    {
+                        std::lock_guard entry_lock{entry->mutex};
+                        entry->active = false;
+                    }
+                    entries.emplace_back(id, entry);
+                }
+                object_paths.clear();
+                object_path_ids.clear();
+            }
+            for (const auto& [id, entry] : entries) {
+                if (current_connection != nullptr) {
+                    (void)dbus_connection_unregister_object_path(
+                        current_connection, entry->path.c_str());
+                }
+                (void)ledger.release_object_path(entry->client, id);
+            }
+        } catch (...) {
+            // Teardown remains noexcept. The connection close below also
+            // unregisters any libdbus path still retained after allocation
+            // failure while collecting entries.
+        }
+    }
+
     mutable std::mutex lifecycle_mutex;
     mutable std::mutex pending_mutex;
+    mutable std::mutex object_mutex;
     DBusConnection* connection{};
     std::thread io_thread;
     std::atomic<bool> stop_requested{false};
@@ -477,6 +678,9 @@ struct LinuxDbusTransport::Impl final {
     LinuxDbusResourceLedger ledger;
     LinuxDbusPendingCallSet calls;
     std::unordered_map<LinuxDbusRequestId, NativePendingCall> pending_calls;
+    std::unordered_map<LinuxDbusObjectRegistrationId,
+                       std::shared_ptr<ObjectPathEntry>> object_paths;
+    std::unordered_map<std::string, LinuxDbusObjectRegistrationId> object_path_ids;
 };
 
 LinuxDbusTransport::LinuxDbusTransport()
@@ -558,6 +762,8 @@ void LinuxDbusTransport::stop() noexcept {
         if (impl_->io_thread.joinable()) {
             impl_->io_thread.join();
         }
+
+        impl_->unregister_all_object_paths(impl_->connection);
 
         if (impl_->connection != nullptr) {
             dbus_connection_close(impl_->connection);
@@ -747,6 +953,115 @@ bool LinuxDbusTransport::cancel_request(LinuxDbusClientId client, LinuxDbusReque
 
 std::size_t LinuxDbusTransport::pending_request_count() const noexcept {
     return impl_->calls.pending_count();
+}
+
+LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
+    LinuxDbusClientId client,
+    std::string path,
+    LinuxDbusObjectPathHandler handler) {
+    if (client == kInvalidLinuxDbusClientId || !handler || contains_nul(path) ||
+        !linux_dbus_valid_object_path(path)) {
+        return kInvalidLinuxDbusObjectRegistrationId;
+    }
+
+    try {
+        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        if (impl_->destroying || impl_->connection == nullptr ||
+            !impl_->running.load(std::memory_order_acquire) ||
+            impl_->stop_requested.load(std::memory_order_acquire)) {
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+
+        std::lock_guard object_lock{impl_->object_mutex};
+        if (impl_->object_path_ids.contains(path)) {
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+
+        const auto id = impl_->ledger.acquire_object_path(client);
+        if (id == kInvalidLinuxDbusObjectRegistrationId) {
+            return id;
+        }
+
+        auto entry = std::make_shared<Impl::ObjectPathEntry>();
+        entry->client = client;
+        entry->path = path;
+        entry->handler = std::move(handler);
+        auto* context = new (std::nothrow) Impl::ObjectPathContext{impl_.get(), id};
+        if (context == nullptr) {
+            (void)impl_->ledger.release_object_path(client, id);
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+
+        if (dbus_connection_register_object_path(
+                impl_->connection, path.c_str(), &Impl::object_path_vtable(), context) == FALSE) {
+            delete context;
+            (void)impl_->ledger.release_object_path(client, id);
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+
+        try {
+            impl_->object_paths.emplace(id, entry);
+            impl_->object_path_ids.emplace(std::move(path), id);
+        } catch (...) {
+            (void)dbus_connection_unregister_object_path(
+                impl_->connection, entry->path.c_str());
+            (void)impl_->ledger.release_object_path(client, id);
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+        return id;
+    } catch (...) {
+        return kInvalidLinuxDbusObjectRegistrationId;
+    }
+}
+
+bool LinuxDbusTransport::unregister_object_path(LinuxDbusClientId client,
+                                                LinuxDbusObjectRegistrationId id) {
+    if (client == kInvalidLinuxDbusClientId ||
+        id == kInvalidLinuxDbusObjectRegistrationId) {
+        return false;
+    }
+
+    std::shared_ptr<Impl::ObjectPathEntry> entry;
+    {
+        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        if (impl_->connection == nullptr) {
+            return false;
+        }
+
+        std::lock_guard object_lock{impl_->object_mutex};
+        const auto found = impl_->object_paths.find(id);
+        if (found == impl_->object_paths.end() || found->second->client != client) {
+            return false;
+        }
+        entry = found->second;
+        {
+            std::lock_guard entry_lock{entry->mutex};
+            entry->active = false;
+        }
+
+        if (dbus_connection_unregister_object_path(
+                impl_->connection, entry->path.c_str()) == FALSE) {
+            std::lock_guard entry_lock{entry->mutex};
+            entry->active = true;
+            return false;
+        }
+
+        impl_->object_path_ids.erase(entry->path);
+        impl_->object_paths.erase(found);
+    }
+
+    (void)impl_->ledger.release_object_path(client, id);
+
+    if (impl_->io_thread.get_id() != std::this_thread::get_id()) {
+        std::unique_lock entry_lock{entry->mutex};
+        entry->idle.wait(entry_lock, [&] { return entry->in_flight == 0; });
+    }
+    return true;
+}
+
+std::size_t LinuxDbusTransport::object_path_count() const noexcept {
+    std::lock_guard lock{impl_->object_mutex};
+    return impl_->object_paths.size();
 }
 
 } // namespace ui::detail

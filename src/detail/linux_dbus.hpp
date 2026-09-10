@@ -232,6 +232,40 @@ struct LinuxDbusMethodCall final {
           timeout(method_timeout) {}
 };
 
+struct LinuxDbusMethodRequest final {
+    std::string sender;
+    std::string path;
+    std::string interface;
+    std::string member;
+    std::vector<LinuxDbusValue> arguments;
+};
+
+struct LinuxDbusMethodReply final {
+    bool is_error{};
+    std::string error_name;
+    std::string error_message;
+    std::vector<LinuxDbusValue> values;
+
+    [[nodiscard]] static LinuxDbusMethodReply method_return(
+        std::vector<LinuxDbusValue> return_values) {
+        LinuxDbusMethodReply reply;
+        reply.values = std::move(return_values);
+        return reply;
+    }
+
+    [[nodiscard]] static LinuxDbusMethodReply error(std::string name,
+                                                     std::string message) {
+        LinuxDbusMethodReply reply;
+        reply.is_error = true;
+        reply.error_name = std::move(name);
+        reply.error_message = std::move(message);
+        return reply;
+    }
+};
+
+using LinuxDbusObjectPathHandler =
+    std::function<LinuxDbusMethodReply(const LinuxDbusMethodRequest&)>;
+
 [[nodiscard]] bool linux_dbus_library_probe() noexcept;
 [[nodiscard]] bool linux_dbus_initialize_threads() noexcept;
 [[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
@@ -326,6 +360,16 @@ public:
                                                  LinuxDbusCompletionCallback callback);
     [[nodiscard]] bool cancel_request(LinuxDbusClientId client, LinuxDbusRequestId id);
     [[nodiscard]] std::size_t pending_request_count() const noexcept;
+
+    /// Register an internal D-Bus object path. Handlers execute only on the
+    /// owned I/O thread and receive copied plain values, never libdbus objects.
+    [[nodiscard]] LinuxDbusObjectRegistrationId register_object_path(
+        LinuxDbusClientId client,
+        std::string path,
+        LinuxDbusObjectPathHandler handler);
+    [[nodiscard]] bool unregister_object_path(LinuxDbusClientId client,
+                                              LinuxDbusObjectRegistrationId id);
+    [[nodiscard]] std::size_t object_path_count() const noexcept;
 
 private:
     struct Impl;
