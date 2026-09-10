@@ -94,6 +94,53 @@ private:
     std::shared_ptr<PointerProbeState> state_;
 };
 
+struct EscapeProbeState {
+    int escape_downs{};
+};
+
+class EscapeProbeComponent final : public ui::Component {
+public:
+    explicit EscapeProbeComponent(std::shared_ptr<EscapeProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {96.0f, 48.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::KeyDown || event.key != ui::Key::Escape) {
+            return ui::EventResult::Ignored;
+        }
+        ++state_->escape_downs;
+        return ui::EventResult::Handled;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<EscapeProbeState> state_;
+};
+
+class EscapeProbe {
+public:
+    explicit EscapeProbe(std::shared_ptr<EscapeProbeState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<EscapeProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<EscapeProbeState> state_;
+};
+
 ui::OverlaySpec centered_overlay(ui::Spec content) {
     ui::OverlaySpec spec;
     spec.placement = ui::OverlayPlacement::Center;
@@ -274,6 +321,92 @@ void overlay_modal_pointer_barrier_contract() {
     NUI_CHECK(root->pointer_downs == 1);
 }
 
+void overlay_dismissal_contract() {
+    test::MockPlatform platform;
+    auto root = std::make_shared<PointerProbeState>();
+    auto dismissed = std::make_shared<PointerProbeState>();
+    auto ignored = std::make_shared<PointerProbeState>();
+
+    ui::UI tree{PointerProbe{{96.0f, 48.0f}, root}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+
+    auto dismissable = centered_pointer_overlay(dismissed);
+    dismissable.dismiss_on_outside_pointer_down = true;
+    const auto dismissable_handle = tree.show_overlay(std::move(dismissable));
+
+    auto transparent = centered_pointer_overlay(ignored, ui::OverlayPointerPolicy::Ignore);
+    transparent.dismiss_on_outside_pointer_down = true;
+    const auto transparent_handle = tree.show_overlay(std::move(transparent));
+    tree.resize({96.0f, 48.0f});
+
+    ui::InputEvent outside;
+    outside.type = ui::InputType::PointerDown;
+    outside.position = {4.0f, 4.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(outside, platform)));
+    NUI_CHECK(!dismissable_handle.valid());
+    NUI_CHECK(transparent_handle.valid());
+    NUI_CHECK(root->pointer_downs == 0);
+    NUI_CHECK(dismissed->pointer_downs == 0);
+    NUI_CHECK(ignored->pointer_downs == 0);
+
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(ui::handled(tree.dispatch(outside, platform)));
+    NUI_CHECK(root->pointer_downs == 1);
+    NUI_CHECK(tree.close_overlay(transparent_handle));
+
+    auto root_keys = std::make_shared<EscapeProbeState>();
+    ui::UI keys{EscapeProbe{root_keys}};
+    keys.resize({96.0f, 48.0f});
+    keys.activate(platform);
+
+    auto lower_escape = centered_overlay(
+        ui::make_spec(OverlayProbe{std::make_shared<OverlayProbeState>()}));
+    lower_escape.dismiss_on_escape = true;
+    const auto lower_escape_handle = keys.show_overlay(std::move(lower_escape));
+
+    auto visual_only = centered_overlay(
+        ui::make_spec(OverlayProbe{std::make_shared<OverlayProbeState>()}));
+    visual_only.pointer_policy = ui::OverlayPointerPolicy::Ignore;
+    const auto visual_only_handle = keys.show_overlay(std::move(visual_only));
+    keys.resize({96.0f, 48.0f});
+
+    ui::InputEvent escape;
+    escape.type = ui::InputType::KeyDown;
+    escape.key = ui::Key::Escape;
+    NUI_CHECK(ui::handled(keys.dispatch(escape, platform)));
+    NUI_CHECK(!lower_escape_handle.valid());
+    NUI_CHECK(visual_only_handle.valid());
+    NUI_CHECK(root_keys->escape_downs == 0);
+
+    keys.resize({96.0f, 48.0f});
+    NUI_CHECK(ui::handled(keys.dispatch(escape, platform)));
+    NUI_CHECK(root_keys->escape_downs == 1);
+    NUI_CHECK(keys.close_overlay(visual_only_handle));
+
+    auto protected_lower = centered_overlay(
+        ui::make_spec(OverlayProbe{std::make_shared<OverlayProbeState>()}));
+    protected_lower.dismiss_on_escape = true;
+    const auto protected_handle = keys.show_overlay(std::move(protected_lower));
+
+    auto blocking_modal = centered_overlay(
+        ui::make_spec(OverlayProbe{std::make_shared<OverlayProbeState>()}));
+    blocking_modal.mode = ui::OverlayMode::Modal;
+    const auto modal_handle = keys.show_overlay(std::move(blocking_modal));
+    keys.resize({96.0f, 48.0f});
+
+    NUI_CHECK(ui::handled(keys.dispatch(escape, platform)));
+    NUI_CHECK(protected_handle.valid());
+    NUI_CHECK(modal_handle.valid());
+    NUI_CHECK(root_keys->escape_downs == 1);
+
+    NUI_CHECK(keys.close_overlay(modal_handle));
+    keys.resize({96.0f, 48.0f});
+    NUI_CHECK(ui::handled(keys.dispatch(escape, platform)));
+    NUI_CHECK(!protected_handle.valid());
+    NUI_CHECK(root_keys->escape_downs == 1);
+}
+
 void overlay_structural_queue_contract() {
     test::MockPlatform platform;
     auto state = std::make_shared<OverlayProbeState>();
@@ -383,6 +516,7 @@ void suite() {
     overlay_placement_contract();
     overlay_pointer_stack_contract();
     overlay_modal_pointer_barrier_contract();
+    overlay_dismissal_contract();
     overlay_structural_queue_contract();
 }
 
