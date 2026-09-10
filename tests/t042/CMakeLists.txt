@@ -62,6 +62,16 @@ if(T042_BUILD_PLATFORM_STRESS)
   nativeui_enable_project_warnings(nativeui_t042_platform_stress)
   nativeui_enable_sanitizers(nativeui_t042_platform_stress)
 
+  add_executable(nativeui_t042_application_stress
+    "${NATIVEUI_SOURCE_DIR}/tests/t042_application_stress.cpp"
+  )
+  _nativeui_attach_consumer_platform(
+    TARGET nativeui_t042_application_stress
+    CONSUMER_ID org.nativeui.test.t042-application-stress
+  )
+  nativeui_enable_project_warnings(nativeui_t042_application_stress)
+  nativeui_enable_sanitizers(nativeui_t042_application_stress)
+
   add_test(
     NAME nativeui_t042_embedded_sequential_100
     COMMAND nativeui_t042_platform_stress --embedded-sequential
@@ -82,7 +92,7 @@ if(T042_BUILD_PLATFORM_STRESS)
   )
   add_test(
     NAME nativeui_t042_standalone_supported_multi_instance
-    COMMAND nativeui_t042_platform_stress --standalone-shared-world
+    COMMAND nativeui_t042_application_stress
   )
   set_tests_properties(
     nativeui_t042_embedded_sequential_100
