@@ -54,6 +54,47 @@ bool g_dbus_threads_initialized = false;
     return true;
 }
 
+[[nodiscard]] bool valid_signal_match(const LinuxDbusSignalMatch& match) noexcept {
+    if (contains_nul(match.sender) || contains_nul(match.path) ||
+        contains_nul(match.interface) || contains_nul(match.member)) {
+        return false;
+    }
+    if (!match.sender.empty() &&
+        dbus_validate_bus_name(match.sender.c_str(), nullptr) == FALSE) {
+        return false;
+    }
+    if (!match.path.empty() && dbus_validate_path(match.path.c_str(), nullptr) == FALSE) {
+        return false;
+    }
+    if (!match.interface.empty() &&
+        dbus_validate_interface(match.interface.c_str(), nullptr) == FALSE) {
+        return false;
+    }
+    if (!match.member.empty() &&
+        dbus_validate_member(match.member.c_str(), nullptr) == FALSE) {
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] std::string signal_match_rule(const LinuxDbusSignalMatch& match) {
+    std::string rule{"type='signal'"};
+    const auto append = [&rule](std::string_view field, const std::string& value) {
+        if (!value.empty()) {
+            rule += ",";
+            rule += field;
+            rule += "='";
+            rule += value;
+            rule += "'";
+        }
+    };
+    append("sender", match.sender);
+    append("path", match.path);
+    append("interface", match.interface);
+    append("member", match.member);
+    return rule;
+}
+
 template <typename Map>
 [[nodiscard]] std::uint64_t acquire_slot(Map& owners,
                                          std::uint64_t& next_id,
@@ -370,6 +411,15 @@ struct LinuxDbusTransport::Impl final {
         LinuxDbusRequestId id{};
     };
 
+    struct SignalEntry final {
+        LinuxDbusClientId client{};
+        ui::Dispatcher dispatcher;
+        LinuxDbusSignalMatch match;
+        LinuxDbusSignalCallback callback;
+        std::string rule;
+        std::shared_ptr<std::atomic<bool>> active{std::make_shared<std::atomic<bool>>(false)};
+    };
+
     struct ObjectPathEntry final {
         LinuxDbusClientId client{};
         std::string path;
@@ -498,6 +548,121 @@ struct LinuxDbusTransport::Impl final {
         dbus_pending_call_unref(native->pending);
     }
 
+    [[nodiscard]] static std::string copy_message_string(const char* value) {
+        return value == nullptr ? std::string{} : std::string{value};
+    }
+
+    [[nodiscard]] static bool signal_matches(const LinuxDbusSignalMatch& match,
+                                             DBusMessage* message) noexcept {
+        if (!match.sender.empty() &&
+            dbus_message_has_sender(message, match.sender.c_str()) == FALSE) {
+            return false;
+        }
+        if (!match.path.empty() &&
+            dbus_message_has_path(message, match.path.c_str()) == FALSE) {
+            return false;
+        }
+        if (!match.interface.empty() &&
+            dbus_message_has_interface(message, match.interface.c_str()) == FALSE) {
+            return false;
+        }
+        if (!match.member.empty() &&
+            dbus_message_has_member(message, match.member.c_str()) == FALSE) {
+            return false;
+        }
+        return true;
+    }
+
+    static DBusHandlerResult signal_filter(DBusConnection*, DBusMessage* message, void* data) {
+        if (message == nullptr || data == nullptr ||
+            dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+
+        auto* owner = static_cast<Impl*>(data);
+        std::vector<std::shared_ptr<SignalEntry>> targets;
+        try {
+            std::lock_guard lock{owner->signal_mutex};
+            targets.reserve(owner->signals.size());
+            for (const auto& [id, entry] : owner->signals) {
+                (void)id;
+                if (entry && entry->active->load(std::memory_order_acquire) &&
+                    signal_matches(entry->match, message)) {
+                    targets.push_back(entry);
+                }
+            }
+        } catch (...) {
+            return DBUS_HANDLER_RESULT_NEED_MEMORY;
+        }
+
+        if (targets.empty()) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+
+        LinuxDbusSignal signal;
+        signal.sender = copy_message_string(dbus_message_get_sender(message));
+        signal.path = copy_message_string(dbus_message_get_path(message));
+        signal.interface = copy_message_string(dbus_message_get_interface(message));
+        signal.member = copy_message_string(dbus_message_get_member(message));
+        std::string decode_error;
+        if (!linux_dbus_decode_values(message, signal.arguments, decode_error)) {
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+
+        for (const auto& entry : targets) {
+            try {
+                auto dispatcher = entry->dispatcher;
+                auto callback = entry->callback;
+                auto active = entry->active;
+                LinuxDbusSignal delivered = signal;
+                (void)dispatcher.post(
+                    [active = std::move(active), callback = std::move(callback),
+                     delivered = std::move(delivered)]() mutable {
+                        if (!active->load(std::memory_order_acquire)) {
+                            return;
+                        }
+                        callback(std::move(delivered));
+                    });
+            } catch (...) {
+                // Dispatcher rejection/allocation failure drops this delivery;
+                // never run client callbacks on the D-Bus I/O thread.
+            }
+        }
+        return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+    }
+
+    void unregister_all_signals(DBusConnection* current_connection) noexcept {
+        try {
+            std::lock_guard lock{signal_mutex};
+            for (auto& [id, entry] : signals) {
+                (void)id;
+                if (entry) {
+                    entry->active->store(false, std::memory_order_release);
+                }
+            }
+            if (current_connection != nullptr && signal_filter_installed) {
+                dbus_connection_remove_filter(current_connection, &Impl::signal_filter, this);
+            }
+            signal_filter_installed = false;
+            for (const auto& [id, entry] : signals) {
+                if (!entry) {
+                    continue;
+                }
+                if (current_connection != nullptr) {
+                    DBusError error;
+                    dbus_error_init(&error);
+                    dbus_bus_remove_match(current_connection, entry->rule.c_str(), &error);
+                    dbus_error_free(&error);
+                }
+                (void)ledger.release_subscription(entry->client, id);
+            }
+            signals.clear();
+        } catch (...) {
+            // Shutdown is noexcept; lifetime gates are disabled before any
+            // operation that can fail, so no client callback can escape.
+        }
+    }
+
     [[nodiscard]] std::shared_ptr<ObjectPathEntry> begin_object_invocation(
         LinuxDbusObjectRegistrationId id) {
         std::shared_ptr<ObjectPathEntry> entry;
@@ -517,10 +682,6 @@ struct LinuxDbusTransport::Impl final {
             ++entry->in_flight;
         }
         return entry;
-    }
-
-    [[nodiscard]] static std::string copy_message_string(const char* value) {
-        return value == nullptr ? std::string{} : std::string{value};
     }
 
     [[nodiscard]] static DBusMessage* create_object_reply(
@@ -667,6 +828,7 @@ struct LinuxDbusTransport::Impl final {
 
     mutable std::mutex lifecycle_mutex;
     mutable std::mutex pending_mutex;
+    mutable std::mutex signal_mutex;
     mutable std::mutex object_mutex;
     DBusConnection* connection{};
     std::thread io_thread;
@@ -674,10 +836,12 @@ struct LinuxDbusTransport::Impl final {
     std::atomic<bool> running{false};
     std::string unique_name;
     bool destroying{};
+    bool signal_filter_installed{};
 
     LinuxDbusResourceLedger ledger;
     LinuxDbusPendingCallSet calls;
     std::unordered_map<LinuxDbusRequestId, NativePendingCall> pending_calls;
+    std::unordered_map<LinuxDbusSubscriptionId, std::shared_ptr<SignalEntry>> signals;
     std::unordered_map<LinuxDbusObjectRegistrationId,
                        std::shared_ptr<ObjectPathEntry>> object_paths;
     std::unordered_map<std::string, LinuxDbusObjectRegistrationId> object_path_ids;
@@ -758,6 +922,8 @@ void LinuxDbusTransport::stop() noexcept {
         std::lock_guard lock{impl_->lifecycle_mutex};
         impl_->stop_requested.store(true, std::memory_order_release);
         suppress_completions = impl_->destroying;
+
+        impl_->unregister_all_signals(impl_->connection);
 
         if (impl_->io_thread.joinable()) {
             impl_->io_thread.join();
@@ -953,6 +1119,124 @@ bool LinuxDbusTransport::cancel_request(LinuxDbusClientId client, LinuxDbusReque
 
 std::size_t LinuxDbusTransport::pending_request_count() const noexcept {
     return impl_->calls.pending_count();
+}
+
+LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
+    LinuxDbusClientId client,
+    ui::Dispatcher dispatcher,
+    const LinuxDbusSignalMatch& match,
+    LinuxDbusSignalCallback callback) {
+    if (client == kInvalidLinuxDbusClientId || !dispatcher.valid() || !callback ||
+        !valid_signal_match(match)) {
+        return kInvalidLinuxDbusSubscriptionId;
+    }
+
+    try {
+        auto entry = std::make_shared<Impl::SignalEntry>();
+        entry->client = client;
+        entry->dispatcher = std::move(dispatcher);
+        entry->match = match;
+        entry->callback = std::move(callback);
+        entry->rule = signal_match_rule(match);
+
+        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        if (impl_->destroying || impl_->connection == nullptr ||
+            !impl_->running.load(std::memory_order_acquire) ||
+            impl_->stop_requested.load(std::memory_order_acquire)) {
+            return kInvalidLinuxDbusSubscriptionId;
+        }
+
+        std::lock_guard signal_lock{impl_->signal_mutex};
+        const auto id = impl_->ledger.acquire_subscription(client);
+        if (id == kInvalidLinuxDbusSubscriptionId) {
+            return id;
+        }
+
+        bool installed_filter_now = false;
+        if (!impl_->signal_filter_installed) {
+            if (dbus_connection_add_filter(impl_->connection, &Impl::signal_filter,
+                                           impl_.get(), nullptr) == FALSE) {
+                (void)impl_->ledger.release_subscription(client, id);
+                return kInvalidLinuxDbusSubscriptionId;
+            }
+            impl_->signal_filter_installed = true;
+            installed_filter_now = true;
+        }
+
+        try {
+            impl_->signals.emplace(id, entry);
+        } catch (...) {
+            if (installed_filter_now && impl_->signals.empty()) {
+                dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                              impl_.get());
+                impl_->signal_filter_installed = false;
+            }
+            (void)impl_->ledger.release_subscription(client, id);
+            return kInvalidLinuxDbusSubscriptionId;
+        }
+
+        DBusError error;
+        dbus_error_init(&error);
+        dbus_bus_add_match(impl_->connection, entry->rule.c_str(), &error);
+        if (dbus_error_is_set(&error)) {
+            dbus_error_free(&error);
+            impl_->signals.erase(id);
+            if (installed_filter_now && impl_->signals.empty()) {
+                dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                              impl_.get());
+                impl_->signal_filter_installed = false;
+            }
+            (void)impl_->ledger.release_subscription(client, id);
+            return kInvalidLinuxDbusSubscriptionId;
+        }
+        dbus_error_free(&error);
+        dbus_connection_flush(impl_->connection);
+        entry->active->store(true, std::memory_order_release);
+        return id;
+    } catch (...) {
+        return kInvalidLinuxDbusSubscriptionId;
+    }
+}
+
+bool LinuxDbusTransport::unsubscribe_signal(LinuxDbusClientId client,
+                                            LinuxDbusSubscriptionId id) {
+    if (client == kInvalidLinuxDbusClientId || id == kInvalidLinuxDbusSubscriptionId) {
+        return false;
+    }
+
+    std::shared_ptr<Impl::SignalEntry> entry;
+    {
+        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        if (impl_->connection == nullptr) {
+            return false;
+        }
+        std::lock_guard signal_lock{impl_->signal_mutex};
+        const auto found = impl_->signals.find(id);
+        if (found == impl_->signals.end() || !found->second ||
+            found->second->client != client) {
+            return false;
+        }
+        entry = found->second;
+        entry->active->store(false, std::memory_order_release);
+        impl_->signals.erase(found);
+
+        DBusError error;
+        dbus_error_init(&error);
+        dbus_bus_remove_match(impl_->connection, entry->rule.c_str(), &error);
+        dbus_error_free(&error);
+        if (impl_->signals.empty() && impl_->signal_filter_installed) {
+            dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                          impl_.get());
+            impl_->signal_filter_installed = false;
+        }
+    }
+
+    return impl_->ledger.release_subscription(client, id);
+}
+
+std::size_t LinuxDbusTransport::subscription_count() const noexcept {
+    std::lock_guard lock{impl_->signal_mutex};
+    return impl_->signals.size();
 }
 
 LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
