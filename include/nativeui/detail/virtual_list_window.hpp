@@ -46,13 +46,14 @@ public:
 
         const auto next_indices = virtual_list_materialized_indices(
             model_->size(), *range, focused_index, captured_index);
+        if (!next_indices) return false;
 
         std::vector<MaterializedItem> next_items;
         std::vector<std::string> next_keys;
-        next_items.reserve(next_indices.size());
-        next_keys.reserve(next_indices.size());
+        next_items.reserve(next_indices->size());
+        next_keys.reserve(next_indices->size());
 
-        for (const auto index : next_indices) {
+        for (const auto index : *next_indices) {
             const auto* encoded_key = model_->encoded_key_at(index);
             const auto* item = model_->item_at(index);
             if (!encoded_key || !item) return false;
@@ -74,7 +75,7 @@ public:
             next_items.push_back(MaterializedItem{retained_key, index, std::move(payload)});
         }
 
-        indices_ = next_indices;
+        indices_ = *next_indices;
         keys_ = std::move(next_keys);
         items_ = std::move(next_items);
         return true;
