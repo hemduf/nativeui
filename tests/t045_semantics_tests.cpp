@@ -44,121 +44,59 @@ void semantic_snapshot_owns_data() {
     NUI_CHECK(snapshot.bounds.w == 30.0f);
 }
 
-struct VirtualMetadata {
-    struct Entry {
-        ui::VirtualSemanticItemToken token{};
-        std::string name;
-        bool enabled{true};
-    };
-
-    std::uint64_t generation{};
-    std::vector<Entry> entries;
-};
-
-class FixedHeightVirtualSnapshot final : public ui::VirtualSemanticChildren {
-public:
-    FixedHeightVirtualSnapshot(std::shared_ptr<const VirtualMetadata> metadata,
-                               std::optional<ui::VirtualSemanticItemToken> selected,
-                               float row_height,
-                               float scroll_y,
-                               int& visual_factory_calls)
-        : metadata_(std::move(metadata)),
-          selected_(selected),
-          row_height_(row_height),
-          scroll_y_(scroll_y),
-          visual_factory_calls_(&visual_factory_calls) {}
-
-    [[nodiscard]] std::uint64_t dataset_generation() const noexcept override {
-        return metadata_->generation;
-    }
-
-    [[nodiscard]] std::size_t size() const noexcept override {
-        return metadata_->entries.size();
-    }
-
-    [[nodiscard]] std::optional<ui::VirtualSemanticItem> item_at(
-        std::size_t index) const override {
-        if (index >= metadata_->entries.size()) {
-            return std::nullopt;
-        }
-
-        const auto& entry = metadata_->entries[index];
-        ui::VirtualSemanticItem item;
-        item.token = entry.token;
-        item.info.role = ui::SemanticRole::ListItem;
-        item.info.name = entry.name;
-        item.info.enabled = entry.enabled;
-        item.info.selected = selected_.has_value() && *selected_ == entry.token;
-        item.info.actions = {ui::SemanticAction::Select, ui::SemanticAction::Focus};
-        item.logical_bounds = {
-            0.0f,
-            static_cast<float>(index) * row_height_ - scroll_y_,
-            200.0f,
-            row_height_,
-        };
-        return item;
-    }
-
-    [[nodiscard]] std::optional<std::size_t> index_of_selected_item() const noexcept override {
-        if (!selected_.has_value()) {
-            return std::nullopt;
-        }
-        for (std::size_t index = 0; index < metadata_->entries.size(); ++index) {
-            if (metadata_->entries[index].token == *selected_) {
-                return index;
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] const VirtualMetadata* metadata_address() const noexcept {
-        return metadata_.get();
-    }
-
-    [[nodiscard]] int visual_factory_calls() const noexcept {
-        return *visual_factory_calls_;
-    }
-
-private:
-    std::shared_ptr<const VirtualMetadata> metadata_;
-    std::optional<ui::VirtualSemanticItemToken> selected_;
-    float row_height_{};
-    float scroll_y_{};
-    int* visual_factory_calls_{};
-};
-
 void virtual_collection_is_lazy_and_metadata_shared() {
-    auto metadata = std::make_shared<VirtualMetadata>();
-    metadata->generation = 7;
-    metadata->entries.reserve(100000);
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->reserve(100000);
     for (std::uint64_t index = 0; index < 100000; ++index) {
-        metadata->entries.push_back({index + 1, "Item", true});
+        ui::VirtualSemanticItemMetadata item;
+        item.token = index + 1;
+        item.name = "Item";
+        item.enabled = true;
+        item.actions = {ui::SemanticAction::Select, ui::SemanticAction::Focus};
+        mutable_metadata->push_back(std::move(item));
     }
 
-    int visual_factory_calls = 0;
-    auto first = std::make_shared<const FixedHeightVirtualSnapshot>(
-        metadata, ui::VirtualSemanticItemToken{50001}, 20.0f, 100.0f, visual_factory_calls);
-    auto second = std::make_shared<const FixedHeightVirtualSnapshot>(
-        metadata, ui::VirtualSemanticItemToken{50002}, 20.0f, 120.0f, visual_factory_calls);
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata = mutable_metadata;
+    const auto first = ui::VirtualSemanticChildren::from_metadata(
+        7, metadata, ui::VirtualSemanticItemToken{50001},
+        {10.0f, 20.0f, 200.0f, 400.0f}, 20.0f, 100.0f);
+    const auto second = ui::VirtualSemanticChildren::from_metadata(
+        7, metadata, ui::VirtualSemanticItemToken{50002},
+        {10.0f, 20.0f, 200.0f, 400.0f}, 20.0f, 120.0f);
 
-    ui::VirtualSemanticChildrenSnapshot first_view = first;
-    ui::VirtualSemanticChildrenSnapshot second_view = second;
+    NUI_CHECK(first.size() == 100000);
+    NUI_CHECK(first.dataset_generation() == 7);
+    NUI_CHECK(second.dataset_generation() == 7);
+    NUI_CHECK(first.metadata_snapshot().get() == second.metadata_snapshot().get());
 
-    NUI_CHECK(first_view->size() == 100000);
-    NUI_CHECK(first_view->dataset_generation() == 7);
-    NUI_CHECK(second_view->dataset_generation() == 7);
-    NUI_CHECK(first->metadata_address() == second->metadata_address());
-
-    const auto middle = first_view->item_at(50000);
+    const auto middle = first.item_at(50000);
     NUI_CHECK(middle.has_value());
     NUI_CHECK(middle->token == ui::VirtualSemanticItemToken{50001});
     NUI_CHECK(middle->info.name == "Item");
     NUI_CHECK(middle->info.selected);
-    NUI_CHECK(middle->logical_bounds.y == 999900.0f);
-    NUI_CHECK(first_view->index_of_selected_item() == std::optional<std::size_t>{50000});
-    NUI_CHECK(!first_view->item_at(100000).has_value());
-    NUI_CHECK(first->visual_factory_calls() == 0);
-    NUI_CHECK(second->visual_factory_calls() == 0);
+    NUI_CHECK(middle->logical_bounds.x == 10.0f);
+    NUI_CHECK(middle->logical_bounds.y == 999920.0f);
+    NUI_CHECK(middle->logical_bounds.w == 200.0f);
+    NUI_CHECK(middle->logical_bounds.h == 20.0f);
+    NUI_CHECK(first.index_of_selected_item() == std::optional<std::size_t>{50000});
+    NUI_CHECK(!first.item_at(100000).has_value());
+}
+
+void virtual_metadata_is_immutable_after_publication() {
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->push_back({1, "Before", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata = mutable_metadata;
+    const auto snapshot = ui::VirtualSemanticChildren::from_metadata(
+        1, metadata, std::nullopt, {0.0f, 0.0f, 100.0f, 20.0f}, 20.0f, 0.0f);
+
+    mutable_metadata.reset();
+    const auto item = snapshot.item_at(0);
+    NUI_CHECK(item.has_value());
+    NUI_CHECK(item->info.name == "Before");
+    NUI_CHECK(snapshot.metadata_snapshot().use_count() >= 1);
 }
 
 void virtual_tokens_and_tristate_contract() {
@@ -197,6 +135,7 @@ int main() {
         semantic_role_and_action_contract();
         semantic_snapshot_owns_data();
         virtual_collection_is_lazy_and_metadata_shared();
+        virtual_metadata_is_immutable_after_publication();
         virtual_tokens_and_tristate_contract();
         semantic_tree_generation_contract();
     });
