@@ -119,6 +119,9 @@
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
     }
+    [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
+        return structural_diagnostic_;
+    }
 
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {

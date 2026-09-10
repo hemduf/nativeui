@@ -6,6 +6,7 @@
 
 #include <limits>
 #include <optional>
+#include <string>
 
 namespace ui {
 
