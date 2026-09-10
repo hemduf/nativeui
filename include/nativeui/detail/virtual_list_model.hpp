@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nativeui/dynamic.hpp>
+#include <nativeui/detail/dynamic_key.hpp>
 #include <nativeui/semantics.hpp>
 
 #include <algorithm>
