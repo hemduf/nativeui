@@ -1,21 +1,122 @@
+namespace {
+
+class PuglDispatcherWakeBackend final : public detail::DispatcherWakeBackend {
+public:
+    explicit PuglDispatcherWakeBackend(PuglWorld* world) noexcept
+        : world_(world) {}
+
+    ~PuglDispatcherWakeBackend() override = default;
+
+    [[nodiscard]] bool ensure_view() {
+        std::lock_guard lock{mutex_};
+        if (closing_) return false;
+        if (view_) return true;
+        if (!world_) return false;
+
+        view_ = puglNewView(world_);
+        if (!view_) {
+            last_error_ = "puglNewView failed for dispatcher wake bridge";
+            return false;
+        }
+
+        puglSetViewString(view_, PUGL_WINDOW_TITLE, "NativeUI dispatcher wake bridge");
+        puglSetSizeHint(view_, PUGL_DEFAULT_SIZE, 1, 1);
+        puglSetBackend(view_, puglGlBackend());
+        puglSetEventFunc(view_, [](PuglView*, const PuglEvent*) noexcept {
+            return PUGL_SUCCESS;
+        });
+
+        const auto status = puglRealize(view_);
+        if (status != PUGL_SUCCESS) {
+            last_error_ = std::string{"dispatcher wake bridge realization failed: "} +
+                          puglStrerror(status);
+            puglFreeView(view_);
+            view_ = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::string_view last_error() const noexcept {
+        return last_error_;
+    }
+
+    void request_wake() noexcept override {
+        std::lock_guard lock{mutex_};
+        if (closing_ || !view_) return;
+
+        PuglEvent event{};
+        event.client.type = PUGL_CLIENT;
+        event.client.data1 = 0x4E554944u; // "NUID"
+        (void)puglSendEvent(view_, &event);
+    }
+
+    void begin_shutdown() noexcept {
+        std::lock_guard lock{mutex_};
+        closing_ = true;
+    }
+
+    void destroy_view_on_ui_thread() noexcept {
+        std::lock_guard lock{mutex_};
+        if (!view_) return;
+        (void)puglUnrealize(view_);
+        puglFreeView(view_);
+        view_ = nullptr;
+        world_ = nullptr;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    PuglWorld* world_{};
+    PuglView* view_{};
+    bool closing_{};
+    std::string last_error_;
+};
+
+struct ApplicationWindowRecord final {
+    bool open{true};
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+};
+
+[[nodiscard]] double bound_dispatch_timeout(
+    double requested,
+    const std::vector<std::shared_ptr<detail::DispatcherOwner>>& owners) noexcept {
+    double result = requested < 0.0 ? -1.0 : requested;
+    for (const auto& owner : owners) {
+        if (!owner) continue;
+        const auto next = owner->next_delay();
+        if (!next) continue;
+        const double seconds = std::max(0.0, next->count());
+        if (result < 0.0 || seconds < result) result = seconds;
+    }
+    return result;
+}
+
+} // namespace
+
 struct Application::Impl final {
     PuglWorld* world{};
+    std::shared_ptr<PuglDispatcherWakeBackend> wake_backend;
     QuitPolicy quit_policy{QuitPolicy::OnLastWindowClosed};
     bool quit_requested{};
     bool terminal_error{};
     std::uint64_t next_window_id{1};
     std::size_t open_window_count{};
-    std::unordered_map<std::uint64_t, bool> windows;
+    std::unordered_map<std::uint64_t, ApplicationWindowRecord> windows;
     std::string last_error;
 
     Impl() {
-        world = puglNewWorld(PUGL_PROGRAM, 0);
+        // Dispatcher worker posts use Pugl client events to interrupt a blocked
+        // PROGRAM loop. X11 requires XInitThreads before any other Xlib call,
+        // which Pugl performs when this flag is supplied at world creation.
+        world = puglNewWorld(PUGL_PROGRAM, PUGL_WORLD_THREADS);
         if (!world) {
             terminal_error = true;
             last_error = "puglNewWorld failed";
             return;
         }
         puglSetWorldString(world, PUGL_CLASS_NAME, "NativeUI");
+        wake_backend = std::make_shared<PuglDispatcherWakeBackend>(world);
     }
 
     ~Impl() {
@@ -24,6 +125,17 @@ struct Application::Impl final {
         // borrowed view is still alive would turn a clear lifetime violation
         // into a platform UAF during later window teardown.
         if (!windows.empty()) std::terminate();
+
+        // Stop worker-originated sends first. A PUGL_CLIENT already accepted on
+        // macOS is delivered by the main run loop and retains the PuglView raw
+        // pointer until dispatch, so give pending client events one final UI
+        // checkpoint before destroying the hidden wake view and PROGRAM world.
+        if (wake_backend) wake_backend->begin_shutdown();
+        if (world) (void)puglUpdate(world, 0.0);
+        if (wake_backend) {
+            wake_backend->destroy_view_on_ui_thread();
+            wake_backend.reset();
+        }
         if (world) puglFreeWorld(world);
     }
 
@@ -35,18 +147,42 @@ struct Application::Impl final {
         return valid() && !quit_requested;
     }
 
-    std::uint64_t register_window() {
-        if (!runnable() || next_window_id == 0) return 0;
+    [[nodiscard]] std::vector<std::shared_ptr<detail::DispatcherOwner>>
+    dispatcher_snapshot() const {
+        std::vector<std::shared_ptr<detail::DispatcherOwner>> owners;
+        owners.reserve(open_window_count);
+        for (const auto& [id, record] : windows) {
+            (void)id;
+            if (record.open && record.dispatcher_owner) {
+                owners.push_back(record.dispatcher_owner);
+            }
+        }
+        return owners;
+    }
+
+    std::uint64_t register_window(
+        const std::shared_ptr<detail::DispatcherOwner>& dispatcher_owner) {
+        if (!runnable() || !dispatcher_owner || next_window_id == 0) return 0;
+        if (!wake_backend || !wake_backend->ensure_view()) {
+            terminal_error = true;
+            quit_requested = true;
+            last_error = wake_backend && !wake_backend->last_error().empty()
+                ? std::string{wake_backend->last_error()}
+                : "dispatcher wake bridge initialization failed";
+            return 0;
+        }
+
         const auto id = next_window_id++;
-        windows.emplace(id, true);
+        windows.emplace(id, ApplicationWindowRecord{true, dispatcher_owner});
         ++open_window_count;
         return id;
     }
 
     void mark_window_closed(std::uint64_t id) noexcept {
         const auto found = windows.find(id);
-        if (found == windows.end() || !found->second) return;
-        found->second = false;
+        if (found == windows.end() || !found->second.open) return;
+        found->second.open = false;
+        if (found->second.dispatcher_owner) found->second.dispatcher_owner->shutdown();
         if (open_window_count) --open_window_count;
         if (open_window_count == 0 && quit_policy == QuitPolicy::OnLastWindowClosed) {
             quit_requested = true;
@@ -56,8 +192,16 @@ struct Application::Impl final {
     void unregister_window(std::uint64_t id) noexcept {
         const auto found = windows.find(id);
         if (found == windows.end()) return;
-        if (found->second) mark_window_closed(id);
+        if (found->second.open) mark_window_closed(id);
+        if (found->second.dispatcher_owner) found->second.dispatcher_owner->shutdown();
         windows.erase(id);
+    }
+
+    void drain_dispatchers() {
+        const auto owners = dispatcher_snapshot();
+        for (const auto& owner : owners) {
+            if (owner) (void)owner->checkpoint();
+        }
     }
 
     bool pump(double timeout_seconds) {
@@ -69,7 +213,9 @@ struct Application::Impl final {
             return false;
         }
 
-        const double pugl_timeout = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
+        const auto owners = dispatcher_snapshot();
+        const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
+        const double pugl_timeout = bound_dispatch_timeout(requested, owners);
         const auto status = puglUpdate(world, pugl_timeout);
         if (status != PUGL_SUCCESS) {
             terminal_error = true;
@@ -77,6 +223,12 @@ struct Application::Impl final {
             last_error = puglStrerror(status);
             return false;
         }
+
+        // Snapshot after native dispatch: a native close may have destroyed a
+        // logical owner, while another callback may have created a new one.
+        // DispatcherOwner::checkpoint itself is reentrancy-safe if a callback
+        // destroys its own window or a sibling.
+        drain_dispatchers();
         return !quit_requested;
     }
 };
@@ -115,12 +267,15 @@ QuitPolicy Application::quit_policy() const noexcept {
 }
 
 struct StandaloneWindow::Impl final : PlatformServices {
+    explicit Impl(std::shared_ptr<detail::DispatcherWakeBackend> wake_backend = {})
+        : dispatcher_owner(
+              std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))) {}
+
     std::unique_ptr<ViewCore> core;
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
-    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner{
-        std::make_shared<detail::DispatcherOwner>()};
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -140,11 +295,13 @@ struct StandaloneWindow::Impl final : PlatformServices {
 };
 
 StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc desc)
-    : impl_(std::make_unique<Impl>()) {
+    : impl_(std::make_unique<Impl>(
+          application.impl_ ? application.impl_->wake_backend : nullptr)) {
     if (!application.impl_ || !application.impl_->runnable()) {
         impl_->construction_error = application.last_error().empty()
             ? "Application is not runnable"
             : std::string{application.last_error()};
+        impl_->dispatcher_owner->shutdown();
         return;
     }
 
@@ -158,9 +315,13 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
             0,
             application.impl_->world,
             [this] { mark_application_window_closed(); });
-        impl_->registration_id = application.impl_->register_window();
+        impl_->registration_id =
+            application.impl_->register_window(impl_->dispatcher_owner);
         if (!impl_->registration_id) {
-            impl_->construction_error = "Application rejected window registration";
+            impl_->construction_error = application.last_error().empty()
+                ? "Application rejected window registration"
+                : std::string{application.last_error()};
+            impl_->dispatcher_owner->shutdown();
             impl_->core.reset();
             impl_->application = nullptr;
         }
@@ -168,6 +329,7 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
         throw;
     } catch (const std::exception& error) {
         impl_->construction_error = error.what();
+        impl_->dispatcher_owner->shutdown();
         impl_->core.reset();
         impl_->application = nullptr;
     }
@@ -175,11 +337,25 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
 
 StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>()) {
-    impl_->core = std::make_unique<ViewCore>(ui, *impl_, PUGL_PROGRAM, std::move(desc), 0);
+    impl_->core = std::make_unique<ViewCore>(
+        ui,
+        *impl_,
+        PUGL_PROGRAM,
+        std::move(desc),
+        0,
+        nullptr,
+        [this] {
+            if (impl_ && impl_->dispatcher_owner) impl_->dispatcher_owner->shutdown();
+        });
 }
 
 StandaloneWindow::~StandaloneWindow() {
-    unregister_from_application();
+    if (!impl_) return;
+    if (impl_->application) {
+        unregister_from_application();
+    } else if (impl_->dispatcher_owner) {
+        impl_->dispatcher_owner->shutdown();
+    }
 }
 
 void StandaloneWindow::mark_application_window_closed() noexcept {
@@ -209,12 +385,25 @@ int StandaloneWindow::run() {
 bool StandaloneWindow::poll(double timeout_seconds) {
     if (!impl_) return false;
     if (impl_->application) return impl_->application->poll(timeout_seconds);
-    return impl_->core && impl_->core->poll(timeout_seconds);
+    if (!impl_->core) return false;
+
+    const auto owner = impl_->dispatcher_owner;
+    std::vector<std::shared_ptr<detail::DispatcherOwner>> owners;
+    if (owner) owners.push_back(owner);
+    const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
+    const double pugl_timeout = bound_dispatch_timeout(requested, owners);
+    const bool alive = impl_->core->poll(pugl_timeout);
+    if (owner) (void)owner->checkpoint();
+    return alive;
 }
 void StandaloneWindow::request_close() {
     if (!impl_ || !impl_->core) return;
     impl_->core->request_close();
-    mark_application_window_closed();
+    if (impl_->application) {
+        mark_application_window_closed();
+    } else if (impl_->dispatcher_owner) {
+        impl_->dispatcher_owner->shutdown();
+    }
 }
 bool StandaloneWindow::valid() const noexcept {
     return impl_ && impl_->core && impl_->construction_error.empty() &&
@@ -267,7 +456,12 @@ struct EmbeddedView::Impl final : PlatformServices {
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true},
-               parent) {}
+               parent),
+          dispatcher_owner(std::make_shared<detail::DispatcherOwner>()) {}
+
+    ~Impl() override {
+        if (dispatcher_owner) dispatcher_owner->shutdown();
+    }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         core.set_text_input(active, area, cursor_offset);
@@ -280,16 +474,25 @@ struct EmbeddedView::Impl final : PlatformServices {
     void reject_drop(Rect region) override { core.reject_drop(region); }
 
     ViewCore core;
-    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner{
-        std::make_shared<detail::DispatcherOwner>()};
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
     : impl_(std::make_unique<Impl>(ui, parent, size)) {}
 EmbeddedView::~EmbeddedView() = default;
 
-bool EmbeddedView::poll() { return impl_->core.poll(0.0); }
-void EmbeddedView::request_close() { impl_->core.request_close(); }
+bool EmbeddedView::poll() {
+    if (!impl_) return false;
+    const auto owner = impl_->dispatcher_owner;
+    const bool alive = impl_->core.poll(0.0);
+    if (owner) (void)owner->checkpoint();
+    return alive;
+}
+void EmbeddedView::request_close() {
+    if (!impl_) return;
+    impl_->core.request_close();
+    if (impl_->dispatcher_owner) impl_->dispatcher_owner->shutdown();
+}
 bool EmbeddedView::should_close() const noexcept { return !impl_ || impl_->core.should_close(); }
 Size EmbeddedView::size() const noexcept { return impl_ ? impl_->core.size() : Size{}; }
 float EmbeddedView::scale_factor() const noexcept { return impl_ ? impl_->core.scale_factor() : 1.0f; }
@@ -300,13 +503,19 @@ Dispatcher EmbeddedView::dispatcher() const noexcept {
 }
 bool EmbeddedView::set_size(Size size) { return impl_ && impl_->core.set_size(size); }
 void EmbeddedView::set_text_input(bool active, Rect area, float cursor_offset) {
-    impl_->core.set_text_input(active, area, cursor_offset);
+    if (impl_) impl_->core.set_text_input(active, area, cursor_offset);
 }
-void EmbeddedView::set_clipboard_text(std::string_view text) { impl_->core.set_clipboard_text(text); }
-void EmbeddedView::request_clipboard_text() { impl_->core.request_clipboard_text(); }
+void EmbeddedView::set_clipboard_text(std::string_view text) {
+    if (impl_) impl_->core.set_clipboard_text(text);
+}
+void EmbeddedView::request_clipboard_text() {
+    if (impl_) impl_->core.request_clipboard_text();
+}
 bool EmbeddedView::accept_drop(std::string_view type, Rect region) {
     return impl_ && impl_->core.accept_drop(type, region);
 }
-void EmbeddedView::reject_drop(Rect region) { if (impl_) impl_->core.reject_drop(region); }
+void EmbeddedView::reject_drop(Rect region) {
+    if (impl_) impl_->core.reject_drop(region);
+}
 
 } // namespace ui
