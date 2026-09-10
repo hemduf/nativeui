@@ -10,6 +10,15 @@ ui::InputEvent wheel(float x, float y, float dx, float dy) {
     return event;
 }
 
+bool accent_pixel(ui::Rgba8 pixel) {
+    return pixel.r > 220 && pixel.g > 120 && pixel.g < 190 && pixel.b < 100 && pixel.a > 220;
+}
+
+bool darker_track_than_background(ui::Rgba8 track, ui::Rgba8 background) {
+    return track.r > background.r && track.g > background.g && track.b > background.b &&
+           track.a == background.a;
+}
+
 struct PointerEatingState {
     int down{};
     int move{};
@@ -363,6 +372,54 @@ void idle_scroll_view_schedules_no_activity() {
     NUI_CHECK(!tree.dirty());
 }
 
+void headless_scrollbar_golden_states() {
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state.set_offset({0.0f, 100.0f});
+        NUI_CHECK(renderer.render(tree));
+
+        const auto background = renderer.pixel(50, 50);
+        NUI_CHECK(accent_pixel(renderer.pixel(96, 30)));
+        NUI_CHECK(darker_track_than_background(renderer.pixel(96, 55), background));
+        NUI_CHECK(!accent_pixel(renderer.pixel(50, 96)));
+    }
+
+    {
+        ui::ScrollState state{ui::ScrollAxis::Horizontal};
+        ui::UI tree{ui::ScrollView{state, ui::Spacer{400.0f, 100.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state.set_offset({100.0f, 0.0f});
+        NUI_CHECK(renderer.render(tree));
+
+        const auto background = renderer.pixel(50, 50);
+        NUI_CHECK(accent_pixel(renderer.pixel(30, 96)));
+        NUI_CHECK(darker_track_than_background(renderer.pixel(55, 96), background));
+        NUI_CHECK(!accent_pixel(renderer.pixel(96, 50)));
+    }
+
+    {
+        ui::ScrollState state{ui::ScrollAxis::Both};
+        ui::UI tree{ui::ScrollView{state, ui::Spacer{400.0f, 400.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state.set_offset({100.0f, 100.0f});
+        NUI_CHECK(renderer.render(tree));
+
+        const auto background = renderer.pixel(50, 50);
+        NUI_CHECK(accent_pixel(renderer.pixel(30, 96)));
+        NUI_CHECK(accent_pixel(renderer.pixel(96, 30)));
+        NUI_CHECK(darker_track_than_background(renderer.pixel(60, 96), background));
+        NUI_CHECK(darker_track_than_background(renderer.pixel(96, 60), background));
+        const auto corner = renderer.pixel(96, 96);
+        NUI_CHECK(corner.r == background.r && corner.g == background.g &&
+                  corner.b == background.b && corner.a == background.a);
+    }
+}
+
 void suite() {
     wheel_consumption_uses_scroll_state();
     nested_wheel_bubbles_at_boundary();
@@ -373,6 +430,7 @@ void suite() {
     scrollbar_overlay_wins_over_interactive_content();
     inert_overlay_does_not_block_pointer_target();
     idle_scroll_view_schedules_no_activity();
+    headless_scrollbar_golden_states();
 }
 
 } // namespace
