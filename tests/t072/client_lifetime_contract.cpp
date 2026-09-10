@@ -30,6 +30,36 @@ int main() {
     constexpr LinuxDbusClientId client_a = 1;
     constexpr LinuxDbusClientId client_b = 2;
 
+    // Client teardown must suppress work that has already been accepted by the
+    // UI dispatcher without suppressing a sibling client's accepted work.
+    {
+        LinuxDbusResourceLedger ledger;
+        LinuxDbusPendingCallSet calls{ledger};
+        DispatcherOwner owner;
+        std::size_t client_a_callbacks = 0;
+        std::size_t client_b_callbacks = 0;
+
+        const auto request_a = calls.begin(
+            client_a, owner.dispatcher(), 1s,
+            [&](LinuxDbusCompletion) { ++client_a_callbacks; });
+        const auto request_b = calls.begin(
+            client_b, owner.dispatcher(), 1s,
+            [&](LinuxDbusCompletion) { ++client_b_callbacks; });
+        if (request_a == kInvalidLinuxDbusRequestId ||
+            request_b == kInvalidLinuxDbusRequestId ||
+            !calls.complete(client_a, request_a, LinuxDbusCompletion{}) ||
+            !calls.complete(client_b, request_b, LinuxDbusCompletion{})) {
+            return EXIT_FAILURE;
+        }
+
+        calls.discard_client(client_a);
+        (void)owner.checkpoint();
+        if (client_a_callbacks != 0 || client_b_callbacks != 1 ||
+            calls.pending_count() != 0 || ledger.pending_request_count() != 0) {
+            return EXIT_FAILURE;
+        }
+    }
+
     LinuxDbusTransport transport;
     if (transport.start() != LinuxDbusErrorCode::None) {
         return EXIT_FAILURE;
