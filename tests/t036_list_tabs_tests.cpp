@@ -10,6 +10,8 @@
 
 namespace {
 
+constexpr ui::Color kHoverSurface{0.145f, 0.155f, 0.175f, 1.0f};
+
 bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 3) {
     const auto channel = [](float value) {
         return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
@@ -134,6 +136,111 @@ void external_list_selection_reveals_selected_row() {
     NUI_CHECK(pixel_matches(renderer.pixel(8, 45), ui::colors::accent));
 }
 
+void hover_presentation_contract() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<std::optional<int>> selected{std::nullopt};
+        ui::UI tree{ui::ListView<int>{selected}
+            .item(1, ui::Spacer{120.0f, 30.0f})
+            .item(2, ui::Spacer{120.0f, 30.0f}, false)
+            .item(3, ui::Spacer{120.0f, 30.0f})};
+        tree.resize({120.0f, 90.0f});
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{{120.0f, 90.0f}, 1.0f};
+
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(20, 15), kHoverSurface));
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform);
+        NUI_CHECK(!selected.get());
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(20, 15), kHoverSurface));
+
+        // Disabled rows are never visually hovered and moving onto one clears
+        // the previous enabled-row hover without mutating selection.
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 45.0f), platform);
+        NUI_CHECK(!selected.get());
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(20, 15), kHoverSurface));
+        NUI_CHECK(!pixel_matches(renderer.pixel(20, 45), kHoverSurface));
+
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 75.0f), platform);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(20, 75), kHoverSurface));
+
+        ui::InputEvent leave{};
+        leave.type = ui::InputType::PointerLeave;
+        leave.position = {120.0f, 75.0f};
+        NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(20, 75), kHoverSurface));
+    }
+
+    {
+        ui::State<int> selected{1};
+        ui::UI tree{ui::Tabs<int>{selected}
+            .tab(1, "One", ui::Spacer{300.0f, 50.0f})
+            .tab(2, "Disabled", ui::Spacer{300.0f, 50.0f}, false)
+            .tab(3, "Three", ui::Spacer{300.0f, 50.0f})};
+        tree.resize({300.0f, 100.0f});
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{{300.0f, 100.0f}, 1.0f};
+
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(220, 20), ui::colors::panel));
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 220.0f, 20.0f), platform);
+        NUI_CHECK(selected.get() == 1);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(220, 20), kHoverSurface));
+
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 150.0f, 20.0f), platform);
+        NUI_CHECK(selected.get() == 1);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(220, 20), kHoverSurface));
+        NUI_CHECK(!pixel_matches(renderer.pixel(150, 20), kHoverSurface));
+
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 220.0f, 20.0f), platform);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(220, 20), kHoverSurface));
+        ui::InputEvent leave{};
+        leave.type = ui::InputType::PointerLeave;
+        leave.position = {300.0f, 20.0f};
+        NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(220, 20), kHoverSurface));
+    }
+
+    // Hover bookkeeping belongs to each retained Tree/component instance.
+    ui::State<int> left_selected{1};
+    ui::State<int> right_selected{1};
+    ui::UI left{ui::Tabs<int>{left_selected}
+        .tab(1, "One", ui::Spacer{200.0f, 40.0f})
+        .tab(2, "Two", ui::Spacer{200.0f, 40.0f})};
+    ui::UI right{ui::Tabs<int>{right_selected}
+        .tab(1, "One", ui::Spacer{200.0f, 40.0f})
+        .tab(2, "Two", ui::Spacer{200.0f, 40.0f})};
+    left.resize({200.0f, 100.0f});
+    right.resize({200.0f, 100.0f});
+    left.activate(platform);
+    right.activate(platform);
+    (void)left.dispatch(
+        test::pointer(ui::InputType::PointerMove, 150.0f, 20.0f), platform);
+    ui::HeadlessRenderer left_renderer{{200.0f, 100.0f}, 1.0f};
+    ui::HeadlessRenderer right_renderer{{200.0f, 100.0f}, 1.0f};
+    NUI_CHECK(left_renderer.render(left));
+    NUI_CHECK(right_renderer.render(right));
+    // Sample away from the centered tab label so this checks the hover surface,
+    // not a foreground text glyph rendered on top of it.
+    NUI_CHECK(pixel_matches(left_renderer.pixel(120, 20), kHoverSurface));
+    NUI_CHECK(!pixel_matches(right_renderer.pixel(120, 20), kHoverSurface));
+}
+
 void deterministic_headless_states() {
     {
         ui::State<std::optional<int>> selected{1};
@@ -168,6 +275,7 @@ void suite() {
     fully_retained_large_list_baseline();
     disabled_and_two_instance_contract();
     external_list_selection_reveals_selected_row();
+    hover_presentation_contract();
     deterministic_headless_states();
 }
 
