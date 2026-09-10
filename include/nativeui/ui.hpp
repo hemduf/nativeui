@@ -37,6 +37,52 @@ public:
     void deactivate(PlatformServices& platform) { tree_.deactivate_focus(platform); }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // Overlay dismissal is policy that must run before normal retained-tree
+        // delivery: an outside-dismiss PointerDown is consumed and must never
+        // click through to lower content in the same event, while Escape is
+        // owned by the topmost eligible overlay before a focused root control
+        // can consume it. Logical close invalidates the handle immediately;
+        // retained destruction remains deferred through the T058 queue.
+        if (event.type == InputType::PointerDown) {
+            for (auto it = overlay_state_->entries.rbegin();
+                 it != overlay_state_->entries.rend(); ++it) {
+                if (it->spec.pointer_policy == OverlayPointerPolicy::Ignore) {
+                    continue;
+                }
+
+                if (it->resolved_bounds.contains(event.position)) {
+                    break;
+                }
+
+                if (it->spec.dismiss_on_outside_pointer_down) {
+                    const auto id = it->id;
+                    (void)overlay_state_->close_id(id);
+                    return EventResult::Handled;
+                }
+
+                if (it->spec.mode == OverlayMode::Modal) {
+                    return EventResult::Handled;
+                }
+            }
+        } else if (event.type == InputType::KeyDown && event.key == Key::Escape) {
+            for (auto it = overlay_state_->entries.rbegin();
+                 it != overlay_state_->entries.rend(); ++it) {
+                if (it->spec.dismiss_on_escape) {
+                    const auto id = it->id;
+                    (void)overlay_state_->close_id(id);
+                    return EventResult::Handled;
+                }
+
+                // The topmost modal owns keyboard activation below it. If it
+                // is not itself Escape-dismissable, lower overlays/root must
+                // not observe this Escape; overlays created above it have
+                // already had their eligibility checked by this reverse scan.
+                if (it->spec.mode == OverlayMode::Modal) {
+                    return EventResult::Handled;
+                }
+            }
+        }
+
         return tree_.dispatch(event, platform);
     }
     EventResult cancel_pointer(PlatformServices& platform) {
