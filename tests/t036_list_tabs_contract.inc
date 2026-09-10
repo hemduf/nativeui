@@ -71,8 +71,6 @@ inline void list_keyboard_pointer_and_read_only_contract() {
     NUI_CHECK(list.dispatch(test::key(ui::Key::End), platform) == ui::EventResult::Handled);
     NUI_CHECK(selected.get() && *selected.get() == 5);
 
-    // End must reveal the final row through T034. With five 30px rows in a
-    // 60px viewport the resulting offset is 90px, so y=10 maps to row 4.
     NUI_CHECK(list.dispatch(
                   test::pointer(ui::InputType::PointerDown, 20.0f, 10.0f), platform) ==
               ui::EventResult::Handled);
@@ -112,12 +110,10 @@ inline void list_activation_contract() {
     list.resize({100.0f, 60.0f});
     list.activate(platform);
 
-    // Navigation selects but does not activate.
     NUI_CHECK(list.dispatch(test::key(ui::Key::Down), platform) == ui::EventResult::Handled);
     NUI_CHECK(selected.get() && *selected.get() == 2);
     NUI_CHECK(activations == 0);
 
-    // Enter/Space activate the current row exactly once per key event.
     NUI_CHECK(list.dispatch(test::key(ui::Key::Enter), platform) == ui::EventResult::Handled);
     NUI_CHECK(activations == 1);
     NUI_CHECK(activated_key == 2);
@@ -125,7 +121,6 @@ inline void list_activation_contract() {
     NUI_CHECK(activations == 2);
     NUI_CHECK(activated_key == 2);
 
-    // Pointer activation selects first, then invokes the callback once.
     NUI_CHECK(list.dispatch(
                   test::pointer(ui::InputType::PointerDown, 20.0f, 10.0f), platform) ==
               ui::EventResult::Handled);
@@ -135,6 +130,28 @@ inline void list_activation_contract() {
     NUI_CHECK(selected.get() && *selected.get() == 1);
     NUI_CHECK(activations == 3);
     NUI_CHECK(activated_key == 1);
+}
+
+inline void list_is_one_composite_tab_stop() {
+    test::MockPlatform platform;
+    ui::State<std::optional<int>> selected{1};
+    auto first_row = std::make_shared<test::ProbeState>();
+    auto second_row = std::make_shared<test::ProbeState>();
+
+    ui::UI list{ui::ListView<int>{selected}
+        .item(1, test::Probe{first_row})
+        .item(2, test::Probe{second_row})};
+    list.resize({120.0f, 80.0f});
+    list.activate(platform);
+
+    // The ListView itself is the only global Tab stop for its rows. Row content
+    // may contain focusable components for presentation/testing, but normal Tab
+    // traversal must not enter them individually.
+    NUI_CHECK(first_row->focus_in == 0);
+    NUI_CHECK(second_row->focus_in == 0);
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Tab), platform) == ui::EventResult::Ignored);
+    NUI_CHECK(first_row->focus_in == 0);
+    NUI_CHECK(second_row->focus_in == 0);
 }
 
 inline void tabs_keyboard_pointer_focus_and_read_only_contract() {
@@ -167,8 +184,6 @@ inline void tabs_keyboard_pointer_focus_and_read_only_contract() {
               ui::EventResult::Handled);
     NUI_CHECK(selected.get() == 3);
 
-    // Move focus into panel 3, then switch externally. The now-collapsed panel
-    // must lose focus and the composite Tabs stop must become the safe fallback.
     tabs.dispatch(test::key(ui::Key::Tab), platform);
     NUI_CHECK(third_panel->focus_in == 1);
     selected.set(1);
@@ -202,9 +217,6 @@ inline void missing_selection_and_two_instance_contract() {
     list.activate(platform);
     NUI_CHECK(missing_list.get() && *missing_list.get() == 99);
 
-    // Focus entry must establish the first enabled row as the internal active
-    // row without rewriting the application's missing selection. Therefore the
-    // first Down moves to row 2 and selects it, rather than selecting row 1.
     NUI_CHECK(list.dispatch(test::key(ui::Key::Down), platform) == ui::EventResult::Handled);
     NUI_CHECK(missing_list.get() && *missing_list.get() == 2);
 
@@ -217,9 +229,6 @@ inline void missing_selection_and_two_instance_contract() {
     tabs.activate(platform);
     NUI_CHECK(missing_tab.get() == 99);
 
-    // Tabs uses the same composite-focus contract: focus entry activates the
-    // first enabled header internally but does not write selection. Right then
-    // advances to the second header and automatic activation writes key 2.
     NUI_CHECK(tabs.dispatch(test::key(ui::Key::Right), platform) == ui::EventResult::Handled);
     NUI_CHECK(missing_tab.get() == 2);
 
@@ -245,6 +254,7 @@ inline void behavior_contract() {
     duplicate_key_contract();
     list_keyboard_pointer_and_read_only_contract();
     list_activation_contract();
+    list_is_one_composite_tab_stop();
     tabs_keyboard_pointer_focus_and_read_only_contract();
     missing_selection_and_two_instance_contract();
 }
