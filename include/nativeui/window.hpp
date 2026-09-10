@@ -3,6 +3,7 @@
 #include <nativeui/ui.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -11,6 +12,7 @@ namespace ui {
 
 using NativeParentHandle = std::uintptr_t;
 using NativeViewHandle = std::uintptr_t;
+using PreferredSizeCallback = std::function<void(Size)>;
 
 struct WindowDesc {
     std::string title{"NativeUI"};
@@ -91,6 +93,12 @@ public:
     [[nodiscard]] std::string_view last_error() const noexcept;
     bool set_size(Size logical_size);
 
+    /// Advisory logical preferred-size notification for external owners.
+    /// The callback runs on the platform/UI thread at a safe top-level
+    /// checkpoint and may synchronously call set_size() without recursive
+    /// preferred-size notification.
+    void set_preferred_size_callback(PreferredSizeCallback callback);
+
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
     void set_clipboard_text(std::string_view text) override;
     void request_clipboard_text() override;
@@ -130,6 +138,10 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     bool set_size(Size logical_size);
+
+    /// Advisory preferred logical size. NativeUI never resizes the embedding
+    /// parent; the host may ignore the callback or grant a different child size.
+    void set_preferred_size_callback(PreferredSizeCallback callback);
 
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
     void set_clipboard_text(std::string_view text) override;
