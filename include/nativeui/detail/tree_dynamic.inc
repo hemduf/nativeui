@@ -97,6 +97,12 @@
 
     void queue_dynamic_mutation(NodeId owner) {
         if (!root_ || owner == kInvalidNodeId) return;
+
+        // Capture the initial retained-tree high-water mark before the first
+        // dynamic removal can destroy a node. Runtime NodeIds are monotonic for
+        // the complete Tree lifetime and must never be recycled after removal.
+        ensure_runtime_node_ids();
+
         ++structural_epoch_;
         if (std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
             dirty_dynamic_nodes_.end()) {
