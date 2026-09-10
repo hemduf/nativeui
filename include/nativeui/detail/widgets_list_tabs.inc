@@ -80,11 +80,6 @@ struct ListViewRuntime final {
 
     bool select(std::size_t index) {
         if (index >= keys.size() || !enabled_at(index)) return false;
-
-        // Finish every framework-owned mutation before State observers can
-        // re-enter application code. The runtime is retained by the caller for
-        // the duration of dispatch, but no framework member is touched after
-        // State::set() begins notifying arbitrary observers.
         const T key = keys[index];
         if (index < row_bounds.size()) {
             (void)ensure_visible(scroll, row_bounds[index], ScrollAlignment::Nearest);
@@ -160,7 +155,6 @@ public:
 
     void paint(PaintContext& context) const override {
         if (index_ >= runtime_->keys.size()) return;
-
         const auto bounds = context.bounds();
         auto& painter = context.painter();
         const auto& selected = runtime_->selection->get();
@@ -179,7 +173,6 @@ public:
                 1.5f,
                 colors::accent);
         }
-
         if (index_ + 1 < runtime_->keys.size() && bounds.w > 24.0f) {
             const float y = bounds.y + bounds.h - 0.5f;
             painter.line(
@@ -329,16 +322,12 @@ public:
         switch (event.type) {
         case InputType::PointerMove: {
             const auto index = row_at(event.position, context.bounds());
-            set_hovered(
-                index && runtime->enabled_at(*index) ? index : std::nullopt,
-                context);
+            set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             return EventResult::Ignored;
         }
-
         case InputType::PointerLeave:
             set_hovered(std::nullopt, context);
             return EventResult::Ignored;
-
         case InputType::PointerDown: {
             const auto index = row_at(event.position, context.bounds());
             if (!index) {
@@ -354,12 +343,9 @@ public:
             context.capture_pointer();
             return EventResult::Handled;
         }
-
         case InputType::PointerUp: {
             const auto index = row_at(event.position, context.bounds());
-            set_hovered(
-                index && runtime->enabled_at(*index) ? index : std::nullopt,
-                context);
+            set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
@@ -370,13 +356,11 @@ public:
             }
             return EventResult::Handled;
         }
-
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
             pointer_armed_.reset();
             context.release_pointer();
             return EventResult::Handled;
-
         default:
             return EventResult::Ignored;
         }
@@ -391,7 +375,6 @@ public:
         const auto bounds = context.bounds();
         auto& painter = context.painter();
         painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
-
         if (effective_enabled() && hovered_index_ &&
             runtime_->enabled_at(*hovered_index_) &&
             *hovered_index_ < runtime_->row_bounds.size()) {
@@ -413,7 +396,6 @@ public:
                 }
             }
         }
-
         painter.stroke_rounded_rect(
             bounds,
             9.0f,
@@ -568,9 +550,7 @@ public:
         Size result{120.0f, kHeaderHeight};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.preferred.w);
-            result.h = std::max(
-                result.h,
-                kHeaderHeight + kPanelGap + child.preferred.h);
+            result.h = std::max(result.h, kHeaderHeight + kPanelGap + child.preferred.h);
         }
         return result;
     }
@@ -579,9 +559,7 @@ public:
         Size result{0.0f, kHeaderHeight};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.minimum.w);
-            result.h = std::max(
-                result.h,
-                kHeaderHeight + kPanelGap + child.minimum.h);
+            result.h = std::max(result.h, kHeaderHeight + kPanelGap + child.minimum.h);
         }
         return result;
     }
@@ -630,14 +608,10 @@ public:
             std::optional<std::size_t> target;
             switch (event.key) {
             case Key::Right:
-                target = active_index_
-                    ? runtime->next_enabled_wrapped(*active_index_)
-                    : runtime->first_enabled();
+                target = active_index_ ? runtime->next_enabled_wrapped(*active_index_) : runtime->first_enabled();
                 break;
             case Key::Left:
-                target = active_index_
-                    ? runtime->previous_enabled_wrapped(*active_index_)
-                    : runtime->last_enabled();
+                target = active_index_ ? runtime->previous_enabled_wrapped(*active_index_) : runtime->last_enabled();
                 break;
             case Key::Home:
                 target = runtime->first_enabled();
@@ -658,16 +632,12 @@ public:
         switch (event.type) {
         case InputType::PointerMove: {
             const auto index = tab_at(event.position, context.bounds());
-            set_hovered(
-                index && runtime->enabled_at(*index) ? index : std::nullopt,
-                context);
+            set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             return EventResult::Ignored;
         }
-
         case InputType::PointerLeave:
             set_hovered(std::nullopt, context);
             return EventResult::Ignored;
-
         case InputType::PointerDown: {
             const auto index = tab_at(event.position, context.bounds());
             if (!index) {
@@ -683,12 +653,9 @@ public:
             context.capture_pointer();
             return EventResult::Handled;
         }
-
         case InputType::PointerUp: {
             const auto index = tab_at(event.position, context.bounds());
-            set_hovered(
-                index && runtime->enabled_at(*index) ? index : std::nullopt,
-                context);
+            set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
@@ -699,13 +666,11 @@ public:
             }
             return EventResult::Handled;
         }
-
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
             pointer_armed_.reset();
             context.release_pointer();
             return EventResult::Handled;
-
         default:
             return EventResult::Ignored;
         }
@@ -718,7 +683,6 @@ public:
 
     void paint(PaintContext& context) const override {
         if (runtime_->keys.empty()) return;
-
         const auto bounds = context.bounds();
         const float header_height = std::min(bounds.h, kHeaderHeight);
         if (!(header_height > 0.0f) || !(bounds.w > 0.0f)) return;
@@ -738,10 +702,7 @@ public:
                 bounds.x + width * static_cast<float>(index),
                 bounds.y,
                 index + 1 == runtime_->keys.size()
-                    ? std::max(
-                          0.0f,
-                          bounds.x + bounds.w -
-                              (bounds.x + width * static_cast<float>(index)))
+                    ? std::max(0.0f, bounds.x + bounds.w - (bounds.x + width * static_cast<float>(index)))
                     : width,
                 header_height};
             const bool selected = runtime_->selection->get() == runtime_->keys[index];
@@ -751,34 +712,25 @@ public:
 
             if (hovered) {
                 painter.fill_rounded_rect(
-                    {tab.x + 3.0f,
-                     tab.y + 3.0f,
-                     std::max(0.0f, tab.w - 6.0f),
-                     std::max(0.0f, tab.h - 6.0f)},
+                    {tab.x + 3.0f, tab.y + 3.0f,
+                     std::max(0.0f, tab.w - 6.0f), std::max(0.0f, tab.h - 6.0f)},
                     6.0f,
                     kListTabsHoverSurface);
             }
-
             if (selected) {
                 painter.fill_rounded_rect(
-                    {tab.x + 3.0f,
-                     tab.y + 3.0f,
-                     std::max(0.0f, tab.w - 6.0f),
-                     std::max(0.0f, tab.h - 6.0f)},
+                    {tab.x + 3.0f, tab.y + 3.0f,
+                     std::max(0.0f, tab.w - 6.0f), std::max(0.0f, tab.h - 6.0f)},
                     6.0f,
                     colors::input);
                 const float underline_width = std::max(0.0f, tab.w - 28.0f);
                 if (underline_width > 0.0f) {
                     painter.fill_rounded_rect(
-                        {tab.x + 14.0f,
-                         tab.y + tab.h - 4.0f,
-                         underline_width,
-                         2.0f},
+                        {tab.x + 14.0f, tab.y + tab.h - 4.0f, underline_width, 2.0f},
                         1.0f,
                         colors::accent);
                 }
             }
-
             if (index > 0) {
                 const float x = tab.x;
                 painter.line(
@@ -787,7 +739,6 @@ public:
                     1.0f,
                     Color{0.20f, 0.22f, 0.25f, 0.75f});
             }
-
             if (index < runtime_->labels.size()) {
                 const Color text_color = !enabled
                     ? Color{0.39f, 0.42f, 0.47f, 1.0f}
@@ -869,16 +820,13 @@ public:
     }
 
     ListView&& on_activate(ActivationCallback callback) && {
-        if (virtual_state_) {
-            throw std::logic_error(
-                "ListView::on_activate is not available on the virtualized path yet");
-        }
         activation_callback_ = std::move(callback);
         return std::move(*this);
     }
 
     Spec spec() && {
         if (virtual_state_) {
+            virtual_state_->runtime()->set_activation_callback(std::move(activation_callback_));
             return detail::make_virtual_list_retained_spec(virtual_state_->runtime());
         }
 
