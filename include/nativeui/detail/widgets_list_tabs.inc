@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -28,6 +29,8 @@ private:
 
 template <class T>
 struct ListViewRuntime final {
+    using ActivationCallback = std::function<void(const T&)>;
+
     explicit ListViewRuntime(State<std::optional<T>>& selection)
         : selection(&selection), scroll(ScrollAxis::Vertical) {}
 
@@ -74,10 +77,26 @@ struct ListViewRuntime final {
 
     bool select(std::size_t index) {
         if (index >= keys.size() || !enabled_at(index)) return false;
-        selection->set(std::optional<T>{keys[index]});
+
+        // Finish every framework-owned mutation before State observers can
+        // re-enter application code. The runtime is retained by the caller for
+        // the duration of dispatch, but no framework member is touched after
+        // State::set() begins notifying arbitrary observers.
+        const T key = keys[index];
         if (index < row_bounds.size()) {
             (void)ensure_visible(scroll, row_bounds[index], ScrollAlignment::Nearest);
         }
+        auto* const selected = selection;
+        selected->set(std::optional<T>{key});
+        return true;
+    }
+
+    bool activate(std::size_t index) {
+        if (index >= keys.size() || !enabled_at(index)) return false;
+        const T key = keys[index];
+        auto callback = activation_callback;
+        if (!select(index)) return false;
+        if (callback) callback(key);
         return true;
     }
 
@@ -86,6 +105,7 @@ struct ListViewRuntime final {
     std::vector<T> keys;
     std::vector<bool> enabled;
     std::vector<Rect> row_bounds;
+    ActivationCallback activation_callback;
 };
 
 template <class T>
@@ -218,30 +238,39 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        auto runtime = runtime_;
         if (event.type == InputType::KeyDown) {
-            if (const auto selected = runtime_->selected_index()) {
+            if (const auto selected = runtime->selected_index()) {
                 active_index_ = selected;
             } else if (!active_index_) {
-                active_index_ = runtime_->first_enabled();
+                active_index_ = runtime->first_enabled();
+            }
+
+            if (event.key == Key::Enter || event.key == Key::Space) {
+                if (active_index_) {
+                    (void)runtime->activate(*active_index_);
+                    return EventResult::Handled;
+                }
+                return EventResult::Ignored;
             }
 
             std::optional<std::size_t> target;
             switch (event.key) {
             case Key::Down:
                 target = active_index_
-                    ? runtime_->next_enabled(*active_index_)
-                    : runtime_->first_enabled();
+                    ? runtime->next_enabled(*active_index_)
+                    : runtime->first_enabled();
                 break;
             case Key::Up:
                 target = active_index_
-                    ? runtime_->previous_enabled(*active_index_)
-                    : runtime_->last_enabled();
+                    ? runtime->previous_enabled(*active_index_)
+                    : runtime->last_enabled();
                 break;
             case Key::Home:
-                target = runtime_->first_enabled();
+                target = runtime->first_enabled();
                 break;
             case Key::End:
-                target = runtime_->last_enabled();
+                target = runtime->last_enabled();
                 break;
             default:
                 return EventResult::Ignored;
@@ -249,7 +278,7 @@ public:
 
             if (target) {
                 active_index_ = target;
-                (void)runtime_->select(*target);
+                (void)runtime->select(*target);
             }
             return EventResult::Handled;
         }
@@ -258,7 +287,7 @@ public:
         case InputType::PointerDown: {
             const auto index = row_at(event.position, context.bounds());
             if (!index) return EventResult::Ignored;
-            if (!runtime_->enabled_at(*index)) return EventResult::Handled;
+            if (!runtime->enabled_at(*index)) return EventResult::Handled;
             pointer_armed_ = index;
             context.capture_pointer();
             return EventResult::Handled;
@@ -272,7 +301,7 @@ public:
             const auto index = row_at(event.position, context.bounds());
             if (index && *index == armed) {
                 active_index_ = armed;
-                (void)runtime_->select(armed);
+                (void)runtime->activate(armed);
             }
             return EventResult::Handled;
         }
@@ -363,7 +392,9 @@ struct TabsRuntime final {
 
     bool select(std::size_t index) {
         if (index >= keys.size() || !enabled_at(index)) return false;
-        selection->set(keys[index]);
+        const T key = keys[index];
+        auto* const selected = selection;
+        selected->set(key);
         return true;
     }
 
@@ -478,37 +509,38 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        auto runtime = runtime_;
         if (event.type == InputType::KeyDown) {
-            if (const auto selected = runtime_->selected_index()) {
+            if (const auto selected = runtime->selected_index()) {
                 active_index_ = selected;
             } else if (!active_index_) {
-                active_index_ = runtime_->first_enabled();
+                active_index_ = runtime->first_enabled();
             }
 
             std::optional<std::size_t> target;
             switch (event.key) {
             case Key::Right:
                 target = active_index_
-                    ? runtime_->next_enabled_wrapped(*active_index_)
-                    : runtime_->first_enabled();
+                    ? runtime->next_enabled_wrapped(*active_index_)
+                    : runtime->first_enabled();
                 break;
             case Key::Left:
                 target = active_index_
-                    ? runtime_->previous_enabled_wrapped(*active_index_)
-                    : runtime_->last_enabled();
+                    ? runtime->previous_enabled_wrapped(*active_index_)
+                    : runtime->last_enabled();
                 break;
             case Key::Home:
-                target = runtime_->first_enabled();
+                target = runtime->first_enabled();
                 break;
             case Key::End:
-                target = runtime_->last_enabled();
+                target = runtime->last_enabled();
                 break;
             default:
                 return EventResult::Ignored;
             }
             if (target) {
                 active_index_ = target;
-                (void)runtime_->select(*target);
+                (void)runtime->select(*target);
             }
             return EventResult::Handled;
         }
@@ -517,7 +549,7 @@ public:
         case InputType::PointerDown: {
             const auto index = tab_at(event.position, context.bounds());
             if (!index) return EventResult::Ignored;
-            if (!runtime_->enabled_at(*index)) return EventResult::Handled;
+            if (!runtime->enabled_at(*index)) return EventResult::Handled;
             pointer_armed_ = index;
             context.capture_pointer();
             return EventResult::Handled;
@@ -531,7 +563,7 @@ public:
             const auto index = tab_at(event.position, context.bounds());
             if (index && *index == armed) {
                 active_index_ = armed;
-                (void)runtime_->select(armed);
+                (void)runtime->select(armed);
             }
             return EventResult::Handled;
         }
@@ -605,6 +637,8 @@ private:
 template <class T>
 class ListView {
 public:
+    using ActivationCallback = std::function<void(const T&)>;
+
     explicit ListView(State<std::optional<T>>& selection) : selection_(&selection) {}
 
     template <class Child>
@@ -615,10 +649,16 @@ public:
         return std::move(*this);
     }
 
+    ListView&& on_activate(ActivationCallback callback) && {
+        activation_callback_ = std::move(callback);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto runtime = std::make_shared<detail::ListViewRuntime<T>>(*selection_);
         runtime->keys.reserve(items_.size());
         runtime->enabled.reserve(items_.size());
+        runtime->activation_callback = std::move(activation_callback_);
 
         std::vector<Spec> rows;
         rows.reserve(items_.size());
@@ -667,6 +707,7 @@ private:
 
     State<std::optional<T>>* selection_{};
     std::vector<Item> items_;
+    ActivationCallback activation_callback_;
 };
 
 template <class T>
