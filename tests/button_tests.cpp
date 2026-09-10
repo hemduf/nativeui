@@ -239,11 +239,55 @@ void custom_theme_controls_presentation_and_measurement() {
     NUI_CHECK(pixel_near(renderer.pixel(20, 20), theme.palette.surface));
 }
 
+void explicit_style_controls_button_presentation_and_measurement() {
+    ui::ButtonStyle style{};
+    const ui::Color normal{0.12f, 0.24f, 0.36f, 1.0f};
+    const ui::Color hovered{0.22f, 0.34f, 0.46f, 1.0f};
+    const ui::Color pressed{0.62f, 0.12f, 0.22f, 1.0f};
+    const ui::Color disabled{0.08f, 0.09f, 0.10f, 1.0f};
+    style.base.fill = normal;
+    style.base.minimum_width = 140.0f;
+    style.base.control_height = 48.0f;
+    style.hovered.fill = hovered;
+    style.pressed.fill = pressed;
+    style.disabled.fill = disabled;
+
+    ui::UI tree{ui::Button{"Styled", [] {}}.style(style)};
+    const auto metrics = tree.measure();
+    NUI_CHECK_NEAR(metrics.preferred.h, 48.0f, 0.0001f);
+    NUI_CHECK(metrics.preferred.w >= 140.0f);
+
+    constexpr ui::Size size{180.0f, 64.0f};
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), normal));
+
+    test::MockPlatform platform;
+    tree.resize(size);
+    tree.activate(platform);
+    tree.dispatch(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), hovered));
+
+    tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), pressed));
+    tree.dispatch(test::pointer(ui::InputType::PointerCancel, 20.0f, 20.0f), platform);
+
+    ui::State<bool> enabled{false};
+    ui::UI disabled_tree{
+        ui::Enabled{enabled, ui::Button{"Disabled style", [] {}}.style(style)}
+    };
+    NUI_CHECK(renderer.render(disabled_tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), disabled));
+}
+
 void suite() {
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
     visual_state_goldens();
     custom_theme_controls_presentation_and_measurement();
+    explicit_style_controls_button_presentation_and_measurement();
 }
 
 } // namespace
