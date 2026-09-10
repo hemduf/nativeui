@@ -111,6 +111,29 @@ void disabled_and_two_instance_contract() {
     NUI_CHECK(right_selected.get() == 10);
 }
 
+void external_list_selection_reveals_selected_row() {
+    ui::State<std::optional<int>> selected{1};
+    ui::UI tree{ui::ListView<int>{selected}
+        .item(1, ui::Spacer{120.0f, 30.0f})
+        .item(2, ui::Spacer{120.0f, 30.0f})
+        .item(3, ui::Spacer{120.0f, 30.0f})
+        .item(4, ui::Spacer{120.0f, 30.0f})
+        .item(5, ui::Spacer{120.0f, 30.0f})};
+    test::MockPlatform platform;
+    tree.resize({120.0f, 60.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{120.0f, 60.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(20, 15), ui::colors::selection));
+
+    // T036 requires selection changes, not only user-navigation writes, to
+    // keep the selected row visible through the shared T034 ScrollState path.
+    selected.set(5);
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(20, 45), ui::colors::selection));
+}
+
 void deterministic_headless_states() {
     {
         ui::State<std::optional<int>> selected{1};
@@ -144,6 +167,7 @@ void suite() {
     t036_contract::behavior_contract();
     fully_retained_large_list_baseline();
     disabled_and_two_instance_contract();
+    external_list_selection_reveals_selected_row();
     deterministic_headless_states();
 }
 
