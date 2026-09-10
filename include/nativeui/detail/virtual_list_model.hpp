@@ -77,6 +77,21 @@ template <class Key>
 class VirtualListDatasetModel {
 public:
     struct Item {
+        Item(Key key_value,
+             std::string name_value,
+             bool enabled_value = true,
+             std::string description_value = {},
+             bool read_only_value = false,
+             SemanticCheckedState checked_value = SemanticCheckedState::NotApplicable,
+             std::vector<SemanticAction> actions_value = {})
+            : key(std::move(key_value)),
+              name(std::move(name_value)),
+              enabled(enabled_value),
+              description(std::move(description_value)),
+              read_only(read_only_value),
+              checked(checked_value),
+              actions(std::move(actions_value)) {}
+
         Key key;
         std::string name;
         bool enabled{true};
