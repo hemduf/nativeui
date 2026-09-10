@@ -338,28 +338,6 @@ void set_error(std::string& error, std::string_view message) {
     return false;
 }
 
-[[nodiscard]] bool current_complete_signature(DBusMessageIter& iter,
-                                              std::string& signature,
-                                              std::string& error) {
-    char* remaining = dbus_message_iter_get_signature(&iter);
-    if (remaining == nullptr) {
-        set_error(error, "Unable to read D-Bus value signature");
-        return false;
-    }
-
-    DBusSignatureIter signature_iter;
-    dbus_signature_iter_init(&signature_iter, remaining);
-    char* current = dbus_signature_iter_get_signature(&signature_iter);
-    dbus_free(remaining);
-    if (current == nullptr) {
-        set_error(error, "Unable to isolate D-Bus value signature");
-        return false;
-    }
-    signature.assign(current);
-    dbus_free(current);
-    return true;
-}
-
 [[nodiscard]] bool array_element_signature(DBusMessageIter& iter,
                                            std::string& signature,
                                            std::string& error) {
