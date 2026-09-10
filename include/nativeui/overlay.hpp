@@ -90,6 +90,9 @@ struct OverlayEntry {
     std::optional<Rect> anchor_bounds;
 };
 
+// One OverlayState belongs to one UI. It stores only logical overlay state and
+// one T058 structural invalidator; no overlay registry or mutation queue is
+// shared process-wide between simultaneous NativeUI/plugin instances.
 struct OverlayState {
     std::shared_ptr<const OverlayOwnerToken> owner{
         std::make_shared<const OverlayOwnerToken>()};
