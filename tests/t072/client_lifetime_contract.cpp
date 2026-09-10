@@ -24,8 +24,8 @@ void stage(const char* name) { std::cerr << "T072 client_lifetime stage: " << na
 int main() {
     using namespace std::chrono_literals;
     using namespace ui::detail;
-    constexpr LinuxDbusClientId client_a = 1;
-    constexpr LinuxDbusClientId client_b = 2;
+    constexpr LinuxDbusClientId pending_client_a = 1;
+    constexpr LinuxDbusClientId pending_client_b = 2;
 
     stage("pending-callback-begin");
     {
@@ -34,14 +34,14 @@ int main() {
         DispatcherOwner owner;
         std::size_t client_a_callbacks = 0;
         std::size_t client_b_callbacks = 0;
-        const auto request_a = calls.begin(client_a, owner.dispatcher(), 1s,
+        const auto request_a = calls.begin(pending_client_a, owner.dispatcher(), 1s,
             [&](LinuxDbusCompletion) { ++client_a_callbacks; });
-        const auto request_b = calls.begin(client_b, owner.dispatcher(), 1s,
+        const auto request_b = calls.begin(pending_client_b, owner.dispatcher(), 1s,
             [&](LinuxDbusCompletion) { ++client_b_callbacks; });
         if (request_a == kInvalidLinuxDbusRequestId || request_b == kInvalidLinuxDbusRequestId ||
-            !calls.complete(client_a, request_a, LinuxDbusCompletion{}) ||
-            !calls.complete(client_b, request_b, LinuxDbusCompletion{})) return EXIT_FAILURE;
-        calls.discard_client(client_a);
+            !calls.complete(pending_client_a, request_a, LinuxDbusCompletion{}) ||
+            !calls.complete(pending_client_b, request_b, LinuxDbusCompletion{})) return EXIT_FAILURE;
+        calls.discard_client(pending_client_a);
         (void)owner.checkpoint();
         if (client_a_callbacks != 0 || client_b_callbacks != 1 || calls.pending_count() != 0 ||
             ledger.pending_request_count() != 0) return EXIT_FAILURE;
@@ -50,6 +50,10 @@ int main() {
 
     LinuxDbusTransport transport;
     if (transport.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
+    const auto client_a = transport.register_client();
+    const auto client_b = transport.register_client();
+    if (client_a == kInvalidLinuxDbusClientId ||
+        client_b == kInvalidLinuxDbusClientId || client_a == client_b) return EXIT_FAILURE;
     DispatcherOwner owner_a;
     DispatcherOwner owner_b;
 
@@ -105,6 +109,7 @@ int main() {
         transport.object_path_count() != 0 || transport.subscription_count() != 0) return EXIT_FAILURE;
     stage("final-unregister-ok");
 
+    transport.release_client(client_b);
     transport.stop();
     stage("complete");
     return EXIT_SUCCESS;
