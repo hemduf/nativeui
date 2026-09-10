@@ -11,6 +11,15 @@
 namespace ui::detail {
 
 inline constexpr float kPreferredSizeEpsilon = 0.0001f;
+inline constexpr float kPuglMaximumViewSpan = 10000.0f;
+
+[[nodiscard]] inline unsigned physical_to_pugl_view_span(float physical) noexcept {
+    if (!std::isfinite(physical)) {
+        return physical > 0.0f ? static_cast<unsigned>(kPuglMaximumViewSpan) : 1U;
+    }
+    return static_cast<unsigned>(
+        std::ceil(std::clamp(physical, 1.0f, kPuglMaximumViewSpan)));
+}
 
 [[nodiscard]] inline bool valid_scale(float scale) noexcept {
     return std::isfinite(scale) && scale > 0.0f;

@@ -44,8 +44,7 @@ constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 
 PuglSpan to_pugl_span(float physical) {
-    const float maximum = static_cast<float>(std::numeric_limits<PuglSpan>::max());
-    return static_cast<PuglSpan>(std::ceil(std::clamp(physical, 1.0f, maximum)));
+    return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
 
 [[noreturn]] void throw_pugl(PuglStatus status, const char* what) {
