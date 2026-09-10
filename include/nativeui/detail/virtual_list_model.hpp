@@ -157,8 +157,10 @@ public:
             next_entries.push_back(Entry{std::move(items[index]), std::move(encoded[index]), token});
         }
 
+        auto next_metadata_snapshot =
+            std::make_shared<const VirtualSemanticChildren::Metadata>(std::move(next_metadata));
         entries_ = std::move(next_entries);
-        metadata_ = std::make_shared<const VirtualSemanticChildren::Metadata>(std::move(next_metadata));
+        metadata_ = std::move(next_metadata_snapshot);
         next_token_ = next_token;
         ++generation_;
         return true;
