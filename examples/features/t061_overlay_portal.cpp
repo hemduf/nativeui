@@ -1,5 +1,9 @@
 #include "example_support.hpp"
 
+#include <functional>
+#include <memory>
+#include <utility>
+
 namespace {
 
 struct DemoState {
@@ -7,6 +11,72 @@ struct DemoState {
     ui::OverlayHandle popup;
     ui::OverlayHandle modal;
     ui::OverlayHandle tooltip;
+};
+
+struct CaptureState {
+    int pointer_downs{};
+    int pointer_moves{};
+    int pointer_cancels{};
+    bool in_pointer_down{};
+    bool cancelled_reentrantly{};
+    ui::OverlayHandle modal;
+    std::function<ui::OverlayHandle()> show_modal;
+};
+
+class CaptureComponent final : public ui::Component {
+public:
+    explicit CaptureComponent(std::shared_ptr<CaptureState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {96.0f, 48.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
+        if (event.type == ui::InputType::PointerCancel) {
+            ++state_->pointer_cancels;
+            state_->cancelled_reentrantly =
+                state_->cancelled_reentrantly || state_->in_pointer_down;
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerMove) {
+            ++state_->pointer_moves;
+            return ui::EventResult::Handled;
+        }
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+
+        ++state_->pointer_downs;
+        state_->in_pointer_down = true;
+        context.capture_pointer();
+        if (state_->show_modal) state_->modal = state_->show_modal();
+        state_->in_pointer_down = false;
+        return ui::EventResult::Handled;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<CaptureState> state_;
+};
+
+class CaptureProbe {
+public:
+    explicit CaptureProbe(std::shared_ptr<CaptureState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<CaptureComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<CaptureState> state_;
 };
 
 ui::OverlaySpec centered_label(std::string text) {
@@ -104,6 +174,39 @@ int self_test() {
         return example::fail("closed overlay handle remained valid");
     }
 
+    auto capture = std::make_shared<CaptureState>();
+    ui::UI capture_tree{CaptureProbe{capture}};
+    capture_tree.resize({96.0f, 48.0f});
+    capture_tree.activate(platform);
+    capture->show_modal = [&capture_tree] {
+        auto capture_modal = centered_label("Capture barrier");
+        capture_modal.mode = ui::OverlayMode::Modal;
+        return capture_tree.show_overlay(std::move(capture_modal));
+    };
+
+    ui::InputEvent down;
+    down.type = ui::InputType::PointerDown;
+    down.position = {4.0f, 4.0f};
+    if (!ui::handled(capture_tree.dispatch(down, platform)) ||
+        capture->pointer_downs != 1 || !capture->modal.valid()) {
+        return example::fail("modal capture setup failed");
+    }
+    if (capture->pointer_cancels != 1 || capture->cancelled_reentrantly) {
+        return example::fail("modal did not safely cancel lower pointer capture");
+    }
+
+    ui::InputEvent move;
+    move.type = ui::InputType::PointerMove;
+    move.position = {4.0f, 4.0f};
+    if (!ui::handled(capture_tree.dispatch(move, platform)) ||
+        capture->pointer_moves != 0 || capture->pointer_cancels != 1) {
+        return example::fail("lower pointer capture bypassed modal barrier");
+    }
+    if (!capture_tree.close_overlay(capture->modal)) {
+        return example::fail("modal capture barrier close failed");
+    }
+
+    capture_tree.deactivate(platform);
     return 0;
 }
 
