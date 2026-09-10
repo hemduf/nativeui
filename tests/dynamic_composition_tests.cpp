@@ -330,6 +330,45 @@ void focus_capture_and_lifetime_contract() {
     NUI_CHECK(log->observed_changes == 0);
 }
 
+void focus_scope_rehome_contract() {
+    ui::State<bool> scope_active{true};
+    ui::State<bool> dynamic_visible{true};
+    ui::State<bool> outside{false};
+    ui::State<bool> dynamic_value{false};
+    ui::State<bool> fallback_value{false};
+    test::MockPlatform platform;
+
+    ui::UI tree{
+        ui::Column{
+            ui::Toggle{"Outside", outside},
+            ui::FocusScope{
+                scope_active,
+                ui::Row{
+                    ui::If{dynamic_visible, ui::Toggle{"Dynamic", dynamic_value}},
+                    ui::Toggle{"Fallback", fallback_value}
+                }.gap(4.0f)}
+                .trap(true)
+                .default_focus(0)
+        }.gap(4.0f).padding(0.0f)};
+
+    tree.resize({320.0f, 120.0f});
+    tree.activate(platform);
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(dynamic_value.get());
+    NUI_CHECK(!outside.get());
+    NUI_CHECK(!fallback_value.get());
+
+    dynamic_visible.set(false);
+    tree.resize({320.0f, 120.0f});
+    tree.dispatch(test::key(ui::Key::Space), platform);
+
+    // Removing the focused dynamic child must obey the still-active trapping
+    // FocusScope and rehome inside it rather than escaping to the first global
+    // focusable node.
+    NUI_CHECK(!outside.get());
+    NUI_CHECK(fallback_value.get());
+}
+
 void bounded_reconciliation_contract() {
     ui::State<bool> visible{true};
     auto loop = std::make_shared<LoopState>();
@@ -365,6 +404,7 @@ void suite() {
     switch_contract();
     keyed_contract();
     focus_capture_and_lifetime_contract();
+    focus_scope_rehome_contract();
     bounded_reconciliation_contract();
 }
 
