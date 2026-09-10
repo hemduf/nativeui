@@ -96,13 +96,21 @@ private:
     ScrollState::Subscription scroll_subscription_;
 };
 
+class VirtualListOwnedSpec final {
+public:
+    explicit VirtualListOwnedSpec(Spec spec) : spec_(std::move(spec)) {}
+
+    [[nodiscard]] Spec spec() && { return std::move(spec_); }
+
+private:
+    Spec spec_;
+};
+
 template <class Key>
 class VirtualListRetainedComponent final : public Component, public DynamicChildrenSource {
 public:
     explicit VirtualListRetainedComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
         : runtime_(std::move(runtime)) {}
-
-    [[nodiscard]] bool clips_children() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         Size result{0.0f, runtime_->content_height()};
@@ -120,8 +128,10 @@ public:
         Rect bounds,
         const std::vector<ChildMetrics>&,
         std::vector<ChildPlacement>& placements) const override {
-        runtime_->set_viewport_height(bounds.h);
-        const auto offset = runtime_->scroll().offset().y;
+        // T034's ScrollComponent is the sole viewport/offset authority. By the
+        // time this content node is laid out it has already published canonical
+        // viewport/content metrics into the shared ScrollState.
+        runtime_->set_viewport_height(runtime_->scroll().viewport_size().h);
         const auto row_height = runtime_->row_height();
         for (std::size_t child_index = 0; child_index < placements.size(); ++child_index) {
             const auto* item = runtime_->materialized_at(child_index);
@@ -129,8 +139,7 @@ public:
                 placements[child_index].bounds = {};
                 continue;
             }
-            const double row_y = static_cast<double>(item->index) * static_cast<double>(row_height) -
-                                 static_cast<double>(offset);
+            const double row_y = static_cast<double>(item->index) * static_cast<double>(row_height);
             placements[child_index].bounds = Rect{
                 bounds.x,
                 bounds.y + static_cast<float>(row_y),
@@ -169,11 +178,15 @@ template <class Key>
     children.reserve(initial_children.size());
     for (auto& child : initial_children) children.push_back(std::move(child.spec));
 
-    return Spec{
-        [runtime = std::move(runtime)] {
+    Spec content{
+        [runtime] {
             return std::make_unique<VirtualListRetainedComponent<Key>>(runtime);
         },
         std::move(children)};
+
+    return std::move(ScrollView{
+        runtime->scroll(),
+        VirtualListOwnedSpec{std::move(content)}}).spec();
 }
 
 } // namespace ui::detail
