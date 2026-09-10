@@ -93,6 +93,51 @@ void content_height_contract() {
         2, std::numeric_limits<float>::max()));
 }
 
+void scroll_alignment_contract() {
+    using ui::detail::VirtualListAlignment;
+    using ui::detail::virtual_list_scroll_offset;
+
+    const auto start = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 30, VirtualListAlignment::Start);
+    const auto center = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 30, VirtualListAlignment::Center);
+    const auto end = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 30, VirtualListAlignment::End);
+    const auto nearest_below = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 30, VirtualListAlignment::Nearest);
+    check(start && *start == 600.0f);
+    check(center && *center == 560.0f);
+    check(end && *end == 520.0f);
+    check(nearest_below && *nearest_below == 520.0f);
+
+    const auto already_visible = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 22, VirtualListAlignment::Nearest);
+    const auto nearest_above = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 400.0f, 10, VirtualListAlignment::Nearest);
+    check(already_visible && *already_visible == 400.0f);
+    check(nearest_above && *nearest_above == 200.0f);
+
+    const auto oversized = virtual_list_scroll_offset(
+        10, 120.0f, 100.0f, 300.0f, 3, VirtualListAlignment::Nearest);
+    check(oversized && *oversized == 360.0f);
+
+    const auto clamped_end = virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 0.0f, 99, VirtualListAlignment::Start);
+    check(clamped_end && *clamped_end == 1900.0f);
+
+    check(!virtual_list_scroll_offset(
+        100, 20.0f, 100.0f, 0.0f, 100, VirtualListAlignment::Nearest));
+    check(!virtual_list_scroll_offset(
+        100, 0.0f, 100.0f, 0.0f, 0, VirtualListAlignment::Nearest));
+    check(!virtual_list_scroll_offset(
+        100,
+        20.0f,
+        std::numeric_limits<float>::quiet_NaN(),
+        0.0f,
+        0,
+        VirtualListAlignment::Nearest));
+}
+
 void dataset_identity_contract() {
     using Model = ui::detail::VirtualListDatasetModel<int>;
     using Input = Model::Item;
@@ -207,6 +252,7 @@ int main() {
     range_contract();
     bounded_materialization_contract();
     content_height_contract();
+    scroll_alignment_contract();
     dataset_identity_contract();
     large_dataset_contract();
     return failures == 0 ? 0 : 1;
