@@ -157,6 +157,25 @@ public:
         return index ? std::optional<VirtualSemanticItemToken>{entries_[*index].token} : std::nullopt;
     }
 
+    [[nodiscard]] std::optional<std::vector<std::size_t>> materialized_indices(
+        float row_height,
+        float scroll_y,
+        float viewport_height,
+        std::size_t overscan = 2,
+        std::optional<Key> focused_key = std::nullopt,
+        std::optional<Key> captured_key = std::nullopt) const {
+        const auto range = virtual_list_materialization_range(
+            entries_.size(), row_height, scroll_y, viewport_height, overscan);
+        if (!range) return std::nullopt;
+
+        std::optional<std::size_t> focused_index;
+        std::optional<std::size_t> captured_index;
+        if (focused_key) focused_index = index_of_key(*focused_key);
+        if (captured_key) captured_index = index_of_key(*captured_key);
+        return virtual_list_materialized_indices(
+            entries_.size(), *range, focused_index, captured_index);
+    }
+
     [[nodiscard]] bool replace(std::vector<Item> items) {
         std::vector<std::string> encoded;
         encoded.reserve(items.size());
