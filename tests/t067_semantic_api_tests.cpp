@@ -2,9 +2,11 @@
 
 #include <nativeui/nativeui.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -63,7 +65,29 @@ void suite() {
     NUI_CHECK(row_factory_calls == 0);
 
     // A real dataset metadata change publishes exactly one new immutable
-    // generation. Existing native readers may safely retain the old snapshot.
+    // generation. A native-side reader may retain the old shared snapshot
+    // concurrently while the UI thread publishes the replacement generation.
+    std::atomic<bool> reader_started{false};
+    std::atomic<bool> release_reader{false};
+    std::atomic<bool> reader_ok{true};
+    std::thread reader{
+        [snapshot = old_metadata, &reader_started, &release_reader, &reader_ok] {
+            if (!snapshot || snapshot->empty() || snapshot->back().name != "row 99999") {
+                reader_ok.store(false, std::memory_order_relaxed);
+            }
+            reader_started.store(true, std::memory_order_release);
+            while (!release_reader.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            if (!snapshot || snapshot->empty() || snapshot->back().name != "row 99999") {
+                reader_ok.store(false, std::memory_order_relaxed);
+            }
+        }};
+
+    while (!reader_started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
     items.back().name = "updated row";
     NUI_CHECK(state.replace(items));
     NUI_CHECK(state.dataset_generation() == generation + 1);
@@ -74,6 +98,10 @@ void suite() {
     NUI_CHECK(old_metadata->back().name == "row 99999");
     NUI_CHECK(new_metadata->back().name == "updated row");
     NUI_CHECK(row_factory_calls == 0);
+
+    release_reader.store(true, std::memory_order_release);
+    reader.join();
+    NUI_CHECK(reader_ok.load(std::memory_order_relaxed));
 }
 
 } // namespace
