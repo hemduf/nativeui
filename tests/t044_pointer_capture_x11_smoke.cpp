@@ -66,9 +66,20 @@ private:
     bool dragging_{};
 };
 
-ui::Spec probe_spec(const std::shared_ptr<CaptureState>& state) {
-    return ui::Spec{[state] { return std::make_unique<CaptureProbe>(state); }, {}};
-}
+class CaptureProbeRoot final {
+public:
+    explicit CaptureProbeRoot(std::shared_ptr<CaptureState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state] { return std::make_unique<CaptureProbe>(state); }, {}};
+    }
+
+private:
+    std::shared_ptr<CaptureState> state_;
+};
 
 int fail(std::string_view stage, std::string_view message) {
     std::cerr << "[nativeui t044 x11] " << stage << ": " << message << '\n';
@@ -229,8 +240,8 @@ int main() {
 
     auto a_state = std::make_shared<CaptureState>();
     auto b_state = std::make_shared<CaptureState>();
-    ui::UI a_ui{probe_spec(a_state)};
-    ui::UI b_ui{probe_spec(b_state)};
+    ui::UI a_ui{CaptureProbeRoot{a_state}};
+    ui::UI b_ui{CaptureProbeRoot{b_state}};
     auto a = std::make_unique<ui::StandaloneWindow>(
         app, a_ui, ui::WindowDesc{.title = "T044 X11 A", .size = {260.0f, 180.0f}, .resizable = true});
     auto b = std::make_unique<ui::StandaloneWindow>(
@@ -262,7 +273,7 @@ int main() {
                 "focus-loss", "cancelled capture received a duplicate release")) return 1;
 
     auto c_state = std::make_shared<CaptureState>();
-    auto c_ui = std::make_unique<ui::UI>(probe_spec(c_state));
+    auto c_ui = std::make_unique<ui::UI>(CaptureProbeRoot{c_state});
     auto c = std::make_unique<ui::StandaloneWindow>(
         app, *c_ui, ui::WindowDesc{.title = "T044 X11 C", .size = {240.0f, 170.0f}, .resizable = true});
     if (!c->valid()) return fail("window-c", c->last_error());
