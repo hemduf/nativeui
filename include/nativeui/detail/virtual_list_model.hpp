@@ -1,10 +1,20 @@
 #pragma once
 
+#include <nativeui/dynamic.hpp>
+#include <nativeui/semantics.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace ui::detail {
 
@@ -62,5 +72,140 @@ struct VirtualListRange {
     const std::size_t after = std::min(overscan, item_count - last_visible);
     return VirtualListRange{first_visible - before, last_visible + after};
 }
+
+template <class Key>
+class VirtualListDatasetModel {
+public:
+    struct Item {
+        Key key;
+        std::string name;
+        bool enabled{true};
+        std::string description;
+        bool read_only{};
+        SemanticCheckedState checked{SemanticCheckedState::NotApplicable};
+        std::vector<SemanticAction> actions;
+
+        bool operator==(const Item&) const = default;
+    };
+
+    [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+
+    [[nodiscard]] const VirtualSemanticChildren::MetadataSnapshot& metadata_snapshot() const noexcept {
+        return metadata_;
+    }
+
+    [[nodiscard]] const Item* item_at(std::size_t index) const noexcept {
+        return index < entries_.size() ? &entries_[index].item : nullptr;
+    }
+
+    [[nodiscard]] const std::string* encoded_key_at(std::size_t index) const noexcept {
+        return index < entries_.size() ? &entries_[index].encoded_key : nullptr;
+    }
+
+    [[nodiscard]] std::optional<VirtualSemanticItemToken> token_for_key(const Key& key) const {
+        const auto encoded = encode_dynamic_key(key);
+        const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& entry) {
+            return entry.encoded_key == encoded;
+        });
+        if (it == entries_.end()) return std::nullopt;
+        return it->token;
+    }
+
+    [[nodiscard]] bool replace(std::vector<Item> items) {
+        std::vector<std::string> encoded;
+        encoded.reserve(items.size());
+        std::unordered_set<std::string> unique;
+        unique.reserve(items.size());
+        for (const auto& item : items) {
+            auto key = encode_dynamic_key(item.key);
+            if (!unique.emplace(key).second) return false;
+            encoded.push_back(std::move(key));
+        }
+
+        if (same_dataset(items, encoded)) return true;
+        if (generation_ == std::numeric_limits<std::uint64_t>::max()) return false;
+
+        std::unordered_map<std::string, VirtualSemanticItemToken> old_tokens;
+        old_tokens.reserve(entries_.size());
+        for (const auto& entry : entries_) old_tokens.emplace(entry.encoded_key, entry.token);
+
+        auto next_token = next_token_;
+        std::vector<Entry> next_entries;
+        next_entries.reserve(items.size());
+        VirtualSemanticChildren::Metadata next_metadata;
+        next_metadata.reserve(items.size());
+
+        for (std::size_t index = 0; index < items.size(); ++index) {
+            VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
+            if (const auto found = old_tokens.find(encoded[index]); found != old_tokens.end()) {
+                token = found->second;
+            } else {
+                if (next_token == kInvalidVirtualSemanticItemToken) return false;
+                token = next_token++;
+            }
+
+            VirtualSemanticItemMetadata semantic;
+            semantic.token = token;
+            semantic.name = items[index].name;
+            semantic.description = items[index].description;
+            semantic.enabled = items[index].enabled;
+            semantic.read_only = items[index].read_only;
+            semantic.checked = items[index].checked;
+            semantic.actions = items[index].actions;
+            next_metadata.push_back(std::move(semantic));
+            next_entries.push_back(Entry{std::move(items[index]), std::move(encoded[index]), token});
+        }
+
+        entries_ = std::move(next_entries);
+        metadata_ = std::make_shared<const VirtualSemanticChildren::Metadata>(std::move(next_metadata));
+        next_token_ = next_token;
+        ++generation_;
+        return true;
+    }
+
+    [[nodiscard]] VirtualSemanticChildren semantic_children(
+        std::optional<Key> selected,
+        Rect list_bounds,
+        float row_height,
+        float scroll_y) const {
+        std::optional<VirtualSemanticItemToken> selected_token;
+        if (selected) selected_token = token_for_key(*selected);
+        return VirtualSemanticChildren::from_metadata(
+            generation_, metadata_, selected_token, list_bounds, row_height, scroll_y);
+    }
+
+    [[nodiscard]] VirtualSemanticChildren semantic_children(
+        const Key& selected,
+        Rect list_bounds,
+        float row_height,
+        float scroll_y) const {
+        return semantic_children(std::optional<Key>{selected}, list_bounds, row_height, scroll_y);
+    }
+
+private:
+    struct Entry {
+        Item item;
+        std::string encoded_key;
+        VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
+    };
+
+    [[nodiscard]] bool same_dataset(const std::vector<Item>& items,
+                                    const std::vector<std::string>& encoded) const {
+        if (entries_.size() != items.size()) return false;
+        for (std::size_t index = 0; index < items.size(); ++index) {
+            if (entries_[index].encoded_key != encoded[index] || !(entries_[index].item == items[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    std::vector<Entry> entries_;
+    VirtualSemanticChildren::MetadataSnapshot metadata_{
+        std::make_shared<const VirtualSemanticChildren::Metadata>()};
+    VirtualSemanticItemToken next_token_{1};
+    std::uint64_t generation_{};
+};
 
 } // namespace ui::detail
