@@ -152,18 +152,32 @@ inline void missing_selection_and_two_instance_contract() {
     ui::State<std::optional<int>> missing_list{99};
     ui::UI list{ui::ListView<int>{missing_list}
         .item(1, ui::Spacer{80.0f, 30.0f})
-        .item(2, ui::Spacer{80.0f, 30.0f})};
+        .item(2, ui::Spacer{80.0f, 30.0f})
+        .item(3, ui::Spacer{80.0f, 30.0f})};
     list.resize({80.0f, 60.0f});
     list.activate(platform);
     NUI_CHECK(missing_list.get() && *missing_list.get() == 99);
 
+    // Focus entry must establish the first enabled row as the internal active
+    // row without rewriting the application's missing selection. Therefore the
+    // first Down moves to row 2 and selects it, rather than selecting row 1.
+    NUI_CHECK(list.dispatch(test::key(ui::Key::Down), platform) == ui::EventResult::Handled);
+    NUI_CHECK(missing_list.get() && *missing_list.get() == 2);
+
     ui::State<int> missing_tab{99};
     ui::UI tabs{ui::Tabs<int>{missing_tab}
         .tab(1, "One", ui::Spacer{100.0f, 40.0f})
-        .tab(2, "Two", ui::Spacer{100.0f, 40.0f})};
+        .tab(2, "Two", ui::Spacer{100.0f, 40.0f})
+        .tab(3, "Three", ui::Spacer{100.0f, 40.0f})};
     tabs.resize({200.0f, 100.0f});
     tabs.activate(platform);
     NUI_CHECK(missing_tab.get() == 99);
+
+    // Tabs uses the same composite-focus contract: focus entry activates the
+    // first enabled header internally but does not write selection. Right then
+    // advances to the second header and automatic activation writes key 2.
+    NUI_CHECK(tabs.dispatch(test::key(ui::Key::Right), platform) == ui::EventResult::Handled);
+    NUI_CHECK(missing_tab.get() == 2);
 
     ui::State<std::optional<int>> left{1};
     ui::State<std::optional<int>> right{10};
