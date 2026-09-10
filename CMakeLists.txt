@@ -313,6 +313,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t031_checkbox_radio
   t032_slider
   t033_progress_meter
+  t034_scroll_view
   t041_smoke_harness
   t057_embedded_resources
   t059_component_state
@@ -445,6 +446,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_grid_layout_tests tests/grid_layout_tests.cpp)
   nativeui_add_core_test(nativeui_clipping_tests tests/clipping_tests.cpp)
   nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
+  nativeui_add_core_test(nativeui_t034_scroll_view_tests tests/t034_scroll_view_tests.cpp)
   nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
