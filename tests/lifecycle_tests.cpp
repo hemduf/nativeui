@@ -84,6 +84,13 @@ private:
     ui::State<int>* observed_{};
 };
 
+struct DynamicItem {
+    std::string key;
+    float extent{};
+
+    bool operator==(const DynamicItem&) const = default;
+};
+
 void suite() {
     // Existing focus/resize lifecycle regression.
     {
@@ -146,6 +153,27 @@ void suite() {
         NUI_CHECK(root->children[0]->id != root->id);
         NUI_CHECK(root->children[1]->id != root->id);
         NUI_CHECK(root->children[0]->id != root->children[1]->id);
+    }
+
+    // A keyed snapshot whose keys are unchanged is structurally inert. The
+    // state observer must request a future checkpoint without pre-emptively
+    // dirtying layout; the retained child is deliberately not rebound when its
+    // same-key item payload changes.
+    {
+        ui::State<std::vector<DynamicItem>> items{{DynamicItem{"stable", 10.0f}}};
+        ui::UI tree{ui::ForEach<DynamicItem>{
+            items,
+            [](const DynamicItem& item) { return item.key; },
+            [](const DynamicItem& item) { return ui::Spacer{item.extent, item.extent}; }}};
+
+        tree.resize({120.0f, 80.0f});
+        NUI_CHECK(!tree.layout_dirty());
+
+        items.set({DynamicItem{"stable", 20.0f}});
+        NUI_CHECK(!tree.layout_dirty());
+
+        tree.resize({120.0f, 80.0f});
+        NUI_CHECK(!tree.layout_dirty());
     }
 
     // Deterministic mount/activate/deactivate/unmount order and stable IDs.
