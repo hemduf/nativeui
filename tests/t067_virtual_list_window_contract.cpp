@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,17 +14,9 @@ void check(bool condition) {
     if (!condition) ++failures;
 }
 
-class StubRow final : public ui::Component {
-public:
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {100.0f, 20.0f};
-    }
-    void paint(ui::PaintContext&) const override {}
-};
-
 void viewport_bounded_factory_contract() {
     using Model = ui::detail::VirtualListDatasetModel<int>;
-    using Window = ui::detail::VirtualListMaterializationWindow<int>;
+    using Window = ui::detail::VirtualListMaterializationWindow<int, int>;
 
     std::vector<Model::Item> items;
     for (int index = 0; index < 100; ++index) {
@@ -36,16 +27,18 @@ void viewport_bounded_factory_contract() {
     check(model.replace(std::move(items)));
 
     std::size_t factory_calls = 0;
-    Window window{model, 20.0f, [&](const Model::Item&) {
+    Window window{model, 20.0f, [&](const Model::Item& item) {
         ++factory_calls;
-        return ui::Spec{[] { return std::make_unique<StubRow>(); }, {}};
+        return item.key;
     }};
 
     check(window.update(0.0f, 100.0f));
     check(window.indices().size() == 7);
     check(window.indices().front() == 0 && window.indices().back() == 6);
     check(window.keys().size() == 7);
-    check(window.children().size() == 7);
+    check(window.items().size() == 7);
+    check(*window.items().front().payload == 0);
+    check(*window.items().back().payload == 6);
     check(factory_calls == 7);
 
     check(window.update(400.0f, 100.0f));
@@ -67,9 +60,9 @@ void viewport_bounded_factory_contract() {
     check(factory_calls == 19);
 }
 
-void keyed_reorder_reuses_materialized_specs() {
+void keyed_reorder_reuses_materialized_payloads() {
     using Model = ui::detail::VirtualListDatasetModel<int>;
-    using Window = ui::detail::VirtualListMaterializationWindow<int>;
+    using Window = ui::detail::VirtualListMaterializationWindow<int, int>;
 
     Model model;
     std::vector<Model::Item> items;
@@ -79,9 +72,9 @@ void keyed_reorder_reuses_materialized_specs() {
     check(model.replace(items));
 
     std::size_t factory_calls = 0;
-    Window window{model, 20.0f, [&](const Model::Item&) {
+    Window window{model, 20.0f, [&](const Model::Item& item) {
         ++factory_calls;
-        return ui::Spec{[] { return std::make_unique<StubRow>(); }, {}};
+        return item.key;
     }};
 
     check(window.update(40.0f, 100.0f));
@@ -102,13 +95,11 @@ void keyed_reorder_reuses_materialized_specs() {
 
 void invalid_geometry_is_atomic() {
     using Model = ui::detail::VirtualListDatasetModel<int>;
-    using Window = ui::detail::VirtualListMaterializationWindow<int>;
+    using Window = ui::detail::VirtualListMaterializationWindow<int, int>;
 
     Model model;
     check(model.replace({Model::Item{1, "one"}, Model::Item{2, "two"}}));
-    Window window{model, 20.0f, [](const Model::Item&) {
-        return ui::Spec{[] { return std::make_unique<StubRow>(); }, {}};
-    }};
+    Window window{model, 20.0f, [](const Model::Item& item) { return item.key; }};
 
     check(window.update(0.0f, 20.0f));
     const auto keys = window.keys();
@@ -122,7 +113,7 @@ void invalid_geometry_is_atomic() {
 
 int main() {
     viewport_bounded_factory_contract();
-    keyed_reorder_reuses_materialized_specs();
+    keyed_reorder_reuses_materialized_payloads();
     invalid_geometry_is_atomic();
     return failures == 0 ? 0 : 1;
 }
