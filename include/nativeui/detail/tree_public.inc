@@ -218,19 +218,11 @@
             return result;
         };
 
-        const auto pointer_descendants_targetable = [](const Node& node) noexcept {
-            const auto* policy =
-                dynamic_cast<const detail::PointerDescendantPolicy*>(node.component.get());
-            return policy == nullptr || policy->pointer_descendants_targetable();
-        };
-
         // Pointer targeting is intentionally independent from keyboard focus.
         // Reverse child order matches paint stacking: later/overlay children are
         // input-frontmost. Inert visual/layout nodes retain the historic behavior
         // of not blocking an interactive sibling below them unless they explicitly
-        // opt into pointer targetability. Structural wrappers may additionally
-        // suppress pointer targeting for their complete subtree without changing
-        // painting, layout, availability or keyboard focus.
+        // opt into pointer targetability. Inactive focus scopes remain unavailable.
         auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
             if (inherited_clip.empty() || !inherited_clip.contains(point) ||
                 !node.component->effective_availability().interactive()) {
@@ -244,7 +236,7 @@
             if (node.component->clips_children()) {
                 child_clip = intersect(inherited_clip, node.bounds);
             }
-            if (!child_clip.empty() && pointer_descendants_targetable(node)) {
+            if (!child_clip.empty()) {
                 for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
                     if (auto* result = self(self, **it, point, child_clip)) return result;
                 }
