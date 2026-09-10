@@ -14,6 +14,7 @@ Non-negotiable rules:
 - retained UI state is UI/main-thread confined unless explicitly documented otherwise;
 - dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
 - macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
+- NativeUI-owned source-tree targets compile with zero unapproved warnings; `NATIVEUI_ALLOWED_WARNINGS` is empty by default and is the only normal explicit CMake opt-in for a temporarily accepted diagnostic;
 - `CODE_REVIEW.md`, exact-head validation, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
 
 ## Pinned dependencies
@@ -93,6 +94,24 @@ Delivered behavior:
 
 The legacy `StandaloneWindow(UI&, ...)` path remains pre-v1 compatibility only and is removed by T069. T065 does not introduce a hidden shared Application or a second supported PROGRAM-world ownership model.
 
+## #163 / PR #181 — warning-free source-tree builds
+
+#163 / PR #181 is the active build-quality change on top of current `main`.
+
+Delivered behavior on the branch:
+
+- shared feature examples use the v1 `Application + StandaloneWindow(Application&, UI&, WindowDesc)` ownership path, eliminating the repeated `StandaloneWindow` deprecation warning;
+- `examples/standalone.cpp`, T041 and supported standalone/embedded/macOS drop smoke paths use the same v1 Application ownership model;
+- NativeUI-owned source-tree builds enable a strict warning level and `CMAKE_COMPILE_WARNING_AS_ERROR=ON`;
+- `NATIVEUI_ALLOWED_WARNINGS` is a semicolon-separated CMake cache setting with an empty default; Clang/GCC diagnostics are named without `-W`, MSVC diagnostics use four-digit codes;
+- malformed warning identifiers fail configuration;
+- the historical #64 legacy independent-PROGRAM diagnostics are excluded from the strict default build and become available only when `deprecated-declarations` is explicitly approved through `NATIVEUI_ALLOWED_WARNINGS`;
+- repository workflow and review rules classify an unapproved NativeUI compiler warning as Blocking and forbid target/source-local suppression as a substitute for the explicit CMake opt-in.
+
+The strict build exposed and corrected existing warnings instead of whitelisting them: deprecated standalone construction in examples/smoke coverage, MSVC C4458 parameter shadowing, GCC `-Wsubobject-linkage` caused by platform implementation types with anonymous linkage, and MSVC C4244 narrowing in the slider value-contract test. The default warning allowlist remains empty.
+
+After synchronizing PR #181 with current `main`, CI, T060, T065, T042 and T052 must all pass on the resulting exact head before merge.
+
 ## Current dependency frontier
 
 ```text
@@ -127,12 +146,21 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A temporary approved Clang/GCC exception is explicitly configured, for example:
+
+```bash
+cmake -S . -B build -DNATIVEUI_ALLOWED_WARNINGS=deprecated-declarations
+```
+
+Do not add an exception when the warning can be fixed in NativeUI-owned code.
+
 T036 completion exact head `458b48ed60e187a1a89587b39735da3d387b0532` passed the dedicated T036 contract/tests/example self-test, normal Linux X11/Windows/macOS/Linux ASan+UBSan CI, T042 Lifecycle Stress, T060 Application Contract, T052 release gate and T065 dispatcher contract before merge.
 
 ## Next actions
 
-1. Start T045 / issue #45 as the next UI/accessibility critical-path item; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
-2. Keep T067 dependency-gated until T045 + T058 are Done, then implement it before T068.
-3. Continue active T072 in the independent platform lane; after it completes, T064 becomes available.
-4. Continue T043 / PR #142 independently and finish it before T066/T068.
-5. Keep unrelated style/dynamic/overlay/release work in their own lanes and do not duplicate active PRs.
+1. Complete exact-head qualification and final `CODE_REVIEW.md` review for #163 / PR #181; merge only if every required executed gate is green and no Blocking/Important finding remains.
+2. Start T045 / issue #45 as the next UI/accessibility critical-path item; it freezes the ordinary and virtual-collection accessibility semantics required before T067/T068.
+3. Keep T067 dependency-gated until T045 + T058 are Done, then implement it before T068.
+4. Continue active T072 in the independent platform lane; after it completes, T064 becomes available.
+5. Continue T043 / PR #142 independently and finish it before T066/T068.
+6. Keep unrelated style/dynamic/overlay/release work in their own lanes and do not duplicate active PRs.

@@ -31,7 +31,9 @@ int main() {
             }.padding(12.0f).gap(8.0f)};
 
         stage = "construct-parent-window";
+        ui::Application application;
         ui::StandaloneWindow parent{
+            application,
             parent_ui,
             ui::WindowDesc{.title = "NativeUI embedded smoke parent",
                            .size = {420.0f, 280.0f},
@@ -64,7 +66,7 @@ int main() {
         stage = "embedded-resize";
         if (!child.set_size({300.0f, 160.0f})) return fail(stage, "child set_size failed");
         for (int i = 0; i < 4; ++i) {
-            (void)parent.poll(0.0);
+            (void)application.poll(0.0);
             (void)child.poll();
         }
         if (!parent.last_error().empty()) return fail(stage, parent.last_error());
