@@ -208,16 +208,34 @@ public:
         if (!placements.empty()) placements.front().bounds = bounds;
     }
 
+    void focus_changed(bool focused, FocusContext&) override {
+        if (!focused) {
+            active_index_.reset();
+            return;
+        }
+        active_index_ = runtime_->selected_index();
+        if (!active_index_) active_index_ = runtime_->first_enabled();
+    }
+
     EventResult input(const InputEvent& event, InputContext& context) override {
         if (event.type == InputType::KeyDown) {
+            if (const auto selected = runtime_->selected_index()) {
+                active_index_ = selected;
+            } else if (!active_index_) {
+                active_index_ = runtime_->first_enabled();
+            }
+
             std::optional<std::size_t> target;
-            const auto current = runtime_->selected_index();
             switch (event.key) {
             case Key::Down:
-                target = current ? runtime_->next_enabled(*current) : runtime_->first_enabled();
+                target = active_index_
+                    ? runtime_->next_enabled(*active_index_)
+                    : runtime_->first_enabled();
                 break;
             case Key::Up:
-                target = current ? runtime_->previous_enabled(*current) : runtime_->last_enabled();
+                target = active_index_
+                    ? runtime_->previous_enabled(*active_index_)
+                    : runtime_->last_enabled();
                 break;
             case Key::Home:
                 target = runtime_->first_enabled();
@@ -229,7 +247,10 @@ public:
                 return EventResult::Ignored;
             }
 
-            if (target) (void)runtime_->select(*target);
+            if (target) {
+                active_index_ = target;
+                (void)runtime_->select(*target);
+            }
             return EventResult::Handled;
         }
 
@@ -249,7 +270,10 @@ public:
             pointer_armed_.reset();
             context.release_pointer();
             const auto index = row_at(event.position, context.bounds());
-            if (index && *index == armed) (void)runtime_->select(armed);
+            if (index && *index == armed) {
+                active_index_ = armed;
+                (void)runtime_->select(armed);
+            }
             return EventResult::Handled;
         }
 
@@ -286,6 +310,7 @@ private:
     }
 
     std::shared_ptr<ListViewRuntime<T>> runtime_;
+    std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
 };
 
@@ -443,19 +468,33 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
+    void focus_changed(bool focused, FocusContext&) override {
+        if (!focused) {
+            active_index_.reset();
+            return;
+        }
+        active_index_ = runtime_->selected_index();
+        if (!active_index_) active_index_ = runtime_->first_enabled();
+    }
+
     EventResult input(const InputEvent& event, InputContext& context) override {
         if (event.type == InputType::KeyDown) {
+            if (const auto selected = runtime_->selected_index()) {
+                active_index_ = selected;
+            } else if (!active_index_) {
+                active_index_ = runtime_->first_enabled();
+            }
+
             std::optional<std::size_t> target;
-            const auto current = runtime_->selected_index();
             switch (event.key) {
             case Key::Right:
-                target = current
-                    ? runtime_->next_enabled_wrapped(*current)
+                target = active_index_
+                    ? runtime_->next_enabled_wrapped(*active_index_)
                     : runtime_->first_enabled();
                 break;
             case Key::Left:
-                target = current
-                    ? runtime_->previous_enabled_wrapped(*current)
+                target = active_index_
+                    ? runtime_->previous_enabled_wrapped(*active_index_)
                     : runtime_->last_enabled();
                 break;
             case Key::Home:
@@ -467,7 +506,10 @@ public:
             default:
                 return EventResult::Ignored;
             }
-            if (target) (void)runtime_->select(*target);
+            if (target) {
+                active_index_ = target;
+                (void)runtime_->select(*target);
+            }
             return EventResult::Handled;
         }
 
@@ -487,7 +529,10 @@ public:
             pointer_armed_.reset();
             context.release_pointer();
             const auto index = tab_at(event.position, context.bounds());
-            if (index && *index == armed) (void)runtime_->select(armed);
+            if (index && *index == armed) {
+                active_index_ = armed;
+                (void)runtime_->select(armed);
+            }
             return EventResult::Handled;
         }
 
@@ -550,6 +595,7 @@ private:
     static constexpr float kHeaderHeight = 36.0f;
 
     std::shared_ptr<TabsRuntime<T>> runtime_;
+    std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
     typename State<T>::Subscription subscription_;
 };
