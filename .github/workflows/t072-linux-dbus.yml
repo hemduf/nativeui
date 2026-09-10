@@ -1,0 +1,32 @@
+name: T072 Linux D-Bus Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/linux_dbus.cpp'
+      - 'src/detail/linux_dbus.hpp'
+      - 'cmake/NativeUILinuxDbus.cmake'
+      - 'tests/t072/**'
+      - 'tests/t072_linux_dbus_build_contract.cmake'
+      - 'CMakeLists.txt'
+      - 'VALIDATION.md'
+      - '.github/workflows/t072-linux-dbus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t072-linux-dbus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-contract:
+    name: Linux D-Bus build contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static integration contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t072_linux_dbus_build_contract.cmake
