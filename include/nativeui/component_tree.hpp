@@ -3,6 +3,8 @@
 #include <nativeui/component_base.hpp>
 #include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/focus_group.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/theme.hpp>
 
 #include <limits>
 #include <optional>
@@ -19,8 +21,10 @@ class UI;
 class Tree {
 public:
 #include <nativeui/detail/tree_public.inc>
+#include <nativeui/detail/tree_theme_public.inc>
 private:
     friend class UI;
+#include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_layout.inc>
 #include <nativeui/detail/tree_focus.inc>
