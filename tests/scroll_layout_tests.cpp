@@ -117,23 +117,23 @@ void suite() {
         ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
 
-        NUI_CHECK(state.ensure_visible({20.0f, 20.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Nearest) == false);
-        NUI_CHECK(state.ensure_visible({20.0f, 180.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Nearest));
+        NUI_CHECK(ui::ensure_visible(state, {20.0f, 20.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Nearest) == false);
+        NUI_CHECK(ui::ensure_visible(state, {20.0f, 180.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Nearest));
         NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
 
-        NUI_CHECK(state.ensure_visible({150.0f, 250.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Start));
+        NUI_CHECK(ui::ensure_visible(state, {150.0f, 250.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Start));
         NUI_CHECK_NEAR(state.offset().x, 150.0f, 0.001f);
         NUI_CHECK_NEAR(state.offset().y, 250.0f, 0.001f);
 
-        NUI_CHECK(state.ensure_visible({180.0f, 300.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Center));
+        NUI_CHECK(ui::ensure_visible(state, {180.0f, 300.0f, 20.0f, 20.0f}, ui::ScrollAlignment::Center));
         NUI_CHECK_NEAR(state.offset().x, 140.0f, 0.001f);
         NUI_CHECK_NEAR(state.offset().y, 260.0f, 0.001f);
 
-        NUI_CHECK(state.ensure_visible({250.0f, 350.0f, 20.0f, 20.0f}, ui::ScrollAlignment::End));
+        NUI_CHECK(ui::ensure_visible(state, {250.0f, 350.0f, 20.0f, 20.0f}, ui::ScrollAlignment::End));
         NUI_CHECK_NEAR(state.offset().x, 170.0f, 0.001f);
         NUI_CHECK_NEAR(state.offset().y, 270.0f, 0.001f);
 
-        NUI_CHECK(state.ensure_visible({10.0f, 50.0f, 180.0f, 140.0f}, ui::ScrollAlignment::Nearest));
+        NUI_CHECK(ui::ensure_visible(state, {10.0f, 50.0f, 180.0f, 140.0f}, ui::ScrollAlignment::Nearest));
         NUI_CHECK_NEAR(state.offset().x, 10.0f, 0.001f);
         NUI_CHECK_NEAR(state.offset().y, 50.0f, 0.001f);
     }
