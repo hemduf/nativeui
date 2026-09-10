@@ -17,6 +17,8 @@ public:
     explicit PointerEatingComponent(std::shared_ptr<PointerEatingState> state)
         : state_(std::move(state)) {}
 
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
         return {100.0f, 400.0f};
     }
