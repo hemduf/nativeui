@@ -6,6 +6,7 @@
 #include <nativeui/input.hpp>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
+#include <nativeui/dispatcher.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>
 #include <nativeui/path.hpp>
