@@ -34,6 +34,7 @@ enable_testing()
 t067_add_test(t067_virtual_list_retained t067_retained_tests.cpp)
 t067_add_test(t067_public_api t067_public_api_tests.cpp)
 t067_add_test(t067_semantic_api t067_semantic_api_tests.cpp)
+t067_add_test(t067_visual t067_visual_tests.cpp)
 
 add_library(t067_virtual_list_header_compile OBJECT
   "${NATIVEUI_SOURCE_DIR}/tests/headers/virtual_list.cpp"
