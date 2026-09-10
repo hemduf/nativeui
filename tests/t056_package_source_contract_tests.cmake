@@ -30,10 +30,21 @@ foreach(_module IN ITEMS NativeUIBinaryData.cmake NativeUIEmbedResource.cmake)
       "T056 package source contract: CMakeLists.txt must install and copy ${_module} into the build-tree package")
   endif()
 endforeach()
-string(FIND "${_root_cmake}" "resource embedded_resource image" _header_compile)
-if(_header_compile EQUAL -1)
-  message(FATAL_ERROR "T056 package source contract: embedded_resource.hpp lacks isolated public-header compilation")
+
+# Public-header isolation is an extensible list. Do not make T056 depend on
+# adjacency between its header and later public headers: adding a new isolated
+# compile probe must not invalidate the older EmbeddedResourceEntry contract.
+string(REGEX MATCH "foreach\\(_header IN ITEMS [^\n]*\\)" _header_compile_list "${_root_cmake}")
+if(_header_compile_list STREQUAL "")
+  message(FATAL_ERROR "T056 package source contract: public-header compile list is missing")
 endif()
+foreach(_header IN ITEMS embedded_resource resource_manager)
+  string(FIND " ${_header_compile_list} " " ${_header} " _header_compile)
+  if(_header_compile EQUAL -1)
+    message(FATAL_ERROR
+      "T056 package source contract: ${_header}.hpp lacks isolated public-header compilation")
+  endif()
+endforeach()
 
 foreach(_config IN ITEMS cmake/NativeUIConfig.cmake.in cmake/NativeUIBuildTreeConfig.cmake.in)
   file(READ "${SOURCE_DIR}/${_config}" _config_text)

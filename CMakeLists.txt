@@ -205,6 +205,7 @@ install(FILES
   "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
+  cmake/NativeUIApplication.cmake
   cmake/NativeUIBinaryData.cmake
   cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
@@ -271,6 +272,10 @@ configure_file(cmake/NativeUIAttachPlatform.cmake
   "${_nativeui_build_package_dir}/NativeUIAttachPlatform.cmake"
   COPYONLY
 )
+configure_file(cmake/NativeUIApplication.cmake
+  "${_nativeui_build_package_dir}/NativeUIApplication.cmake"
+  COPYONLY
+)
 configure_file(cmake/NativeUIBinaryData.cmake
   "${_nativeui_build_package_dir}/NativeUIBinaryData.cmake"
   COPYONLY
@@ -307,6 +312,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t030_button
   t031_checkbox_radio
   t041_smoke_harness
+  t057_embedded_resources
   t059_component_state
 )
 
@@ -356,6 +362,24 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t047_attach_contract_tests.cmake"
   )
+  add_test(
+    NAME nativeui_t054_application_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_application_contract_tests.cmake"
+  )
+  add_test(
+    NAME nativeui_t054_argument_boundary_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_argument_boundary_tests.cmake"
+  )
+  add_test(
+    NAME nativeui_t054_package_source_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_package_source_contract_tests.cmake"
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
@@ -364,6 +388,12 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t047_attach_contract_tests
     PROPERTIES LABELS "build;cmake;t047" TIMEOUT 60
+  )
+  set_tests_properties(
+    nativeui_t054_application_contract_tests
+    nativeui_t054_argument_boundary_tests
+    nativeui_t054_package_source_contract_tests
+    PROPERTIES LABELS "build;cmake;t054" TIMEOUT 60
   )
 
   function(nativeui_add_core_test name source)
@@ -406,6 +436,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
+  nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
   nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
   nativeui_add_core_test(nativeui_layout_alignment_tests tests/layout_alignment_tests.cpp)
   nativeui_add_core_test(nativeui_layout_flex_tests tests/layout_flex_tests.cpp)
@@ -495,7 +526,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource embedded_resource image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
