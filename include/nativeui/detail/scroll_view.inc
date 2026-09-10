@@ -209,6 +209,8 @@ public:
     ScrollbarComponent(ScrollState& state, ScrollbarAxis axis)
         : state_(&state), axis_(axis) {}
 
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override { return {}; }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -327,6 +329,7 @@ public:
     // tree. ScrollView stays out of Tab traversal while receiving bubbled wheel
     // and optional pan events when descendants do not consume them.
     [[nodiscard]] bool focusable() const noexcept override { return false; }
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;
