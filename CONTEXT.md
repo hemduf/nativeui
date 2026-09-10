@@ -18,7 +18,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`. The independent P0 platform regression #124 / PR #125 owns any later Pugl pin change and stays outside the platform/package resource work.
+- Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`. This reviewed pin includes the X11 `SelectionNotify.property == None` guard owned by #124 / PR #125 in addition to the established drag-and-drop fixes.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` contains the completed T057 ResourceManager in addition to the established platform/package foundations.
+`main` `15df68e8f72f02abadbccdba579ab6c1b0ee8409` contains the completed T057 ResourceManager and its post-merge recovery/roadmap synchronization. PR #125 is the active P0 dependency-correction candidate on top of that baseline.
 
 Completed foundations relevant to this lane:
 
@@ -64,6 +64,12 @@ Final evidence:
 - PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`;
 - issue #69 is closed with `status:done` and a completed review/validation record.
 
+## Active P0 platform correction — #124 / PR #125
+
+PR #125 advances the shared Pugl pin to `195f79b22644010c81a5e0c3231c591856787ec6`. The defect was in the X11 failed-selection path: `SelectionNotify.property == None` could reach `XGetWindowProperty()` as atom `None`, causing `BadAtom` during lifecycle/clipboard stress. The reviewed Pugl correction rejects that path before the X11 property read; NativeUI does not weaken the T042 fixture or introduce a local workaround.
+
+The pre-refresh dependency-only candidate passed normal CI and T042 Lifecycle Stress. After synchronization with current `main` and the required dependency documentation, the final exact head must pass the same relevant gates before merge.
+
 ## Current DAG frontier
 
 ```text
@@ -72,9 +78,10 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
                                        +-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
+platform fix:       #124 / PR #125 (active P0 Pugl pin correction)
 ```
 
-T059, T030, #64 and T042 are owned by other lanes and must not be taken by this platform/package lane. #124 / PR #125 is also an independent Pugl/X11 regression stream and must not be folded into unrelated package/resource work.
+T059, T030, #64 and T042 are owned by other lanes and must not be folded into unrelated package/resource work. #124 / PR #125 remains an independent Pugl/X11 correction stream.
 
 The next platform/package selection must be made from live GitHub dependency/status data. T064/T072 remain blocked by T065, while T065 is dependency-ready but shares an event-loop integration seam with the active T060 stream; re-check current branches/PRs and conflict risk before starting it. Platform-hardening tickets such as T043/T044 are separate issue scopes and should only be taken if they are the live unowned choice for this lane.
 
@@ -88,12 +95,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T057 exact-head CI #600 is green in every required lane.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T042 lifecycle stress remains an independent exact-head gate for the Pugl correction.
 
 ## Next actions
 
-1. Keep T057 closed unless a real regression is discovered.
-2. Re-read live open PRs/issues before selecting the next platform/package item; resume existing work rather than duplicating it.
-3. Do not absorb T059, T030, #64, T042 or the independent #124 Pugl regression.
-4. Prefer a dependency-unblocked platform/package item that does not conflict with an active parallel branch; if T060 remains active, reassess T065 overlap before opening a competing implementation.
-5. Apply strict TDD, mandatory `CODE_REVIEW.md`, exact-head platform validation, and `CONTEXT.md`/`ROADMAP.md` synchronization on the selected ticket.
+1. Finish exact-head normal CI and T042 validation for PR #125 after current-main synchronization and documentation completion.
+2. Perform the mandatory final `CODE_REVIEW.md` pass; merge #125 only with no Blocking/Important finding.
+3. Synchronize #124/ROADMAP completion state in the merge cycle and close the issue Done.
+4. Re-evaluate the open T032/T060/T052/T033 branches against the new Pugl baseline and refresh them without widening their scopes.
+5. Continue dependency-unblocked work using strict TDD, exact-head platform validation and the repository review policy.
