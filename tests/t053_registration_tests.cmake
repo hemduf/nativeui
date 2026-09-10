@@ -38,4 +38,10 @@ _nativeui_expect_registration_failure(
   "consumer identity 'com.example.first'"
   "duplicate attachment is not allowed")
 
+# T043 is deliberately included here for the RED step because this test is
+# already registered on every normal configuration. Once the root build wires
+# the dedicated T043 test and feature example, the contract gets its own CTest
+# entry and this temporary inclusion is removed.
+include("${SOURCE_DIR}/tests/t043_registration_contract.cmake")
+
 message(STATUS "T053 configure-time registration isolation passed")
