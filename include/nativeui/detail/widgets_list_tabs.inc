@@ -5,6 +5,7 @@
 #include <nativeui/state.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -30,6 +31,56 @@ struct ListViewRuntime final {
     explicit ListViewRuntime(State<std::optional<T>>& selection)
         : selection(&selection), scroll(ScrollAxis::Vertical) {}
 
+    [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
+        return index < enabled.size() && enabled[index];
+    }
+
+    [[nodiscard]] std::optional<std::size_t> selected_index() const {
+        const auto& selected = selection->get();
+        if (!selected) return std::nullopt;
+        for (std::size_t index = 0; index < keys.size(); ++index) {
+            if (enabled_at(index) && keys[index] == *selected) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> first_enabled() const noexcept {
+        for (std::size_t index = 0; index < enabled.size(); ++index) {
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> last_enabled() const noexcept {
+        for (std::size_t index = enabled.size(); index > 0; --index) {
+            if (enabled_at(index - 1)) return index - 1;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> next_enabled(std::size_t from) const noexcept {
+        for (std::size_t index = from + 1; index < enabled.size(); ++index) {
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> previous_enabled(std::size_t from) const noexcept {
+        for (std::size_t index = from; index > 0; --index) {
+            if (enabled_at(index - 1)) return index - 1;
+        }
+        return std::nullopt;
+    }
+
+    bool select(std::size_t index) {
+        if (index >= keys.size() || !enabled_at(index)) return false;
+        selection->set(std::optional<T>{keys[index]});
+        if (index < row_bounds.size()) {
+            (void)ensure_visible(scroll, row_bounds[index], ScrollAlignment::Nearest);
+        }
+        return true;
+    }
+
     State<std::optional<T>>* selection{};
     ScrollState scroll;
     std::vector<T> keys;
@@ -43,9 +94,11 @@ public:
     ListRowComponent(std::shared_ptr<ListViewRuntime<T>> runtime, std::size_t index)
         : runtime_(std::move(runtime)), index_(index) {}
 
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
     [[nodiscard]] ComponentAvailability local_availability() const noexcept override {
         ComponentAvailability result{};
-        result.enabled = index_ < runtime_->enabled.size() && runtime_->enabled[index_];
+        result.enabled = runtime_->enabled_at(index_);
         return result;
     }
 
@@ -72,6 +125,36 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
+    EventResult input(const InputEvent& event, InputContext& context) override {
+        switch (event.type) {
+        case InputType::PointerDown:
+            pointer_armed_ = context.bounds().contains(event.position);
+            if (!pointer_armed_) return EventResult::Ignored;
+            context.capture_pointer();
+            return EventResult::Handled;
+
+        case InputType::PointerUp: {
+            if (!pointer_armed_) return EventResult::Ignored;
+            const bool activate = context.bounds().contains(event.position);
+            pointer_armed_ = false;
+            context.release_pointer();
+            if (activate) (void)runtime_->select(index_);
+            return EventResult::Handled;
+        }
+
+        case InputType::PointerCancel:
+            if (!pointer_armed_) return EventResult::Ignored;
+            pointer_armed_ = false;
+            context.release_pointer();
+            return EventResult::Handled;
+
+        default:
+            return EventResult::Ignored;
+        }
+    }
+
+    void deactivate(LifecycleContext&) override { pointer_armed_ = false; }
+
     void paint(PaintContext& context) const override {
         if (index_ >= runtime_->keys.size()) return;
         const auto& selected = runtime_->selection->get();
@@ -83,6 +166,7 @@ public:
 private:
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::size_t index_{};
+    bool pointer_armed_{};
     typename State<std::optional<T>>::Subscription subscription_;
 };
 
@@ -156,6 +240,32 @@ public:
         if (!placements.empty()) placements.front().bounds = bounds;
     }
 
+    EventResult input(const InputEvent& event, InputContext&) override {
+        if (event.type != InputType::KeyDown) return EventResult::Ignored;
+
+        std::optional<std::size_t> target;
+        const auto current = runtime_->selected_index();
+        switch (event.key) {
+        case Key::Down:
+            target = current ? runtime_->next_enabled(*current) : runtime_->first_enabled();
+            break;
+        case Key::Up:
+            target = current ? runtime_->previous_enabled(*current) : runtime_->last_enabled();
+            break;
+        case Key::Home:
+            target = runtime_->first_enabled();
+            break;
+        case Key::End:
+            target = runtime_->last_enabled();
+            break;
+        default:
+            return EventResult::Ignored;
+        }
+
+        if (target) (void)runtime_->select(*target);
+        return EventResult::Handled;
+    }
+
     void paint(PaintContext& context) const override {
         context.painter().stroke_rounded_rect(
             context.bounds(), 6.0f, context.focused() ? 2.0f : 1.0f,
@@ -169,6 +279,55 @@ private:
 template <class T>
 struct TabsRuntime final {
     explicit TabsRuntime(State<T>& selection) : selection(&selection) {}
+
+    [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
+        return index < enabled.size() && enabled[index];
+    }
+
+    [[nodiscard]] std::optional<std::size_t> selected_index() const {
+        for (std::size_t index = 0; index < keys.size(); ++index) {
+            if (enabled_at(index) && keys[index] == selection->get()) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> first_enabled() const noexcept {
+        for (std::size_t index = 0; index < enabled.size(); ++index) {
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> last_enabled() const noexcept {
+        for (std::size_t index = enabled.size(); index > 0; --index) {
+            if (enabled_at(index - 1)) return index - 1;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> next_enabled_wrapped(std::size_t from) const noexcept {
+        if (enabled.empty()) return std::nullopt;
+        for (std::size_t distance = 1; distance <= enabled.size(); ++distance) {
+            const auto index = (from + distance) % enabled.size();
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> previous_enabled_wrapped(std::size_t from) const noexcept {
+        if (enabled.empty()) return std::nullopt;
+        for (std::size_t distance = 1; distance <= enabled.size(); ++distance) {
+            const auto index = (from + enabled.size() - (distance % enabled.size())) % enabled.size();
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    bool select(std::size_t index) {
+        if (index >= keys.size() || !enabled_at(index)) return false;
+        selection->set(keys[index]);
+        return true;
+    }
 
     State<T>* selection{};
     std::vector<T> keys;
@@ -271,6 +430,67 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
+    EventResult input(const InputEvent& event, InputContext& context) override {
+        if (event.type == InputType::KeyDown) {
+            std::optional<std::size_t> target;
+            const auto current = runtime_->selected_index();
+            switch (event.key) {
+            case Key::Right:
+                target = current
+                    ? runtime_->next_enabled_wrapped(*current)
+                    : runtime_->first_enabled();
+                break;
+            case Key::Left:
+                target = current
+                    ? runtime_->previous_enabled_wrapped(*current)
+                    : runtime_->last_enabled();
+                break;
+            case Key::Home:
+                target = runtime_->first_enabled();
+                break;
+            case Key::End:
+                target = runtime_->last_enabled();
+                break;
+            default:
+                return EventResult::Ignored;
+            }
+            if (target) (void)runtime_->select(*target);
+            return EventResult::Handled;
+        }
+
+        switch (event.type) {
+        case InputType::PointerDown: {
+            const auto index = tab_at(event.position, context.bounds());
+            if (!index) return EventResult::Ignored;
+            if (!runtime_->enabled_at(*index)) return EventResult::Handled;
+            pointer_armed_ = index;
+            context.capture_pointer();
+            return EventResult::Handled;
+        }
+
+        case InputType::PointerUp: {
+            if (!pointer_armed_) return EventResult::Ignored;
+            const auto armed = *pointer_armed_;
+            pointer_armed_.reset();
+            context.release_pointer();
+            const auto index = tab_at(event.position, context.bounds());
+            if (index && *index == armed) (void)runtime_->select(armed);
+            return EventResult::Handled;
+        }
+
+        case InputType::PointerCancel:
+            if (!pointer_armed_) return EventResult::Ignored;
+            pointer_armed_.reset();
+            context.release_pointer();
+            return EventResult::Handled;
+
+        default:
+            return EventResult::Ignored;
+        }
+    }
+
+    void deactivate(LifecycleContext&) override { pointer_armed_.reset(); }
+
     void paint(PaintContext& context) const override {
         if (runtime_->keys.empty()) return;
         const auto bounds = context.bounds();
@@ -284,7 +504,7 @@ public:
                     : width,
                 std::min(bounds.h, kHeaderHeight)};
             const bool selected = runtime_->selection->get() == runtime_->keys[index];
-            const bool enabled = index < runtime_->enabled.size() && runtime_->enabled[index];
+            const bool enabled = runtime_->enabled_at(index);
             painter.fill_rounded_rect(tab, 4.0f, selected ? colors::selection : colors::panel);
             painter.stroke_rounded_rect(
                 tab, 4.0f, selected || context.focused() ? 2.0f : 1.0f,
@@ -300,9 +520,24 @@ public:
     }
 
 private:
+    [[nodiscard]] std::optional<std::size_t> tab_at(Point position, Rect bounds) const noexcept {
+        if (runtime_->keys.empty() || !(bounds.w > 0.0f) ||
+            position.y < bounds.y || position.y >= bounds.y + std::min(bounds.h, kHeaderHeight) ||
+            position.x < bounds.x || position.x >= bounds.x + bounds.w) {
+            return std::nullopt;
+        }
+        const double relative = static_cast<double>(position.x - bounds.x) /
+                                static_cast<double>(bounds.w);
+        auto index = static_cast<std::size_t>(
+            std::floor(relative * static_cast<double>(runtime_->keys.size())));
+        if (index >= runtime_->keys.size()) index = runtime_->keys.size() - 1;
+        return index;
+    }
+
     static constexpr float kHeaderHeight = 36.0f;
 
     std::shared_ptr<TabsRuntime<T>> runtime_;
+    std::optional<std::size_t> pointer_armed_;
     typename State<T>::Subscription subscription_;
 };
 
