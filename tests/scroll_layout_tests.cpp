@@ -94,7 +94,7 @@ void suite() {
         NUI_CHECK_NEAR(state.offset().y, 90.0f, 0.001f);
     }
 
-    // T034 ScrollView is the interactive wrapper around the existing ScrollState.
+    // T034 ScrollView is pointer-targetable for scrolling without becoming a keyboard focus stop.
     {
         ui::ScrollState state{ui::ScrollAxis::Vertical};
         ui::UI tree{ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}};
@@ -108,6 +108,11 @@ void suite() {
         event.delta = {0.0f, 40.0f};
         NUI_CHECK(tree.dispatch(event, platform) == ui::EventResult::Handled);
         NUI_CHECK_NEAR(state.offset().y, 40.0f, 0.001f);
+
+        ui::InputEvent tab{};
+        tab.type = ui::InputType::KeyDown;
+        tab.key = ui::Key::Tab;
+        NUI_CHECK(tree.dispatch(tab, platform) == ui::EventResult::Ignored);
     }
 
     // T034 ensure-visible alignment uses ScrollState as the sole offset authority.
