@@ -3,10 +3,10 @@
 #if defined(__APPLE__)
 #  include <CoreFoundation/CFRunLoop.h>
 #elif defined(__linux__)
-struct _XDisplay;
-extern "C" int XFlush(_XDisplay* display);
+#  include <X11/Xlib.h>
 #endif
 
+#include <atomic>
 #include <mutex>
 #include <vector>
 
