@@ -1,6 +1,7 @@
 #include <nativeui/detail/virtual_list_model.hpp>
 #include <nativeui/detail/virtual_list_window.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
