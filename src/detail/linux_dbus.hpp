@@ -198,6 +198,7 @@ struct LinuxDbusCompletion final {
     LinuxDbusErrorCode code{LinuxDbusErrorCode::None};
     std::string remote_error_name;
     std::string message;
+    std::vector<LinuxDbusValue> values;
 };
 
 using LinuxDbusCompletionCallback = std::function<void(LinuxDbusCompletion)>;
@@ -208,6 +209,7 @@ struct LinuxDbusMethodCall final {
     std::string interface;
     std::string member;
     std::chrono::milliseconds timeout{kLinuxDbusDefaultTimeout};
+    std::vector<LinuxDbusValue> arguments;
 };
 
 [[nodiscard]] bool linux_dbus_library_probe() noexcept;
@@ -295,9 +297,9 @@ public:
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::string unique_name() const;
 
-    /// Thread-safe non-blocking method call. Arguments/reply values are added
-    /// by the value-codec unit; this seam already owns reply/error/timeout and
-    /// cancellation lifetime. Invalid syntax or inactive transport returns 0.
+    /// Thread-safe non-blocking method call. Arguments and successful method
+    /// return values are copied through the owned T072 value model. Invalid
+    /// syntax/value shapes or inactive transport return 0.
     [[nodiscard]] LinuxDbusRequestId call_method(LinuxDbusClientId client,
                                                  ui::Dispatcher dispatcher,
                                                  const LinuxDbusMethodCall& call,
