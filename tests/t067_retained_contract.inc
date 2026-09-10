@@ -67,6 +67,8 @@ void behavior_contract() {
     ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
 
     NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(runtime->scroll().viewport_size().h == 100.0f);
+    NUI_CHECK(runtime->scroll().content_size().h == 2000.0f);
     NUI_CHECK(counters.constructed == 7);
     NUI_CHECK(counters.destroyed == 0);
 
