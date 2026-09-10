@@ -8,6 +8,7 @@
                                 static_cast<float>(event->configure.height)};
             const auto logical = geometry_.configure(
                 physical, static_cast<float>(puglGetScaleFactor(view_)));
+            record_scale_observation(geometry_.last_scale_observation_valid());
             if (!logical) {
                 // Zero/non-finite native extents are transient non-renderable
                 // states. Preserve the last valid logical viewport until a
