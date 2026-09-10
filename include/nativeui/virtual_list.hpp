@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -30,6 +31,7 @@ class VirtualListState {
 public:
     using Runtime = detail::VirtualListRetainedRuntime<Key>;
     using Item = typename Runtime::Item;
+    using MetadataSnapshot = VirtualSemanticChildren::MetadataSnapshot;
 
     template <class RowFactory>
     VirtualListState(
@@ -69,6 +71,18 @@ public:
     [[nodiscard]] Size content_size() const noexcept { return runtime_->scroll().content_size(); }
     [[nodiscard]] float row_height() const noexcept { return runtime_->row_height(); }
     [[nodiscard]] std::size_t overscan() const noexcept { return runtime_->overscan(); }
+
+    [[nodiscard]] std::uint64_t dataset_generation() const noexcept {
+        return runtime_->dataset_generation();
+    }
+
+    [[nodiscard]] const MetadataSnapshot& metadata_snapshot() const noexcept {
+        return runtime_->metadata_snapshot();
+    }
+
+    [[nodiscard]] VirtualSemanticChildren semantic_children(Rect list_bounds) const {
+        return runtime_->semantic_children(list_bounds);
+    }
 
 private:
     template <class>
