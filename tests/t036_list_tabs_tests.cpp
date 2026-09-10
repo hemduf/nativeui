@@ -48,6 +48,56 @@ private:
     int* constructions_{};
 };
 
+struct HoverLifetimeLog {
+    int pointer_moves{};
+    int pointer_leaves{};
+    int destructions{};
+};
+
+class HoverLifetimeProbeComponent final : public ui::Component {
+public:
+    explicit HoverLifetimeProbeComponent(std::shared_ptr<HoverLifetimeLog> log)
+        : log_(std::move(log)) {}
+
+    ~HoverLifetimeProbeComponent() override { ++log_->destructions; }
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::PointerMove) {
+            ++log_->pointer_moves;
+        } else if (event.type == ui::InputType::PointerLeave) {
+            ++log_->pointer_leaves;
+        }
+        return ui::EventResult::Ignored;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<HoverLifetimeLog> log_;
+};
+
+class HoverLifetimeProbe final {
+public:
+    explicit HoverLifetimeProbe(std::shared_ptr<HoverLifetimeLog> log)
+        : log_(std::move(log)) {}
+
+    ui::Spec spec() && {
+        auto log = std::move(log_);
+        return ui::Spec{
+            [log = std::move(log)] { return std::make_unique<HoverLifetimeProbeComponent>(log); },
+            {}};
+    }
+
+private:
+    std::shared_ptr<HoverLifetimeLog> log_;
+};
+
 void fully_retained_large_list_baseline() {
     constexpr int kItemCount = 256;
     ui::State<std::optional<int>> selected{std::nullopt};
@@ -241,6 +291,32 @@ void hover_presentation_contract() {
     NUI_CHECK(!pixel_matches(right_renderer.pixel(120, 20), kHoverSurface));
 }
 
+void dynamic_hover_lifetime_contract() {
+    auto log = std::make_shared<HoverLifetimeLog>();
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    ui::UI tree{ui::If{visible, HoverLifetimeProbe{log}}};
+    tree.resize({120.0f, 60.0f});
+    tree.activate(platform);
+
+    (void)tree.dispatch(
+        test::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), platform);
+    NUI_CHECK(log->pointer_moves == 1);
+    NUI_CHECK(log->pointer_leaves == 0);
+
+    // T058 may destroy a hovered retained node. The hover route must receive
+    // PointerLeave and be cleared while that node is still alive; otherwise the
+    // next pointer event would traverse a dangling Node*.
+    visible.set(false);
+    tree.resize({120.0f, 60.0f});
+    NUI_CHECK(log->pointer_leaves == 1);
+    NUI_CHECK(log->destructions == 1);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), platform) ==
+              ui::EventResult::Ignored);
+}
+
 void deterministic_headless_states() {
     {
         ui::State<std::optional<int>> selected{1};
@@ -276,6 +352,7 @@ void suite() {
     disabled_and_two_instance_contract();
     external_list_selection_reveals_selected_row();
     hover_presentation_contract();
+    dynamic_hover_lifetime_contract();
     deterministic_headless_states();
 }
 
