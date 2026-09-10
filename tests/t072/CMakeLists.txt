@@ -22,6 +22,7 @@ function(t072_add_test name source)
   add_executable(${name} ${source})
   target_include_directories(${name} PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../src"
+    "${CMAKE_CURRENT_LIST_DIR}/../../include"
   )
   target_link_libraries(${name} PRIVATE nativeui_linux_dbus)
   if(MSVC)
