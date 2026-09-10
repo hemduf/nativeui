@@ -197,10 +197,10 @@ public:
             return same(before, state_->offset()) ? EventResult::Ignored : EventResult::Handled;
         }
 
-        if (!pointer_pan_) return EventResult::Ignored;
-
         switch (event.type) {
         case InputType::PointerDown:
+            if (handle_scrollbar_down(event.position, context)) return EventResult::Handled;
+            if (!pointer_pan_) return EventResult::Ignored;
             pan_active_ = true;
             pan_origin_ = event.position;
             offset_origin_ = state_->offset();
@@ -208,6 +208,10 @@ public:
             return EventResult::Handled;
 
         case InputType::PointerMove:
+            if (scrollbar_drag_ != ScrollbarDrag::None) {
+                update_scrollbar_drag(event.position);
+                return EventResult::Handled;
+            }
             if (!pan_active_) return EventResult::Ignored;
             state_->set_offset(Point{
                 offset_origin_.x - (event.position.x - pan_origin_.x),
@@ -216,6 +220,11 @@ public:
 
         case InputType::PointerUp:
         case InputType::PointerCancel:
+            if (scrollbar_drag_ != ScrollbarDrag::None) {
+                scrollbar_drag_ = ScrollbarDrag::None;
+                context.release_pointer();
+                return EventResult::Handled;
+            }
             if (!pan_active_) return EventResult::Ignored;
             pan_active_ = false;
             context.release_pointer();
@@ -226,13 +235,88 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override { pan_active_ = false; }
+    void deactivate(LifecycleContext&) override {
+        pan_active_ = false;
+        scrollbar_drag_ = ScrollbarDrag::None;
+    }
 
     void paint(PaintContext&) const override {}
 
 private:
+    enum class ScrollbarDrag {
+        None,
+        Horizontal,
+        Vertical,
+    };
+
     [[nodiscard]] static bool same(Point a, Point b) noexcept {
         return a.x == b.x && a.y == b.y;
+    }
+
+    [[nodiscard]] bool handle_scrollbar_down(Point position, InputContext& context) {
+        const auto bars = detail::scroll_view_bars(*state_, context.bounds());
+
+        if (bars.vertical.visible && bars.vertical.track.contains(position)) {
+            if (bars.vertical.thumb.contains(position)) {
+                begin_scrollbar_drag(
+                    ScrollbarDrag::Vertical,
+                    position.y,
+                    state_->offset().y,
+                    bars.vertical.track.h - bars.vertical.thumb.h,
+                    state_->max_offset().y,
+                    context);
+            }
+            return true;
+        }
+
+        if (bars.horizontal.visible && bars.horizontal.track.contains(position)) {
+            if (bars.horizontal.thumb.contains(position)) {
+                begin_scrollbar_drag(
+                    ScrollbarDrag::Horizontal,
+                    position.x,
+                    state_->offset().x,
+                    bars.horizontal.track.w - bars.horizontal.thumb.w,
+                    state_->max_offset().x,
+                    context);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    void begin_scrollbar_drag(
+        ScrollbarDrag drag,
+        float pointer_position,
+        float offset,
+        float travel,
+        float maximum,
+        InputContext& context) {
+        pan_active_ = false;
+        scrollbar_drag_ = drag;
+        scrollbar_pointer_origin_ = pointer_position;
+        scrollbar_offset_origin_ = offset;
+        scrollbar_travel_ = std::max(0.0f, travel);
+        scrollbar_maximum_ = std::max(0.0f, maximum);
+        context.capture_pointer();
+    }
+
+    void update_scrollbar_drag(Point position) {
+        if (!(scrollbar_travel_ > 0.0f) || !(scrollbar_maximum_ > 0.0f)) return;
+        const float pointer = scrollbar_drag_ == ScrollbarDrag::Horizontal ? position.x : position.y;
+        if (!std::isfinite(pointer)) return;
+        const double delta = static_cast<double>(pointer) - static_cast<double>(scrollbar_pointer_origin_);
+        const double target = static_cast<double>(scrollbar_offset_origin_) +
+                              delta / static_cast<double>(scrollbar_travel_) *
+                                  static_cast<double>(scrollbar_maximum_);
+        const float clamped = static_cast<float>(std::clamp(
+            target, 0.0, static_cast<double>(scrollbar_maximum_)));
+        const auto current = state_->offset();
+        if (scrollbar_drag_ == ScrollbarDrag::Horizontal) {
+            state_->set_offset(Point{clamped, current.y});
+        } else {
+            state_->set_offset(Point{current.x, clamped});
+        }
     }
 
     ScrollState* state_{};
@@ -240,6 +324,11 @@ private:
     bool pan_active_{};
     Point pan_origin_{};
     Point offset_origin_{};
+    ScrollbarDrag scrollbar_drag_{ScrollbarDrag::None};
+    float scrollbar_pointer_origin_{};
+    float scrollbar_offset_origin_{};
+    float scrollbar_travel_{};
+    float scrollbar_maximum_{};
 };
 
 class ScrollView {
