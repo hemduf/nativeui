@@ -93,6 +93,25 @@ void suite() {
         NUI_CHECK_NEAR(state.offset().x, 90.0f, 0.001f);
         NUI_CHECK_NEAR(state.offset().y, 90.0f, 0.001f);
     }
+
+    // T034 RED gate: ScrollView is the interactive wrapper around the existing
+    // ScrollState. This deliberately does not compile until T034 production
+    // surface exists; the complete interaction matrix lives in the dedicated
+    // t034_scroll_view_tests.cpp fixture added alongside this gate.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}};
+        test::MockPlatform platform;
+        tree.resize({100.0f, 100.0f});
+        tree.activate(platform);
+
+        ui::InputEvent event{};
+        event.type = ui::InputType::PointerWheel;
+        event.position = {20.0f, 20.0f};
+        event.delta = {0.0f, 40.0f};
+        NUI_CHECK(tree.dispatch(event, platform) == ui::EventResult::Handled);
+        NUI_CHECK_NEAR(state.offset().y, 40.0f, 0.001f);
+    }
 }
 
 } // namespace
