@@ -1,0 +1,301 @@
+    struct DynamicRecord {
+        NodeId owner{kInvalidNodeId};
+        std::vector<std::string> keys;
+    };
+
+    [[nodiscard]] static detail::DynamicChildrenSource* dynamic_source(Node& node) noexcept {
+        return dynamic_cast<detail::DynamicChildrenSource*>(node.component.get());
+    }
+
+    [[nodiscard]] static const detail::DynamicChildrenSource* dynamic_source(
+        const Node& node) noexcept {
+        return dynamic_cast<const detail::DynamicChildrenSource*>(node.component.get());
+    }
+
+    [[nodiscard]] static Node* find_node_mutable(Node& node, NodeId id) noexcept {
+        if (node.id == id) return &node;
+        for (auto& child : node.children) {
+            if (auto* result = find_node_mutable(*child, id)) return result;
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] static NodeId max_node_id(const Node& node) noexcept {
+        NodeId result = node.id;
+        for (const auto& child : node.children) {
+            result = std::max(result, max_node_id(*child));
+        }
+        return result;
+    }
+
+    void ensure_runtime_node_ids() noexcept {
+        if (runtime_node_ids_initialized_ || !root_) return;
+        const auto maximum = max_node_id(*root_);
+        next_node_id_ = maximum == std::numeric_limits<NodeId>::max()
+            ? kInvalidNodeId
+            : maximum + 1;
+        runtime_node_ids_initialized_ = true;
+    }
+
+    [[nodiscard]] DynamicRecord* dynamic_record(NodeId owner) noexcept {
+        for (auto& record : dynamic_records_) {
+            if (record.owner == owner) return &record;
+        }
+        return nullptr;
+    }
+
+    void register_dynamic_node(Node& node) {
+        auto* source = dynamic_source(node);
+        if (!source) return;
+
+        source->set_structure_invalidator([this, owner = node.id] {
+            queue_dynamic_mutation(owner);
+        });
+
+        auto keys = source->desired_keys();
+        if (keys.size() != node.children.size()) {
+            structural_diagnostic_ = "dynamic initial child/key count mismatch";
+            keys.clear();
+            keys.reserve(node.children.size());
+            for (std::size_t i = 0; i < node.children.size(); ++i) {
+                keys.push_back("initial:" + std::to_string(i));
+            }
+        }
+
+        if (auto* existing = dynamic_record(node.id)) {
+            existing->keys = std::move(keys);
+        } else {
+            dynamic_records_.push_back(DynamicRecord{node.id, std::move(keys)});
+        }
+    }
+
+    void unregister_dynamic_node(NodeId owner) noexcept {
+        std::erase_if(dynamic_records_, [owner](const DynamicRecord& record) {
+            return record.owner == owner;
+        });
+        std::erase(dirty_dynamic_nodes_, owner);
+    }
+
+    void queue_dynamic_mutation(NodeId owner) {
+        if (!root_ || owner == kInvalidNodeId) return;
+        ++structural_epoch_;
+        if (std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
+            dirty_dynamic_nodes_.end()) {
+            dirty_dynamic_nodes_.push_back(owner);
+        }
+        if (auto* node = find_node_mutable(*root_, owner)) invalidate_layout_from(*node);
+    }
+
+    [[nodiscard]] static bool contains_dynamic_key(
+        const std::vector<std::string>& keys, const std::string& key) {
+        return std::find(keys.begin(), keys.end(), key) != keys.end();
+    }
+
+    [[nodiscard]] static bool has_duplicate_dynamic_keys(
+        const std::vector<std::string>& keys) {
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            for (std::size_t j = i + 1; j < keys.size(); ++j) {
+                if (keys[i] == keys[j]) return true;
+            }
+        }
+        return false;
+    }
+
+    static void collect_dirty_dynamic_nodes(
+        Node& node,
+        const std::vector<NodeId>& captured,
+        std::vector<NodeId>& ordered) {
+        if (dynamic_source(node) &&
+            std::find(captured.begin(), captured.end(), node.id) != captured.end()) {
+            ordered.push_back(node.id);
+        }
+        for (auto& child : node.children) {
+            collect_dirty_dynamic_nodes(*child, captured, ordered);
+        }
+    }
+
+    static void collect_focusable_nodes(Node& node, std::vector<Node*>& result) {
+        if (node.component->focusable()) result.push_back(&node);
+        for (auto& child : node.children) collect_focusable_nodes(*child, result);
+    }
+
+    void rebuild_focusables_after_structure(Node* retained_focus) {
+        focusables_.clear();
+        collect_focusable_nodes(*root_, focusables_);
+        if (!retained_focus) {
+            focus_active_ = false;
+            focused_index_ = 0;
+            return;
+        }
+
+        const auto it = std::find(focusables_.begin(), focusables_.end(), retained_focus);
+        if (it == focusables_.end()) {
+            focus_active_ = false;
+            focused_index_ = 0;
+            return;
+        }
+        focused_index_ = static_cast<std::size_t>(std::distance(focusables_.begin(), it));
+        focus_active_ = true;
+    }
+
+    [[nodiscard]] bool subtree_is_being_removed(
+        const Node* candidate,
+        const Node& owner,
+        const std::vector<std::string>& current_keys,
+        const std::vector<std::string>& desired_keys) const noexcept {
+        if (!candidate) return false;
+        const auto count = std::min(current_keys.size(), owner.children.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (!contains_dynamic_key(desired_keys, current_keys[i]) &&
+                is_descendant_or_self(candidate, owner.children[i].get())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool reconcile_dynamic_node(Node& owner) {
+        auto* source = dynamic_source(owner);
+        auto* record = dynamic_record(owner.id);
+        if (!source || !record) return false;
+
+        auto desired_keys = source->desired_keys();
+        if (has_duplicate_dynamic_keys(desired_keys)) {
+            structural_diagnostic_ = "duplicate dynamic key";
+            return false;
+        }
+        if (desired_keys == record->keys) return false;
+        if (record->keys.size() != owner.children.size()) {
+            structural_diagnostic_ = "dynamic retained child/key count mismatch";
+            return false;
+        }
+
+        const auto current_keys = record->keys;
+        const auto teardown_epoch = structural_epoch_;
+        bool removed_focus = false;
+
+        if (active_ && active_platform_) {
+            if (auto* capture = pointer_capture_owner();
+                subtree_is_being_removed(capture, owner, current_keys, desired_keys)) {
+                (void)cancel_pointer_capture(*active_platform_);
+            }
+
+            if (auto* focused = current_focus_node();
+                subtree_is_being_removed(focused, owner, current_keys, desired_keys)) {
+                removed_focus = true;
+                clear_focus(*active_platform_);
+            }
+
+            // Teardown callbacks may change the desired structure. Do not apply
+            // a stale snapshot after arbitrary application code has run.
+            if (structural_epoch_ != teardown_epoch) {
+                queue_dynamic_mutation(owner.id);
+                return false;
+            }
+        }
+
+        auto desired = source->desired_children();
+        if (desired.size() != desired_keys.size()) {
+            structural_diagnostic_ = "dynamic desired child/key count mismatch";
+            return false;
+        }
+        for (std::size_t i = 0; i < desired.size(); ++i) {
+            if (desired[i].key != desired_keys[i]) {
+                structural_diagnostic_ = "dynamic desired key snapshot mismatch";
+                return false;
+            }
+        }
+
+        Node* retained_focus = current_focus_node();
+
+        // Removed siblings tear down in reverse retained order, matching normal
+        // child-to-parent/reverse-sibling lifecycle semantics.
+        for (std::size_t i = owner.children.size(); i-- > 0;) {
+            if (contains_dynamic_key(desired_keys, current_keys[i])) continue;
+            if (active_) deactivate_node(*owner.children[i]);
+            unmount_node(*owner.children[i]);
+        }
+
+        ensure_runtime_node_ids();
+        std::vector<std::unique_ptr<Node>> next_children;
+        next_children.reserve(desired.size());
+
+        for (auto& wanted : desired) {
+            auto current = std::find(current_keys.begin(), current_keys.end(), wanted.key);
+            if (current != current_keys.end()) {
+                const auto index = static_cast<std::size_t>(
+                    std::distance(current_keys.begin(), current));
+                if (owner.children[index]) {
+                    next_children.push_back(std::move(owner.children[index]));
+                    continue;
+                }
+            }
+
+            if (next_node_id_ == kInvalidNodeId) {
+                structural_diagnostic_ = "dynamic NodeId space exhausted";
+                return false;
+            }
+            auto inserted = detail::compile_node(
+                std::move(wanted.spec), next_node_id_, &owner);
+            initialize_availability(
+                *inserted, owner.component->effective_availability());
+            mount_node(*inserted);
+            if (active_) activate_node(*inserted);
+            next_children.push_back(std::move(inserted));
+        }
+
+        owner.children = std::move(next_children);
+        if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = std::move(desired_keys);
+
+        rebuild_focusables_after_structure(retained_focus);
+        focus_structure_dirty_ = true;
+        invalidate_layout_from(owner);
+
+        if (active_ && active_platform_) {
+            sync_focus_structure(*active_platform_);
+            if (removed_focus && !focus_active_) {
+                if (auto* fallback = first_available_focusable()) {
+                    set_focus(fallback, *active_platform_);
+                }
+            }
+        }
+        return true;
+    }
+
+    void flush_dynamic_mutations() {
+        if (reconciling_dynamic_ || !root_ || dirty_dynamic_nodes_.empty()) return;
+
+        reconciling_dynamic_ = true;
+        constexpr std::size_t kMaxStructuralPasses = 32;
+        std::size_t pass = 0;
+
+        while (!dirty_dynamic_nodes_.empty() && pass < kMaxStructuralPasses) {
+            auto captured = std::move(dirty_dynamic_nodes_);
+            dirty_dynamic_nodes_.clear();
+
+            std::vector<NodeId> ordered;
+            ordered.reserve(captured.size());
+            collect_dirty_dynamic_nodes(*root_, captured, ordered);
+
+            for (const auto owner : ordered) {
+                if (auto* node = find_node_mutable(*root_, owner)) {
+                    (void)reconcile_dynamic_node(*node);
+                }
+            }
+            ++pass;
+        }
+
+        reconciling_dynamic_ = false;
+        if (!dirty_dynamic_nodes_.empty()) {
+            structural_diagnostic_ = "structural reconciliation pass limit exceeded";
+            invalidate_paint(viewport_rect());
+        }
+    }
+
+    std::vector<DynamicRecord> dynamic_records_;
+    std::vector<NodeId> dirty_dynamic_nodes_;
+    NodeId next_node_id_{1};
+    std::uint64_t structural_epoch_{};
+    bool runtime_node_ids_initialized_{};
+    bool reconciling_dynamic_{};
+    std::string structural_diagnostic_;
