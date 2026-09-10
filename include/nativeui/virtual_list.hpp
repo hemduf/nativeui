@@ -41,7 +41,9 @@ public:
           runtime_(std::make_shared<Runtime>(
               checked_row_height(row_height),
               adapt_row_factory(std::forward<RowFactory>(row_factory)),
-              overscan)) {}
+              overscan)) {
+        runtime_->bind_selection(selection);
+    }
 
     VirtualListState(const VirtualListState&) = delete;
     VirtualListState& operator=(const VirtualListState&) = delete;
