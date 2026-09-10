@@ -1,5 +1,6 @@
 #include <nativeui/detail/virtual_list_model.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -42,6 +43,40 @@ void range_contract() {
         10, std::numeric_limits<float>::quiet_NaN(), 0.0f, 100.0f, 2));
 }
 
+void bounded_materialization_contract() {
+    using ui::detail::VirtualListRange;
+    using ui::detail::virtual_list_materialized_indices;
+
+    const auto normal = virtual_list_materialized_indices(
+        100, VirtualListRange{10, 17}, std::nullopt, std::nullopt);
+    check(normal.has_value());
+    check(normal && normal->size() == 7);
+    check(normal && normal->front() == 10 && normal->back() == 16);
+
+    const auto pinned = virtual_list_materialized_indices(
+        100, VirtualListRange{10, 17}, std::size_t{2}, std::size_t{90});
+    check(pinned.has_value());
+    check(pinned && pinned->size() == 9);
+    check(pinned && std::is_sorted(pinned->begin(), pinned->end()));
+    check(pinned && std::find(pinned->begin(), pinned->end(), 2) != pinned->end());
+    check(pinned && std::find(pinned->begin(), pinned->end(), 90) != pinned->end());
+
+    const auto duplicate_pin = virtual_list_materialized_indices(
+        100, VirtualListRange{10, 17}, std::size_t{12}, std::size_t{12});
+    check(duplicate_pin.has_value());
+    check(duplicate_pin && duplicate_pin->size() == 7);
+
+    const auto invalid_pin = virtual_list_materialized_indices(
+        100, VirtualListRange{10, 17}, std::size_t{100}, std::size_t{101});
+    check(invalid_pin.has_value());
+    check(invalid_pin && invalid_pin->size() == 7);
+
+    check(!virtual_list_materialized_indices(
+        100, VirtualListRange{17, 10}, std::nullopt, std::nullopt));
+    check(!virtual_list_materialized_indices(
+        100, VirtualListRange{10, 101}, std::nullopt, std::nullopt));
+}
+
 void content_height_contract() {
     using ui::detail::virtual_list_content_height;
 
@@ -73,6 +108,10 @@ void dataset_identity_contract() {
     }));
     check(model.generation() == 1);
     check(model.size() == 3);
+    check(model.index_of_key(10) == 0);
+    check(model.index_of_key(20) == 1);
+    check(model.index_of_key(30) == 2);
+    check(!model.index_of_key(99));
 
     const auto token10 = model.token_for_key(10);
     const auto token20 = model.token_for_key(20);
@@ -97,6 +136,9 @@ void dataset_identity_contract() {
         Input{20, "twenty", true},
     }));
     check(model.generation() == 2);
+    check(model.index_of_key(30) == 0);
+    check(model.index_of_key(10) == 1);
+    check(model.index_of_key(20) == 2);
     check(model.token_for_key(10) == token10);
     check(model.token_for_key(20) == token20);
     check(model.token_for_key(30) == token30);
@@ -131,12 +173,25 @@ void large_dataset_contract() {
     check(model.replace(std::move(items)));
     check(model.size() == 100000);
     check(model.metadata_snapshot()->size() == 100000);
+
+    const auto metadata = model.metadata_snapshot();
+    const auto generation = model.generation();
+    for (std::size_t i = 0; i < 1000; ++i) {
+        const auto view = model.semantic_children(
+            i % 100000,
+            {0.0f, 0.0f, 320.0f, 400.0f},
+            20.0f,
+            static_cast<float>(i));
+        check(view.dataset_generation() == generation);
+        check(view.metadata_snapshot().get() == metadata.get());
+    }
 }
 
 } // namespace
 
 int main() {
     range_contract();
+    bounded_materialization_contract();
     content_height_contract();
     dataset_identity_contract();
     large_dataset_contract();
