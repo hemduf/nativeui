@@ -255,6 +255,14 @@
         NodeId surviving_focus_scope{kInvalidNodeId};
 
         if (active_ && active_platform_) {
+            if (pointer_hover_target_ &&
+                subtree_is_being_removed(
+                    pointer_hover_target_, owner, current_keys, desired_keys)) {
+                InputEvent leave{};
+                leave.type = InputType::PointerLeave;
+                (void)clear_pointer_hover(leave, *active_platform_);
+            }
+
             if (auto* capture = pointer_capture_owner();
                 subtree_is_being_removed(capture, owner, current_keys, desired_keys)) {
                 (void)cancel_pointer_capture(*active_platform_);
