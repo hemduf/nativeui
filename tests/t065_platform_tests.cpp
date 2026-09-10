@@ -62,7 +62,7 @@ int standalone_worker_wake() {
     std::atomic<bool> wrong_thread{false};
     const auto start = std::chrono::steady_clock::now();
 
-    std::jthread worker{[dispatcher, &accepted, &calls, &wrong_thread, ui_thread] {
+    std::thread worker{[dispatcher, &accepted, &calls, &wrong_thread, ui_thread] {
         std::this_thread::sleep_for(50ms);
         accepted.store(
             dispatcher.post([&calls, &wrong_thread, ui_thread] {
@@ -113,7 +113,7 @@ int embedded_host_checkpoint() {
     std::atomic<int> calls{0};
     std::atomic<bool> wrong_thread{false};
     std::atomic<bool> accepted{false};
-    std::jthread worker{[dispatcher, &calls, &wrong_thread, &accepted, ui_thread] {
+    std::thread worker{[dispatcher, &calls, &wrong_thread, &accepted, ui_thread] {
         accepted.store(
             dispatcher.post([&calls, &wrong_thread, ui_thread] {
                 wrong_thread.store(std::this_thread::get_id() != ui_thread,
