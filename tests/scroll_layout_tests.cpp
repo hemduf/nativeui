@@ -269,7 +269,7 @@ void suite() {
         NUI_CHECK(content->up == 0);
     }
 
-    // T034 RED: moving focus to an offscreen descendant reveals it with Nearest before paint.
+    // T034: moving focus to an offscreen descendant reveals it with Nearest before paint.
     {
         ui::ScrollState state{ui::ScrollAxis::Vertical};
         ui::UI tree{
@@ -277,7 +277,9 @@ void suite() {
                 ui::Column{
                     ui::Button{"first", [] {}},
                     ui::Spacer{100.0f, 180.0f},
-                    ui::Button{"target", [] {}}}}};
+                    ui::Button{"target", [] {}}}
+                    .gap(0.0f)
+                    .padding(0.0f)}};
         test::MockPlatform platform;
         tree.resize({100.0f, 100.0f});
         tree.activate(platform);
