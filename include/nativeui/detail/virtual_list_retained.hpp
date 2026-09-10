@@ -253,8 +253,15 @@ public:
             const auto* item = model_.item_at(materialized.index);
             if (!item) continue;
             const Key key = item->key;
+
+            std::vector<Spec> content_children;
+            content_children.push_back(*materialized.payload);
+            Spec content_barrier{
+                [] { return std::make_unique<VirtualListRowContentBarrierComponent>(); },
+                std::move(content_children)};
+
             std::vector<Spec> row_children;
-            row_children.push_back(*materialized.payload);
+            row_children.push_back(std::move(content_barrier));
             result.push_back(DynamicChildSpec{
                 materialized.key,
                 Spec{
@@ -330,12 +337,6 @@ class VirtualListRetainedComponent final : public Component, public DynamicChild
 public:
     explicit VirtualListRetainedComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
         : runtime_(std::move(runtime)) {}
-
-    // T036's rows stay outside global focus traversal even though their visual
-    // subtrees are retained dynamically by T058.
-    [[nodiscard]] bool is_focus_scope() const noexcept override { return true; }
-    [[nodiscard]] bool focus_scope_active() const noexcept override { return false; }
-    [[nodiscard]] bool focus_scope_traps() const noexcept override { return false; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         Size result{0.0f, runtime_->content_height()};
