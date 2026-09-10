@@ -9,10 +9,12 @@
 
 namespace ui::detail {
 
+using LinuxDbusClientId = std::uint64_t;
 using LinuxDbusRequestId = std::uint64_t;
 using LinuxDbusSubscriptionId = std::uint64_t;
 using LinuxDbusObjectRegistrationId = std::uint64_t;
 
+inline constexpr LinuxDbusClientId kInvalidLinuxDbusClientId = 0;
 inline constexpr LinuxDbusRequestId kInvalidLinuxDbusRequestId = 0;
 inline constexpr LinuxDbusSubscriptionId kInvalidLinuxDbusSubscriptionId = 0;
 inline constexpr LinuxDbusObjectRegistrationId kInvalidLinuxDbusObjectRegistrationId = 0;
@@ -43,6 +45,38 @@ enum class LinuxDbusErrorCode {
 [[nodiscard]] bool linux_dbus_initialize_threads() noexcept;
 [[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
 [[nodiscard]] bool linux_dbus_valid_object_path(std::string_view path) noexcept;
+
+/// Transport-local hard-limit ledger. It owns no libdbus objects and invokes no
+/// callbacks; IDs are monotonically generated within each resource namespace.
+/// Client ownership is checked on release so sibling Portal/accessibility
+/// clients sharing one Application transport cannot release each other's slots.
+class LinuxDbusResourceLedger final {
+public:
+    LinuxDbusResourceLedger();
+    ~LinuxDbusResourceLedger();
+
+    LinuxDbusResourceLedger(const LinuxDbusResourceLedger&) = delete;
+    LinuxDbusResourceLedger& operator=(const LinuxDbusResourceLedger&) = delete;
+    LinuxDbusResourceLedger(LinuxDbusResourceLedger&&) = delete;
+    LinuxDbusResourceLedger& operator=(LinuxDbusResourceLedger&&) = delete;
+
+    [[nodiscard]] LinuxDbusRequestId acquire_request(LinuxDbusClientId client);
+    [[nodiscard]] bool release_request(LinuxDbusClientId client, LinuxDbusRequestId id);
+    [[nodiscard]] std::size_t pending_request_count() const noexcept;
+
+    [[nodiscard]] LinuxDbusSubscriptionId acquire_subscription(LinuxDbusClientId client);
+    [[nodiscard]] bool release_subscription(LinuxDbusClientId client, LinuxDbusSubscriptionId id);
+    [[nodiscard]] std::size_t subscription_count() const noexcept;
+
+    [[nodiscard]] LinuxDbusObjectRegistrationId acquire_object_path(LinuxDbusClientId client);
+    [[nodiscard]] bool release_object_path(LinuxDbusClientId client,
+                                           LinuxDbusObjectRegistrationId id);
+    [[nodiscard]] std::size_t object_path_count() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 class LinuxDbusTransport final {
 public:

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 namespace ui::detail {
@@ -18,6 +19,44 @@ bool g_dbus_threads_initialized = false;
            (c >= 'a' && c <= 'z') ||
            (c >= '0' && c <= '9') ||
            c == '_';
+}
+
+template <typename Map>
+[[nodiscard]] std::uint64_t acquire_slot(Map& owners,
+                                         std::uint64_t& next_id,
+                                         std::size_t capacity,
+                                         LinuxDbusClientId client) {
+    if (client == kInvalidLinuxDbusClientId || owners.size() >= capacity) {
+        return 0;
+    }
+
+    for (;;) {
+        const std::uint64_t candidate = next_id;
+        ++next_id;
+        if (next_id == 0) {
+            next_id = 1;
+        }
+        if (candidate == 0 || owners.contains(candidate)) {
+            continue;
+        }
+        owners.emplace(candidate, client);
+        return candidate;
+    }
+}
+
+template <typename Map>
+[[nodiscard]] bool release_slot(Map& owners,
+                                LinuxDbusClientId client,
+                                std::uint64_t id) {
+    if (client == kInvalidLinuxDbusClientId || id == 0) {
+        return false;
+    }
+    const auto found = owners.find(id);
+    if (found == owners.end() || found->second != client) {
+        return false;
+    }
+    owners.erase(found);
+    return true;
 }
 
 } // namespace
@@ -69,6 +108,73 @@ bool linux_dbus_library_probe() noexcept {
     const auto valid = dbus_validate_path("/", &error) != FALSE;
     dbus_error_free(&error);
     return valid;
+}
+
+struct LinuxDbusResourceLedger::Impl final {
+    mutable std::mutex mutex;
+    std::uint64_t next_request_id{1};
+    std::uint64_t next_subscription_id{1};
+    std::uint64_t next_object_path_id{1};
+    std::unordered_map<std::uint64_t, LinuxDbusClientId> requests;
+    std::unordered_map<std::uint64_t, LinuxDbusClientId> subscriptions;
+    std::unordered_map<std::uint64_t, LinuxDbusClientId> object_paths;
+};
+
+LinuxDbusResourceLedger::LinuxDbusResourceLedger()
+    : impl_(std::make_unique<Impl>()) {}
+
+LinuxDbusResourceLedger::~LinuxDbusResourceLedger() = default;
+
+LinuxDbusRequestId LinuxDbusResourceLedger::acquire_request(LinuxDbusClientId client) {
+    std::lock_guard lock{impl_->mutex};
+    return acquire_slot(impl_->requests, impl_->next_request_id,
+                        kLinuxDbusMaxPendingCalls, client);
+}
+
+bool LinuxDbusResourceLedger::release_request(LinuxDbusClientId client,
+                                               LinuxDbusRequestId id) {
+    std::lock_guard lock{impl_->mutex};
+    return release_slot(impl_->requests, client, id);
+}
+
+std::size_t LinuxDbusResourceLedger::pending_request_count() const noexcept {
+    std::lock_guard lock{impl_->mutex};
+    return impl_->requests.size();
+}
+
+LinuxDbusSubscriptionId LinuxDbusResourceLedger::acquire_subscription(LinuxDbusClientId client) {
+    std::lock_guard lock{impl_->mutex};
+    return acquire_slot(impl_->subscriptions, impl_->next_subscription_id,
+                        kLinuxDbusMaxSubscriptions, client);
+}
+
+bool LinuxDbusResourceLedger::release_subscription(LinuxDbusClientId client,
+                                                    LinuxDbusSubscriptionId id) {
+    std::lock_guard lock{impl_->mutex};
+    return release_slot(impl_->subscriptions, client, id);
+}
+
+std::size_t LinuxDbusResourceLedger::subscription_count() const noexcept {
+    std::lock_guard lock{impl_->mutex};
+    return impl_->subscriptions.size();
+}
+
+LinuxDbusObjectRegistrationId LinuxDbusResourceLedger::acquire_object_path(
+    LinuxDbusClientId client) {
+    std::lock_guard lock{impl_->mutex};
+    return acquire_slot(impl_->object_paths, impl_->next_object_path_id,
+                        kLinuxDbusMaxObjectPaths, client);
+}
+
+bool LinuxDbusResourceLedger::release_object_path(LinuxDbusClientId client,
+                                                  LinuxDbusObjectRegistrationId id) {
+    std::lock_guard lock{impl_->mutex};
+    return release_slot(impl_->object_paths, client, id);
+}
+
+std::size_t LinuxDbusResourceLedger::object_path_count() const noexcept {
+    std::lock_guard lock{impl_->mutex};
+    return impl_->object_paths.size();
 }
 
 struct LinuxDbusTransport::Impl final {
