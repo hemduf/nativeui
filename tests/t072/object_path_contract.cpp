@@ -33,8 +33,12 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    constexpr LinuxDbusClientId client_a = 1;
-    constexpr LinuxDbusClientId client_b = 2;
+    const auto client_a = transport.register_client();
+    const auto client_b = transport.register_client();
+    if (client_a == kInvalidLinuxDbusClientId ||
+        client_b == kInvalidLinuxDbusClientId || client_a == client_b) {
+        return EXIT_FAILURE;
+    }
     const auto main_thread = std::this_thread::get_id();
     std::thread::id handler_thread;
 
@@ -169,6 +173,8 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    transport.release_client(client_a);
+    transport.release_client(client_b);
     transport.stop();
     return EXIT_SUCCESS;
 }
