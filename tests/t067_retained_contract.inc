@@ -100,6 +100,17 @@ void behavior_contract() {
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(counters.constructed == 18);
     NUI_CHECK(counters.destroyed == 9);
+
+    NUI_CHECK(runtime->scroll_to_index(30, ui::ScrollAlignment::Start));
+    NUI_CHECK(runtime->scroll().offset().y == 600.0f);
+    NUI_CHECK(runtime->scroll_to_key(31, ui::ScrollAlignment::Nearest));
+    NUI_CHECK(runtime->scroll().offset().y == 600.0f);
+
+    const auto before_invalid_scroll = runtime->scroll().offset();
+    NUI_CHECK(!runtime->scroll_to_index(100, ui::ScrollAlignment::End));
+    NUI_CHECK(!runtime->scroll_to_key(10000, ui::ScrollAlignment::Center));
+    NUI_CHECK(runtime->scroll().offset().x == before_invalid_scroll.x);
+    NUI_CHECK(runtime->scroll().offset().y == before_invalid_scroll.y);
 }
 
 } // namespace t067_retained_contract
