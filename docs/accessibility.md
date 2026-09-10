@@ -1,64 +1,51 @@
 # NativeUI v1 accessibility semantics
 
-Status: T045 design freeze for T067/T068. This document is normative for the v1 accessibility implementation. Production native bridges are implemented by T068, not here.
+Status: normative T045 design freeze for T067/T068. Production native accessibility bridges are implemented by T068, not here.
 
 ## 1. Semantic identity and snapshots
 
-Every exposed semantic object has an owned, backend-neutral `SemanticId`. Ordinary retained nodes use a deterministic identity derived from their retained `NodeId`; `0` is invalid. Native objects never retain `Node*`, `Component*`, or other live-tree pointers.
+Every exposed semantic object has an owned backend-neutral `SemanticId`; `0` is invalid. Ordinary retained semantic IDs are derived deterministically from stable retained `NodeId` identity. Native accessibility objects never retain `Node*`, `Component*`, or another live-tree pointer.
 
-Each native view publishes immutable `SemanticTreeSnapshot` generations from the UI thread. A native reader retains a shared immutable generation, performs read-only queries from it, and may outlive publication of the next generation. Removed IDs resolve as defunct/absent. Native mutation/action requests are marshalled to the owning UI thread and re-resolved against current state before execution.
+Each native view publishes immutable `SemanticTreeSnapshot` generations from the UI thread. A native reader retains one shared immutable generation and may outlive publication of later generations. Removed IDs resolve as absent/defunct. Native mutation/action requests are marshalled to the owning UI thread and re-resolved against current state before execution.
 
-No process-global semantic registry, current semantic root, or `thread_local` semantic state is permitted. Snapshot/proxy/cache state is per native view.
+Snapshot/proxy/cache state is per native view. No process-global semantic registry, current semantic root, singleton, or `thread_local` semantic state exists.
 
-## 2. Semantic roles
+## 2. Closed v1 roles and actions
 
-The closed v1 role set is the `SemanticRole` enum in `nativeui/semantics.hpp`:
+The closed role set is the `SemanticRole` enum in `nativeui/semantics.hpp`: `None`, `Button`, `Checkbox`, `RadioButton`, `Toggle`, `Slider`, `RangeSliderHandle`, `ProgressBar`, `Meter`, `Text`, `TextInput`, `TextArea`, `ComboBox`, `PopupMenu`, `MenuItem`, `ListView`, `ListItem`, `Tabs`, `Tab`, `TabPanel`, `Dialog`, `Group`, `Image`, `Custom`.
 
-`None`, `Button`, `Checkbox`, `RadioButton`, `Toggle`, `Slider`, `RangeSliderHandle`, `ProgressBar`, `Meter`, `Text`, `TextInput`, `TextArea`, `ComboBox`, `PopupMenu`, `MenuItem`, `ListView`, `ListItem`, `Tabs`, `Tab`, `TabPanel`, `Dialog`, `Group`, `Image`, `Custom`.
+`None` means the node itself is flattened unless needed as the owner of exposed semantic descendants. Pure layout wrappers normally use `None`. `Group` is an explicitly exposed semantic grouping node. `Custom` is the generic application role when no more specific standard role is selected.
 
-`None` means the node itself is flattened from the semantic tree unless it is needed as the owner of semantic children. Pure layout wrappers normally use `None`. `Group` is used only for intentionally exposed grouping semantics. `Custom` is the generic role for an application component that deliberately opts into semantics without selecting another standard role.
+The closed action set is `Activate`, `Toggle`, `Focus`, `Increment`, `Decrement`, `SetValue`, `Select`, `Expand`, `Collapse`.
 
-## 3. Semantic actions
+Only advertised actions may be requested. The platform bridge never writes widget internals directly and never synthesizes pointer/key events for accessibility. It dispatches one semantic action to NativeUI on the UI thread, where identity, effective enabled/read-only state, and current action eligibility are checked again.
 
-The closed v1 action set is:
+Disabled nodes remain present when meaningful and reject activation/mutation actions. Read-only editable/value nodes remain readable/focusable/selectable as applicable and reject value-changing actions. Focus and non-mutating navigation remain available when otherwise eligible.
 
-- `Activate`: invoke a button/menu-item/default action;
-- `Toggle`: change check/toggle state;
-- `Focus`: request NativeUI keyboard focus;
-- `Increment` / `Decrement`: one logical value step;
-- `SetValue`: set a numeric/text value when the role supports it;
-- `Select`: select one logical item/tab/radio entry;
-- `Expand` / `Collapse`: change expansion state for roles that expose it.
-
-Only advertised actions may be requested. The platform bridge never writes widget internals directly and never synthesizes fake pointer/key input. It dispatches one semantic action to NativeUI on the UI thread, where existence, effective enabled/read-only state and current action eligibility are checked again.
-
-Disabled nodes remain semantically present when meaningful but reject activation/mutation actions. Read-only editable/value nodes remain readable/focusable/selectable as applicable and reject value-changing actions. Focus and non-mutating navigation remain available when otherwise eligible.
-
-## 4. Tree, availability and ordering
+## 3. Tree, availability, focus, and geometry
 
 - `Collapsed`: subtree absent from semantics.
 - `Hidden`: subtree absent from semantics by default.
-- Disabled: present when meaningful, `enabled=false`.
-- Read-only: present, `read_only=true`.
-- Semantic child order follows logical reading/navigation order, never incidental paint-call order.
+- Disabled: present when meaningful with `enabled=false`.
+- Read-only: present with `read_only=true`.
+- Child order follows logical reading/navigation order, never incidental paint-call order.
 - A `None` layout wrapper is flattened while preserving descendant order.
-- An explicit `Group` is retained as one semantic parent.
-- Visible overlays are ordered after root content according to T061 creation/z order. A modal dialog becomes the active semantic focus domain; underlying content remains represented only according to the final T061/T063 modal policy implemented by T068.
-- Tooltip visual overlay is not the source of accessible help; help/description belongs to the anchor semantic node.
+- An explicit `Group` remains as one semantic parent.
+- Visible overlays follow T061 creation/z order after root content.
+- A T063 modal dialog is the active semantic focus domain while visible; underlying content is not exposed as an actionable focus domain while the modal is active.
+- Tooltip visual overlay is not the semantic source of help text; help/description belongs to the anchor node.
 
-## 5. Focus and geometry
+Semantic bounds are NativeUI logical view-relative `Rect` values. T043 is the sole logical-to-native/screen conversion authority and a platform bridge applies scale/translation exactly once.
 
-Semantic bounds are logical view-relative `Rect` values. T043 is the sole logical-to-native/screen conversion authority; a platform bridge applies scale/translation exactly once.
+Native focus requests dispatch `SemanticAction::Focus`. NativeUI keyboard focus remains authoritative. Native focus notifications are emitted only from resulting NativeUI focus state, preventing request/notification feedback loops.
 
-Native accessibility focus requests dispatch `SemanticAction::Focus`. NativeUI keyboard focus remains authoritative. Focus notifications are emitted only from the resulting NativeUI focus state, preventing request/notification feedback loops.
-
-## 6. Standard-widget semantic contract
+## 4. Standard-widget semantic contract
 
 | NativeUI surface | Role(s) | Principal properties | Actions when enabled/editable |
 | --- | --- | --- | --- |
 | Button | Button | name, enabled, focused | Activate, Focus |
 | Checkbox | Checkbox | name, checked, enabled, focused | Toggle, Focus |
-| RadioButton | RadioButton | name, selected/checked, group relation | Select, Focus |
+| RadioButton | RadioButton | name, selected/checked, parent radio group | Select, Focus |
 | Toggle | Toggle | name, checked, enabled | Toggle, Focus |
 | Slider | Slider | numeric value/range, read-only | Increment, Decrement, SetValue, Focus |
 | RangeSlider | two RangeSliderHandle children | each handle value/range | Increment, Decrement, SetValue, Focus |
@@ -69,46 +56,46 @@ Native accessibility focus requests dispatch `SemanticAction::Focus`. NativeUI k
 | TextArea | TextArea | value, editable/read-only, focus | SetValue when editable, Focus |
 | ComboBox | ComboBox | value, expanded, enabled | Expand, Collapse, Select, Focus |
 | PopupMenu | PopupMenu | ordered MenuItem children | Focus where applicable |
-| MenuItem | MenuItem | name, enabled, selected/checked when applicable | Activate/Select as declared |
+| MenuItem | MenuItem | name, enabled, selected/checked when applicable | Activate or Select as declared |
 | ListView | ListView | selected item + ordinary/virtual children | Focus |
-| List item | ListItem | name, enabled, selected | Select, Focus, optional Activate |
-| Tabs | Tabs | ordered Tab children | Focus |
+| ListItem | ListItem | name, enabled, selected | Select, Focus, optional Activate |
+| Tabs | Tabs | ordered Tab/TabPanel children | Focus |
 | Tab | Tab | name, selected, enabled | Select, Focus |
-| TabPanel | TabPanel | labelled/group relation | none |
+| TabPanel | TabPanel | parent Tabs + paired Tab relation | none |
 | Dialog | Dialog | name/title, modal state | Focus and child actions |
 | Group/container | Group | optional name | none |
 | Image/Icon | Image | accessible name/description when meaningful | none |
-| Custom | Custom or chosen standard role | application-provided fields | application-advertised subset |
+| Custom | Custom or selected standard role | application-provided fields | application-advertised subset |
 
-Radio group membership and tab-to-panel relationships are semantic relationships represented by stable semantic IDs in the T068 snapshot implementation; they are never raw component pointers.
+Radio-group membership is encoded by semantic hierarchy: one exposed `Group` owns its `RadioButton` children. Tabs similarly owns its `Tab` and `TabPanel` children in logical order; the selected Tab and visible TabPanel are paired by stable selected-key semantics from T036. T068 may emit platform-native labelled/controlled relationships from that frozen hierarchy but does not invent raw component-pointer relationships.
 
-## 7. Custom-component seam
+## 5. Exact custom-component seam
 
-The v1 component semantic hook is fixed conceptually as a platform-neutral `SemanticInfo` producer on a retained component/context. T068 may implement it as a virtual `Component::semantics()` or an equivalent context hook, but the observable contract is fixed:
+T068 must add exactly one ordinary component hook with this public capability:
 
-- returns owned/value semantic data using only NativeUI public types;
-- no Pugl/AppKit/Win32/Xlib/UIA/AT-SPI types in the public signature;
-- no native object ownership is transferred to application code;
-- a default component with role `None` is flattened;
-- virtual-collection capability is separate and optional, used by ListView rather than required for ordinary custom components.
+```cpp
+virtual SemanticInfo Component::semantics() const;
+```
 
-T068 must not introduce a second incompatible custom semantic API.
+The default implementation returns `SemanticInfo{}` with `role == SemanticRole::None`, which flattens the component while preserving semantic descendants. An application custom component overrides this hook to return owned/value semantic data. The signature uses NativeUI public types only and transfers no native object ownership.
 
-## 8. Virtual collection contract
+Virtual-collection semantics are a separate ListView capability and are not part of the ordinary custom-component hook. T068 must not introduce a second competing ordinary semantic callback/provider API.
+
+## 6. Virtual collection identity and immutable data
 
 T067 ListView exposes the full logical dataset without materializing every visual row.
 
-Each accepted logical key receives a non-zero `VirtualSemanticItemToken`. The token is **not a hash**. It is minted by the owning ListView when a key first enters the accepted dataset, remains stable while that exact logical key remains present (including reorder and metadata updates), and is never reused for another live or stale item identity during that ListView lifetime. If a key is removed and later reinserted, it receives a new token so old native proxies remain defunct.
+Each accepted logical key receives a non-zero `VirtualSemanticItemToken`. The token is **not a hash**. The owning ListView mints it when a key first enters an accepted dataset, retains it while that exact key remains present through reorder/metadata updates, and never reuses it for another live or stale identity during that ListView lifetime. If a key is removed and later reinserted, it receives a new token, so an old native proxy stays defunct.
 
-Native virtual item identity is the pair `{ListView SemanticId, VirtualSemanticItemToken}`.
+Native virtual item identity is exactly `{ListView SemanticId, VirtualSemanticItemToken}`.
 
-`VirtualSemanticChildren` is an immutable snapshot interface. A T067 implementation stores one O(N) immutable logical metadata object per accepted dataset generation and combines it with small current scalar/view state such as selected token, row height, scroll transform and viewport geometry. Creating a new semantic generation for selection/scroll/focus may create a new lightweight provider object but must retain the same O(N) metadata allocation/generation while the dataset is unchanged.
+`VirtualSemanticChildren` is a concrete immutable, data-only snapshot value. T067 creates one O(N) immutable metadata allocation for each accepted dataset generation and combines it with cheap current scalar/view state: selected token, fixed row height, scroll transform, and list bounds. A new semantic generation caused by selection/scroll/focus may construct another cheap `VirtualSemanticChildren` value but must retain the exact same O(N) metadata pointer/generation while the dataset is unchanged.
 
-`size()` returns the full logical count. `item_at(index)` returns semantic metadata and lazily computed bounds for exactly one logical item and must never call the visual row factory, mount a component, or allocate all item proxies. `index_of_selected_item()` may use the provider's current scalar selection state and T067's documented lookup policy.
+`size()` reports the full logical item count. `item_at(index)` reads exactly one immutable metadata entry, resolves selected state from the small current selected token, and computes fixed-height logical bounds arithmetically. It never calls application code, a visual row factory, or retained-tree mutation. `index_of_selected_item()` follows T067's documented O(N) lookup policy; no hidden key-index cache is introduced.
 
-T067 owns key equality, dataset validation, token retention and metadata snapshot construction. T068 owns native proxy creation and must create virtual item proxies lazily on query/action.
+T067 owns key equality, dataset validation, token retention, finite fixed-height geometry validation, and metadata snapshot construction. `VirtualSemanticChildren::from_metadata()` is consumed only with already validated T067 data. T068 shares this immutable metadata pointer; it must never recopy O(N) virtual item metadata on ordinary semantic publication.
 
-## 9. macOS mapping — NSAccessibility
+## 7. macOS — exact NSAccessibility mapping
 
 | SemanticRole | NSAccessibility mapping |
 | --- | --- |
@@ -128,18 +115,20 @@ T067 owns key equality, dataset validation, token retention and metadata snapsho
 | ListView | `NSAccessibilityListRole` |
 | ListItem | `NSAccessibilityRowRole` |
 | Tabs | `NSAccessibilityTabGroupRole` |
-| Tab | `NSAccessibilityRadioButtonRole` + tab-button subrole when supported |
-| TabPanel / Group / Custom | `NSAccessibilityGroupRole` unless a more specific standard role is supplied |
+| Tab | `NSAccessibilityRadioButtonRole` with tab-button subrole when available on the deployment target |
+| TabPanel | `NSAccessibilityGroupRole` |
+| Group | `NSAccessibilityGroupRole` |
 | Dialog | `NSAccessibilityDialogRole` |
 | Image | `NSAccessibilityImageRole` |
+| Custom | `NSAccessibilityGroupRole` unless the application selected another standard `SemanticRole` |
 
-`Activate`/`Toggle`/`Select` use press/selection semantics as appropriate; `Increment` and `Decrement` map to the standard increment/decrement actions; `SetValue` uses the writable value attribute; `Focus` uses focused-element semantics; `Expand`/`Collapse` use expanded-state semantics where the role supports it.
+`Activate`/`Toggle`/`Select` map to standard press/selection semantics as appropriate. `Increment` and `Decrement` map to standard increment/decrement actions. `SetValue` uses the writable value attribute. `Focus` uses focused-element semantics. `Expand`/`Collapse` use expanded-state semantics only where the role advertises them.
 
-Virtual ListView queries expose logical children lazily through NSAccessibility children/index queries. Native proxy objects are per-view and lazy; no 100k eager `NSAccessibilityElement` construction is allowed. Any T068 runtime-visible Objective-C class must use the T053 consumer-specific runtime prefix; no category/swizzle/`+load` solution is permitted.
+Virtual ListView children are exposed lazily through NSAccessibility children/index queries. Native proxies are per-view and lazy; no O(N) eager `NSAccessibilityElement` creation is allowed. Any runtime-visible Objective-C class added by T068 must use the T053 consumer-specific runtime prefix. Categories, swizzling, and `+load` are not permitted.
 
-## 10. Windows mapping — UI Automation
+## 8. Windows — exact UI Automation mapping
 
-| SemanticRole | UIA ControlType / primary pattern |
+| SemanticRole | UIA ControlType / required primary pattern |
 | --- | --- |
 | Button | Button / Invoke |
 | Checkbox | CheckBox / Toggle |
@@ -147,99 +136,104 @@ Virtual ListView queries expose logical children lazily through NSAccessibility 
 | Toggle | CheckBox / Toggle |
 | Slider | Slider / RangeValue |
 | RangeSliderHandle | Thumb / RangeValue |
-| ProgressBar / Meter | ProgressBar / read-only RangeValue |
+| ProgressBar | ProgressBar / read-only RangeValue |
+| Meter | ProgressBar / read-only RangeValue |
 | Text | Text |
-| TextInput | Edit / Value + Text where available |
-| TextArea | Edit / Text + Value semantics as supported |
+| TextInput | Edit / Value + Text where the platform requests text access |
+| TextArea | Edit / Text + Value semantics |
 | ComboBox | ComboBox / ExpandCollapse + Selection |
 | PopupMenu | Menu |
-| MenuItem | MenuItem / Invoke or SelectionItem as declared |
+| MenuItem | MenuItem / Invoke or SelectionItem according to advertised NativeUI action |
 | ListView | List / Selection + ItemContainer |
-| ListItem | ListItem / SelectionItem; virtual items also expose VirtualizedItem when applicable |
+| ListItem | ListItem / SelectionItem; virtual logical items additionally expose VirtualizedItem |
 | Tabs | Tab |
 | Tab | TabItem / SelectionItem |
-| TabPanel / Group / Custom | Group unless a more specific standard role is supplied |
-| Dialog | Window control type within the NativeUI fragment; modal/focus state is semantic, not a second native HWND |
+| TabPanel | Group |
+| Group | Group |
+| Dialog | Window ControlType as an in-view UIA fragment element; no second native HWND |
 | Image | Image |
+| Custom | Group unless another standard `SemanticRole` was selected |
 
-T068 exposes one fragment/provider root per NativeUI view. Providers retain semantic identity + weak bridge, never Component pointers. Stale objects return UIA element-not-available semantics.
+T068 exposes one fragment/provider root per NativeUI view. Providers retain semantic identity plus a weak bridge, never a `Component*`. Stale objects return UIA element-not-available semantics.
 
-Virtualized ListView uses `ItemContainerPattern` on the list and lazy item providers; an offscreen logical item may expose `VirtualizedItemPattern`/selection behavior without materializing a visual NativeUI row. No eager provider creation proportional to logical item count is permitted.
+Virtualized ListView uses `ItemContainerPattern` on the list and lazy item providers. An offscreen logical item may expose `VirtualizedItemPattern` and selection/focus behavior without materializing a visual NativeUI row. No provider creation proportional to the logical item count occurs at publication time.
 
-## 11. Linux/X11 mapping — AT-SPI2
+## 9. Linux/X11 — exact AT-SPI2 mapping
 
-| SemanticRole | AT-SPI2 role / principal interfaces |
+| SemanticRole | AT-SPI2 role / required interfaces |
 | --- | --- |
-| Button | PUSH_BUTTON / Action, Component |
-| Checkbox | CHECK_BOX / Action, Component |
-| RadioButton | RADIO_BUTTON / Action, Selection relation |
-| Toggle | TOGGLE_BUTTON / Action |
-| Slider / RangeSliderHandle | SLIDER / Value, Component |
-| ProgressBar | PROGRESS_BAR / Value |
-| Meter | LEVEL_BAR or closest supported value role / Value |
-| Text | STATIC / Text when useful |
-| TextInput | TEXT / Text, EditableText, Component |
-| TextArea | TEXT / Text, EditableText, Component |
-| ComboBox | COMBO_BOX / Action, Selection |
-| PopupMenu | MENU |
-| MenuItem | MENU_ITEM / Action |
-| ListView | LIST / Accessible children + Collection/Selection where supported |
-| ListItem | LIST_ITEM / Action/Selection state |
-| Tabs | PAGE_TAB_LIST / Selection |
-| Tab | PAGE_TAB / Action/Selection |
-| TabPanel / Group / Custom | PANEL/SECTION equivalent according to exposed grouping semantics |
-| Dialog | DIALOG |
-| Image | IMAGE / Image interface where meaningful |
+| Button | `PUSH_BUTTON` / Action, Component |
+| Checkbox | `CHECK_BOX` / Action, Component |
+| RadioButton | `RADIO_BUTTON` / Action, Component + parent selection relation |
+| Toggle | `TOGGLE_BUTTON` / Action, Component |
+| Slider / RangeSliderHandle | `SLIDER` / Value, Component |
+| ProgressBar | `PROGRESS_BAR` / Value, Component |
+| Meter | `LEVEL_BAR` / Value, Component |
+| Text | `STATIC` / Text when textual navigation is exposed |
+| TextInput | `ENTRY` / Text, EditableText, Component |
+| TextArea | `TEXT` / Text, EditableText, Component |
+| ComboBox | `COMBO_BOX` / Action, Selection, Component |
+| PopupMenu | `MENU` / Component |
+| MenuItem | `MENU_ITEM` / Action, Component |
+| ListView | `LIST` / Component, Selection, Collection-style child access |
+| ListItem | `LIST_ITEM` / Component, selection state, advertised Action |
+| Tabs | `PAGE_TAB_LIST` / Selection, Component |
+| Tab | `PAGE_TAB` / Action, Component, selection state |
+| TabPanel | `PANEL` / Component |
+| Group | `PANEL` / Component |
+| Dialog | `DIALOG` / Component |
+| Image | `IMAGE` / Image, Component |
+| Custom | `PANEL` / Component unless another standard `SemanticRole` was selected |
 
-T068 uses T072 as the only D-Bus transport. AT-SPI read handlers may answer from immutable semantic snapshots on the T072 I/O thread. Mutating actions are posted through T065 to the UI thread. The root reports logical child count and resolves `GetChildAtIndex`/Collection queries lazily; virtual ListView enumeration never mounts visual rows or pre-creates 100k D-Bus objects.
+T068 uses T072 as the only D-Bus transport. AT-SPI read handlers may answer from immutable semantic snapshots on the T072 I/O thread. Mutating actions are posted through T065 to the UI thread. Full logical child count and indexed/collection queries are resolved lazily; virtual ListView enumeration never mounts visual rows or pre-creates O(N) D-Bus objects.
 
-If the accessibility bus is unavailable, T068 disables the Linux accessibility bridge with one bounded diagnostic/state transition. It does not busy-poll or add another D-Bus stack.
+If the accessibility bus is unavailable, T068 disables the Linux accessibility bridge with one bounded diagnostic/state transition. It does not busy-poll and does not add another D-Bus stack.
 
-## 12. Native proxy lifetime
+## 10. Native proxy lifetime
 
 All native proxies store only:
 
-- weak/lifetime-safe reference to their owning view accessibility bridge;
+- a weak/lifetime-safe reference to the owning view accessibility bridge;
 - `SemanticId`, or `{ListView SemanticId, VirtualSemanticItemToken}` for a virtual item;
 - platform provider bookkeeping required by the OS API.
 
-Every query resolves against a retained immutable snapshot. Every action is re-resolved against current live semantic state on the UI thread. Missing identity is reported as absent/defunct/element-not-available. Proxy caches are per view and may use weak values; they must not keep removed semantic content alive indefinitely.
+Every read resolves against a retained immutable snapshot. Every action is re-resolved against current live semantic state on the UI thread. A missing identity is reported as absent/defunct/element-not-available. Proxy caches are per view, may use weak values, and must not keep removed semantic content alive indefinitely.
 
-## 13. Notification categories
+## 11. Closed notification categories
 
-T068 diffs successive exposed semantic snapshots into this closed set:
+T068 diffs successive exposed semantic snapshots into exactly:
 
-- `StructureChanged` — child insertion/removal/reorder or semantic flatten/group structure change;
-- `FocusChanged` — focused semantic identity changed;
-- `SelectionChanged` — selected item/tab/radio state changed;
-- `ValueChanged` — text/numeric/checked/expanded value changed;
-- `BoundsChanged` — exposed logical bounds changed without structure change.
+- `StructureChanged`: child insertion/removal/reorder or semantic flatten/group structure change;
+- `FocusChanged`: focused semantic identity changed;
+- `SelectionChanged`: selected item/tab/radio state changed;
+- `ValueChanged`: text/numeric/checked/expanded value changed;
+- `BoundsChanged`: exposed logical bounds changed without structure change.
 
-One publication may emit multiple categories. Changes are coalesced per resulting semantic generation. Scroll/bounds changes do not become structure changes. Virtual ListView selection/bounds publication must retain the same T067 O(N) metadata generation when the dataset is unchanged.
+One publication may emit multiple categories. Changes are coalesced per resulting semantic generation. Scroll/bounds changes are not structure changes. Virtual ListView selection/bounds publication retains the same T067 O(N) metadata generation when the dataset is unchanged.
 
-## 14. Platform notification mapping
+Platform notification mapping is fixed:
 
-- macOS: post the corresponding NSAccessibility layout/children/focus/value/selected-children notifications on the appropriate AppKit thread using snapshot data.
-- Windows: raise UIA structure-changed, automation-focus-changed, selection/value/property-changed events from the per-view provider root.
-- Linux: emit AT-SPI object children-changed, state-changed:focused/selected, property/value/text and bounds-related events through T072.
+- macOS: NSAccessibility children/layout/focus/value/selected-children notifications on the appropriate AppKit thread from snapshot data;
+- Windows: UIA structure-changed, automation-focus-changed, selection/value/property-changed events from the per-view provider root;
+- Linux: AT-SPI object children-changed, focused/selected state, value/text/property, and bounds events through T072.
 
-Platform event coalescing may be stronger than one-event-per-field, but it may not invent a structure rebuild for a value-only update.
+Platform event coalescing may be stronger than one event per field, but a value-only update may not be represented as a root/structure rebuild.
 
-## 15. T068 implementation checklist
+## 12. Exact T068 implementation order
 
-T068 must implement this design in the following order:
+T068 implements this design in this order:
 
-1. add the exact platform-neutral component semantic hook and standard-widget `SemanticInfo` producers;
+1. add `virtual SemanticInfo Component::semantics() const` with the default `None` implementation and standard-widget producers;
 2. build deterministic semantic-tree flattening/order/availability logic;
 3. publish immutable per-view `SemanticTreeSnapshot` generations with no-op generation suppression;
-4. add semantic action routing that revalidates current target/state on the UI thread through T065;
-5. integrate T067 virtual metadata/provider sharing without O(N) recopy on scroll/selection/focus;
-6. implement per-view native proxy caches with stable IDs and safe stale behavior;
-7. implement NSAccessibility mapping and consumer-prefixed runtime audit;
-8. implement UIA mapping/provider patterns and lazy virtual list items;
-9. implement AT-SPI2 over T072 only, including immutable off-thread read queries and UI-thread actions;
+4. route semantic actions through T065, revalidating current identity and eligibility on the UI thread;
+5. integrate T067 virtual metadata sharing with no O(N) recopy on scroll/selection/focus;
+6. implement per-view native proxy caches with stable IDs/tokens and safe stale behavior;
+7. implement NSAccessibility mapping plus consumer-prefixed Objective-C runtime audit;
+8. implement UIA fragment/pattern mapping and lazy virtual list items;
+9. implement AT-SPI2 over T072 only, with immutable off-thread reads and UI-thread actions;
 10. map/coalesce the five notification categories;
-11. validate two-view isolation, stale proxies, concurrent old/new snapshot readers, native actions and representative screen-reader/platform fixtures;
+11. validate two-view isolation, stale proxies, concurrent old/new snapshot readers, actions, and representative platform/screen-reader fixtures;
 12. preserve public-header isolation: no Pugl/AppKit/Win32/UIA/AT-SPI/D-Bus implementation type enters normal NativeUI public signatures.
 
-Any native API constraint that contradicts this document requires reopening/amending T045 before T068 chooses an alternate architecture.
+Any native API constraint that contradicts this document requires reopening/amending T045 before T068 chooses another architecture.
