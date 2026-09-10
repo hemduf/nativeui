@@ -218,6 +218,10 @@ public:
         refresh_window();
     }
 
+    [[nodiscard]] std::optional<std::size_t> focused_index() const noexcept {
+        return focused_index_;
+    }
+
     void set_captured_index(std::optional<std::size_t> index) {
         if (index && *index >= model_.size()) index.reset();
         if (captured_index_ == index) return;
@@ -464,13 +468,12 @@ public:
 
     void focus_changed(bool focused, FocusContext&) override {
         if (!focused) {
-            active_index_.reset();
             runtime_->set_focused_index(std::nullopt);
             return;
         }
-        active_index_ = runtime_->selected_index();
-        if (!active_index_) active_index_ = runtime_->first_enabled();
-        runtime_->set_focused_index(active_index_);
+        auto active = runtime_->selected_index();
+        if (!active) active = runtime_->first_enabled();
+        runtime_->set_focused_index(active);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -490,15 +493,20 @@ public:
 
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
 
-        if (const auto selected = runtime->selected_index()) {
-            active_index_ = selected;
-        } else if (!active_index_) {
-            active_index_ = runtime->first_enabled();
+        auto active = runtime->selected_index();
+        if (active) {
+            runtime->set_focused_index(active);
+        } else {
+            active = runtime->focused_index();
+            if (!active) {
+                active = runtime->first_enabled();
+                runtime->set_focused_index(active);
+            }
         }
 
         if (event.key == ui::Key::Enter || event.key == ui::Key::Space) {
-            if (!active_index_) return EventResult::Ignored;
-            return runtime->activate(*active_index_)
+            if (!active) return EventResult::Ignored;
+            return runtime->activate(*active)
                 ? EventResult::Handled
                 : EventResult::Ignored;
         }
@@ -506,13 +514,13 @@ public:
         std::optional<std::size_t> target;
         switch (event.key) {
         case ui::Key::Down:
-            target = active_index_
-                ? runtime->next_enabled(*active_index_)
+            target = active
+                ? runtime->next_enabled(*active)
                 : runtime->first_enabled();
             break;
         case ui::Key::Up:
-            target = active_index_
-                ? runtime->previous_enabled(*active_index_)
+            target = active
+                ? runtime->previous_enabled(*active)
                 : runtime->last_enabled();
             break;
         case ui::Key::Home:
@@ -526,7 +534,6 @@ public:
         }
 
         if (target) {
-            active_index_ = target;
             runtime->set_focused_index(target);
             (void)runtime->select(*target);
         }
@@ -616,7 +623,6 @@ private:
     }
 
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime_;
-    std::optional<std::size_t> active_index_;
     std::optional<std::size_t> hovered_index_;
     typename State<std::optional<Key>>::Subscription selection_subscription_;
 };
