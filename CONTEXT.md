@@ -27,16 +27,16 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-The T045 branch is synchronized with `main` `19c14970918105ebef059b41db8cdcfcb4b5de64`, which includes T037 / PR #151 on top of the completed T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and warning-free source-tree baseline.
+The current implementation baseline includes completed T045 / PR #210 and the post-T036 hover correction #212 / PR #213 (squash merge `2d483ffe3585b9ab619a743a2131badb4709fa4f`) on top of T037, T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and the warning-free source-tree baseline.
 
 The UI/accessibility critical path is now:
 
 ```text
-T034(done) -> T036(done) -> T045(completion PR #210) -> T067 -> T068
-                              T058(done) -----------------^
+T034(done) -> T036(done) -> T045(done) -> T067(active PR #219) -> T068
+                              T058(done) ---------------------------^
 ```
 
-T045 freezes the accessibility semantics architecture that T067 and T068 consume. Its implementation/design candidate provides:
+T045 freezes the accessibility semantics architecture that T067 and T068 consume. Its delivered contract provides:
 
 - backend-neutral `SemanticRole`, `SemanticAction`, checked/expanded/value/range data and the closed semantic change categories;
 - stable semantic identities independent of raw component addresses;
@@ -49,7 +49,7 @@ T045 freezes the accessibility semantics architecture that T067 and T068 consume
 - no process-global semantic/proxy registry;
 - isolated warning-as-error T045 tests plus public-header isolation.
 
-The previous exact implementation head passed T045, normal CI, T060, T065, T042 and T052 workflows with a clean mandatory review. The branch was then refreshed from current main to preserve T037 and now requires completion-doc exact-head requalification before merge.
+T067 is active after T045 completion and must preserve those identity/metadata rules while integrating fixed-height virtualization with T034/T036/T058.
 
 ## Completed foundations relevant to v1
 
@@ -62,7 +62,9 @@ The previous exact implementation head passed T045, normal CI, T060, T065, T042 
 - T033 / PR #123: ProgressBar + Meter.
 - T034 / PR #135: ScrollView with change-based wheel bubbling, pointer pan, retained overlay scrollbars and focus reveal.
 - T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable key/value selection and composite focus.
+- #212 / PR #213: restores deterministic paint-only ListView/Tabs hover presentation, adds retained/native pointer-leave handling and makes hover lifetime safe across T058 dynamic subtree removal.
 - T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
+- T045 / PR #210: accessibility semantic architecture and virtual collection contract.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
 - T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
 - T051 / PR #116: reproducible Release benchmark and regression policy.
@@ -77,9 +79,25 @@ The previous exact implementation head passed T045, normal CI, T060, T065, T042 
 - #163 / PR #181: warning-free NativeUI-owned builds and v1 Application ownership in examples/smokes.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
 
+## T036 hover follow-up — complete
+
+Issue #212 / PR #213 is complete and squash-merged as `2d483ffe3585b9ab619a743a2131badb4709fa4f`.
+
+Delivered behavior:
+
+- `ListView` enabled rows and enabled/unselected `Tabs` headers expose deterministic paint-only hover feedback;
+- disabled entries never render hovered and hover transfer/leave does not mutate application selection or activation state;
+- one per-Tree retained hover route tracks the authoritative pointer target without mutable process-global state;
+- platform pointer crossing maps through Pugl `PUGL_POINTER_IN` / `PUGL_POINTER_OUT` to retained move/leave behavior;
+- T058 dynamic reconciliation clears a hover route into a subtree before that subtree is deactivated, unmounted or destroyed;
+- the existing T058 structural-epoch guard makes callback-driven structural mutation during `PointerLeave` abort/requeue the stale reconciliation snapshot;
+- two-UI isolation and hovered-subtree removal lifetime regressions are covered.
+
+Exact implementation head `711156e64dfe62200765c79e63c096e65b3456c4` passed normal CI on Linux ASan+UBSan, Linux X11, Windows and macOS plus T042, T045, T052, T060 and both T065 qualification workflows. Final `CODE_REVIEW.md` review found no remaining Blocking/Important finding.
+
 ## T045 completion state
 
-T045 / issue #45 / PR #210 is the active Critical UI lane item. The design choices are frozen rather than deferred to T068:
+T045 / issue #45 / PR #210 is complete. The design choices are frozen rather than deferred to T068:
 
 - macOS uses NSAccessibility;
 - Windows uses UI Automation (UIA), not MSAA as the primary v1 architecture;
@@ -121,11 +139,11 @@ ctest --test-dir build --output-on-failure
 
 The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A code-changing completion candidate must use its exact current head for normal CI plus every relevant dedicated workflow named by the ticket, followed by the mandatory `CODE_REVIEW.md` pass.
 
-For T045, final completion requires exact-head T045 Accessibility Semantics, normal CI, T060 Application Contract, T065 dispatcher/platform qualification, T042 Lifecycle Stress and T052 Release Gate after the current-main/doc synchronization. No native accessibility smoke is claimed by T045; T068 owns production NSAccessibility/UIA/AT-SPI2 implementation and native qualification.
-
 ## Next actions
 
-1. Finish T045 completion bookkeeping, exact-head qualification and final review on PR #210; merge autonomously when green.
-2. Immediately start/resume T067 after T045 merges, because T034/T036/T058 are already complete.
-3. Do not start T068 until every explicit dependency in issue #80 is Done; continue T067 while the independent overlay/platform lanes close their prerequisites.
-4. Keep the Critical UI lane scoped to T045 -> T067 -> T068 and do not duplicate T035/T061/T063/T043/T065/T072 work owned by other lanes.
+1. Continue T067 / PR #219 as the Critical UI lane now that T045 is complete.
+2. Continue T061 -> T035/T063 in the independent overlay lane because those converge on T068.
+3. Continue T072 and T043 -> T064/T066 in the independent platform lane because those converge on T068/T069.
+4. Continue T038 -> T039 and then T040 in the style lane as capacity permits.
+5. Do not start T068 until every explicit dependency in issue #80 is Done.
+6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.
