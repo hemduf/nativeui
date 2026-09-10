@@ -164,6 +164,40 @@
         return false;
     }
 
+    [[nodiscard]] NodeId surviving_trapping_scope_for_removal(
+        Node* focused,
+        const Node& owner,
+        const std::vector<std::string>& current_keys,
+        const std::vector<std::string>& desired_keys) const noexcept {
+        for (auto* current = focused; current; current = current->parent) {
+            if (!current->component->effective_availability().interactive() ||
+                !current->component->is_focus_scope() ||
+                !current->component->focus_scope_active() ||
+                !current->component->focus_scope_traps()) {
+                continue;
+            }
+            if (!subtree_is_being_removed(current, owner, current_keys, desired_keys)) {
+                return current->id;
+            }
+        }
+        return kInvalidNodeId;
+    }
+
+    void clear_removed_focus_restore_targets(
+        Node& node,
+        const Node& owner,
+        const std::vector<std::string>& current_keys,
+        const std::vector<std::string>& desired_keys) noexcept {
+        if (node.focus_restore &&
+            subtree_is_being_removed(node.focus_restore, owner, current_keys, desired_keys)) {
+            node.focus_restore = nullptr;
+        }
+        for (auto& child : node.children) {
+            clear_removed_focus_restore_targets(
+                *child, owner, current_keys, desired_keys);
+        }
+    }
+
     bool reconcile_dynamic_node(Node& owner) {
         auto* source = dynamic_source(owner);
         auto* record = dynamic_record(owner.id);
@@ -193,11 +227,8 @@
 
             if (auto* focused = current_focus_node();
                 subtree_is_being_removed(focused, owner, current_keys, desired_keys)) {
-                if (auto* trap = trapping_scope_for(focused);
-                    trap && !subtree_is_being_removed(
-                                trap, owner, current_keys, desired_keys)) {
-                    surviving_focus_scope = trap->id;
-                }
+                surviving_focus_scope = surviving_trapping_scope_for_removal(
+                    focused, owner, current_keys, desired_keys);
                 removed_focus = true;
                 clear_focus(*active_platform_);
             }
@@ -223,6 +254,12 @@
         }
 
         Node* retained_focus = current_focus_node();
+        clear_removed_focus_restore_targets(*root_, owner, current_keys, desired_keys);
+        if (availability_cleared_focus_ &&
+            subtree_is_being_removed(
+                availability_cleared_focus_, owner, current_keys, desired_keys)) {
+            availability_cleared_focus_ = nullptr;
+        }
 
         // Removed siblings tear down in reverse retained order, matching normal
         // child-to-parent/reverse-sibling lifecycle semantics.
@@ -232,36 +269,88 @@
             unmount_node(*owner.children[i]);
         }
 
-        ensure_runtime_node_ids();
-        std::vector<std::unique_ptr<Node>> next_children;
-        next_children.reserve(desired.size());
-
-        for (auto& wanted : desired) {
-            auto current = std::find(current_keys.begin(), current_keys.end(), wanted.key);
-            if (current != current_keys.end()) {
-                const auto index = static_cast<std::size_t>(
-                    std::distance(current_keys.begin(), current));
-                if (owner.children[index]) {
-                    next_children.push_back(std::move(owner.children[index]));
-                    continue;
-                }
+        // Detach retained and removed nodes into separate ownership before any
+        // replacement factory is invoked. The retained-only intermediate tree
+        // is coherent, and removed nodes are destroyed before new nodes exist.
+        auto previous_children = std::move(owner.children);
+        std::vector<std::unique_ptr<Node>> retained_children;
+        std::vector<std::string> retained_keys;
+        retained_children.reserve(previous_children.size());
+        retained_keys.reserve(previous_children.size());
+        for (const auto& key : desired_keys) {
+            const auto current = std::find(current_keys.begin(), current_keys.end(), key);
+            if (current == current_keys.end()) continue;
+            const auto index = static_cast<std::size_t>(
+                std::distance(current_keys.begin(), current));
+            if (previous_children[index]) {
+                retained_children.push_back(std::move(previous_children[index]));
+                retained_keys.push_back(key);
             }
+        }
 
+        owner.children = std::move(retained_children);
+        if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = retained_keys;
+        rebuild_focusables_after_structure(retained_focus);
+
+        // At this point only removed, already-unmounted nodes remain in
+        // previous_children. Destroy them before constructing replacement nodes
+        // so destructor/lifetime ordering matches the retained-tree contract.
+        previous_children.clear();
+
+        ensure_runtime_node_ids();
+        std::vector<std::pair<std::string, std::unique_ptr<Node>>> inserted_nodes;
+        inserted_nodes.reserve(desired.size());
+        for (auto& wanted : desired) {
+            if (contains_dynamic_key(retained_keys, wanted.key)) continue;
             if (next_node_id_ == kInvalidNodeId) {
                 structural_diagnostic_ = "dynamic NodeId space exhausted";
+                queue_dynamic_mutation(owner.id);
                 return false;
             }
             auto inserted = detail::compile_node(
                 std::move(wanted.spec), next_node_id_, &owner);
             initialize_availability(
                 *inserted, owner.component->effective_availability());
-            mount_node(*inserted);
-            if (active_) activate_node(*inserted);
-            next_children.push_back(std::move(inserted));
+            inserted_nodes.emplace_back(wanted.key, std::move(inserted));
+        }
+
+        std::vector<std::unique_ptr<Node>> next_children;
+        std::vector<bool> inserted_flags;
+        next_children.reserve(desired_keys.size());
+        inserted_flags.reserve(desired_keys.size());
+        auto retained = std::move(owner.children);
+        for (const auto& key : desired_keys) {
+            const auto retained_it = std::find(retained_keys.begin(), retained_keys.end(), key);
+            if (retained_it != retained_keys.end()) {
+                const auto index = static_cast<std::size_t>(
+                    std::distance(retained_keys.begin(), retained_it));
+                next_children.push_back(std::move(retained[index]));
+                inserted_flags.push_back(false);
+                continue;
+            }
+
+            const auto inserted_it = std::find_if(
+                inserted_nodes.begin(), inserted_nodes.end(),
+                [&](const auto& entry) { return entry.first == key; });
+            if (inserted_it == inserted_nodes.end() || !inserted_it->second) {
+                structural_diagnostic_ = "dynamic inserted child/key mismatch";
+                queue_dynamic_mutation(owner.id);
+                return false;
+            }
+            next_children.push_back(std::move(inserted_it->second));
+            inserted_flags.push_back(true);
         }
 
         owner.children = std::move(next_children);
-        if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = std::move(desired_keys);
+        if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = desired_keys;
+
+        // Newly created nodes are now attached to the retained tree before
+        // mount/activation callbacks can observe or mutate surrounding state.
+        for (std::size_t i = 0; i < owner.children.size(); ++i) {
+            if (!inserted_flags[i]) continue;
+            mount_node(*owner.children[i]);
+            if (active_) activate_node(*owner.children[i]);
+        }
 
         rebuild_focusables_after_structure(retained_focus);
         focus_structure_dirty_ = true;
@@ -273,7 +362,7 @@
                 Node* fallback = nullptr;
                 if (surviving_focus_scope != kInvalidNodeId) {
                     if (auto* scope = find_node_mutable(*root_, surviving_focus_scope)) {
-                        fallback = default_focus_for_scope(*scope);
+                        fallback = first_available_focusable(scope);
                     }
                 } else {
                     fallback = first_available_focusable();
