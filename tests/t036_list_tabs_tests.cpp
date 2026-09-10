@@ -154,12 +154,12 @@ void deterministic_headless_states() {
         ui::HeadlessRenderer renderer{{200.0f, 100.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 18), ui::colors::input));
-        NUI_CHECK(pixel_matches(renderer.pixel(150, 18), ui::colors::panel));
+        NUI_CHECK(pixel_matches(renderer.pixel(120, 18), ui::colors::panel));
 
         selected.set(2);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 18), ui::colors::panel));
-        NUI_CHECK(pixel_matches(renderer.pixel(150, 18), ui::colors::input));
+        NUI_CHECK(pixel_matches(renderer.pixel(120, 18), ui::colors::input));
     }
 }
 
