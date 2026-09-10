@@ -83,7 +83,13 @@
             dirty_dynamic_nodes_.end()) {
             dirty_dynamic_nodes_.push_back(owner);
         }
-        if (auto* node = find_node_mutable(*root_, owner)) invalidate_layout_from(*node);
+
+        // Observers only enqueue structural work. They must not claim that
+        // layout changed before reconciliation has compared logical identity.
+        // A paint invalidation is enough to request a normal UI checkpoint;
+        // reconcile_dynamic_node() performs the actual layout invalidation only
+        // when the retained key/branch structure changes.
+        invalidate_paint(viewport_rect());
     }
 
     [[nodiscard]] static bool contains_dynamic_key(
