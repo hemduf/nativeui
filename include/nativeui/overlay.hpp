@@ -392,7 +392,9 @@ public:
     }
 
     [[nodiscard]] Constraints child_constraints(
-        std::size_t child_index, const Constraints& constraints) const override {
+        const Constraints& constraints,
+        std::size_t child_index,
+        std::size_t) const override {
         return child_index == 0 ? constraints : constraints.loosen();
     }
 
@@ -401,7 +403,7 @@ public:
                          std::vector<ChildPlacement>& placements) const override {
         if (placements.empty()) return;
         placements.front().bounds = bounds;
-        const auto overlay_count = std::min(state_->entries.size(), placements.size() - 1);
+        const auto overlay_count = (std::min)(state_->entries.size(), placements.size() - 1);
         for (std::size_t i = 0; i < overlay_count; ++i) {
             const auto size = children[i + 1].preferred;
             auto& entry = state_->entries[i];
