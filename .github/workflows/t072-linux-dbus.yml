@@ -44,4 +44,4 @@ jobs:
         run: cmake --build build-t072 --parallel 2
 
       - name: Test isolated contract in a private session bus
-        run: dbus-run-session -- ctest --test-dir build-t072 --output-on-failure
+        run: dbus-run-session -- ctest --test-dir build-t072 --verbose --output-on-failure --timeout 10
