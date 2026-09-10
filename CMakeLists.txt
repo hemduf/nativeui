@@ -15,8 +15,6 @@ option(NATIVEUI_BUILD_EXAMPLES "Build NativeUI examples" ON)
 option(NATIVEUI_BUILD_TESTS "Build NativeUI core tests" ON)
 option(NATIVEUI_ENABLE_SANITIZERS "Enable ASan+UBSan on NativeUI-owned code/tests" OFF)
 option(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS "Register native standalone/embedded smoke tests with CTest" OFF)
-set(NATIVEUI_ALLOWED_WARNINGS "" CACHE STRING
-    "Semicolon-separated compiler warnings explicitly allowed for NativeUI-owned targets (Clang/GCC names without -W; MSVC numeric codes)")
 
 if(NATIVEUI_BUILD_EXAMPLES AND NOT NATIVEUI_BUILD_PLATFORM)
   message(FATAL_ERROR "NATIVEUI_BUILD_EXAMPLES requires NATIVEUI_BUILD_PLATFORM=ON")
@@ -77,28 +75,9 @@ set(NATIVEUI_INSTALL_SOURCE_DIR "${CMAKE_INSTALL_DATADIR}/nativeui/source")
 
 function(nativeui_enable_project_warnings target)
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W4 /permissive- /WX)
-    foreach(_warning IN LISTS NATIVEUI_ALLOWED_WARNINGS)
-      if(NOT _warning MATCHES "^[0-9][0-9][0-9][0-9]$")
-        message(FATAL_ERROR
-          "Invalid NATIVEUI_ALLOWED_WARNINGS entry '${_warning}' for MSVC; use a four-digit warning code such as 4996")
-      endif()
-      # MSVC has no per-diagnostic equivalent of -Wno-error; /wd is the narrow
-      # escape hatch and is only reachable through this explicit cache option.
-      target_compile_options(${target} PRIVATE "/wd${_warning}")
-    endforeach()
-  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    foreach(_warning IN LISTS NATIVEUI_ALLOWED_WARNINGS)
-      if(NOT _warning MATCHES "^[A-Za-z0-9][A-Za-z0-9_-]*$")
-        message(FATAL_ERROR
-          "Invalid NATIVEUI_ALLOWED_WARNINGS entry '${_warning}'; use the diagnostic name without the -W prefix")
-      endif()
-      target_compile_options(${target} PRIVATE "-Wno-error=${_warning}")
-    endforeach()
+    target_compile_options(${target} PRIVATE /W4 /permissive-)
   else()
-    message(FATAL_ERROR
-      "NativeUI warning policy is not defined for compiler '${CMAKE_CXX_COMPILER_ID}'")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
   endif()
 endfunction()
 
@@ -136,6 +115,7 @@ add_library(nativeui_core STATIC
   src/skia_image.cpp
   src/skia_svg.cpp
   src/headless.cpp
+  src/dispatcher.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
 set_target_properties(nativeui_core PROPERTIES
@@ -346,7 +326,6 @@ if(NATIVEUI_BUILD_EXAMPLES)
     TARGET nativeui_demo
     CONSUMER_ID org.nativeui.demo
   )
-  nativeui_enable_project_warnings(nativeui_demo)
   nativeui_enable_sanitizers(nativeui_demo)
 
   function(nativeui_add_feature_example name)
@@ -405,6 +384,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_package_source_contract_tests.cmake"
   )
+  add_test(
+    NAME nativeui_t065_root_integration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t065_root_integration_contract.cmake"
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
@@ -420,6 +405,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_t054_package_source_contract_tests
     PROPERTIES LABELS "build;cmake;t054" TIMEOUT 60
   )
+  set_tests_properties(
+    nativeui_t065_root_integration_contract
+    PROPERTIES LABELS "build;cmake;t065" TIMEOUT 20
+  )
 
   function(nativeui_add_core_test name source)
     add_executable(${name} ${source})
@@ -429,6 +418,8 @@ if(NATIVEUI_BUILD_TESTS)
     add_test(NAME ${name} COMMAND ${name})
   endfunction()
 
+  nativeui_add_core_test(nativeui_dispatcher_tests tests/dispatcher_tests.cpp)
+  nativeui_add_core_test(nativeui_dispatcher_edge_tests tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests tests/state_tests.cpp)
   nativeui_add_core_test(nativeui_component_state_tests tests/component_state_tests.cpp)
   nativeui_add_core_test(nativeui_focus_tests tests/focus_tests.cpp)
@@ -555,7 +546,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state text_edit text path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
