@@ -411,7 +411,7 @@ public:
             active_index_ = runtime_->first_enabled();
         }
 
-        if (event.key == Key::Enter || event.key == Key::Space) {
+        if (event.key == ui::Key::Enter || event.key == ui::Key::Space) {
             if (!active_index_) return EventResult::Ignored;
             return runtime_->activate(*active_index_)
                 ? EventResult::Handled
@@ -420,20 +420,20 @@ public:
 
         std::optional<std::size_t> target;
         switch (event.key) {
-        case Key::Down:
+        case ui::Key::Down:
             target = active_index_
                 ? runtime_->next_enabled(*active_index_)
                 : runtime_->first_enabled();
             break;
-        case Key::Up:
+        case ui::Key::Up:
             target = active_index_
                 ? runtime_->previous_enabled(*active_index_)
                 : runtime_->last_enabled();
             break;
-        case Key::Home:
+        case ui::Key::Home:
             target = runtime_->first_enabled();
             break;
-        case Key::End:
+        case ui::Key::End:
             target = runtime_->last_enabled();
             break;
         default:
