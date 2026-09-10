@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/detail/dynamic_source.hpp>
+#include <nativeui/detail/virtual_list_row.hpp>
 #include <nativeui/detail/virtual_list_window.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/state.hpp>
@@ -197,6 +198,33 @@ public:
         refresh_window();
     }
 
+    [[nodiscard]] std::optional<std::size_t> materialized_index_for_key(
+        const Key& key) const noexcept {
+        for (const auto& materialized : window_.items()) {
+            const auto* item = model_.item_at(materialized.index);
+            if (item && item->key == key) return materialized.index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool begin_pointer_capture(const Key& key) {
+        const auto index = materialized_index_for_key(key);
+        if (!index || !enabled_at(*index)) return false;
+        set_captured_index(index);
+        return true;
+    }
+
+    void end_pointer_capture(const Key& key) {
+        if (!captured_index_) return;
+        const auto* item = model_.item_at(*captured_index_);
+        if (!item || item->key == key) set_captured_index(std::nullopt);
+    }
+
+    [[nodiscard]] bool activate_key(const Key& key) {
+        const auto index = materialized_index_for_key(key);
+        return index && activate(*index);
+    }
+
     [[nodiscard]] float content_height() const noexcept {
         const auto height = virtual_list_content_height(model_.size(), row_height_);
         return height.value_or(0.0f);
@@ -217,11 +245,26 @@ public:
         return window_.keys();
     }
 
-    [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const {
+    [[nodiscard]] std::vector<DynamicChildSpec> desired_children(
+        const std::shared_ptr<VirtualListRetainedRuntime>& self) const {
         std::vector<DynamicChildSpec> result;
         result.reserve(window_.items().size());
-        for (const auto& item : window_.items()) {
-            result.push_back(DynamicChildSpec{item.key, *item.payload});
+        for (const auto& materialized : window_.items()) {
+            const auto* item = model_.item_at(materialized.index);
+            if (!item) continue;
+            const Key key = item->key;
+            std::vector<Spec> row_children;
+            row_children.push_back(*materialized.payload);
+            result.push_back(DynamicChildSpec{
+                materialized.key,
+                Spec{
+                    [self, key] {
+                        return std::make_unique<VirtualListRowInteractionComponent>(
+                            [self, key] { return self->begin_pointer_capture(key); },
+                            [self, key] { self->end_pointer_capture(key); },
+                            [self, key] { return self->activate_key(key); });
+                    },
+                    std::move(row_children)}});
         }
         return result;
     }
@@ -335,7 +378,7 @@ public:
     }
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
-        return runtime_->desired_children();
+        return runtime_->desired_children(runtime_);
     }
 
     void set_structure_invalidator(std::function<void()> invalidator) override {
@@ -403,17 +446,18 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext&) override {
+        auto runtime = runtime_;
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
 
-        if (const auto selected = runtime_->selected_index()) {
+        if (const auto selected = runtime->selected_index()) {
             active_index_ = selected;
         } else if (!active_index_) {
-            active_index_ = runtime_->first_enabled();
+            active_index_ = runtime->first_enabled();
         }
 
         if (event.key == ui::Key::Enter || event.key == ui::Key::Space) {
             if (!active_index_) return EventResult::Ignored;
-            return runtime_->activate(*active_index_)
+            return runtime->activate(*active_index_)
                 ? EventResult::Handled
                 : EventResult::Ignored;
         }
@@ -422,19 +466,19 @@ public:
         switch (event.key) {
         case ui::Key::Down:
             target = active_index_
-                ? runtime_->next_enabled(*active_index_)
-                : runtime_->first_enabled();
+                ? runtime->next_enabled(*active_index_)
+                : runtime->first_enabled();
             break;
         case ui::Key::Up:
             target = active_index_
-                ? runtime_->previous_enabled(*active_index_)
-                : runtime_->last_enabled();
+                ? runtime->previous_enabled(*active_index_)
+                : runtime->last_enabled();
             break;
         case ui::Key::Home:
-            target = runtime_->first_enabled();
+            target = runtime->first_enabled();
             break;
         case ui::Key::End:
-            target = runtime_->last_enabled();
+            target = runtime->last_enabled();
             break;
         default:
             return EventResult::Ignored;
@@ -442,8 +486,8 @@ public:
 
         if (target) {
             active_index_ = target;
-            runtime_->set_focused_index(target);
-            (void)runtime_->select(*target);
+            runtime->set_focused_index(target);
+            (void)runtime->select(*target);
         }
         return EventResult::Handled;
     }
@@ -466,7 +510,7 @@ private:
 template <class Key>
 [[nodiscard]] Spec make_virtual_list_retained_spec(
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime) {
-    auto initial_children = runtime->desired_children();
+    auto initial_children = runtime->desired_children(runtime);
     std::vector<Spec> children;
     children.reserve(initial_children.size());
     for (auto& child : initial_children) children.push_back(std::move(child.spec));
