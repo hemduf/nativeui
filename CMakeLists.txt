@@ -320,6 +320,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t057_embedded_resources
   t058_dynamic_composition
   t059_component_state
+  t061_overlay_portal
 )
 
 if(NATIVEUI_BUILD_EXAMPLES)
