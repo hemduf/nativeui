@@ -131,7 +131,9 @@ void semantic_tree_generation_contract() {
     ui::SemanticTreeSnapshot tree;
     tree.generation = 12;
     tree.root = 1;
-    tree.nodes.push_back(ui::SemanticNodeSnapshot{.id = 1});
+    ui::SemanticNodeSnapshot root;
+    root.id = 1;
+    tree.nodes.push_back(std::move(root));
 
     T045_CHECK(tree.generation == 12);
     T045_CHECK(tree.root == 1);
