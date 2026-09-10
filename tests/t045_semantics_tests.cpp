@@ -1,15 +1,25 @@
-#include "test_support.hpp"
-
 #include <nativeui/semantics.hpp>
 
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
+
+void check(bool condition, const char* expression, int line) {
+    if (!condition) {
+        throw std::runtime_error(std::string{"line "} + std::to_string(line) +
+                                 ": CHECK failed: " + expression);
+    }
+}
+
+#define T045_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 void semantic_role_and_action_contract() {
     ui::SemanticInfo info;
@@ -19,13 +29,13 @@ void semantic_role_and_action_contract() {
     info.focusable = true;
     info.actions = {ui::SemanticAction::Activate, ui::SemanticAction::Focus};
 
-    NUI_CHECK(info.role == ui::SemanticRole::Button);
-    NUI_CHECK(info.name == "Apply");
-    NUI_CHECK(info.enabled);
-    NUI_CHECK(info.focusable);
-    NUI_CHECK(info.supports(ui::SemanticAction::Activate));
-    NUI_CHECK(info.supports(ui::SemanticAction::Focus));
-    NUI_CHECK(!info.supports(ui::SemanticAction::SetValue));
+    T045_CHECK(info.role == ui::SemanticRole::Button);
+    T045_CHECK(info.name == "Apply");
+    T045_CHECK(info.enabled);
+    T045_CHECK(info.focusable);
+    T045_CHECK(info.supports(ui::SemanticAction::Activate));
+    T045_CHECK(info.supports(ui::SemanticAction::Focus));
+    T045_CHECK(!info.supports(ui::SemanticAction::SetValue));
 }
 
 void semantic_snapshot_owns_data() {
@@ -39,9 +49,9 @@ void semantic_snapshot_owns_data() {
     snapshot.children = {ui::SemanticId{18}, ui::SemanticId{19}};
 
     source_name = "Mutated";
-    NUI_CHECK(snapshot.info.name == "Original");
-    NUI_CHECK(snapshot.children.size() == 2);
-    NUI_CHECK(snapshot.bounds.w == 30.0f);
+    T045_CHECK(snapshot.info.name == "Original");
+    T045_CHECK(snapshot.children.size() == 2);
+    T045_CHECK(snapshot.bounds.w == 30.0f);
 }
 
 void virtual_collection_is_lazy_and_metadata_shared() {
@@ -64,22 +74,22 @@ void virtual_collection_is_lazy_and_metadata_shared() {
         7, metadata, ui::VirtualSemanticItemToken{50002},
         {10.0f, 20.0f, 200.0f, 400.0f}, 20.0f, 120.0f);
 
-    NUI_CHECK(first.size() == 100000);
-    NUI_CHECK(first.dataset_generation() == 7);
-    NUI_CHECK(second.dataset_generation() == 7);
-    NUI_CHECK(first.metadata_snapshot().get() == second.metadata_snapshot().get());
+    T045_CHECK(first.size() == 100000);
+    T045_CHECK(first.dataset_generation() == 7);
+    T045_CHECK(second.dataset_generation() == 7);
+    T045_CHECK(first.metadata_snapshot().get() == second.metadata_snapshot().get());
 
     const auto middle = first.item_at(50000);
-    NUI_CHECK(middle.has_value());
-    NUI_CHECK(middle->token == ui::VirtualSemanticItemToken{50001});
-    NUI_CHECK(middle->info.name == "Item");
-    NUI_CHECK(middle->info.selected);
-    NUI_CHECK(middle->logical_bounds.x == 10.0f);
-    NUI_CHECK(middle->logical_bounds.y == 999920.0f);
-    NUI_CHECK(middle->logical_bounds.w == 200.0f);
-    NUI_CHECK(middle->logical_bounds.h == 20.0f);
-    NUI_CHECK(first.index_of_selected_item() == std::optional<std::size_t>{50000});
-    NUI_CHECK(!first.item_at(100000).has_value());
+    T045_CHECK(middle.has_value());
+    T045_CHECK(middle->token == ui::VirtualSemanticItemToken{50001});
+    T045_CHECK(middle->info.name == "Item");
+    T045_CHECK(middle->info.selected);
+    T045_CHECK(middle->logical_bounds.x == 10.0f);
+    T045_CHECK(middle->logical_bounds.y == 999920.0f);
+    T045_CHECK(middle->logical_bounds.w == 200.0f);
+    T045_CHECK(middle->logical_bounds.h == 20.0f);
+    T045_CHECK(first.index_of_selected_item() == std::optional<std::size_t>{50000});
+    T045_CHECK(!first.item_at(100000).has_value());
 }
 
 void virtual_metadata_is_immutable_after_publication() {
@@ -94,13 +104,13 @@ void virtual_metadata_is_immutable_after_publication() {
 
     mutable_metadata.reset();
     const auto item = snapshot.item_at(0);
-    NUI_CHECK(item.has_value());
-    NUI_CHECK(item->info.name == "Before");
-    NUI_CHECK(snapshot.metadata_snapshot().use_count() >= 1);
+    T045_CHECK(item.has_value());
+    T045_CHECK(item->info.name == "Before");
+    T045_CHECK(snapshot.metadata_snapshot().use_count() >= 1);
 }
 
 void virtual_tokens_and_tristate_contract() {
-    NUI_CHECK(ui::kInvalidVirtualSemanticItemToken == 0);
+    T045_CHECK(ui::kInvalidVirtualSemanticItemToken == 0);
 
     ui::SemanticInfo info;
     info.role = ui::SemanticRole::Checkbox;
@@ -109,12 +119,12 @@ void virtual_tokens_and_tristate_contract() {
     info.numeric_value = 0.5;
     info.value_range = ui::SemanticValueRange{0.0, 1.0, 0.1};
 
-    NUI_CHECK(info.checked == ui::SemanticCheckedState::Mixed);
-    NUI_CHECK(info.expanded == ui::SemanticExpandedState::Collapsed);
-    NUI_CHECK(info.numeric_value.has_value());
-    NUI_CHECK(info.value_range.has_value());
-    NUI_CHECK(info.value_range->minimum == 0.0);
-    NUI_CHECK(info.value_range->maximum == 1.0);
+    T045_CHECK(info.checked == ui::SemanticCheckedState::Mixed);
+    T045_CHECK(info.expanded == ui::SemanticExpandedState::Collapsed);
+    T045_CHECK(info.numeric_value.has_value());
+    T045_CHECK(info.value_range.has_value());
+    T045_CHECK(info.value_range->minimum == 0.0);
+    T045_CHECK(info.value_range->maximum == 1.0);
 }
 
 void semantic_tree_generation_contract() {
@@ -123,20 +133,25 @@ void semantic_tree_generation_contract() {
     tree.root = 1;
     tree.nodes.push_back(ui::SemanticNodeSnapshot{.id = 1});
 
-    NUI_CHECK(tree.generation == 12);
-    NUI_CHECK(tree.root == 1);
-    NUI_CHECK(tree.nodes.size() == 1);
+    T045_CHECK(tree.generation == 12);
+    T045_CHECK(tree.root == 1);
+    T045_CHECK(tree.nodes.size() == 1);
 }
 
 } // namespace
 
 int main() {
-    return test::run("t045 semantics", [] {
+    try {
         semantic_role_and_action_contract();
         semantic_snapshot_owns_data();
         virtual_collection_is_lazy_and_metadata_shared();
         virtual_metadata_is_immutable_after_publication();
         virtual_tokens_and_tristate_contract();
         semantic_tree_generation_contract();
-    });
+        std::cout << "PASS t045 semantics\n";
+        return EXIT_SUCCESS;
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL t045 semantics: " << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
 }
