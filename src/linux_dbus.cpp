@@ -10,6 +10,7 @@
 #include <optional>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace ui::detail {
@@ -900,6 +901,9 @@ struct LinuxDbusTransport::Impl final {
     bool destroying{};
     bool stopping{};
     bool signal_filter_installed{};
+    bool explicit_client_registration{};
+    std::uint64_t next_client_id{1};
+    std::unordered_set<LinuxDbusClientId> clients;
 
     LinuxDbusResourceLedger ledger;
     LinuxDbusPendingCallSet calls;
@@ -1016,6 +1020,7 @@ void LinuxDbusTransport::stop() noexcept {
         if (impl_->connection == nullptr && !impl_->io_thread.joinable()) {
             impl_->running.store(false, std::memory_order_release);
             impl_->unique_name.clear();
+            impl_->clients.clear();
             return;
         }
 
@@ -1049,6 +1054,7 @@ void LinuxDbusTransport::stop() noexcept {
         }
         impl_->running.store(false, std::memory_order_release);
         impl_->unique_name.clear();
+        impl_->clients.clear();
         impl_->stopping = false;
     }
     impl_->lifecycle_idle.notify_all();
@@ -1083,6 +1089,38 @@ bool LinuxDbusTransport::running() const noexcept {
 std::string LinuxDbusTransport::unique_name() const {
     std::lock_guard lock{impl_->lifecycle_mutex};
     return impl_->unique_name;
+}
+
+LinuxDbusClientId LinuxDbusTransport::register_client() {
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
+        !impl_->running.load(std::memory_order_acquire) ||
+        impl_->stop_requested.load(std::memory_order_acquire)) {
+        return kInvalidLinuxDbusClientId;
+    }
+
+    impl_->explicit_client_registration = true;
+    try {
+        for (;;) {
+            const LinuxDbusClientId candidate = impl_->next_client_id;
+            ++impl_->next_client_id;
+            if (impl_->next_client_id == kInvalidLinuxDbusClientId) {
+                impl_->next_client_id = 1;
+            }
+            if (candidate == kInvalidLinuxDbusClientId || impl_->clients.contains(candidate)) {
+                continue;
+            }
+            impl_->clients.emplace(candidate);
+            return candidate;
+        }
+    } catch (...) {
+        return kInvalidLinuxDbusClientId;
+    }
+}
+
+std::size_t LinuxDbusTransport::client_count() const noexcept {
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    return impl_->clients.size();
 }
 
 LinuxDbusRequestId LinuxDbusTransport::call_method(
@@ -1257,7 +1295,6 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
             impl_->stop_requested.load(std::memory_order_acquire)) {
             return kInvalidLinuxDbusSubscriptionId;
         }
-
         const auto id = impl_->ledger.acquire_subscription(client);
         if (id == kInvalidLinuxDbusSubscriptionId) {
             return id;
@@ -1434,7 +1471,8 @@ LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
         std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
         if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
             !impl_->running.load(std::memory_order_acquire) ||
-            impl_->stop_requested.load(std::memory_order_acquire)) {
+            impl_->stop_requested.load(std::memory_order_acquire) ||
+            (impl_->explicit_client_registration && !impl_->clients.contains(client))) {
             return kInvalidLinuxDbusObjectRegistrationId;
         }
 
@@ -1533,6 +1571,11 @@ std::size_t LinuxDbusTransport::object_path_count() const noexcept {
 void LinuxDbusTransport::release_client(LinuxDbusClientId client) noexcept {
     if (client == kInvalidLinuxDbusClientId) {
         return;
+    }
+
+    {
+        std::lock_guard lock{impl_->lifecycle_mutex};
+        impl_->clients.erase(client);
     }
 
     // Disable completion gates first so a reply that was already marshalled to
