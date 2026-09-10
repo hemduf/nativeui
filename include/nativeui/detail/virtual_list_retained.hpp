@@ -23,8 +23,12 @@ public:
     using Item = typename Model::Item;
     using RowFactory = std::function<Spec(const Item&)>;
 
-    VirtualListRetainedRuntime(float row_height, RowFactory row_factory)
+    VirtualListRetainedRuntime(
+        float row_height,
+        RowFactory row_factory,
+        std::size_t overscan = 2)
         : row_height_(row_height),
+          overscan_(overscan),
           window_(model_, row_height_, std::move(row_factory)) {
         scroll_subscription_ = scroll_.observe([this](Point) { refresh_window(); });
     }
@@ -33,6 +37,11 @@ public:
     VirtualListRetainedRuntime& operator=(const VirtualListRetainedRuntime&) = delete;
 
     [[nodiscard]] bool replace(std::vector<Item> items) {
+        // Reject geometry that cannot be represented before publishing the
+        // logical dataset/semantic generation. A rejected update therefore
+        // leaves the previous dataset, metadata and materialized rows intact.
+        if (!virtual_list_content_height(items.size(), row_height_)) return false;
+
         const auto generation = model_.generation();
         if (!model_.replace(std::move(items))) return false;
         if (model_.generation() != generation) refresh_window();
@@ -42,6 +51,7 @@ public:
     [[nodiscard]] ScrollState& scroll() noexcept { return scroll_; }
     [[nodiscard]] const ScrollState& scroll() const noexcept { return scroll_; }
     [[nodiscard]] float row_height() const noexcept { return row_height_; }
+    [[nodiscard]] std::size_t overscan() const noexcept { return overscan_; }
 
     [[nodiscard]] bool scroll_to_index(
         std::size_t index,
@@ -121,7 +131,7 @@ private:
 
     void refresh_window() {
         const auto previous_keys = window_.keys();
-        if (!window_.update(scroll_.offset().y, viewport_height_)) return;
+        if (!window_.update(scroll_.offset().y, viewport_height_, overscan_)) return;
         if (window_.keys() != previous_keys && structure_invalidator_) {
             structure_invalidator_();
         }
@@ -129,6 +139,7 @@ private:
 
     Model model_;
     float row_height_{};
+    std::size_t overscan_{2};
     ScrollState scroll_{ScrollAxis::Vertical};
     VirtualListMaterializationWindow<Key, Spec> window_;
     float viewport_height_{};
