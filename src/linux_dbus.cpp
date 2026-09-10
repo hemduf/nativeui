@@ -1085,7 +1085,6 @@ struct LinuxDbusTransport::Impl final {
     bool destroying{};
     bool stopping{};
     bool signal_filter_installed{};
-    bool explicit_client_registration{};
     std::uint64_t next_client_id{1};
     std::unordered_set<LinuxDbusClientId> clients;
 
@@ -1296,7 +1295,6 @@ LinuxDbusClientId LinuxDbusTransport::register_client() {
         return kInvalidLinuxDbusClientId;
     }
 
-    impl_->explicit_client_registration = true;
     try {
         for (;;) {
             const LinuxDbusClientId candidate = impl_->next_client_id;
@@ -1330,17 +1328,17 @@ LinuxDbusRequestId LinuxDbusTransport::call_method(
         return kInvalidLinuxDbusRequestId;
     }
 
+    LinuxDbusRequestId id = kInvalidLinuxDbusRequestId;
     {
         std::lock_guard lock{impl_->lifecycle_mutex};
         if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
             !impl_->running.load(std::memory_order_acquire) ||
-            impl_->stop_requested.load(std::memory_order_acquire)) {
+            impl_->stop_requested.load(std::memory_order_acquire) ||
+            !impl_->clients.contains(client)) {
             return kInvalidLinuxDbusRequestId;
         }
+        id = impl_->calls.begin(client, dispatcher, call.timeout, std::move(callback));
     }
-
-    const LinuxDbusRequestId id =
-        impl_->calls.begin(client, dispatcher, call.timeout, std::move(callback));
     if (id == kInvalidLinuxDbusRequestId) {
         return id;
     }
@@ -1354,6 +1352,9 @@ LinuxDbusRequestId LinuxDbusTransport::call_method(
             !impl_->running.load(std::memory_order_acquire) ||
             impl_->stop_requested.load(std::memory_order_acquire)) {
             immediate_completion.code = LinuxDbusErrorCode::Shutdown;
+            complete_immediately = true;
+        } else if (!impl_->clients.contains(client)) {
+            immediate_completion.code = LinuxDbusErrorCode::Cancelled;
             complete_immediately = true;
         } else {
             DBusMessage* message = dbus_message_new_method_call(
@@ -1496,7 +1497,8 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
         std::unique_lock lifecycle_lock{impl_->lifecycle_mutex};
         if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
             !impl_->running.load(std::memory_order_acquire) ||
-            impl_->stop_requested.load(std::memory_order_acquire)) {
+            impl_->stop_requested.load(std::memory_order_acquire) ||
+            !impl_->clients.contains(client)) {
             return kInvalidLinuxDbusSubscriptionId;
         }
         const auto id = impl_->ledger.acquire_subscription(client);
@@ -1686,7 +1688,7 @@ LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
         if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
             !impl_->running.load(std::memory_order_acquire) ||
             impl_->stop_requested.load(std::memory_order_acquire) ||
-            (impl_->explicit_client_registration && !impl_->clients.contains(client))) {
+            !impl_->clients.contains(client)) {
             return kInvalidLinuxDbusObjectRegistrationId;
         }
 
