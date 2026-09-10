@@ -5,9 +5,9 @@ namespace {
 void suite() {
     ui::HeadlessRenderer renderer{{96.0f, 48.0f}, 1.0f};
 
-    // Seed the raster surface with a known full-frame color, then render an
-    // otherwise empty retained tree into the same surface. Tree itself must
-    // not impose a background or instructional/debug overlay on consumers.
+    // Seed the raster surface, then render an otherwise empty retained tree.
+    // The renderer owns the same black framebuffer clear as the GPU path;
+    // Tree itself must add neither a styled background nor instructional text.
     ui::UI seed{
         ui::Canvas{
             ui::Size{96.0f, 48.0f},
@@ -26,7 +26,18 @@ void suite() {
             [](ui::CanvasContext2D&) {}}
     };
     NUI_CHECK(renderer.render(empty));
-    NUI_CHECK(renderer.rgba_pixels() == seeded_pixels);
+    NUI_CHECK(renderer.rgba_pixels() != seeded_pixels);
+
+    bool only_renderer_clear = true;
+    const auto& empty_pixels = renderer.rgba_pixels();
+    for (std::size_t i = 0; i < empty_pixels.size(); i += 4) {
+        if (empty_pixels[i] != 0 || empty_pixels[i + 1] != 0 ||
+            empty_pixels[i + 2] != 0 || empty_pixels[i + 3] != 255) {
+            only_renderer_clear = false;
+            break;
+        }
+    }
+    NUI_CHECK(only_renderer_clear);
 
     ui::State<bool> enabled{true};
     ui::UI tree{
