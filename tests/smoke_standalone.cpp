@@ -47,6 +47,10 @@ void install_issue64_crash_handler() {}
 #endif
 
 bool valid_window(const ui::StandaloneWindow& window, std::string_view stage) {
+    if (!window.valid()) {
+        (void)fail(stage, window.last_error().empty() ? "window is invalid" : window.last_error());
+        return false;
+    }
     if (!window.native_handle()) {
         (void)fail(stage, "native handle is zero");
         return false;
@@ -60,6 +64,73 @@ bool valid_window(const ui::StandaloneWindow& window, std::string_view stage) {
         return false;
     }
     return true;
+}
+
+int run_t060_multi_window() {
+    ui::Application application;
+    if (!application.valid()) {
+        return fail("t060-application", application.last_error());
+    }
+    if (application.quit_requested()) {
+        return fail("t060-application", "fresh application unexpectedly requested quit");
+    }
+    if (application.quit_policy() != ui::QuitPolicy::OnLastWindowClosed) {
+        return fail("t060-application", "unexpected default quit policy");
+    }
+
+    ui::State<std::string> a_text{"Window A"};
+    ui::State<std::string> b_text{"Window B"};
+    ui::UI a_ui{ui::TextInput{"Window A text", a_text}};
+    ui::UI b_ui{ui::TextInput{"Window B text", b_text}};
+
+    auto a = std::make_unique<ui::StandaloneWindow>(
+        application,
+        a_ui,
+        ui::WindowDesc{.title = "NativeUI T060 A", .size = {300.0f, 130.0f}, .resizable = true});
+    auto b = std::make_unique<ui::StandaloneWindow>(
+        application,
+        b_ui,
+        ui::WindowDesc{.title = "NativeUI T060 B", .size = {310.0f, 140.0f}, .resizable = true});
+    if (!valid_window(*a, "t060-create-a") || !valid_window(*b, "t060-create-b")) return 1;
+
+    a->set_text_input(true, ui::Rect{12.0f, 12.0f, 180.0f, 24.0f});
+    b->set_text_input(true, ui::Rect{12.0f, 12.0f, 180.0f, 24.0f});
+    for (int i = 0; i < 8; ++i) {
+        if (!application.poll(0.0)) {
+            return fail("t060-poll-a-b", application.last_error().empty()
+                                            ? "application stopped while both windows were live"
+                                            : application.last_error());
+        }
+    }
+
+    a.reset();
+    if (application.quit_requested()) {
+        return fail("t060-destroy-a", "destroying A requested quit while B remained live");
+    }
+    b->set_clipboard_text("NativeUI T060 surviving B");
+    if (!b->set_size({330.0f, 150.0f})) {
+        return fail("t060-surviving-b", "set_size failed");
+    }
+    for (int i = 0; i < 8; ++i) {
+        if (!application.poll(0.0)) {
+            return fail("t060-surviving-b", application.last_error().empty()
+                                             ? "application stopped while B remained live"
+                                             : application.last_error());
+        }
+    }
+    if (!b->last_error().empty()) return fail("t060-surviving-b", b->last_error());
+
+    b.reset();
+    if (!application.quit_requested()) {
+        return fail("t060-last-window", "last-window destruction did not request quit");
+    }
+    if (application.poll(0.0)) {
+        return fail("t060-last-window", "poll succeeded after normal quit request");
+    }
+    if (!application.last_error().empty()) {
+        return fail("t060-last-window", application.last_error());
+    }
+    return 0;
 }
 
 int run_issue64_sequential() {
@@ -184,14 +255,9 @@ int run_regular_smoke() {
         if (!window.native_handle()) return fail(stage, "native handle is zero");
         if (!(window.scale_factor() > 0.0f)) return fail(stage, "invalid scale factor");
 
-        // Exercise the native clipboard bridge directly. This stays in the
-        // normal platform smoke independently of the issue #64 diagnostic.
         stage = "clipboard";
         window.set_clipboard_text("NativeUI clipboard smoke");
 
-        // Plugin/editor instance isolation is modeled by independent MODULE
-        // worlds under one host window. It is intentionally separate from the
-        // unsupported pre-T060 multi-PROGRAM standalone architecture.
         stage = "embedded-multi-instance";
         ui::State<std::string> child_a_text{"Child A"};
         ui::State<std::string> child_b_text{"Child B"};
@@ -227,9 +293,6 @@ int run_regular_smoke() {
         }
         if (!child_b.last_error().empty()) return fail(stage, child_b.last_error());
 
-        // Repeated embedded construction/destruction checks teardown while a
-        // host window remains alive. TextInput exercises active text-input
-        // lifecycle rather than only inert child views.
         stage = "embedded-repeat-create-destroy";
         for (int iteration = 0; iteration < 3; ++iteration) {
             ui::State<std::string> text{"Cycle"};
@@ -285,16 +348,13 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2) {
             const std::string_view mode{argv[1]};
+            if (mode == "--t060-multi-window") return run_t060_multi_window();
             if (mode == "--issue64-sequential") return run_issue64_sequential();
             if (mode == "--issue64-simultaneous") return run_issue64_simultaneous();
             return fail("arguments", "unknown diagnostic mode");
         }
         if (argc != 1) return fail("arguments", "expected at most one diagnostic mode");
 
-        // Decision B makes independent PROGRAM-world overlap/recreation a
-        // diagnostic-only legacy path. The normal smoke validates the current
-        // supported contract: one standalone PROGRAM world plus independent
-        // MODULE editors. T060 owns one Application world with multiple windows.
         return run_regular_smoke();
     } catch (const std::exception& e) {
         return fail("top-level", e.what());
