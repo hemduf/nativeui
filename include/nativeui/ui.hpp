@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/theme.hpp>
 
 #include <functional>
 #include <string>
@@ -19,9 +20,17 @@ class UI {
 public:
     template <class Root>
     explicit UI(Root&& root)
+        : UI(std::forward<Root>(root), default_theme()) {}
+
+    template <class Root>
+    UI(Root&& root, Theme theme)
         : tree_(compile(make_spec(std::forward<Root>(root)))) {
+        tree_.set_theme(std::move(theme));
         tree_.mount();
     }
+
+    [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
+    void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
         return tree_.measure(constraints);

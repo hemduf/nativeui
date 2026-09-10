@@ -61,6 +61,76 @@ void check_rect(ui::Rect actual, ui::Rect expected) {
     NUI_CHECK_NEAR(actual.h, expected.h, 0.0001f);
 }
 
+void theme_change_classification() {
+    const auto defaults = ui::default_theme();
+    NUI_CHECK(ui::classify_theme_change(defaults, defaults) == ui::ThemeInvalidation::None);
+
+    auto paint = defaults;
+    paint.palette.accent = ui::Color{0.1f, 0.2f, 0.3f, 1.0f};
+    NUI_CHECK(ui::classify_theme_change(defaults, paint) == ui::ThemeInvalidation::Paint);
+
+    auto radius = defaults;
+    radius.radii.medium += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, radius) == ui::ThemeInvalidation::Paint);
+
+    auto border = defaults;
+    border.controls.border_width += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, border) == ui::ThemeInvalidation::Paint);
+
+    auto thumb = defaults;
+    thumb.controls.thumb_diameter += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, thumb) == ui::ThemeInvalidation::Paint);
+
+    auto typography = defaults;
+    typography.typography.control_size += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, typography) == ui::ThemeInvalidation::Layout);
+
+    auto spacing = defaults;
+    spacing.spacing.medium += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, spacing) == ui::ThemeInvalidation::Layout);
+
+    auto controls = defaults;
+    controls.controls.control_height += 1.0f;
+    NUI_CHECK(ui::classify_theme_change(defaults, controls) == ui::ThemeInvalidation::Layout);
+}
+
+void ui_theme_ownership_and_invalidation() {
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    auto initial = ui::default_theme();
+    initial.palette.background = ui::Color{0.12f, 0.13f, 0.14f, 1.0f};
+    ui::UI tree{ui::Button{"Theme", [] {}}, initial};
+    tree.resize({180.0f, 64.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(tree.theme().palette.background.r == initial.palette.background.r);
+
+    const auto same = tree.theme();
+    tree.set_theme(same);
+    NUI_CHECK(!tree.dirty());
+
+    auto paint_only = tree.theme();
+    paint_only.palette.accent = ui::Color{0.2f, 0.3f, 0.4f, 1.0f};
+    tree.set_theme(paint_only);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    auto layout = tree.theme();
+    layout.typography.control_size += 3.0f;
+    tree.set_theme(layout);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(tree.layout_dirty());
+
+    auto other_theme = ui::default_theme();
+    other_theme.palette.background = ui::Color{0.41f, 0.42f, 0.43f, 1.0f};
+    ui::UI other{ui::Button{"Other", [] {}}, other_theme};
+    NUI_CHECK(tree.theme().palette.background.r != other.theme().palette.background.r);
+}
+
 void suite() {
     // Dirty rectangles are clipped, merged, and duplicate coverage is ignored.
     {
@@ -146,6 +216,9 @@ void suite() {
         NUI_CHECK(tree.paint_dirty());
         NUI_CHECK(!tree.layout_dirty());
     }
+
+    theme_change_classification();
+    ui_theme_ownership_and_invalidation();
 }
 
 } // namespace
