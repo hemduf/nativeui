@@ -127,32 +127,72 @@ public:
 
     [[nodiscard]] PuglStatus update_world(double timeout_seconds) noexcept {
         PuglWorld* world = nullptr;
-        PuglView* view = nullptr;
+#if defined(__linux__)
+        Display* display = nullptr;
+#endif
         {
             std::lock_guard lock{mutex_};
             if (closing_ || !world_) return PUGL_FAILURE;
             world = world_;
-            view = view_;
+#if defined(__linux__)
+            display = display_;
+#endif
         }
 
-        if (!(timeout_seconds > 0.0) || !view) {
-            return puglUpdate(world, timeout_seconds);
+        if (timeout_seconds == 0.0) return puglUpdate(world, 0.0);
+
+        // Do not use a Pugl repeating timer as a one-shot wait deadline here.
+        // X11 timers are optional (XSync-dependent), and Cocoa's NSEvent wait
+        // is not interrupted merely because an NSTimer/CF source fired. Wait on
+        // each platform's native event primitive, which the worker wake path
+        // above can interrupt, then let one non-blocking Pugl update own all
+        // actual Pugl world/view dispatch on the UI thread.
+#if defined(__APPLE__)
+        constexpr double kIndefiniteRunLoopSliceSeconds = 24.0 * 60.0 * 60.0;
+        const double wait_seconds =
+            timeout_seconds < 0.0 ? kIndefiniteRunLoopSliceSeconds : timeout_seconds;
+        (void)CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait_seconds, true);
+        return puglUpdate(world, 0.0);
+#elif defined(_WIN32)
+        DWORD wait_milliseconds = INFINITE;
+        if (timeout_seconds >= 0.0) {
+            const double milliseconds = std::ceil(timeout_seconds * 1000.0);
+            wait_milliseconds = static_cast<DWORD>(std::clamp(
+                milliseconds, 1.0, static_cast<double>(INFINITE - 1U)));
         }
+        const DWORD wait_result = MsgWaitForMultipleObjectsEx(
+            0, nullptr, wait_milliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (wait_result == WAIT_FAILED) return PUGL_FAILURE;
+        return puglUpdate(world, 0.0);
+#elif defined(__linux__)
+        if (!display) return PUGL_FAILURE;
 
-        // Pugl's positive finite update path intentionally keeps dispatching
-        // until its deadline after handling events. Convert a bounded poll to
-        // its interruptible indefinite path plus one native Pugl deadline
-        // timer. Any native event or dispatcher wake returns promptly, while
-        // the timer preserves the requested maximum wait without busy polling.
-        constexpr uintptr_t kPollDeadlineTimerId = 0x4E554950u; // "NUIP"
-        const auto start_status =
-            puglStartTimer(view, kPollDeadlineTimerId, timeout_seconds);
-        if (start_status != PUGL_SUCCESS) return start_status;
+        // Xlib can already own decoded events even when the connection fd is
+        // no longer readable, so only block in poll() when its local queue is
+        // empty. PUGL_WORLD_THREADS initializes Xlib for the worker XSendEvent
+        // wake used by request_wake().
+        if (XPending(display) == 0) {
+            const int connection = ConnectionNumber(display);
+            if (connection < 0) return PUGL_FAILURE;
 
-        const auto update_status = puglUpdate(world, -1.0);
-        const auto stop_status = puglStopTimer(view, kPollDeadlineTimerId);
-        if (update_status != PUGL_SUCCESS) return update_status;
-        return stop_status == PUGL_SUCCESS ? PUGL_SUCCESS : stop_status;
+            int wait_milliseconds = -1;
+            if (timeout_seconds >= 0.0) {
+                const double milliseconds = std::ceil(timeout_seconds * 1000.0);
+                wait_milliseconds = static_cast<int>(std::clamp(
+                    milliseconds, 1.0, static_cast<double>(INT_MAX)));
+            }
+
+            pollfd descriptor{connection, POLLIN, 0};
+            int result = 0;
+            do {
+                result = ::poll(&descriptor, 1, wait_milliseconds);
+            } while (result < 0 && errno == EINTR);
+            if (result < 0) return PUGL_FAILURE;
+        }
+        return puglUpdate(world, 0.0);
+#else
+        return puglUpdate(world, timeout_seconds);
+#endif
     }
 
     void begin_shutdown() noexcept {

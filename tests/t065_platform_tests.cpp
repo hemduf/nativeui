@@ -75,11 +75,19 @@ int standalone_worker_wake() {
 
     // A successful empty->non-empty post must interrupt this long blocking
     // application wait. Without a native wake this returns only at the timeout.
+    bool poll_ok = true;
     while (calls.load(std::memory_order_acquire) == 0 &&
            std::chrono::steady_clock::now() - start < 1500ms) {
-        if (!application.poll(1.0)) return fail("standalone-poll", application.last_error());
+        if (!application.poll(1.0)) {
+            poll_ok = false;
+            break;
+        }
     }
+
+    // Always join before returning so a platform-poll failure reports its real
+    // diagnostic instead of being masked by std::thread's destructor terminate.
     worker.join();
+    if (!poll_ok) return fail("standalone-poll", application.last_error());
 
     if (!accepted.load(std::memory_order_acquire)) return fail("standalone", "worker post was rejected");
     if (calls.load(std::memory_order_acquire) != 1) return fail("standalone", "callback did not execute exactly once");
