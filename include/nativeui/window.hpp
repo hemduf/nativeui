@@ -10,6 +10,11 @@
 
 namespace ui {
 
+namespace detail {
+struct ApplicationPlatformState;
+struct ApplicationBackendAccess;
+} // namespace detail
+
 using NativeParentHandle = std::uintptr_t;
 using NativeViewHandle = std::uintptr_t;
 
@@ -53,8 +58,14 @@ public:
 
 private:
     friend class StandaloneWindow;
+    friend struct detail::ApplicationBackendAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    // Declared after Impl intentionally: reverse member destruction tears down
+    // source-private platform services (including Linux D-Bus) before the Pugl
+    // PROGRAM world and dispatcher backend owned by Impl are destroyed.
+    std::unique_ptr<detail::ApplicationPlatformState> platform_state_;
 };
 
 /// Standalone native window for one UI instance.
