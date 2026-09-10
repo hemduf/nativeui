@@ -60,6 +60,35 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    LinuxDbusMethodCall argument_call{
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetNameOwner",
+        2s,
+    };
+    argument_call.arguments.push_back(LinuxDbusValue::string("org.freedesktop.DBus"));
+
+    bool argument_done = false;
+    LinuxDbusCompletion argument_result;
+    const auto argument_id = transport.call_method(
+        client,
+        dispatcher,
+        argument_call,
+        [&](LinuxDbusCompletion result) {
+            argument_result = std::move(result);
+            argument_done = true;
+        });
+    if (argument_id == kInvalidLinuxDbusRequestId ||
+        !drain_until(owner, [&] { return argument_done; }, 2s) ||
+        argument_result.code != LinuxDbusErrorCode::None ||
+        argument_result.values.size() != 1 ||
+        argument_result.values.front().kind != LinuxDbusValueKind::String ||
+        argument_result.values.front().text.empty() ||
+        transport.pending_request_count() != 0) {
+        return EXIT_FAILURE;
+    }
+
     bool error_done = false;
     LinuxDbusCompletion remote_error;
     const auto error_id = transport.call_method(
