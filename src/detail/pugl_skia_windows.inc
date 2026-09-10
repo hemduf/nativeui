@@ -34,6 +34,58 @@ public:
             view_ = nullptr;
             return false;
         }
+
+#if defined(__APPLE__)
+        run_loop_ = CFRunLoopGetMain();
+        CFRunLoopSourceContext context{};
+        context.info = this;
+        context.perform = [](void*) {
+            // Break only the innermost blocking run-loop wait. Application
+            // immediately re-enters its next pump after dispatcher draining.
+            CFRunLoopStop(CFRunLoopGetCurrent());
+        };
+        wake_source_ = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
+        if (!wake_source_) {
+            last_error_ = "CFRunLoopSourceCreate failed for dispatcher wake bridge";
+            (void)puglUnrealize(view_);
+            puglFreeView(view_);
+            view_ = nullptr;
+            run_loop_ = nullptr;
+            return false;
+        }
+        CFRunLoopAddSource(run_loop_, wake_source_, kCFRunLoopCommonModes);
+#elif defined(_WIN32)
+        native_window_ = reinterpret_cast<HWND>(puglGetNativeView(view_));
+        if (!native_window_) {
+            last_error_ = "dispatcher wake bridge has no native HWND";
+            (void)puglUnrealize(view_);
+            puglFreeView(view_);
+            view_ = nullptr;
+            return false;
+        }
+#elif defined(__linux__)
+        display_ = static_cast<Display*>(puglGetNativeWorld(world_));
+        native_window_ = static_cast<Window>(puglGetNativeView(view_));
+        if (!display_ || !native_window_) {
+            last_error_ = "dispatcher wake bridge has no native X11 handle";
+            (void)puglUnrealize(view_);
+            puglFreeView(view_);
+            view_ = nullptr;
+            display_ = nullptr;
+            native_window_ = 0;
+            return false;
+        }
+        wake_atom_ = XInternAtom(display_, "_NATIVEUI_DISPATCHER_WAKE", False);
+        if (!wake_atom_) {
+            last_error_ = "XInternAtom failed for dispatcher wake bridge";
+            (void)puglUnrealize(view_);
+            puglFreeView(view_);
+            view_ = nullptr;
+            display_ = nullptr;
+            native_window_ = 0;
+            return false;
+        }
+#endif
         return true;
     }
 
@@ -45,22 +97,30 @@ public:
         std::lock_guard lock{mutex_};
         if (closing_ || !view_) return;
 
-        PuglEvent event{};
-        event.client.type = PUGL_CLIENT;
-        event.client.data1 = 0x4E554944u; // "NUID"
-        if (puglSendEvent(view_, &event) != PUGL_SUCCESS) return;
-
+        // Worker threads must not call Pugl APIs: PUGL_WORLD_THREADS only makes
+        // the Xlib connection thread-aware and does not make Pugl world/view
+        // state itself concurrently accessible. Use only platform primitives
+        // whose native handles were captured on the UI thread at realization.
 #if defined(__APPLE__)
-        // Pugl queues PUGL_CLIENT delivery through a CFRunLoop observer on
-        // macOS, but adding that observer does not itself wake a sleeping main
-        // run loop. Explicitly wake it so worker posts interrupt Application.
-        CFRunLoopWakeUp(CFRunLoopGetMain());
+        if (wake_source_ && run_loop_) {
+            CFRunLoopSourceSignal(wake_source_);
+            CFRunLoopWakeUp(run_loop_);
+        }
+#elif defined(_WIN32)
+        if (native_window_) {
+            constexpr UINT kDispatcherWakeMessage = WM_APP + 0x65u;
+            (void)PostMessageW(native_window_, kDispatcherWakeMessage, 0, 0);
+        }
 #elif defined(__linux__)
-        // XSendEvent is buffered by Xlib. PUGL_WORLD_THREADS made this Display
-        // safe for cross-thread Xlib calls before it was opened; flushing here
-        // makes the client message visible to the UI thread's blocking select.
-        if (auto* display = static_cast<_XDisplay*>(puglGetNativeWorld(world_))) {
-            (void)XFlush(display);
+        if (display_ && native_window_ && wake_atom_) {
+            XEvent event{};
+            event.xclient.type = ClientMessage;
+            event.xclient.display = display_;
+            event.xclient.window = native_window_;
+            event.xclient.message_type = wake_atom_;
+            event.xclient.format = 32;
+            (void)XSendEvent(display_, native_window_, False, NoEventMask, &event);
+            (void)XFlush(display_);
         }
 #endif
     }
@@ -80,11 +140,10 @@ public:
         }
 
         // Pugl's positive finite update path intentionally keeps dispatching
-        // until the requested deadline, so a client event alone does not make
-        // poll(timeout) return early. Convert the bounded wait into Pugl's
-        // interruptible indefinite wait plus a one-iteration native timer. Any
-        // real event or dispatcher wake returns promptly; the timer preserves
-        // the caller's maximum wait without a polling loop.
+        // until its deadline after handling events. Convert a bounded poll to
+        // its interruptible indefinite path plus one native Pugl deadline
+        // timer. Any native event or dispatcher wake returns promptly, while
+        // the timer preserves the requested maximum wait without busy polling.
         constexpr uintptr_t kPollDeadlineTimerId = 0x4E554950u; // "NUIP"
         const auto start_status =
             puglStartTimer(view, kPollDeadlineTimerId, timeout_seconds);
@@ -103,6 +162,22 @@ public:
 
     void destroy_view_on_ui_thread() noexcept {
         std::lock_guard lock{mutex_};
+#if defined(__APPLE__)
+        if (wake_source_) {
+            if (run_loop_) {
+                CFRunLoopRemoveSource(run_loop_, wake_source_, kCFRunLoopCommonModes);
+            }
+            CFRelease(wake_source_);
+            wake_source_ = nullptr;
+        }
+        run_loop_ = nullptr;
+#elif defined(_WIN32)
+        native_window_ = nullptr;
+#elif defined(__linux__)
+        wake_atom_ = 0;
+        native_window_ = 0;
+        display_ = nullptr;
+#endif
         if (!view_) return;
         (void)puglUnrealize(view_);
         puglFreeView(view_);
@@ -114,6 +189,16 @@ private:
     mutable std::mutex mutex_;
     PuglWorld* world_{};
     PuglView* view_{};
+#if defined(__APPLE__)
+    CFRunLoopRef run_loop_{};
+    CFRunLoopSourceRef wake_source_{};
+#elif defined(_WIN32)
+    HWND native_window_{};
+#elif defined(__linux__)
+    Display* display_{};
+    Window native_window_{};
+    Atom wake_atom_{};
+#endif
     bool closing_{};
     std::string last_error_;
 };
@@ -151,9 +236,9 @@ struct Application::Impl final {
     std::string last_error;
 
     Impl() {
-        // Dispatcher worker posts use Pugl client events to interrupt a blocked
-        // PROGRAM loop. X11 requires XInitThreads before any other Xlib call,
-        // which Pugl performs when this flag is supplied at world creation.
+        // Dispatcher worker posts use the platform wake primitive captured by
+        // PuglDispatcherWakeBackend. X11 requires XInitThreads before any other
+        // Xlib call, which Pugl performs for this PROGRAM world flag.
         world = puglNewWorld(PUGL_PROGRAM, PUGL_WORLD_THREADS);
         if (!world) {
             terminal_error = true;
@@ -171,10 +256,9 @@ struct Application::Impl final {
         // into a platform UAF during later window teardown.
         if (!windows.empty()) std::terminate();
 
-        // Stop worker-originated sends first. A PUGL_CLIENT already accepted on
-        // macOS is delivered by the main run loop and retains the PuglView raw
-        // pointer until dispatch, so give pending client events one final UI
-        // checkpoint before destroying the hidden wake view and PROGRAM world.
+        // Stop worker-originated wakes first, process a final non-blocking
+        // native checkpoint, then detach the wake source/window before freeing
+        // the shared PROGRAM world.
         if (wake_backend) wake_backend->begin_shutdown();
         if (world) (void)puglUpdate(world, 0.0);
         if (wake_backend) {
