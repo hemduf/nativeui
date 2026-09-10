@@ -17,7 +17,7 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` is `58f45ee02b32a1a3fcb139cc8345276ee334844c` and includes the completed T057 ResourceManager plus the reviewed #124 / PR #125 Pugl X11 failed-selection correction. T052 / PR #120 is the active P0 lifecycle/release candidate on top of that baseline.
+Current `main` is `c5270a1a971d1d409a53b3715df0340fc445fb33` and contains the completed T060 explicit Application/multi-window ownership model plus its recovery-context synchronization. T052 / PR #120 is the active P0 lifecycle/release candidate. T065 / PR #133 is an independent active platform stream and must not be folded into T052.
 
 Recently completed foundations relevant to the dependency graph:
 
@@ -33,25 +33,30 @@ Recently completed foundations relevant to the dependency graph:
 - **T054 / PR #119:** high-level `nativeui_add_application()` package helper.
 - **T056 / PR #111:** deterministic binary-resource packaging and sorted immutable generated tables.
 - **T057 / PR #126:** embedded `ResourceManager` and explicit `ResourceManagerProvider` compatibility adapter.
-- **#124 / PR #125:** Pugl X11 failed-selection correction; exact-head normal CI and T042 Lifecycle Stress were green before merge.
+- **#124 / PR #125:** reviewed Pugl X11 failed-selection correction.
+- **T060 / PR #118:** explicit one-Application/one-PROGRAM-world multi-window ownership model.
 
 Current dependency frontier:
 
 ```text
 lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(in review)
 platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |
-                                       +-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057(done)
-state/widgets:     T059(done) -> T030(done) -> T031(done)
-                                       |
-                                       +-> T032
-                                       +-> T033
-                                       +-> T034 -> T035 / T036
-platform fix:       #124(done)
+                                       |-> T054(done)
+                     T056(done) + T022(done) -> T057(done)
+
+application/platform: #64(done) -> T060(done) -> T065(active PR #133) -> T072 -> T064
+                                      |
+                                      +-> T066 (also depends on T043)
+
+state/widgets: T059(done) -> T030(done) -> T031(done)
+                                    |-> T032
+                                    |-> T033
+                                    +-> T034 -> T035 / T036
+
+platform hardening: #124(done), T043 ready, T044 ready
 ```
 
-T057 / issue #69 / PR #126 and #124 / PR #125 are complete. T052 is the current release/lifecycle lane item; unrelated widget/platform work remains in its own lanes.
+T052 is the current lifecycle/release lane item. T065 and other platform work remain independent; widget/state work remains in its own lanes.
 
 ## Milestone 0 — Baseline hardening
 
@@ -81,9 +86,8 @@ Current widget frontier:
 
 ```text
 T059(done) -> T030(done) -> T031(done)
-                              |
-                              +-> T032
-                              +-> T033
+                              |-> T032
+                              |-> T033
                               +-> T034 -> T035 / T036
 ```
 
@@ -93,7 +97,7 @@ T059(done) -> T030(done) -> T031(done)
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: core lifecycle/consumer-safety baseline substantially complete; later platform tickets remain dependency-driven.**
+**Status: core lifecycle/consumer-safety and explicit Application ownership are substantially complete; remaining platform work is dependency-driven.**
 
 Delivered safety includes:
 
@@ -103,7 +107,9 @@ Delivered safety includes:
 - #103 Linux/X11 Skia native GL integration;
 - #105 constructor-time platform callback lifetime fix;
 - #107 documented non-fatal standalone raise handling;
-- T042 deterministic headless/embedded/standalone lifecycle stress.
+- T042 deterministic headless/embedded/standalone lifecycle stress;
+- #124 reviewed Pugl X11 failed-selection guard;
+- T060 explicit one-Application/one-PROGRAM-world multi-window ownership without a hidden singleton.
 
 ### #124 — Pugl X11 failed-selection correction
 
@@ -111,9 +117,15 @@ PR #125 pins reviewed Pugl commit `195f79b22644010c81a5e0c3231c591856787ec6`. A 
 
 The synchronized completion head passed normal CI and T042 Lifecycle Stress with no Blocking/Important `CODE_REVIEW.md` finding. PR #125 merged to `main` as `58f45ee02b32a1a3fcb139cc8345276ee334844c`; #124 is complete.
 
+### T060 — explicit Application ownership
+
+T060 / issue #72 / PR #118 is complete. One `ui::Application` owns exactly one standalone `PUGL_PROGRAM` world and outlives its `StandaloneWindow(Application&, ...)` views. Multiple top-level windows share only the Application/world/event-loop owner while retaining independent per-window UI, renderer, focus, capture and callback state. `EmbeddedView` remains an independent `PUGL_MODULE` ownership path. No mutable process-global or `thread_local` Application registry was introduced.
+
+Exact candidate `0e4cce56bd8874545794fdf1137d1c7ec5489dde` passed T060 Application Contract `34422787634`, T042 Lifecycle Stress `34422787683`, and normal CI `34422787695`; final review `5161881319` had no Blocking/Important finding. PR #118 merged as `352bdf0e734df46e8edcb53a0a81a07c9e0d7d6d` and the follow-up context sync advanced `main` to `c5270a1a971d1d409a53b3715df0340fc445fb33`.
+
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: low-level packaging, relocated consumers, native application helper, benchmark harness, binary-data generation and ResourceManager are complete; T052 is in final v0.1 developer-preview qualification.**
+**Status: low-level packaging, relocated consumers, native application helper, benchmark harness, binary-data generation and ResourceManager are complete; T052 is in v0.1 developer-preview qualification.**
 
 ### Delivered package foundation
 
@@ -182,13 +194,13 @@ PR #120 is the active aggregate qualification candidate and remains validation/r
 - clean-cache Linux/X11, Windows and macOS bootstraps verify pinned Pugl/Skia acquisition and fail-closed checksum behavior;
 - the exact release-note low-level package CMake snippet is built against the installed package on all supported desktop platforms;
 - normal CI supplies T047/T048 relocation, macOS two-consumer Objective-C namespace/runtime isolation, feature/headless tests and Linux ASan+UBSan;
-- T042 stress independently requalifies supported lifecycle/multi-instance ownership paths while preserving #64 Decision B;
+- T042 stress independently requalifies supported lifecycle/multi-instance ownership paths while preserving #64 Decision B and the T060 explicit Application ownership contract;
 - T051 benchmark comparison is delegated to the canonical C++ two-run policy entry point, with exact baseline/candidate SHA validation and the zero `idle_invalidation` hard gate;
 - release notes state v0.1 developer-preview semantics, known v1 gaps, pinned dependencies, legal/licensing notices and a reproducible exact-SHA tag procedure.
 
-The candidate is synchronized with current `main` through a merge commit rather than by rewriting T052 history. The conflict resolution retains completed T054/T057/#124 project state. Every source change after synchronization requires a fresh T052/CI/T042/T051 exact-head qualification.
+The candidate must be synchronized with current `main` through a merge commit rather than by rewriting T052 history. Every source change after synchronization requires a fresh T052/CI/T042/T051 exact-head qualification.
 
-### Remaining release/platform-package frontier
+### Remaining release/platform frontier
 
 ```text
 T024(done) + T042(done) -> T051(done) -> T052(in review)
@@ -196,11 +208,15 @@ T047(done) + T048(done) -------------------^
 
 T047(done) + T053(done) -> T054(done)
 T056(done) + T022(done) -> T057(done)
-T065 -> T072 -> T064
+
+#64(done) -> T060(done) -> T065(active PR #133) -> T072 -> T064
+                     |
+                     +-> T066 (also depends on T043)
+
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T052 belongs to the release/lifecycle lane. T064 and T072 remain blocked by T065. T065 is dependency-ready, but its standalone wake backend shares the event-loop integration seam with active T060 work; live branch/PR overlap must be re-evaluated before competing implementation. Independent platform-hardening tickets T043/T044 remain separate scopes.
+T052 belongs to the release/lifecycle lane. T065/T072/T064 and T043/T044 remain separate platform scopes.
 
 ## T057 completion protocol
 
@@ -235,7 +251,7 @@ T052 belongs to the release/lifecycle lane. T064 and T072 remain blocked by T065
 - [x] zero `idle_invalidation` hard gate preserved;
 - [x] v0.1 developer-preview/release/tag documentation implemented;
 - [x] licensing/legal payload contract and release-note references implemented;
-- [x] #124/Pugl correction is merged on `main` and included in the synchronized release baseline;
+- [x] #124/Pugl correction and T060 ownership model are merged on `main` and included in the release baseline after refresh;
 - [ ] exact synchronized-head T052 release workflow green;
 - [ ] exact synchronized-head normal platform/sanitizer CI, T042 lifecycle stress and T051 Release benchmark workflows green;
 - [ ] aggregate mandatory `CODE_REVIEW.md` pass clean on the synchronized exact head;
