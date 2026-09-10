@@ -8,6 +8,20 @@ void nativeui_header_compile_nativeui() {
     (void)theme;
 }
 
+void nativeui_header_compile_t038_visual_state() {
+    ui::VisualState state{};
+    state.enabled = true;
+    state.read_only = true;
+    state.hovered = true;
+    state.pressed = true;
+    state.focused = true;
+    state.selected = true;
+    state.checked = true;
+
+    const auto interaction = ui::resolve_interaction_state(state);
+    (void)interaction;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
