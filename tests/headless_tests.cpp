@@ -53,6 +53,84 @@ ui::OverlaySpec centered_overlay(ui::Spec content) {
     return spec;
 }
 
+void check_overlay_rect(ui::Rect actual, ui::Rect expected) {
+    NUI_CHECK(actual.x == expected.x);
+    NUI_CHECK(actual.y == expected.y);
+    NUI_CHECK(actual.w == expected.w);
+    NUI_CHECK(actual.h == expected.h);
+}
+
+void overlay_placement_contract() {
+    const ui::Rect viewport{0.0f, 0.0f, 100.0f, 100.0f};
+    const ui::Rect anchor{40.0f, 40.0f, 10.0f, 10.0f};
+    const ui::Size content{20.0f, 10.0f};
+
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::AnchorBelow),
+        {40.0f, 50.0f, 20.0f, 10.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::AnchorAbove),
+        {40.0f, 30.0f, 20.0f, 10.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::AnchorRight),
+        {50.0f, 40.0f, 20.0f, 10.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::AnchorLeft),
+        {20.0f, 40.0f, 20.0f, 10.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::Center),
+        {40.0f, 45.0f, 20.0f, 10.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, content, ui::OverlayPlacement::Auto),
+        {40.0f, 50.0f, 20.0f, 10.0f});
+
+    // Requested side falls back to its opposite before comparing clipped area.
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport,
+            {40.0f, 95.0f, 10.0f, 5.0f},
+            {20.0f, 20.0f},
+            ui::OverlayPlacement::AnchorBelow),
+        {40.0f, 75.0f, 20.0f, 20.0f});
+
+    // Auto uses Below, Above, Right, Left as its exact full-fit priority.
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport,
+            {40.0f, 95.0f, 10.0f, 5.0f},
+            {20.0f, 20.0f},
+            ui::OverlayPlacement::Auto),
+        {40.0f, 75.0f, 20.0f, 20.0f});
+
+    // Equal clipped areas preserve requested-side priority before final clamp.
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport,
+            {20.0f, 45.0f, 10.0f, 10.0f},
+            {60.0f, 60.0f},
+            ui::OverlayPlacement::AnchorBelow),
+        {20.0f, 40.0f, 60.0f, 60.0f});
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport,
+            {20.0f, 45.0f, 10.0f, 10.0f},
+            {60.0f, 60.0f},
+            ui::OverlayPlacement::AnchorAbove),
+        {20.0f, 0.0f, 60.0f, 60.0f});
+
+    // Oversized content keeps natural size and clamps to a finite viewport origin.
+    check_overlay_rect(
+        ui::detail::overlay_placement_bounds(
+            viewport, anchor, {140.0f, 120.0f}, ui::OverlayPlacement::Center),
+        {0.0f, 0.0f, 140.0f, 120.0f});
+}
+
 void overlay_structural_queue_contract() {
     test::MockPlatform platform;
     auto state = std::make_shared<OverlayProbeState>();
@@ -171,6 +249,7 @@ void suite() {
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(!tree.dirty());
 
+    overlay_placement_contract();
     overlay_structural_queue_contract();
 }
 
