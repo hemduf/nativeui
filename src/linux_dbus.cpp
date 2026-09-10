@@ -455,6 +455,7 @@ struct LinuxDbusTransport::Impl final {
     struct NativePendingCall final {
         LinuxDbusClientId client{};
         DBusPendingCall* pending{};
+        std::chrono::steady_clock::time_point deadline{};
     };
 
     struct NotifyContext final {
@@ -470,6 +471,15 @@ struct LinuxDbusTransport::Impl final {
         LinuxDbusSignalCallback callback;
         std::string rule;
         std::shared_ptr<std::atomic<bool>> active{std::make_shared<std::atomic<bool>>(false)};
+    };
+
+    struct SignalSetupCommand final {
+        std::shared_ptr<SignalEntry> entry;
+        std::mutex mutex;
+        std::condition_variable ready;
+        bool done{};
+        bool success{};
+        bool cancelled{};
     };
 
     struct ObjectPathEntry final {
@@ -600,6 +610,183 @@ struct LinuxDbusTransport::Impl final {
         dbus_pending_call_unref(native->pending);
     }
 
+    [[nodiscard]] int io_wait_timeout_ms() const noexcept {
+        constexpr int idle_wait_ms = 100;
+        int wait_ms = idle_wait_ms;
+        const auto now = std::chrono::steady_clock::now();
+        std::lock_guard lock{pending_mutex};
+        for (const auto& [id, native] : pending_calls) {
+            (void)id;
+            if (native.deadline <= now) {
+                return 0;
+            }
+            const auto remaining = native.deadline - now;
+            auto rounded = std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
+            if (rounded < remaining) {
+                rounded += std::chrono::milliseconds{1};
+            }
+            const auto count = rounded.count();
+            if (count > 0 && count < wait_ms) {
+                wait_ms = static_cast<int>(count);
+            }
+        }
+        return wait_ms;
+    }
+
+    void expire_pending_calls() noexcept {
+        for (;;) {
+            LinuxDbusRequestId id = kInvalidLinuxDbusRequestId;
+            NativePendingCall expired;
+            bool found = false;
+            const auto now = std::chrono::steady_clock::now();
+            {
+                std::lock_guard lock{pending_mutex};
+                for (auto it = pending_calls.begin(); it != pending_calls.end(); ++it) {
+                    if (it->second.deadline <= now) {
+                        id = it->first;
+                        expired = it->second;
+                        pending_calls.erase(it);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                return;
+            }
+            if (expired.pending != nullptr) {
+                dbus_pending_call_cancel(expired.pending);
+                dbus_pending_call_unref(expired.pending);
+            }
+            try {
+                (void)calls.complete(
+                    expired.client, id,
+                    LinuxDbusCompletion{LinuxDbusErrorCode::Timeout, DBUS_ERROR_NO_REPLY,
+                                        "D-Bus method call timed out"});
+            } catch (...) {
+                // Timeout completion is already terminal; no I/O-thread
+                // callback fallback is permitted if marshalling fails.
+            }
+        }
+    }
+
+    [[nodiscard]] static bool install_signal_match(DBusConnection* current_connection,
+                                                   const std::string& rule) noexcept {
+        if (current_connection == nullptr) {
+            return false;
+        }
+
+        DBusMessage* message = dbus_message_new_method_call(
+            DBUS_SERVICE_DBUS, DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "AddMatch");
+        if (message == nullptr) {
+            return false;
+        }
+        const char* rule_text = rule.c_str();
+        if (dbus_message_append_args(message, DBUS_TYPE_STRING, &rule_text,
+                                     DBUS_TYPE_INVALID) == FALSE) {
+            dbus_message_unref(message);
+            return false;
+        }
+
+        DBusError error;
+        dbus_error_init(&error);
+        DBusMessage* reply = dbus_connection_send_with_reply_and_block(
+            current_connection, message, 1'000, &error);
+        dbus_message_unref(message);
+        const bool success = reply != nullptr && !dbus_error_is_set(&error) &&
+                             dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_METHOD_RETURN;
+        if (reply != nullptr) {
+            dbus_message_unref(reply);
+        }
+        dbus_error_free(&error);
+        return success;
+    }
+
+    static void remove_signal_match_async(DBusConnection* current_connection,
+                                          const std::string& rule) noexcept {
+        if (current_connection != nullptr) {
+            dbus_bus_remove_match(current_connection, rule.c_str(), nullptr);
+        }
+    }
+
+    void process_signal_setup_commands() noexcept {
+        std::vector<std::shared_ptr<SignalSetupCommand>> commands;
+        try {
+            {
+                std::lock_guard lock{control_mutex};
+                commands.swap(signal_setup_commands);
+            }
+            for (const auto& command : commands) {
+                if (!command || !command->entry) {
+                    continue;
+                }
+
+                bool cancelled = false;
+                {
+                    std::lock_guard command_lock{command->mutex};
+                    cancelled = command->cancelled;
+                }
+
+                bool success = false;
+                if (!cancelled && !stop_requested.load(std::memory_order_acquire)) {
+                    success = install_signal_match(connection, command->entry->rule);
+                }
+
+                {
+                    std::lock_guard command_lock{command->mutex};
+                    cancelled = command->cancelled;
+                    if (success && !cancelled) {
+                        command->entry->active->store(true, std::memory_order_release);
+                        command->success = true;
+                    } else {
+                        command->success = false;
+                    }
+                    command->done = true;
+                }
+                if (success && cancelled) {
+                    remove_signal_match_async(connection, command->entry->rule);
+                }
+                command->ready.notify_all();
+            }
+        } catch (...) {
+            for (const auto& command : commands) {
+                if (!command) {
+                    continue;
+                }
+                {
+                    std::lock_guard command_lock{command->mutex};
+                    command->success = false;
+                    command->done = true;
+                }
+                command->ready.notify_all();
+            }
+        }
+    }
+
+    void fail_signal_setup_commands() noexcept {
+        std::vector<std::shared_ptr<SignalSetupCommand>> commands;
+        try {
+            {
+                std::lock_guard lock{control_mutex};
+                commands.swap(signal_setup_commands);
+            }
+            for (const auto& command : commands) {
+                if (!command) {
+                    continue;
+                }
+                {
+                    std::lock_guard command_lock{command->mutex};
+                    command->success = false;
+                    command->done = true;
+                }
+                command->ready.notify_all();
+            }
+        } catch (...) {
+            // Callers also use a bounded wait, so shutdown cannot depend on
+            // allocating or draining this diagnostic control path.
+        }
+    }
+
     [[nodiscard]] static std::string copy_message_string(const char* value) {
         return value == nullptr ? std::string{} : std::string{value};
     }
@@ -700,28 +887,17 @@ struct LinuxDbusTransport::Impl final {
                 signal_filter_installed = false;
             }
 
-            // libdbus match removal can synchronously wait for bus traffic. It
-            // must never run while signal_mutex is held because the I/O thread
-            // may already be dispatching a signal and need that mutex to make
-            // progress.
             if (current_connection != nullptr && remove_filter) {
                 dbus_connection_remove_filter(current_connection, &Impl::signal_filter, this);
             }
             for (const auto& [id, entry] : removed) {
-                if (!entry) {
-                    continue;
+                if (entry) {
+                    (void)ledger.release_subscription(entry->client, id);
                 }
-                if (current_connection != nullptr) {
-                    DBusError error;
-                    dbus_error_init(&error);
-                    dbus_bus_remove_match(current_connection, entry->rule.c_str(), &error);
-                    dbus_error_free(&error);
-                }
-                (void)ledger.release_subscription(entry->client, id);
             }
         } catch (...) {
-            // Shutdown is noexcept; lifetime gates are disabled before any
-            // operation that can fail, so no client callback can escape.
+            // The private connection is closed immediately after I/O shutdown,
+            // so no blocking RemoveMatch round-trip is needed during teardown.
         }
     }
 
@@ -893,6 +1069,7 @@ struct LinuxDbusTransport::Impl final {
     mutable std::mutex pending_mutex;
     mutable std::mutex signal_mutex;
     mutable std::mutex object_mutex;
+    mutable std::mutex control_mutex;
     DBusConnection* connection{};
     std::thread io_thread;
     std::atomic<bool> stop_requested{false};
@@ -909,6 +1086,7 @@ struct LinuxDbusTransport::Impl final {
     LinuxDbusPendingCallSet calls;
     std::unordered_map<LinuxDbusRequestId, NativePendingCall> pending_calls;
     std::unordered_map<LinuxDbusSubscriptionId, std::shared_ptr<SignalEntry>> signals;
+    std::vector<std::shared_ptr<SignalSetupCommand>> signal_setup_commands;
     std::unordered_map<LinuxDbusObjectRegistrationId,
                        std::shared_ptr<ObjectPathEntry>> object_paths;
     std::unordered_map<std::string, LinuxDbusObjectRegistrationId> object_path_ids;
@@ -970,10 +1148,15 @@ LinuxDbusErrorCode LinuxDbusTransport::start() {
         Impl* state = impl_.get();
         impl_->io_thread = std::thread([state] {
             while (!state->stop_requested.load(std::memory_order_acquire)) {
-                if (dbus_connection_read_write_dispatch(state->connection, 100) == FALSE) {
+                state->process_signal_setup_commands();
+                state->expire_pending_calls();
+                if (dbus_connection_read_write_dispatch(
+                        state->connection, state->io_wait_timeout_ms()) == FALSE) {
                     break;
                 }
+                state->expire_pending_calls();
             }
+            state->fail_signal_setup_commands();
             state->running.store(false, std::memory_order_release);
         });
     } catch (...) {
@@ -996,8 +1179,6 @@ void LinuxDbusTransport::stop() noexcept {
     {
         std::unique_lock lock{impl_->lifecycle_mutex};
         if (impl_->stopping) {
-            // Stop is serialized. A second normal caller waits for the first
-            // cleanup instead of touching a connection/thread that is joining.
             if (impl_->io_thread.get_id() == std::this_thread::get_id()) {
                 impl_->stop_requested.store(true, std::memory_order_release);
                 return;
@@ -1011,9 +1192,6 @@ void LinuxDbusTransport::stop() noexcept {
 
         if (impl_->io_thread.joinable() &&
             impl_->io_thread.get_id() == std::this_thread::get_id()) {
-            // An internal object-path callback may request stop. Joining self
-            // is impossible; request loop exit and leave final cleanup to the
-            // owning thread/destructor after the callback unwinds.
             return;
         }
 
@@ -1021,6 +1199,7 @@ void LinuxDbusTransport::stop() noexcept {
             impl_->running.store(false, std::memory_order_release);
             impl_->unique_name.clear();
             impl_->clients.clear();
+            impl_->fail_signal_setup_commands();
             return;
         }
 
@@ -1031,17 +1210,10 @@ void LinuxDbusTransport::stop() noexcept {
         }
     }
 
-    // Never hold lifecycle_mutex while joining. Object-path handlers execute
-    // on the I/O thread and may use transport query/send APIs which acquire the
-    // lifecycle mutex. Holding it here would deadlock teardown against a
-    // callback already in flight.
     if (io_thread.joinable()) {
         io_thread.join();
     }
 
-    // With I/O dispatch stopped, remove callbacks/paths and then close the
-    // private connection. This also avoids removing D-Bus match rules while a
-    // signal filter is concurrently trying to acquire signal_mutex.
     impl_->unregister_all_signals(connection);
     impl_->unregister_all_object_paths(connection);
 
@@ -1211,7 +1383,11 @@ LinuxDbusRequestId LinuxDbusTransport::call_method(
                                 inserted = impl_->pending_calls
                                                .try_emplace(
                                                    id,
-                                                   Impl::NativePendingCall{client, pending})
+                                                   Impl::NativePendingCall{
+                                                       client,
+                                                       pending,
+                                                       std::chrono::steady_clock::now() +
+                                                           call.timeout})
                                                .second;
                             } catch (...) {
                                 inserted = false;
@@ -1288,8 +1464,10 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
         entry->match = match;
         entry->callback = std::move(callback);
         entry->rule = signal_match_rule(match);
+        auto setup = std::make_shared<Impl::SignalSetupCommand>();
+        setup->entry = entry;
 
-        std::lock_guard lifecycle_lock{impl_->lifecycle_mutex};
+        std::unique_lock lifecycle_lock{impl_->lifecycle_mutex};
         if (impl_->destroying || impl_->stopping || impl_->connection == nullptr ||
             !impl_->running.load(std::memory_order_acquire) ||
             impl_->stop_requested.load(std::memory_order_acquire)) {
@@ -1324,34 +1502,48 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
             }
         }
 
-        // Do not hold signal_mutex across the synchronous bus-daemon AddMatch
-        // exchange. The I/O thread may concurrently dispatch a signal filter.
-        DBusError error;
-        dbus_error_init(&error);
-        dbus_bus_add_match(impl_->connection, entry->rule.c_str(), &error);
-        if (dbus_error_is_set(&error)) {
-            dbus_error_free(&error);
-            bool remove_filter = false;
+        bool setup_success = false;
+        if (impl_->io_thread.get_id() == std::this_thread::get_id()) {
+            setup_success = Impl::install_signal_match(impl_->connection, entry->rule);
+            if (setup_success) {
+                entry->active->store(true, std::memory_order_release);
+            }
+        } else {
             {
-                std::lock_guard signal_lock{impl_->signal_mutex};
-                impl_->signals.erase(id);
-                if (installed_filter_now && impl_->signals.empty() &&
-                    impl_->signal_filter_installed) {
-                    impl_->signal_filter_installed = false;
-                    remove_filter = true;
-                }
+                std::lock_guard control_lock{impl_->control_mutex};
+                impl_->signal_setup_commands.push_back(setup);
             }
-            if (remove_filter) {
-                dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
-                                              impl_.get());
+
+            std::unique_lock setup_lock{setup->mutex};
+            if (!setup->ready.wait_for(setup_lock, std::chrono::milliseconds{1'500},
+                                       [&] { return setup->done; })) {
+                setup->cancelled = true;
+                setup_success = false;
+            } else {
+                setup_success = setup->success;
             }
-            (void)impl_->ledger.release_subscription(client, id);
-            return kInvalidLinuxDbusSubscriptionId;
         }
-        dbus_error_free(&error);
-        dbus_connection_flush(impl_->connection);
-        entry->active->store(true, std::memory_order_release);
-        return id;
+
+        if (setup_success) {
+            return id;
+        }
+
+        bool remove_filter = false;
+        {
+            std::lock_guard signal_lock{impl_->signal_mutex};
+            impl_->signals.erase(id);
+            if (installed_filter_now && impl_->signals.empty() &&
+                impl_->signal_filter_installed) {
+                impl_->signal_filter_installed = false;
+                remove_filter = true;
+            }
+        }
+        if (remove_filter) {
+            dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                          impl_.get());
+        }
+        (void)impl_->ledger.release_subscription(client, id);
+        return kInvalidLinuxDbusSubscriptionId;
     } catch (...) {
         return kInvalidLinuxDbusSubscriptionId;
     }
@@ -1386,16 +1578,11 @@ bool LinuxDbusTransport::unsubscribe_signal(LinuxDbusClientId client,
             }
         }
 
-        // Never hold signal_mutex while libdbus synchronously changes the bus
-        // match set; otherwise an in-flight filter can deadlock teardown.
         if (remove_filter) {
             dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
                                           impl_.get());
         }
-        DBusError error;
-        dbus_error_init(&error);
-        dbus_bus_remove_match(impl_->connection, entry->rule.c_str(), &error);
-        dbus_error_free(&error);
+        Impl::remove_signal_match_async(impl_->connection, entry->rule);
     }
 
     return impl_->ledger.release_subscription(client, id);
@@ -1578,8 +1765,6 @@ void LinuxDbusTransport::release_client(LinuxDbusClientId client) noexcept {
         impl_->clients.erase(client);
     }
 
-    // Disable completion gates first so a reply that was already marshalled to
-    // the UI dispatcher cannot escape after this logical client is released.
     impl_->calls.discard_client(client);
 
     for (;;) {
