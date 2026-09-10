@@ -222,10 +222,28 @@ void visual_state_goldens() {
     NUI_CHECK(pixel_near(renderer.pixel(20, 20), ui::colors::input));
 }
 
+void custom_theme_controls_presentation_and_measurement() {
+    ui::Theme theme = ui::default_theme();
+    theme.palette.surface = ui::Color{0.18f, 0.32f, 0.47f, 1.0f};
+    theme.controls.minimum_width = 132.0f;
+    theme.controls.control_height = 52.0f;
+    theme.typography.control_size = 18.0f;
+
+    ui::UI tree{ui::Button{"Themed control", [] {}}, theme};
+    const auto metrics = tree.measure();
+    NUI_CHECK_NEAR(metrics.preferred.h, 52.0f, 0.0001f);
+    NUI_CHECK(metrics.preferred.w >= 132.0f);
+
+    ui::HeadlessRenderer renderer{{180.0f, 64.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_near(renderer.pixel(20, 20), theme.palette.surface));
+}
+
 void suite() {
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
     visual_state_goldens();
+    custom_theme_controls_presentation_and_measurement();
 }
 
 } // namespace
