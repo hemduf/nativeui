@@ -205,11 +205,13 @@ struct LinuxDbusPendingCallSet::Impl final {
     };
 
     explicit Impl(LinuxDbusResourceLedger& resource_ledger)
-        : ledger(resource_ledger) {}
+        : ledger(resource_ledger),
+          completion_gate(std::make_shared<std::atomic<bool>>(true)) {}
 
     LinuxDbusResourceLedger& ledger;
     mutable std::mutex mutex;
     std::unordered_map<LinuxDbusRequestId, std::unique_ptr<Entry>> calls;
+    std::shared_ptr<std::atomic<bool>> completion_gate;
     bool closing{};
 };
 
@@ -270,6 +272,7 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
                                        LinuxDbusRequestId id,
                                        LinuxDbusCompletion completion) {
     std::unique_ptr<Impl::Entry> entry;
+    std::shared_ptr<std::atomic<bool>> completion_gate;
     {
         std::lock_guard lock{impl_->mutex};
         if (impl_->closing || client == kInvalidLinuxDbusClientId ||
@@ -283,6 +286,7 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
         }
         entry = std::move(found->second);
         impl_->calls.erase(found);
+        completion_gate = impl_->completion_gate;
     }
 
     (void)impl_->ledger.release_request(client, id);
@@ -293,7 +297,11 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
 
     try {
         (void)dispatcher.post(
-            [callback = std::move(callback), completion = std::move(completion)]() mutable {
+            [completion_gate = std::move(completion_gate), callback = std::move(callback),
+             completion = std::move(completion)]() mutable {
+                if (!completion_gate->load(std::memory_order_acquire)) {
+                    return;
+                }
                 callback(std::move(completion));
             });
     } catch (...) {
@@ -305,7 +313,8 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
 }
 
 bool LinuxDbusPendingCallSet::cancel(LinuxDbusClientId client, LinuxDbusRequestId id) {
-    return complete(client, id, LinuxDbusCompletion{LinuxDbusErrorCode::Cancelled});
+    return complete(client, id,
+                    LinuxDbusCompletion{LinuxDbusErrorCode::Cancelled, {}, {}});
 }
 
 void LinuxDbusPendingCallSet::shutdown() noexcept {
@@ -313,6 +322,7 @@ void LinuxDbusPendingCallSet::shutdown() noexcept {
     try {
         {
             std::lock_guard lock{impl_->mutex};
+            impl_->completion_gate->store(false, std::memory_order_release);
             if (impl_->closing) {
                 return;
             }
@@ -552,7 +562,8 @@ void LinuxDbusTransport::stop() noexcept {
         }
         if (!suppress_completions) {
             (void)impl_->calls.complete(
-                native.client, id, LinuxDbusCompletion{LinuxDbusErrorCode::Shutdown});
+                native.client, id,
+                LinuxDbusCompletion{LinuxDbusErrorCode::Shutdown, {}, {}});
         }
     }
 
