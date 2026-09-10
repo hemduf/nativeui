@@ -301,19 +301,6 @@
         ensure_layout();
 
         Painter painter{canvas};
-        painter.fill_rounded_rect(
-            Rect{0.0f, 0.0f, viewport_.w, viewport_.h},
-            0.0f,
-            colors::background);
-
         paint_node(*root_, painter, platform, viewport_rect());
-
-        painter.text(
-            Point{24.0f, std::max(24.0f, viewport_.h - 22.0f)},
-            "TAB / SHIFT+TAB focus    arrows edit    mouse select/drag    CMD/CTRL+C/X/V/Z",
-            12.0f,
-            colors::textMuted,
-            TextAlign::Left);
-
         paint_dirty_.clear();
     }
