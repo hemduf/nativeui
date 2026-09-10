@@ -70,6 +70,12 @@ public:
         ++drop_reject_count;
     }
 
+    // T044 RED seam: these intentionally are not overrides yet. The capture
+    // lifecycle tests require the retained tree to call the platform boundary
+    // only when toolkit capture actually transitions none <-> owner.
+    void begin_pointer_capture() { ++pointer_capture_begin_count; }
+    void end_pointer_capture() { ++pointer_capture_end_count; }
+
     bool text_input_active{};
     bool paste_requested{};
     float text_input_cursor_offset{};
@@ -83,6 +89,8 @@ public:
     ui::Rect rejected_drop_region{};
     int drop_accept_count{};
     int drop_reject_count{};
+    int pointer_capture_begin_count{};
+    int pointer_capture_end_count{};
     std::vector<bool> text_input_transitions;
 };
 
