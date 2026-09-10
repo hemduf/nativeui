@@ -82,7 +82,7 @@ if(T042_BUILD_PLATFORM_STRESS)
   )
   add_test(
     NAME nativeui_t042_standalone_supported_multi_instance
-    COMMAND nativeui_t042_platform_stress --standalone-contract
+    COMMAND nativeui_t042_platform_stress --standalone-shared-world
   )
   set_tests_properties(
     nativeui_t042_embedded_sequential_100
