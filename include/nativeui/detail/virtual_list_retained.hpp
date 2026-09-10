@@ -43,6 +43,36 @@ public:
     [[nodiscard]] const ScrollState& scroll() const noexcept { return scroll_; }
     [[nodiscard]] float row_height() const noexcept { return row_height_; }
 
+    [[nodiscard]] bool scroll_to_index(
+        std::size_t index,
+        ScrollAlignment alignment = ScrollAlignment::Nearest) {
+        const auto target = model_.scroll_offset_for_index(
+            index,
+            row_height_,
+            scroll_.viewport_size().h,
+            scroll_.offset().y,
+            virtual_alignment(alignment));
+        if (!target) return false;
+        const auto before = scroll_.offset();
+        scroll_.set_offset(Point{before.x, *target});
+        return true;
+    }
+
+    [[nodiscard]] bool scroll_to_key(
+        const Key& key,
+        ScrollAlignment alignment = ScrollAlignment::Nearest) {
+        const auto target = model_.scroll_offset_for_key(
+            key,
+            row_height_,
+            scroll_.viewport_size().h,
+            scroll_.offset().y,
+            virtual_alignment(alignment));
+        if (!target) return false;
+        const auto before = scroll_.offset();
+        scroll_.set_offset(Point{before.x, *target});
+        return true;
+    }
+
     [[nodiscard]] float content_height() const noexcept {
         const auto height = virtual_list_content_height(model_.size(), row_height_);
         return height.value_or(0.0f);
@@ -79,6 +109,16 @@ public:
     }
 
 private:
+    [[nodiscard]] static VirtualListAlignment virtual_alignment(ScrollAlignment alignment) noexcept {
+        switch (alignment) {
+        case ScrollAlignment::Nearest: return VirtualListAlignment::Nearest;
+        case ScrollAlignment::Start: return VirtualListAlignment::Start;
+        case ScrollAlignment::Center: return VirtualListAlignment::Center;
+        case ScrollAlignment::End: return VirtualListAlignment::End;
+        }
+        return VirtualListAlignment::Nearest;
+    }
+
     void refresh_window() {
         const auto previous_keys = window_.keys();
         if (!window_.update(scroll_.offset().y, viewport_height_)) return;
