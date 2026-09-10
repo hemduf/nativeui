@@ -141,6 +141,83 @@ private:
     std::shared_ptr<EscapeProbeState> state_;
 };
 
+struct AnchorProbeState {
+    ui::NodeId id{ui::kInvalidNodeId};
+};
+
+class AnchorProbeComponent final : public ui::Component {
+public:
+    explicit AnchorProbeComponent(std::shared_ptr<AnchorProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {20.0f, 10.0f};
+    }
+
+    void mount(ui::MountContext& context) override { state_->id = context.node_id(); }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<AnchorProbeState> state_;
+};
+
+class AnchorProbe {
+public:
+    explicit AnchorProbe(std::shared_ptr<AnchorProbeState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<AnchorProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<AnchorProbeState> state_;
+};
+
+class AnchorRootComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {96.0f, 48.0f};
+    }
+
+    void layout_children(ui::Rect bounds,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) {
+            placements.front().bounds = {
+                bounds.x + (std::max)(0.0f, bounds.w - 30.0f),
+                bounds.y + 8.0f,
+                20.0f,
+                10.0f};
+        }
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
+class AnchorRoot {
+public:
+    AnchorRoot(ui::State<bool>& present, std::shared_ptr<AnchorProbeState> state)
+        : present_(&present), state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto* present = present_;
+        auto state = std::move(state_);
+        return ui::Spec{
+            [] { return std::make_unique<AnchorRootComponent>(); },
+            {ui::make_spec(ui::If{*present, AnchorProbe{std::move(state)}})}};
+    }
+
+private:
+    ui::State<bool>* present_{};
+    std::shared_ptr<AnchorProbeState> state_;
+};
+
 ui::OverlaySpec centered_overlay(ui::Spec content) {
     ui::OverlaySpec spec;
     spec.placement = ui::OverlayPlacement::Center;
@@ -407,6 +484,60 @@ void overlay_dismissal_contract() {
     NUI_CHECK(root_keys->escape_downs == 1);
 }
 
+void overlay_anchor_contract() {
+    test::MockPlatform platform;
+    ui::State<bool> anchor_present{true};
+    auto anchor = std::make_shared<AnchorProbeState>();
+    auto overlay = std::make_shared<PointerProbeState>();
+
+    ui::UI tree{AnchorRoot{anchor_present, anchor}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+    NUI_CHECK(anchor->id != ui::kInvalidNodeId);
+
+    auto anchored = centered_pointer_overlay(overlay);
+    anchored.anchor = anchor->id;
+    anchored.placement = ui::OverlayPlacement::AnchorBelow;
+    const auto handle = tree.show_overlay(std::move(anchored));
+    tree.resize({96.0f, 48.0f});
+
+    ui::InputEvent first;
+    first.type = ui::InputType::PointerDown;
+    first.position = {68.0f, 20.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(first, platform)));
+    NUI_CHECK(overlay->pointer_downs == 1);
+
+    // Anchor geometry is resolved from the retained NodeId on every relevant
+    // layout checkpoint, so a viewport change repositions the overlay.
+    tree.resize({120.0f, 48.0f});
+    ui::InputEvent moved = first;
+    moved.position = {92.0f, 20.0f};
+    NUI_CHECK(ui::handled(tree.dispatch(moved, platform)));
+    NUI_CHECK(overlay->pointer_downs == 2);
+
+    // T058 removal invalidates the retained NodeId. The anchored overlay closes
+    // at the same safe checkpoint rather than retaining stale geometry/pointers.
+    anchor_present.set(false);
+    tree.resize({120.0f, 48.0f});
+    NUI_CHECK(!handle.valid());
+
+    // UI deactivation is also an explicit anchor-loss boundary.
+    ui::State<bool> second_present{true};
+    auto second_anchor = std::make_shared<AnchorProbeState>();
+    ui::UI second{AnchorRoot{second_present, second_anchor}};
+    second.resize({96.0f, 48.0f});
+    second.activate(platform);
+    auto second_spec = centered_overlay(
+        ui::make_spec(OverlayProbe{std::make_shared<OverlayProbeState>()}));
+    second_spec.anchor = second_anchor->id;
+    second_spec.placement = ui::OverlayPlacement::AnchorBelow;
+    const auto second_handle = second.show_overlay(std::move(second_spec));
+    second.resize({96.0f, 48.0f});
+    NUI_CHECK(second_handle.valid());
+    second.deactivate(platform);
+    NUI_CHECK(!second_handle.valid());
+}
+
 void overlay_structural_queue_contract() {
     test::MockPlatform platform;
     auto state = std::make_shared<OverlayProbeState>();
@@ -517,6 +648,7 @@ void suite() {
     overlay_pointer_stack_contract();
     overlay_modal_pointer_barrier_contract();
     overlay_dismissal_contract();
+    overlay_anchor_contract();
     overlay_structural_queue_contract();
 }
 
