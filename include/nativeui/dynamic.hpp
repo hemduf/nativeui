@@ -319,9 +319,25 @@ public:
           }) {}
 
     Spec spec() && {
+        std::vector<std::string> initial_keys;
+        initial_keys.reserve(state_->get().size());
+        for (const auto& item : state_->get()) initial_keys.push_back(key_function_(item));
+
+        bool duplicate_keys = false;
+        for (std::size_t i = 0; i < initial_keys.size() && !duplicate_keys; ++i) {
+            duplicate_keys = std::find(
+                initial_keys.begin() + static_cast<std::ptrdiff_t>(i + 1),
+                initial_keys.end(),
+                initial_keys[i]) != initial_keys.end();
+        }
+
         std::vector<Spec> initial_children;
-        initial_children.reserve(state_->get().size());
-        for (const auto& item : state_->get()) initial_children.push_back(child_function_(item));
+        if (!duplicate_keys) {
+            initial_children.reserve(state_->get().size());
+            for (const auto& item : state_->get()) {
+                initial_children.push_back(child_function_(item));
+            }
+        }
 
         auto* state = state_;
         auto key_function = std::move(key_function_);
