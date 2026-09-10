@@ -2,6 +2,7 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -14,6 +15,9 @@ namespace ui {
 
 using SemanticId = std::uint64_t;
 inline constexpr SemanticId kInvalidSemanticId = 0;
+
+using VirtualSemanticItemToken = std::uint64_t;
+inline constexpr VirtualSemanticItemToken kInvalidVirtualSemanticItemToken = 0;
 
 enum class SemanticRole {
     None,
@@ -61,6 +65,20 @@ enum class SemanticCheckedState {
     Mixed,
 };
 
+enum class SemanticExpandedState {
+    NotApplicable,
+    Collapsed,
+    Expanded,
+};
+
+enum class SemanticChange {
+    StructureChanged,
+    FocusChanged,
+    SelectionChanged,
+    ValueChanged,
+    BoundsChanged,
+};
+
 struct SemanticValueRange {
     double minimum{};
     double maximum{};
@@ -80,64 +98,44 @@ struct SemanticInfo {
     bool read_only{};
     SemanticCheckedState checked{SemanticCheckedState::NotApplicable};
     bool selected{};
-    bool expanded{};
+    SemanticExpandedState expanded{SemanticExpandedState::NotApplicable};
     bool focusable{};
     bool focused{};
     std::vector<SemanticAction> actions;
 
+    [[nodiscard]] bool supports(SemanticAction action) const noexcept {
+        return std::find(actions.begin(), actions.end(), action) != actions.end();
+    }
+
     bool operator==(const SemanticInfo&) const = default;
 };
 
+// A virtual semantic item token is not a hash. The owning virtual collection
+// mints a non-zero token when a logical key enters the accepted dataset, keeps
+// it stable while that key remains present (including reorder), and never
+// reuses it for another live/stale item identity in that collection lifetime.
 struct VirtualSemanticItem {
-    SemanticId id{kInvalidSemanticId};
-    std::string name;
-    std::string description;
-    bool enabled{true};
-    bool selected{};
+    VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
+    SemanticInfo info;
     Rect logical_bounds{};
-    std::vector<SemanticAction> actions;
 };
 
+// Immutable snapshot interface for a logical virtual collection generation.
+// Implementations may share an O(N) immutable metadata object and combine it
+// with small per-generation selection/geometry state; item_at() must not mount
+// or otherwise materialize visual retained rows.
 class VirtualSemanticChildren {
 public:
-    VirtualSemanticChildren()
-        : items_(std::make_shared<const std::vector<VirtualSemanticItem>>()) {}
+    virtual ~VirtualSemanticChildren() = default;
 
-    [[nodiscard]] static VirtualSemanticChildren from_items(
-        std::vector<VirtualSemanticItem> items) {
-        return VirtualSemanticChildren{
-            std::make_shared<const std::vector<VirtualSemanticItem>>(std::move(items))};
-    }
-
-    [[nodiscard]] std::size_t size() const noexcept { return items_->size(); }
-
-    [[nodiscard]] std::optional<VirtualSemanticItem> item_at(std::size_t index) const {
-        if (index >= items_->size()) {
-            return std::nullopt;
-        }
-        return (*items_)[index];
-    }
-
-    [[nodiscard]] std::optional<std::size_t> index_of_selected_item() const noexcept {
-        for (std::size_t index = 0; index < items_->size(); ++index) {
-            if ((*items_)[index].selected) {
-                return index;
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] std::shared_ptr<const std::vector<VirtualSemanticItem>> snapshot() const noexcept {
-        return items_;
-    }
-
-private:
-    explicit VirtualSemanticChildren(
-        std::shared_ptr<const std::vector<VirtualSemanticItem>> items)
-        : items_(std::move(items)) {}
-
-    std::shared_ptr<const std::vector<VirtualSemanticItem>> items_;
+    [[nodiscard]] virtual std::uint64_t dataset_generation() const noexcept = 0;
+    [[nodiscard]] virtual std::size_t size() const noexcept = 0;
+    [[nodiscard]] virtual std::optional<VirtualSemanticItem> item_at(
+        std::size_t index) const = 0;
+    [[nodiscard]] virtual std::optional<std::size_t> index_of_selected_item() const noexcept = 0;
 };
+
+using VirtualSemanticChildrenSnapshot = std::shared_ptr<const VirtualSemanticChildren>;
 
 struct SemanticNodeSnapshot {
     SemanticId id{kInvalidSemanticId};
@@ -145,7 +143,13 @@ struct SemanticNodeSnapshot {
     SemanticInfo info;
     Rect bounds{};
     std::vector<SemanticId> children;
-    std::optional<VirtualSemanticChildren> virtual_children;
+    VirtualSemanticChildrenSnapshot virtual_children;
+};
+
+struct SemanticTreeSnapshot {
+    std::uint64_t generation{};
+    SemanticId root{kInvalidSemanticId};
+    std::vector<SemanticNodeSnapshot> nodes;
 };
 
 } // namespace ui
