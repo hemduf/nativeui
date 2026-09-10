@@ -6,6 +6,9 @@
 #include <vector>
 
 void nativeui_header_compile_nativeui() {
+    ui::Theme theme = ui::default_theme();
+    (void)theme;
+
     ui::SemanticInfo info;
     info.role = ui::SemanticRole::Custom;
     ui::SemanticNodeSnapshot snapshot;
