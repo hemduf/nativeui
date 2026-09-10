@@ -305,7 +305,7 @@ struct OverlayState {
     }
 };
 
-class OverlayEntryComponent final : public Component {
+class OverlayEntryComponent final : public Component, public PointerDescendantPolicy {
 public:
     OverlayEntryComponent(OverlayMode mode, OverlayPointerPolicy pointer_policy)
         : mode_(mode), pointer_policy_(pointer_policy) {}
@@ -317,6 +317,12 @@ public:
     }
 
     [[nodiscard]] bool pointer_targetable() const noexcept override {
+        return pointer_policy_ == OverlayPointerPolicy::Normal;
+    }
+
+    [[nodiscard]] bool pointer_descendants_targetable() const noexcept override {
+        // Ignore is visual-only for pointer routing. Descendant paint/layout
+        // and explicit keyboard focus remain intact.
         return pointer_policy_ == OverlayPointerPolicy::Normal;
     }
 
