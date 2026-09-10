@@ -695,8 +695,11 @@ void overlay_focus_and_capture_contract() {
     auto capture_spec = centered_overlay(ui::make_spec(CaptureCloseProbe{capture}));
     const auto capture_handle = capture_tree.show_overlay(std::move(capture_spec));
     capture_tree.resize({96.0f, 48.0f});
-    capture->close = [&capture_tree, capture_handle, capture] {
-        capture->close_result = capture_tree.close_overlay(capture_handle);
+    const std::weak_ptr<CaptureCloseState> capture_lifetime{capture};
+    capture->close = [&capture_tree, capture_handle, capture_lifetime] {
+        if (const auto state = capture_lifetime.lock()) {
+            state->close_result = capture_tree.close_overlay(capture_handle);
+        }
     };
 
     ui::InputEvent down;
