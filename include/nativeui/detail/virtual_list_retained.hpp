@@ -3,6 +3,7 @@
 #include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/virtual_list_window.hpp>
 #include <nativeui/layout.hpp>
+#include <nativeui/state.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,7 @@ public:
     using Model = VirtualListDatasetModel<Key>;
     using Item = typename Model::Item;
     using RowFactory = std::function<Spec(const Item&)>;
+    using ActivationCallback = std::function<void(const Key&)>;
 
     VirtualListRetainedRuntime(
         float row_height,
@@ -36,15 +38,39 @@ public:
     VirtualListRetainedRuntime(const VirtualListRetainedRuntime&) = delete;
     VirtualListRetainedRuntime& operator=(const VirtualListRetainedRuntime&) = delete;
 
+    void bind_selection(State<std::optional<Key>>& selection) noexcept {
+        selection_ = &selection;
+    }
+
+    void set_activation_callback(ActivationCallback callback) {
+        activation_callback_ = std::move(callback);
+    }
+
     [[nodiscard]] bool replace(std::vector<Item> items) {
         // Reject geometry that cannot be represented before publishing the
         // logical dataset/semantic generation. A rejected update therefore
         // leaves the previous dataset, metadata and materialized rows intact.
         if (!virtual_list_content_height(items.size(), row_height_)) return false;
 
+        std::optional<Key> focused_key;
+        if (focused_index_) {
+            if (const auto* item = model_.item_at(*focused_index_)) focused_key = item->key;
+        }
+        std::optional<Key> captured_key;
+        if (captured_index_) {
+            if (const auto* item = model_.item_at(*captured_index_)) captured_key = item->key;
+        }
+
         const auto generation = model_.generation();
         if (!model_.replace(std::move(items))) return false;
-        if (model_.generation() != generation) refresh_window();
+        if (model_.generation() == generation) return true;
+
+        // Dataset changes are the one place where O(N) logical-key lookup is
+        // allowed. Ordinary scrolling carries scalar indices so it never scans
+        // the full dataset merely to preserve focused/captured exception rows.
+        focused_index_ = focused_key ? model_.index_of_key(*focused_key) : std::nullopt;
+        captured_index_ = captured_key ? model_.index_of_key(*captured_key) : std::nullopt;
+        refresh_window();
         return true;
     }
 
@@ -52,6 +78,46 @@ public:
     [[nodiscard]] const ScrollState& scroll() const noexcept { return scroll_; }
     [[nodiscard]] float row_height() const noexcept { return row_height_; }
     [[nodiscard]] std::size_t overscan() const noexcept { return overscan_; }
+    [[nodiscard]] std::size_t size() const noexcept { return model_.size(); }
+
+    [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
+        const auto* item = model_.item_at(index);
+        return item && item->enabled;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> selected_index() const {
+        if (!selection_ || !selection_->get()) return std::nullopt;
+        const auto index = model_.index_of_key(*selection_->get());
+        return index && enabled_at(*index) ? index : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> first_enabled() const noexcept {
+        for (std::size_t index = 0; index < model_.size(); ++index) {
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> last_enabled() const noexcept {
+        for (std::size_t index = model_.size(); index > 0; --index) {
+            if (enabled_at(index - 1)) return index - 1;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> next_enabled(std::size_t from) const noexcept {
+        for (std::size_t index = from + 1; index < model_.size(); ++index) {
+            if (enabled_at(index)) return index;
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> previous_enabled(std::size_t from) const noexcept {
+        for (std::size_t index = from; index > 0; --index) {
+            if (enabled_at(index - 1)) return index - 1;
+        }
+        return std::nullopt;
+    }
 
     [[nodiscard]] bool scroll_to_index(
         std::size_t index,
@@ -81,6 +147,50 @@ public:
         const auto before = scroll_.offset();
         scroll_.set_offset(Point{before.x, *target});
         return true;
+    }
+
+    [[nodiscard]] bool select(std::size_t index) {
+        if (!selection_ || !enabled_at(index)) return false;
+        const auto* item = model_.item_at(index);
+        if (!item) return false;
+
+        const Key key = item->key;
+        (void)scroll_to_index(index, ScrollAlignment::Nearest);
+        auto* const selection = selection_;
+        selection->set(std::optional<Key>{key});
+        return true;
+    }
+
+    [[nodiscard]] bool activate(std::size_t index) {
+        if (!enabled_at(index)) return false;
+        const auto* item = model_.item_at(index);
+        if (!item) return false;
+        const Key key = item->key;
+        auto callback = activation_callback_;
+        if (!select(index)) return false;
+        if (callback) callback(key);
+        return true;
+    }
+
+    void reveal_selection() {
+        if (!selection_ || !selection_->get()) return;
+        if (const auto index = model_.index_of_key(*selection_->get())) {
+            (void)scroll_to_index(*index, ScrollAlignment::Nearest);
+        }
+    }
+
+    void set_focused_index(std::optional<std::size_t> index) {
+        if (index && *index >= model_.size()) index.reset();
+        if (focused_index_ == index) return;
+        focused_index_ = index;
+        refresh_window();
+    }
+
+    void set_captured_index(std::optional<std::size_t> index) {
+        if (index && *index >= model_.size()) index.reset();
+        if (captured_index_ == index) return;
+        captured_index_ = index;
+        refresh_window();
     }
 
     [[nodiscard]] float content_height() const noexcept {
@@ -131,7 +241,14 @@ private:
 
     void refresh_window() {
         const auto previous_keys = window_.keys();
-        if (!window_.update(scroll_.offset().y, viewport_height_, overscan_)) return;
+        if (!window_.update(
+                scroll_.offset().y,
+                viewport_height_,
+                overscan_,
+                focused_index_,
+                captured_index_)) {
+            return;
+        }
         if (window_.keys() != previous_keys && structure_invalidator_) {
             structure_invalidator_();
         }
@@ -143,6 +260,10 @@ private:
     ScrollState scroll_{ScrollAxis::Vertical};
     VirtualListMaterializationWindow<Key, Spec> window_;
     float viewport_height_{};
+    State<std::optional<Key>>* selection_{};
+    ActivationCallback activation_callback_;
+    std::optional<std::size_t> focused_index_;
+    std::optional<std::size_t> captured_index_;
     std::function<void()> structure_invalidator_;
     ScrollState::Subscription scroll_subscription_;
 };
@@ -162,6 +283,12 @@ class VirtualListRetainedComponent final : public Component, public DynamicChild
 public:
     explicit VirtualListRetainedComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
         : runtime_(std::move(runtime)) {}
+
+    // T036's rows stay outside global focus traversal even though their visual
+    // subtrees are retained dynamically by T058.
+    [[nodiscard]] bool is_focus_scope() const noexcept override { return true; }
+    [[nodiscard]] bool focus_scope_active() const noexcept override { return false; }
+    [[nodiscard]] bool focus_scope_traps() const noexcept override { return false; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         Size result{0.0f, runtime_->content_height()};
@@ -222,6 +349,117 @@ private:
 };
 
 template <class Key>
+class VirtualListViewComponent final : public Component {
+public:
+    explicit VirtualListViewComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
+        : runtime_(std::move(runtime)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().minimum;
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void mount(MountContext& context) override {
+        if (auto* selection = selection_state()) {
+            auto runtime = runtime_;
+            auto invalidate = context.invalidator();
+            selection_subscription_ = selection->observe(
+                [runtime = std::move(runtime), invalidate = std::move(invalidate)](
+                    const std::optional<Key>&) {
+                    runtime->reveal_selection();
+                    invalidate();
+                });
+        }
+    }
+
+    void unmount(LifecycleContext&) override { selection_subscription_.reset(); }
+
+    void focus_changed(bool focused, FocusContext&) override {
+        if (!focused) {
+            active_index_.reset();
+            runtime_->set_focused_index(std::nullopt);
+            return;
+        }
+        active_index_ = runtime_->selected_index();
+        if (!active_index_) active_index_ = runtime_->first_enabled();
+        runtime_->set_focused_index(active_index_);
+    }
+
+    EventResult input(const InputEvent& event, InputContext&) override {
+        if (event.type != InputType::KeyDown) return EventResult::Ignored;
+
+        if (const auto selected = runtime_->selected_index()) {
+            active_index_ = selected;
+        } else if (!active_index_) {
+            active_index_ = runtime_->first_enabled();
+        }
+
+        if (event.key == Key::Enter || event.key == Key::Space) {
+            if (!active_index_) return EventResult::Ignored;
+            return runtime_->activate(*active_index_)
+                ? EventResult::Handled
+                : EventResult::Ignored;
+        }
+
+        std::optional<std::size_t> target;
+        switch (event.key) {
+        case Key::Down:
+            target = active_index_
+                ? runtime_->next_enabled(*active_index_)
+                : runtime_->first_enabled();
+            break;
+        case Key::Up:
+            target = active_index_
+                ? runtime_->previous_enabled(*active_index_)
+                : runtime_->last_enabled();
+            break;
+        case Key::Home:
+            target = runtime_->first_enabled();
+            break;
+        case Key::End:
+            target = runtime_->last_enabled();
+            break;
+        default:
+            return EventResult::Ignored;
+        }
+
+        if (target) {
+            active_index_ = target;
+            runtime_->set_focused_index(target);
+            (void)runtime_->select(*target);
+        }
+        return EventResult::Handled;
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    [[nodiscard]] State<std::optional<Key>>* selection_state() const noexcept {
+        // The public controller always binds selection. The internal retained
+        // runtime tests intentionally leave it null because they exercise only
+        // materialization/scroll ownership.
+        return runtime_->selection_state();
+    }
+
+    std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime_;
+    std::optional<std::size_t> active_index_;
+    typename State<std::optional<Key>>::Subscription selection_subscription_;
+};
+
+template <class Key>
 [[nodiscard]] Spec make_virtual_list_retained_spec(
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime) {
     auto initial_children = runtime->desired_children();
@@ -235,9 +473,17 @@ template <class Key>
         },
         std::move(children)};
 
-    return std::move(ScrollView{
+    auto scroll = std::move(ScrollView{
         runtime->scroll(),
         VirtualListOwnedSpec{std::move(content)}}).spec();
+
+    std::vector<Spec> root_children;
+    root_children.push_back(std::move(scroll));
+    return Spec{
+        [runtime] {
+            return std::make_unique<VirtualListViewComponent<Key>>(runtime);
+        },
+        std::move(root_children)};
 }
 
 } // namespace ui::detail
