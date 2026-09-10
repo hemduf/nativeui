@@ -27,7 +27,9 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` is `032f5e33b5e7491bc319b4a5e59ee6fba5293e82`. It includes T065 / PR #133 in addition to T034 / PR #135, the supported T060 multi-window lifecycle model, post-T060 T042 lifecycle qualification, standard widgets through T034 and the T052 v0.1 developer-preview release gate.
+`main` is `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675`. It includes T065 / PR #133 in addition to T034 / PR #135, the supported T060 multi-window lifecycle model, post-T060 T042 lifecycle qualification, standard widgets through T034 and the T052 v0.1 developer-preview release gate.
+
+Cross-cutting rendering regression #152 / PR #153 removes Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is therefore consumer/component-owned. The headless renderer now mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
 
 Relevant completed foundations:
 
@@ -64,9 +66,9 @@ Delivered behavior on the branch:
 - the historical #64 legacy independent-PROGRAM diagnostics are excluded from the strict default build and become available only when `deprecated-declarations` is explicitly approved through `NATIVEUI_ALLOWED_WARNINGS`;
 - repository workflow and review rules classify an unapproved NativeUI compiler warning as Blocking and forbid target/source-local suppression as a substitute for the explicit CMake opt-in.
 
-The strict build immediately exposed and corrected existing warnings instead of whitelisting them: the example deprecation uses, MSVC C4458 parameter shadowing, and GCC `-Wsubobject-linkage` caused by platform implementation types with anonymous linkage. The default warning allowlist remains empty.
+The strict build immediately exposed and corrected existing warnings instead of whitelisting them: the example deprecation uses, MSVC C4458 parameter shadowing, GCC `-Wsubobject-linkage` caused by platform implementation types with anonymous linkage, and MSVC C4244 narrowing in the slider value-contract test. The default warning allowlist remains empty.
 
-Exact-head qualification for PR #181 is in progress across normal CI, T060, T065, T042 and T052. T060 is already green on Linux X11, Linux ASan+UBSan, Windows and macOS for code head `4a3ebef7244c44d644005ef7a13c5c4c790c5001`. Complete the remaining exact-head gates and final `CODE_REVIEW.md` record before merge.
+After synchronizing PR #181 with the current `main`, all required CI, T060, T065, T042 and T052 gates must pass on the resulting exact head before merge.
 
 ## Current dependency frontier
 

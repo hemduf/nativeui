@@ -207,6 +207,9 @@ bool verify_label(bool update) {
     ui::UI tree{
         ui::Stack{
             ui::Canvas{220.0f, 80.0f, [](ui::CanvasContext2D& g) {
+                // This golden intentionally owns its visual background. The
+                // generic Tree no longer supplies one for every interface.
+                g.fill_rect({0.0f, 0.0f, g.width(), g.height()}, ui::colors::background);
                 g.fill_rect({0.0f, 34.0f, g.width(), 6.0f}, ui::colors::accent);
             }},
             // A fixed clip keeps even unusually wide/tall fallback glyphs out

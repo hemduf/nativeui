@@ -72,6 +72,9 @@ public:
         auto* canvas = surface_->getCanvas();
         if (!canvas) return false;
 
+        // Match the GPU/window renderer's framebuffer semantics. Frame clearing
+        // is a renderer concern; Tree::paint() remains fully consumer/component-owned.
+        canvas->clear(SK_ColorBLACK);
         canvas->save();
         canvas->scale(scale_factor_, scale_factor_);
         ui.paint(*canvas, services_);
