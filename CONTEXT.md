@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` `352bdf0e734df46e8edcb53a0a81a07c9e0d7d6d` contains the completed T060 explicit Application/multi-window ownership model on top of the reviewed Pugl X11 correction.
+`main` `c5270a1a971d1d409a53b3715df0340fc445fb33` contains the completed T060 explicit Application/multi-window ownership model and its completion-context synchronization on top of the reviewed Pugl X11 correction.
 
 Completed foundations relevant to the platform/package lane:
 
@@ -42,6 +42,14 @@ Completed foundations relevant to the platform/package lane:
 
 T060 exact merge candidate `0e4cce56bd8874545794fdf1137d1c7ec5489dde` passed T060 Application Contract `34422787634`, T042 Lifecycle Stress `34422787683`, and normal CI `34422787695`. Final `CODE_REVIEW.md` review `5161881319` reported no Blocking/Important finding. PR #118 merged as `352bdf0e734df46e8edcb53a0a81a07c9e0d7d6d`; issue #72 is closed Done.
 
+## Lifecycle qualification update — #139 / PR #140
+
+T042's `standalone_supported_multi_instance` gate is being upgraded from the pre-T060 Decision-B marker to an executable stress of the now-supported T060 ownership path. The fixture keeps one explicit `ui::Application` / one `PUGL_PROGRAM` world alive across 50 deterministic A+B cycles, validates distinct native windows, independent resize/close state, destroys A while B survives and continues polling/resizing, and uses `QuitPolicy::ExplicitOnly` to exercise zero-window intervals without inventing a hidden singleton, mutable process-global owner or `thread_local` owner.
+
+The legacy process-isolated standalone constructor stress remains as compatibility coverage until T069; independent simultaneous legacy `PUGL_PROGRAM` worlds remain forbidden by #64 Decision B. Embedded T042 stress remains unchanged.
+
+Initial GREEN head `1b917ec157a938b997e0afc6979454495b90effb` passed T060 Application Contract `34431532321`, T042 Lifecycle Stress `34431532386` on Linux/X11, Windows, macOS and Linux ASan+UBSan, and normal CI `34431532332`. Mandatory review then found stale pre-T060 diagnostic wording and missing direct GDB/LLDB diagnosis for the new Application stress path. The correction stream updates those diagnostics before final exact-head qualification. #139 remains a blocking validation dependency for T052 / PR #120; after #139 merges, T052 must refresh from that new `main` and rerun its release qualification set.
+
 ## Current platform/package frontier
 
 ```text
@@ -51,13 +59,14 @@ T056(done) + T022(done) -> T057(done)
 
 #64(done) -> T060(done) -> T065(active PR #133) -> T072 -> T064
                      |
+                     +-> #139(active PR #140; T042 post-T060 qualification)
                      +-> T066 (also depends on T043)
 
 T043 ready
 T044 ready
 ```
 
-T059, T030, #64 and T042 are owned by other parallel lanes and must not be folded into unrelated package work. T052 is the separate release/lifecycle gate. T032/T033 are widget-lane work. T060 is now merged, so T065 no longer needs to wait for the Application ownership architecture; its existing PR must be synchronized with current `main` before native dispatcher exposure/wake integration continues.
+T059, T030 and unrelated widget work remain owned by their parallel lane and must not be folded into platform/lifecycle work. T052 is the separate release gate. T032/T033/T034 are widget-lane work. T060 is merged, so T065 no longer needs to wait for the Application ownership architecture; its existing PR must be synchronized with current `main` before native dispatcher exposure/wake integration continues.
 
 ## Active work — T065 / issue #77 / PR #133
 
@@ -88,8 +97,7 @@ The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linu
 
 ## Next actions
 
-1. Resume existing T065 PR #133; do not create a duplicate implementation stream.
-2. Synchronize it with T060-complete current main and re-check the exact diff before platform integration.
-3. Continue strict RED -> GREEN -> REFACTOR cycles for native dispatcher exposure and wake semantics.
-4. Keep T059, T030, #64, T042 and unrelated widget/release lanes untouched.
-5. After T065 is merged, re-evaluate T072 as the next dependency-unblocked platform/package item; T064 remains explicitly excluded until its dependencies are complete and lane ownership permits it.
+1. Finish #139 / PR #140 exact-head diagnostic correction, final review and lifecycle/platform qualification; merge only when all required gates are green.
+2. After #139 merges, T052 / PR #120 must refresh from the new lifecycle-qualified `main` before release qualification can complete.
+3. Keep the existing T065 PR #133 as its own stream; do not duplicate it.
+4. Keep unrelated widget/package lanes untouched.
