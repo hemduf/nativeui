@@ -1,7 +1,5 @@
 #include <nativeui/detail/slider_value.hpp>
 
-#include "t036_list_tabs_contract.inc"
-
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -33,8 +31,6 @@ void check_invalid(Fn&& fn) {
 
 int main() {
     using ui::detail::SliderDomain;
-
-    t036_contract::behavior_contract();
 
     check_invalid([] { (void)SliderDomain{1.0f, 1.0f, 0.0f}; });
     check_invalid([] { (void)SliderDomain{2.0f, 1.0f, 0.0f}; });
