@@ -17,25 +17,28 @@ endforeach()
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
 file(READ "${_module}" _dbus_module)
 
+# The root owns only the Linux platform gate and module invocation; the module
+# owns the private target/source details so those do not leak into unrelated
+# platform configuration.
 foreach(_needle IN ITEMS
     "NativeUILinuxDbus.cmake"
-    "nativeui_linux_dbus"
-    "src/linux_dbus.cpp")
+    "nativeui_add_linux_dbus_transport")
   string(FIND "${_root_cmake}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 contract missing root integration token: ${_needle}")
   endif()
 endforeach()
 
-string(FIND "${_dbus_module}" "dbus-1" _dbus_name)
-if(_dbus_name EQUAL -1)
-  message(FATAL_ERROR "T072 contract must discover the system dbus-1 package")
-endif()
-
-string(FIND "${_dbus_module}" "PkgConfig" _pkgconfig)
-if(_pkgconfig EQUAL -1)
-  message(FATAL_ERROR "T072 contract must use CMake/pkg-config discovery for libdbus-1")
-endif()
+foreach(_needle IN ITEMS
+    "nativeui_linux_dbus"
+    "src/linux_dbus.cpp"
+    "dbus-1"
+    "PkgConfig")
+  string(FIND "${_dbus_module}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 contract missing Linux D-Bus module token: ${_needle}")
+  endif()
+endforeach()
 
 file(GLOB_RECURSE _public_headers "${SOURCE_DIR}/include/nativeui/*.hpp")
 foreach(_public_header IN LISTS _public_headers)
