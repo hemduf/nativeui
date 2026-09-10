@@ -4,3 +4,4 @@
 #include "detail/pugl_skia_view_a.inc"
 #include "detail/pugl_skia_view_b.inc"
 #include "detail/pugl_skia_windows.inc"
+#include "detail/pugl_skia_t043.inc"
