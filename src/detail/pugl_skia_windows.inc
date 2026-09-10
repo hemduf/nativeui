@@ -48,7 +48,52 @@ public:
         PuglEvent event{};
         event.client.type = PUGL_CLIENT;
         event.client.data1 = 0x4E554944u; // "NUID"
-        (void)puglSendEvent(view_, &event);
+        if (puglSendEvent(view_, &event) != PUGL_SUCCESS) return;
+
+#if defined(__APPLE__)
+        // Pugl queues PUGL_CLIENT delivery through a CFRunLoop observer on
+        // macOS, but adding that observer does not itself wake a sleeping main
+        // run loop. Explicitly wake it so worker posts interrupt Application.
+        CFRunLoopWakeUp(CFRunLoopGetMain());
+#elif defined(__linux__)
+        // XSendEvent is buffered by Xlib. PUGL_WORLD_THREADS made this Display
+        // safe for cross-thread Xlib calls before it was opened; flushing here
+        // makes the client message visible to the UI thread's blocking select.
+        if (auto* display = static_cast<_XDisplay*>(puglGetNativeWorld(world_))) {
+            (void)XFlush(display);
+        }
+#endif
+    }
+
+    [[nodiscard]] PuglStatus update_world(double timeout_seconds) noexcept {
+        PuglWorld* world = nullptr;
+        PuglView* view = nullptr;
+        {
+            std::lock_guard lock{mutex_};
+            if (closing_ || !world_) return PUGL_FAILURE;
+            world = world_;
+            view = view_;
+        }
+
+        if (!(timeout_seconds > 0.0) || !view) {
+            return puglUpdate(world, timeout_seconds);
+        }
+
+        // Pugl's positive finite update path intentionally keeps dispatching
+        // until the requested deadline, so a client event alone does not make
+        // poll(timeout) return early. Convert the bounded wait into Pugl's
+        // interruptible indefinite wait plus a one-iteration native timer. Any
+        // real event or dispatcher wake returns promptly; the timer preserves
+        // the caller's maximum wait without a polling loop.
+        constexpr uintptr_t kPollDeadlineTimerId = 0x4E554950u; // "NUIP"
+        const auto start_status =
+            puglStartTimer(view, kPollDeadlineTimerId, timeout_seconds);
+        if (start_status != PUGL_SUCCESS) return start_status;
+
+        const auto update_status = puglUpdate(world, -1.0);
+        const auto stop_status = puglStopTimer(view, kPollDeadlineTimerId);
+        if (update_status != PUGL_SUCCESS) return update_status;
+        return stop_status == PUGL_SUCCESS ? PUGL_SUCCESS : stop_status;
     }
 
     void begin_shutdown() noexcept {
@@ -216,7 +261,9 @@ struct Application::Impl final {
         const auto owners = dispatcher_snapshot();
         const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
         const double pugl_timeout = bound_dispatch_timeout(requested, owners);
-        const auto status = puglUpdate(world, pugl_timeout);
+        const auto status = wake_backend
+            ? wake_backend->update_world(pugl_timeout)
+            : puglUpdate(world, pugl_timeout);
         if (status != PUGL_SUCCESS) {
             terminal_error = true;
             quit_requested = true;
@@ -517,5 +564,3 @@ bool EmbeddedView::accept_drop(std::string_view type, Rect region) {
 void EmbeddedView::reject_drop(Rect region) {
     if (impl_) impl_->core.reject_drop(region);
 }
-
-} // namespace ui
