@@ -12,7 +12,7 @@ void check(bool condition) {
     if (!condition) ++failures;
 }
 
-bool near(float actual, float expected, float tolerance = 1.0e-6f) {
+bool near(double actual, double expected, double tolerance = 1.0e-6) {
     return std::abs(actual - expected) <= tolerance;
 }
 
@@ -70,16 +70,16 @@ int main() {
     check(near(continuous.value_from_fraction(2.0f), 2.0f));
     check(near(
         continuous.value_from_fraction(std::numeric_limits<float>::quiet_NaN()), -2.0f));
-    check(near(continuous.keyboard_increment(false), 0.04f));
-    check(near(continuous.keyboard_increment(true), 0.004f));
+    check(near(continuous.keyboard_increment(false), 0.04));
+    check(near(continuous.keyboard_increment(true), 0.004));
 
     const SliderDomain stepped{0.0f, 1.0f, 0.25f};
     check(near(stepped.normalize(0.11f), 0.0f));
     check(near(stepped.normalize(0.14f), 0.25f));
     check(near(stepped.normalize(0.62f), 0.5f));
     check(near(stepped.normalize(0.64f), 0.75f));
-    check(near(stepped.keyboard_increment(false), 0.25f));
-    check(near(stepped.keyboard_increment(true), 0.25f));
+    check(near(stepped.keyboard_increment(false), 0.25));
+    check(near(stepped.keyboard_increment(true), 0.25));
 
     // External finite state is rendered from its clamped effective value, not
     // silently snapped to the user's step grid. Quantization is only applied to
@@ -98,7 +98,7 @@ int main() {
     // representative continuous values.
     for (float fraction : {0.0f, 0.1f, 0.5f, 0.9f, 1.0f}) {
         const float value = continuous.value_from_fraction(fraction);
-        check(near(continuous.fraction(value), fraction, 2.0e-6f));
+        check(near(continuous.fraction(value), fraction, 2.0e-6));
     }
 
     // Finite float endpoints are valid even when their span is wider than a
