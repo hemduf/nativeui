@@ -39,7 +39,7 @@ public:
     void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
-        return tree_.measure(constraints);
+        return tree_.measure_overlay_content(constraints);
     }
     void resize(Size viewport) {
         viewport_ = viewport;
@@ -226,11 +226,14 @@ private:
 
     void prepare_overlay_layout() {
         // First pass makes root/anchor geometry authoritative for this viewport
-        // and flushes pending T058 structural mutations. A changed/missing
-        // anchor then invalidates overlay placement or closes the overlay; the
-        // second pass consumes that update before input or paint observes it.
-        tree_.layout(viewport_);
-        if (synchronize_overlay_anchors()) tree_.layout(viewport_);
+        // and flushes pending T058 structural mutations. The overlay-specific
+        // layout path deliberately skips a redundant recursive measurement of
+        // child 0, whose full-viewport bounds are independent of its preferred
+        // size. A changed/missing anchor then invalidates overlay placement or
+        // closes the overlay; the second pass consumes that update before input
+        // or paint observes it.
+        tree_.layout_overlay_viewport(viewport_);
+        if (synchronize_overlay_anchors()) tree_.layout_overlay_viewport(viewport_);
     }
 
     void close_anchored_overlays() {
