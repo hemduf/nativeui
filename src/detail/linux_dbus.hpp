@@ -232,6 +232,23 @@ struct LinuxDbusMethodCall final {
           timeout(method_timeout) {}
 };
 
+struct LinuxDbusSignalMatch final {
+    std::string sender;
+    std::string path;
+    std::string interface;
+    std::string member;
+};
+
+struct LinuxDbusSignal final {
+    std::string sender;
+    std::string path;
+    std::string interface;
+    std::string member;
+    std::vector<LinuxDbusValue> arguments;
+};
+
+using LinuxDbusSignalCallback = std::function<void(LinuxDbusSignal)>;
+
 struct LinuxDbusMethodRequest final {
     std::string sender;
     std::string path;
@@ -360,6 +377,18 @@ public:
                                                  LinuxDbusCompletionCallback callback);
     [[nodiscard]] bool cancel_request(LinuxDbusClientId client, LinuxDbusRequestId id);
     [[nodiscard]] std::size_t pending_request_count() const noexcept;
+
+    /// Subscribe one client to a bounded bus signal match. Signal payload is
+    /// copied on the D-Bus thread and delivered only through the supplied T065
+    /// Dispatcher. Unsubscribe invalidates already-posted-but-not-started work.
+    [[nodiscard]] LinuxDbusSubscriptionId subscribe_signal(
+        LinuxDbusClientId client,
+        ui::Dispatcher dispatcher,
+        const LinuxDbusSignalMatch& match,
+        LinuxDbusSignalCallback callback);
+    [[nodiscard]] bool unsubscribe_signal(LinuxDbusClientId client,
+                                          LinuxDbusSubscriptionId id);
+    [[nodiscard]] std::size_t subscription_count() const noexcept;
 
     /// Register an internal D-Bus object path. Handlers execute only on the
     /// owned I/O thread and receive copied plain values, never libdbus objects.
