@@ -12,19 +12,19 @@ void range_contract() {
 
     const auto first = virtual_list_materialization_range(100, 20.0f, 0.0f, 100.0f, 2);
     assert(first.has_value());
-    assert(*first == VirtualListRange{0, 7});
+    assert((*first == VirtualListRange{0, 7}));
 
     const auto fractional = virtual_list_materialization_range(100, 20.0f, 10.0f, 100.0f, 2);
     assert(fractional.has_value());
-    assert(*fractional == VirtualListRange{0, 8});
+    assert((*fractional == VirtualListRange{0, 8}));
 
     const auto aligned = virtual_list_materialization_range(100, 20.0f, 40.0f, 100.0f, 2);
     assert(aligned.has_value());
-    assert(*aligned == VirtualListRange{0, 9});
+    assert((*aligned == VirtualListRange{0, 9}));
 
     const auto end = virtual_list_materialization_range(100, 20.0f, 1900.0f, 100.0f, 2);
     assert(end.has_value());
-    assert(*end == VirtualListRange{93, 100});
+    assert((*end == VirtualListRange{93, 100}));
 
     const auto empty = virtual_list_materialization_range(0, 20.0f, 0.0f, 100.0f, 2);
     assert(empty.has_value());
