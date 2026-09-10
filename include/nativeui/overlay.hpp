@@ -18,11 +18,14 @@ enum class OverlayPointerPolicy {
     Ignore,
 };
 
+// X11/Xlib exposes process-wide preprocessor macros named `Above` and `Below`.
+// NativeUI public headers must remain consumable after Xlib headers, so the
+// anchor-relative names deliberately avoid those unqualifiable macro tokens.
 enum class OverlayPlacement {
-    Below,
-    Above,
-    Right,
-    Left,
+    AnchorBelow,
+    AnchorAbove,
+    AnchorRight,
+    AnchorLeft,
     Center,
     Auto,
 };
