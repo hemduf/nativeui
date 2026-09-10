@@ -81,16 +81,26 @@ inline void list_keyboard_pointer_and_read_only_contract() {
 
     ui::State<bool> read_only{true};
     ui::State<std::optional<int>> read_only_selected{1};
+    int read_only_activations = 0;
+    int read_only_activated_key = 0;
     ui::UI read_only_list{ui::ReadOnly{
         read_only,
         ui::ListView<int>{read_only_selected}
             .item(1, ui::Spacer{80.0f, 30.0f})
-            .item(2, ui::Spacer{80.0f, 30.0f})}};
+            .item(2, ui::Spacer{80.0f, 30.0f})
+            .on_activate([&](const int& key) {
+                ++read_only_activations;
+                read_only_activated_key = key;
+            })}};
     read_only_list.resize({80.0f, 60.0f});
     read_only_list.activate(platform);
     NUI_CHECK(read_only_list.dispatch(test::key(ui::Key::Down), platform) ==
               ui::EventResult::Handled);
     NUI_CHECK(read_only_selected.get() && *read_only_selected.get() == 2);
+    NUI_CHECK(read_only_list.dispatch(test::key(ui::Key::Space), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(read_only_activations == 1);
+    NUI_CHECK(read_only_activated_key == 2);
 }
 
 inline void list_activation_contract() {
