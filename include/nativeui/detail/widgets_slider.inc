@@ -5,6 +5,7 @@
 #include <nativeui/state.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <utility>
@@ -57,6 +58,50 @@ namespace detail {
             return colors::accent;
     }
     return colors::accent;
+}
+
+// The visual thumb travel is also the pointer-editing domain. Keeping both
+// directions in one helper prevents paint and hit/value mapping from drifting
+// when track insets or reserved formatter space change.
+struct SliderTrackAxis final {
+    float start{};
+    float end{};
+    bool inverted{};
+
+    [[nodiscard]] float position(float fraction) const noexcept {
+        if (!std::isfinite(fraction)) fraction = 0.0f;
+        const float normalized = std::clamp(fraction, 0.0f, 1.0f);
+        const float span = end - start;
+        return inverted ? end - span * normalized : start + span * normalized;
+    }
+
+    [[nodiscard]] float fraction(float coordinate) const noexcept {
+        if (!std::isfinite(coordinate)) return 0.0f;
+        const float span = end - start;
+        if (!(span > 0.0f)) return 0.0f;
+        const float normalized = inverted
+            ? (end - coordinate) / span
+            : (coordinate - start) / span;
+        return std::clamp(normalized, 0.0f, 1.0f);
+    }
+};
+
+[[nodiscard]] inline SliderTrackAxis slider_track_axis(
+    Rect bounds,
+    SliderOrientation orientation,
+    bool has_formatter = false) noexcept {
+    if (orientation == SliderOrientation::Horizontal) {
+        const float start = bounds.x + 8.0f;
+        const float end = std::max(start, bounds.x + bounds.w - 8.0f);
+        return SliderTrackAxis{start, end, false};
+    }
+
+    const float track_bottom = has_formatter
+        ? bounds.y + bounds.h - 18.0f
+        : bounds.y + bounds.h;
+    const float start = bounds.y + 8.0f;
+    const float end = std::max(start, track_bottom - 8.0f);
+    return SliderTrackAxis{start, end, true};
 }
 
 class SliderComponent final : public Component {
@@ -151,14 +196,16 @@ public:
         const Color track = colors::input;
         const Color active = slider_active_color(state);
         const bool focused = state == SliderVisualState::Focused;
+        const auto axis = slider_track_axis(
+            bounds, orientation_, static_cast<bool>(formatter_));
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
             const float track_bottom = formatter_ ? bounds.y + bounds.h - 16.0f : bounds.y + bounds.h;
             const float y = bounds.y + (track_bottom - bounds.y) * 0.5f;
-            const float x0 = bounds.x + 8.0f;
-            const float x1 = std::max(x0, bounds.x + bounds.w - 8.0f);
-            const float thumb_x = x0 + (x1 - x0) * fraction;
+            const float x0 = axis.start;
+            const float x1 = axis.end;
+            const float thumb_x = axis.position(fraction);
             painter.fill_rounded_rect(Rect{x0, y - 2.0f, x1 - x0, 4.0f}, 2.0f, track);
             painter.fill_rounded_rect(Rect{x0, y - 2.0f, thumb_x - x0, 4.0f}, 2.0f, active);
             if (focused) painter.circle(Point{thumb_x, y}, 9.0f, colors::borderFocus);
@@ -173,11 +220,10 @@ public:
                     TextAlign::Center);
             }
         } else {
-            const float track_bottom = formatter_ ? bounds.y + bounds.h - 18.0f : bounds.y + bounds.h;
             const float x = bounds.x + bounds.w * 0.5f;
-            const float y0 = bounds.y + 8.0f;
-            const float y1 = std::max(y0, track_bottom - 8.0f);
-            const float thumb_y = y1 - (y1 - y0) * fraction;
+            const float y0 = axis.start;
+            const float y1 = axis.end;
+            const float thumb_y = axis.position(fraction);
             painter.fill_rounded_rect(Rect{x - 2.0f, y0, 4.0f, y1 - y0}, 2.0f, track);
             painter.fill_rounded_rect(Rect{x - 2.0f, thumb_y, 4.0f, y1 - thumb_y}, 2.0f, active);
             if (focused) painter.circle(Point{x, thumb_y}, 9.0f, colors::borderFocus);
@@ -208,14 +254,12 @@ private:
 
     [[nodiscard]] float value_from_pointer(
         const InputEvent& event, const InputContext& context) const noexcept {
-        const auto bounds = context.bounds();
-        if (orientation_ == SliderOrientation::Horizontal) {
-            if (bounds.w <= 0.0f) return domain_.minimum();
-            return domain_.value_from_fraction((event.position.x - bounds.x) / bounds.w);
-        }
-        if (bounds.h <= 0.0f) return domain_.minimum();
-        return domain_.value_from_fraction(
-            1.0f - (event.position.y - bounds.y) / bounds.h);
+        const auto axis = slider_track_axis(
+            context.bounds(), orientation_, static_cast<bool>(formatter_));
+        const float coordinate = orientation_ == SliderOrientation::Horizontal
+            ? event.position.x
+            : event.position.y;
+        return domain_.value_from_fraction(axis.fraction(coordinate));
     }
 
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
