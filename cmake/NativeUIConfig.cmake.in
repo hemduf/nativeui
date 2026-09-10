@@ -2,6 +2,16 @@
 
 include(CMakeFindDependencyMacro)
 
+# Platform attachment compiles package-owned Pugl C sources and, on macOS,
+# Objective-C bridge sources. CMake requires enable_language() at file scope,
+# not from the helper functions that later create those targets.
+if(NOT CMAKE_C_COMPILER_LOADED)
+  enable_language(C)
+endif()
+if(APPLE AND NOT CMAKE_OBJC_COMPILER_LOADED)
+  enable_language(OBJC)
+endif()
+
 set(_nativeui_skia_root "@PACKAGE_NATIVEUI_INSTALL_SKIA_DIR@")
 set(_nativeui_skia_include "${_nativeui_skia_root}/include")
 set(_nativeui_skia_lib "${_nativeui_skia_root}/lib/@NATIVEUI_SKIA_MAIN_FILENAME@")
@@ -66,6 +76,7 @@ set(NATIVEUI_PLATFORM_SOURCE_ROOT "@PACKAGE_NATIVEUI_INSTALL_SOURCE_DIR@")
 
 include("${CMAKE_CURRENT_LIST_DIR}/NativeUIConsumerPlatform.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/NativeUIAttachPlatform.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/NativeUIApplication.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/NativeUIBinaryData.cmake")
 
 check_required_components(NativeUI)

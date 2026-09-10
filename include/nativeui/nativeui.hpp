@@ -11,6 +11,7 @@
 #include <nativeui/path.hpp>
 #include <nativeui/resource.hpp>
 #include <nativeui/embedded_resource.hpp>
+#include <nativeui/resource_manager.hpp>
 #include <nativeui/image.hpp>
 #include <nativeui/svg.hpp>
 #include <nativeui/paint.hpp>
