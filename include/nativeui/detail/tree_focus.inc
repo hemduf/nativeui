@@ -191,6 +191,15 @@
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, new_context);
         invalidate_node_paint(*node);
+
+        for (auto* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
+            ancestor->component->descendant_focus_changed(Rect{
+                node->bounds.x - ancestor->bounds.x,
+                node->bounds.y - ancestor->bounds.y,
+                node->bounds.w,
+                node->bounds.h});
+        }
+
         if (!syncing_availability_ || !focus_structure_dirty_) {
             availability_cleared_focus_ = nullptr;
         }
