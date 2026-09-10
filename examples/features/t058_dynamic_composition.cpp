@@ -72,6 +72,14 @@ int self_test() {
     state.page.set(2);
     if (!renderer.render(tree)) return example::fail("switch branch render failed");
 
+    // A construction-time Switch branch must remain reusable after it has
+    // previously been removed. Both branches are revisited to catch moved-from
+    // retained Specs rather than merely proving a one-way transition.
+    state.page.set(1);
+    if (!renderer.render(tree)) return example::fail("switch branch revisit failed");
+    state.page.set(2);
+    if (!renderer.render(tree)) return example::fail("switch second revisit failed");
+
     auto reordered = state.items.get();
     std::rotate(reordered.begin(), reordered.begin() + 1, reordered.end());
     state.items.set(std::move(reordered));
