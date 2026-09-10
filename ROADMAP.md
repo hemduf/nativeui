@@ -17,7 +17,7 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` is `58f45ee02b32a1a3fcb139cc8345276ee334844c`. It includes the completed T057 ResourceManager and the reviewed #124 / PR #125 Pugl X11 failed-selection correction. T052 / PR #120 is the active P0 lifecycle/release candidate and is being synchronized with this exact baseline before final qualification.
+Current `main` is `58f45ee02b32a1a3fcb139cc8345276ee334844c` and includes the completed T057 ResourceManager plus the reviewed #124 / PR #125 Pugl X11 failed-selection correction. T052 / PR #120 is the active P0 lifecycle/release candidate on top of that baseline.
 
 Recently completed foundations relevant to the dependency graph:
 
@@ -33,7 +33,7 @@ Recently completed foundations relevant to the dependency graph:
 - **T054 / PR #119:** high-level `nativeui_add_application()` package helper.
 - **T056 / PR #111:** deterministic binary-resource packaging and sorted immutable generated tables.
 - **T057 / PR #126:** embedded `ResourceManager` and explicit `ResourceManagerProvider` compatibility adapter.
-- **#124 / PR #125:** Pugl X11 failed-selection correction, merged after exact-head normal CI and T042 lifecycle stress passed.
+- **#124 / PR #125:** Pugl X11 failed-selection correction; exact-head normal CI and T042 Lifecycle Stress were green before merge.
 
 Current dependency frontier:
 
@@ -50,6 +50,8 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        +-> T034 -> T035 / T036
 platform fix:       #124(done)
 ```
+
+T057 / issue #69 / PR #126 and #124 / PR #125 are complete. T052 is the current release/lifecycle lane item; unrelated widget/platform work remains in its own lanes.
 
 ## Milestone 0 — Baseline hardening
 
@@ -91,7 +93,7 @@ T059(done) -> T030(done) -> T031(done)
 
 ## Milestone 7 — Platform and embedded robustness
 
-**Status: current supported lifecycle/consumer-safety baseline complete; later platform tickets remain dependency-driven.**
+**Status: core lifecycle/consumer-safety baseline substantially complete; later platform tickets remain dependency-driven.**
 
 Delivered safety includes:
 
@@ -101,14 +103,17 @@ Delivered safety includes:
 - #103 Linux/X11 Skia native GL integration;
 - #105 constructor-time platform callback lifetime fix;
 - #107 documented non-fatal standalone raise handling;
-- T042 deterministic headless/embedded/standalone lifecycle stress;
-- #124 reviewed Pugl X11 failed-selection guard, preventing `SelectionNotify.property == None` from reaching `XGetWindowProperty()` as atom `None` while leaving T042 unchanged.
+- T042 deterministic headless/embedded/standalone lifecycle stress.
 
-The #124 completion head passed normal CI and T042 Lifecycle Stress with no Blocking/Important `CODE_REVIEW.md` finding before PR #125 merged to `main` as `58f45ee02b32a1a3fcb139cc8345276ee334844c`.
+### #124 — Pugl X11 failed-selection correction
+
+PR #125 pins reviewed Pugl commit `195f79b22644010c81a5e0c3231c591856787ec6`. A failed X11 selection conversion can report `SelectionNotify.property == None`; the old dependency path passed atom `None` to `XGetWindowProperty()` and terminated with `BadAtom`. The Pugl correction guards the failed conversion before the property read. NativeUI keeps the deterministic T042 clipboard/lifecycle fixture intact and does not add a local workaround.
+
+The synchronized completion head passed normal CI and T042 Lifecycle Stress with no Blocking/Important `CODE_REVIEW.md` finding. PR #125 merged to `main` as `58f45ee02b32a1a3fcb139cc8345276ee334844c`; #124 is complete.
 
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: package/performance foundations complete; T052 is in final v0.1 developer-preview qualification.**
+**Status: low-level packaging, relocated consumers, native application helper, benchmark harness, binary-data generation and ResourceManager are complete; T052 is in final v0.1 developer-preview qualification.**
 
 ### Delivered package foundation
 
@@ -145,13 +150,35 @@ Delivered contracts:
 - **T054:** validated build-tree/relocated `nativeui_add_application()` with macOS app bundles, Windows GUI resources and normal Linux executables, delegating platform attachment to T047/T053.
 - **T056:** deterministic `nativeui_add_binary_data()` resources with stable IDs, exact bytes, package relocation, sorted immutable generated tables and no runtime registry.
 - **T057:** non-owning validated `ResourceManager`, zero-copy binary-search lookup and explicit allocating `ResourceManagerProvider` adapter for existing cache/provider APIs.
-- **T051:** Release-only deterministic microbenchmark harness and relative regression policy consumed by T052/T071.
+
+### T057 — embedded `ResourceManager`
+
+T057 / issue #69 / PR #126 is merged.
+
+Delivered behavior:
+
+- constructor performs one allocation-free O(N) validation pass over borrowed entries;
+- valid IDs are non-empty, unique and strictly ascending by exact unsigned-byte lexicographic order;
+- invalid managers fail atomically and direct APIs behave empty/false;
+- `find()` performs allocation-free O(log N) binary search and returns borrowed zero-copy `ResourceView` spans;
+- `resources()` returns the original validated table and copies/moves retain the same borrowed identity;
+- independent managers have no shared mutable registry/cache state and immutable concurrent reads require no lock;
+- `ResourceManagerProvider` is the explicit allocating compatibility seam for `ResourceProvider`; successful non-empty loads copy exact bytes and are documented not real-time safe;
+- ImageCache/SvgCache consume the adapter without ResourceManager-specific decoding;
+- the real T056 generated table is consumed by build-tree and relocated install-tree external consumers;
+- the dedicated `t057_embedded_resources` example supports interactive use and deterministic `--self-test`.
+
+TDD/review corrections covered empty-resource provider semantics, exact generated-table ordering, allocation probes, extensible public-header contracts and deterministic SVG contain-fit sampling. Final exact head `20ec256241c9419b5a4d60f8f68968f4433d2855` passed CI #600 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts. The final mandatory `CODE_REVIEW.md` pass reported no Blocking/Important finding. PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`; issue #69 is closed Done.
+
+### T051 — reproducible performance regression contract
+
+T051 / PR #116 is merged. It provides the Release-only microbenchmark harness and relative regression policy consumed by T052/T071, with its benchmark/baseline contract documented in `docs/performance-benchmarks.md`.
 
 ### T052 — v0.1 developer-preview release gate
 
 PR #120 is the active aggregate qualification candidate and remains validation/release infrastructure only:
 
-- exact candidate SHA and approved-base SHA are explicit inputs;
+- exact candidate SHA and approved-base SHA are explicit workflow inputs;
 - clean-cache Linux/X11, Windows and macOS bootstraps verify pinned Pugl/Skia acquisition and fail-closed checksum behavior;
 - the exact release-note low-level package CMake snippet is built against the installed package on all supported desktop platforms;
 - normal CI supplies T047/T048 relocation, macOS two-consumer Objective-C namespace/runtime isolation, feature/headless tests and Linux ASan+UBSan;
@@ -159,13 +186,13 @@ PR #120 is the active aggregate qualification candidate and remains validation/r
 - T051 benchmark comparison is delegated to the canonical C++ two-run policy entry point, with exact baseline/candidate SHA validation and the zero `idle_invalidation` hard gate;
 - release notes state v0.1 developer-preview semantics, known v1 gaps, pinned dependencies, legal/licensing notices and a reproducible exact-SHA tag procedure.
 
-The candidate must be refreshed from current `main` immediately before qualification. The refresh preserves T054/T057/#124 state and the T052 release files; it does not absorb unrelated feature work. Any changed candidate SHA requires fresh T052, normal CI, T042 and T051 workflow evidence.
+The candidate is synchronized with current `main` through a merge commit rather than by rewriting T052 history. The conflict resolution retains completed T054/T057/#124 project state. Every source change after synchronization requires a fresh T052/CI/T042/T051 exact-head qualification.
 
-### Remaining release frontier
+### Remaining release/platform-package frontier
 
 ```text
-T024(done) + T042(done) + T051(done) -> T052(in review)
-T047(done) + T048(done) ---------------------^
+T024(done) + T042(done) -> T051(done) -> T052(in review)
+T047(done) + T048(done) -------------------^
 
 T047(done) + T053(done) -> T054(done)
 T056(done) + T022(done) -> T057(done)
@@ -173,7 +200,31 @@ T065 -> T072 -> T064
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T071 remains the later full NativeUI 1.0 qualification gate and is deliberately distinct from T052's v0.1 developer-preview baseline.
+T052 belongs to the release/lifecycle lane. T064 and T072 remain blocked by T065. T065 is dependency-ready, but its standalone wake backend shares the event-loop integration seam with active T060 work; live branch/PR overlap must be re-evaluated before competing implementation. Independent platform-hardening tickets T043/T044 remain separate scopes.
+
+## T057 completion protocol
+
+- [x] RED validation/direct lookup/provider/cache/public-header contracts established before implementation;
+- [x] immutable non-owning ResourceManager and explicit allocating provider adapter implemented;
+- [x] generated T056 table integration covered in build-tree and relocated external consumer;
+- [x] validation, zero-copy, allocation, copy/move, concurrency, multi-manager, provider and cache integration tests covered;
+- [x] dedicated feature example + `--self-test` wired;
+- [x] mandatory `CODE_REVIEW.md` passes report no Blocking/Important T057 finding;
+- [x] exact final documentation-complete head passed Linux X11 / Windows / macOS / Linux ASan+UBSan CI #600;
+- [x] final exact-head review clean;
+- [x] candidate refreshed against then-current `main` immediately before merge;
+- [x] PR #126 merged and #69 marked Done/closed;
+- [x] completion status synchronized into `CONTEXT.md` and this roadmap.
+
+## #124 completion protocol
+
+- [x] root cause isolated to Pugl X11 failed-selection handling;
+- [x] Pugl regression fixed and reviewed in the dependency repository;
+- [x] NativeUI pin updated without weakening T042 or adding a local workaround;
+- [x] `THIRD_PARTY.md`, `CONTEXT.md`, `ROADMAP.md` and `VALIDATION.md` included in the completion cycle;
+- [x] final exact-head normal CI and T042 Lifecycle Stress green after synchronization with current `main`;
+- [x] mandatory `CODE_REVIEW.md` pass records no Blocking/Important finding;
+- [x] PR #125 merged and #124 closed Done.
 
 ## T052 completion protocol
 
