@@ -18,6 +18,8 @@ namespace ui {
 
 namespace detail {
 
+inline constexpr Color kListTabsHoverSurface{0.145f, 0.155f, 0.175f, 1.0f};
+
 class OwnedSpec final {
 public:
     explicit OwnedSpec(Spec spec) : spec_(std::move(spec)) {}
@@ -324,21 +326,43 @@ public:
         }
 
         switch (event.type) {
+        case InputType::PointerMove: {
+            const auto index = row_at(event.position, context.bounds());
+            set_hovered(
+                index && runtime->enabled_at(*index) ? index : std::nullopt,
+                context);
+            return EventResult::Ignored;
+        }
+
+        case InputType::PointerLeave:
+            set_hovered(std::nullopt, context);
+            return EventResult::Ignored;
+
         case InputType::PointerDown: {
             const auto index = row_at(event.position, context.bounds());
-            if (!index) return EventResult::Ignored;
-            if (!runtime->enabled_at(*index)) return EventResult::Handled;
+            if (!index) {
+                set_hovered(std::nullopt, context);
+                return EventResult::Ignored;
+            }
+            if (!runtime->enabled_at(*index)) {
+                set_hovered(std::nullopt, context);
+                return EventResult::Handled;
+            }
+            set_hovered(index, context);
             pointer_armed_ = index;
             context.capture_pointer();
             return EventResult::Handled;
         }
 
         case InputType::PointerUp: {
+            const auto index = row_at(event.position, context.bounds());
+            set_hovered(
+                index && runtime->enabled_at(*index) ? index : std::nullopt,
+                context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
             context.release_pointer();
-            const auto index = row_at(event.position, context.bounds());
             if (index && *index == armed) {
                 active_index_ = armed;
                 (void)runtime->activate(armed);
@@ -357,12 +381,38 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override { pointer_armed_.reset(); }
+    void deactivate(LifecycleContext&) override {
+        pointer_armed_.reset();
+        hovered_index_.reset();
+    }
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
         auto& painter = context.painter();
         painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
+
+        if (effective_enabled() && hovered_index_ &&
+            runtime_->enabled_at(*hovered_index_) &&
+            *hovered_index_ < runtime_->row_bounds.size()) {
+            const auto& selected = runtime_->selection->get();
+            const bool hovered_selected = selected &&
+                *hovered_index_ < runtime_->keys.size() &&
+                *selected == runtime_->keys[*hovered_index_];
+            if (!hovered_selected) {
+                const auto row = runtime_->row_bounds[*hovered_index_];
+                const auto offset = runtime_->scroll.offset();
+                const Rect highlight{
+                    bounds.x + 4.0f,
+                    bounds.y + row.y - offset.y + 2.0f,
+                    std::max(0.0f, bounds.w - 8.0f),
+                    std::max(0.0f, row.h - 4.0f)};
+                const auto visible = intersect(highlight, bounds);
+                if (!visible.empty()) {
+                    painter.fill_rounded_rect(visible, 6.0f, kListTabsHoverSurface);
+                }
+            }
+        }
+
         painter.stroke_rounded_rect(
             bounds,
             9.0f,
@@ -371,6 +421,12 @@ public:
     }
 
 private:
+    void set_hovered(std::optional<std::size_t> index, InputContext& context) {
+        if (hovered_index_ == index) return;
+        hovered_index_ = index;
+        context.invalidate();
+    }
+
     [[nodiscard]] std::optional<std::size_t> row_at(Point position, Rect bounds) const noexcept {
         if (!bounds.contains(position)) return std::nullopt;
         const auto offset = runtime_->scroll.offset();
@@ -386,6 +442,7 @@ private:
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
+    std::optional<std::size_t> hovered_index_;
 };
 
 template <class T>
@@ -598,21 +655,43 @@ public:
         }
 
         switch (event.type) {
+        case InputType::PointerMove: {
+            const auto index = tab_at(event.position, context.bounds());
+            set_hovered(
+                index && runtime->enabled_at(*index) ? index : std::nullopt,
+                context);
+            return EventResult::Ignored;
+        }
+
+        case InputType::PointerLeave:
+            set_hovered(std::nullopt, context);
+            return EventResult::Ignored;
+
         case InputType::PointerDown: {
             const auto index = tab_at(event.position, context.bounds());
-            if (!index) return EventResult::Ignored;
-            if (!runtime->enabled_at(*index)) return EventResult::Handled;
+            if (!index) {
+                set_hovered(std::nullopt, context);
+                return EventResult::Ignored;
+            }
+            if (!runtime->enabled_at(*index)) {
+                set_hovered(std::nullopt, context);
+                return EventResult::Handled;
+            }
+            set_hovered(index, context);
             pointer_armed_ = index;
             context.capture_pointer();
             return EventResult::Handled;
         }
 
         case InputType::PointerUp: {
+            const auto index = tab_at(event.position, context.bounds());
+            set_hovered(
+                index && runtime->enabled_at(*index) ? index : std::nullopt,
+                context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
             context.release_pointer();
-            const auto index = tab_at(event.position, context.bounds());
             if (index && *index == armed) {
                 active_index_ = armed;
                 (void)runtime->select(armed);
@@ -631,7 +710,10 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override { pointer_armed_.reset(); }
+    void deactivate(LifecycleContext&) override {
+        pointer_armed_.reset();
+        hovered_index_.reset();
+    }
 
     void paint(PaintContext& context) const override {
         if (runtime_->keys.empty()) return;
@@ -663,6 +745,18 @@ public:
                 header_height};
             const bool selected = runtime_->selection->get() == runtime_->keys[index];
             const bool enabled = runtime_->enabled_at(index);
+            const bool hovered = effective_enabled() && enabled && !selected &&
+                hovered_index_ && *hovered_index_ == index;
+
+            if (hovered) {
+                painter.fill_rounded_rect(
+                    {tab.x + 3.0f,
+                     tab.y + 3.0f,
+                     std::max(0.0f, tab.w - 6.0f),
+                     std::max(0.0f, tab.h - 6.0f)},
+                    6.0f,
+                    kListTabsHoverSurface);
+            }
 
             if (selected) {
                 painter.fill_rounded_rect(
@@ -696,7 +790,7 @@ public:
             if (index < runtime_->labels.size()) {
                 const Color text_color = !enabled
                     ? Color{0.39f, 0.42f, 0.47f, 1.0f}
-                    : (selected ? colors::text : colors::textMuted);
+                    : ((selected || hovered) ? colors::text : colors::textMuted);
                 painter.text(
                     Point{tab.x + tab.w * 0.5f, tab.y + tab.h * 0.5f},
                     runtime_->labels[index],
@@ -720,6 +814,12 @@ public:
     }
 
 private:
+    void set_hovered(std::optional<std::size_t> index, InputContext& context) {
+        if (hovered_index_ == index) return;
+        hovered_index_ = index;
+        context.invalidate();
+    }
+
     [[nodiscard]] std::optional<std::size_t> tab_at(Point position, Rect bounds) const noexcept {
         if (runtime_->keys.empty() || !(bounds.w > 0.0f) ||
             position.y < bounds.y || position.y >= bounds.y + std::min(bounds.h, kHeaderHeight) ||
@@ -741,6 +841,7 @@ private:
     std::shared_ptr<TabsRuntime<T>> runtime_;
     std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
+    std::optional<std::size_t> hovered_index_;
     typename State<T>::Subscription subscription_;
 };
 
