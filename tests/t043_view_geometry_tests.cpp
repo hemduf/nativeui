@@ -64,6 +64,29 @@ void test_invalid_scale_retains_last_valid() {
     }
 }
 
+void test_scale_observation_acceptance_state() {
+    using ui::detail::ViewGeometryState;
+    ViewGeometryState geometry{{100.0f, 50.0f}};
+
+    NUI_CHECK(geometry.last_scale_observation_valid());
+    NUI_CHECK(!geometry.observe_scale(0.0f));
+    NUI_CHECK(!geometry.last_scale_observation_valid());
+    NUI_CHECK(close(geometry.last_valid_scale(), 1.0f));
+
+    NUI_CHECK(geometry.observe_scale(1.25f));
+    NUI_CHECK(geometry.last_scale_observation_valid());
+    NUI_CHECK(close(geometry.last_valid_scale(), 1.25f));
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    NUI_CHECK(geometry.configure({250.0f, 125.0f}, nan).has_value());
+    NUI_CHECK(!geometry.last_scale_observation_valid());
+    NUI_CHECK(close(geometry.last_valid_scale(), 1.25f));
+
+    NUI_CHECK(geometry.configure({300.0f, 150.0f}, 1.5f).has_value());
+    NUI_CHECK(geometry.last_scale_observation_valid());
+    NUI_CHECK(close(geometry.last_valid_scale(), 1.5f));
+}
+
 void test_invalid_requests_and_transient_zero_configure() {
     using ui::detail::ViewGeometryState;
     ViewGeometryState geometry{{120.0f, 80.0f}};
@@ -203,6 +226,7 @@ void test_pugl_view_span_rounding_and_limit() {
 void suite() {
     test_scale_validation_and_conversion();
     test_invalid_scale_retains_last_valid();
+    test_scale_observation_acceptance_state();
     test_invalid_requests_and_transient_zero_configure();
     test_request_bookkeeping_is_configure_authoritative();
     test_fractional_dirty_and_pointer_conversion();
