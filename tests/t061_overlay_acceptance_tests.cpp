@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <functional>
+
 namespace {
 
 struct AnchorState {
@@ -404,12 +406,54 @@ void reentrant_show_contract() {
     NUI_CHECK(lifecycle->unmounts == 1);
 }
 
+void middle_removal_contract() {
+    test::MockPlatform platform;
+    auto first = std::make_shared<MountState>();
+    auto middle = std::make_shared<MountState>();
+    auto last = std::make_shared<MountState>();
+
+    ui::UI tree{ui::Spacer{96.0f, 48.0f}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+
+    const auto first_handle =
+        tree.show_overlay(centered(ui::make_spec(MountProbe{first})));
+    const auto middle_handle =
+        tree.show_overlay(centered(ui::make_spec(MountProbe{middle})));
+    const auto last_handle =
+        tree.show_overlay(centered(ui::make_spec(MountProbe{last})));
+    tree.resize({96.0f, 48.0f});
+
+    NUI_CHECK(first->mounts == 1);
+    NUI_CHECK(middle->mounts == 1);
+    NUI_CHECK(last->mounts == 1);
+
+    NUI_CHECK(tree.close_overlay(middle_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(middle->unmounts == 1);
+    NUI_CHECK(first->mounts == 1 && first->unmounts == 0);
+    NUI_CHECK(last->mounts == 1 && last->unmounts == 0);
+    NUI_CHECK(first_handle.valid());
+    NUI_CHECK(last_handle.valid());
+
+    NUI_CHECK(tree.close_overlay(last_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(last->unmounts == 1);
+    NUI_CHECK(first->mounts == 1 && first->unmounts == 0);
+    NUI_CHECK(first_handle.valid());
+
+    NUI_CHECK(tree.close_overlay(first_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(first->unmounts == 1);
+}
+
 void suite() {
     anchor_visibility_contract();
     stale_focus_restoration_contract();
     pointer_transparent_focus_contract();
     per_ui_handle_isolation_contract();
     reentrant_show_contract();
+    middle_removal_contract();
 }
 
 } // namespace
