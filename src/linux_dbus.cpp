@@ -256,16 +256,16 @@ struct LinuxDbusPendingCallSet::Impl final {
         LinuxDbusClientId client{};
         ui::Dispatcher dispatcher;
         LinuxDbusCompletionCallback callback;
+        std::shared_ptr<std::atomic<bool>> active;
     };
 
     explicit Impl(LinuxDbusResourceLedger& resource_ledger)
-        : ledger(resource_ledger),
-          completion_gate(std::make_shared<std::atomic<bool>>(true)) {}
+        : ledger(resource_ledger) {}
 
     LinuxDbusResourceLedger& ledger;
     mutable std::mutex mutex;
     std::unordered_map<LinuxDbusRequestId, std::unique_ptr<Entry>> calls;
-    std::shared_ptr<std::atomic<bool>> completion_gate;
+    std::unordered_map<LinuxDbusClientId, std::shared_ptr<std::atomic<bool>>> client_gates;
     bool closing{};
 };
 
@@ -293,6 +293,7 @@ LinuxDbusRequestId LinuxDbusPendingCallSet::begin(LinuxDbusClientId client,
         }
 
         auto entry = std::make_unique<Impl::Entry>();
+        auto new_gate = std::make_shared<std::atomic<bool>>(true);
         entry->client = client;
         entry->dispatcher = std::move(dispatcher);
         entry->callback = std::move(callback);
@@ -301,10 +302,16 @@ LinuxDbusRequestId LinuxDbusPendingCallSet::begin(LinuxDbusClientId client,
         {
             std::lock_guard lock{impl_->mutex};
             if (!impl_->closing) {
-                auto [it, did_insert] = impl_->calls.try_emplace(id);
-                if (did_insert) {
-                    it->second = std::move(entry);
-                    inserted = true;
+                auto [gate_it, gate_inserted] =
+                    impl_->client_gates.try_emplace(client, std::move(new_gate));
+                (void)gate_inserted;
+                if (gate_it->second && gate_it->second->load(std::memory_order_acquire)) {
+                    entry->active = gate_it->second;
+                    auto [it, did_insert] = impl_->calls.try_emplace(id);
+                    if (did_insert) {
+                        it->second = std::move(entry);
+                        inserted = true;
+                    }
                 }
             }
         }
@@ -326,7 +333,6 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
                                        LinuxDbusRequestId id,
                                        LinuxDbusCompletion completion) {
     std::unique_ptr<Impl::Entry> entry;
-    std::shared_ptr<std::atomic<bool>> completion_gate;
     {
         std::lock_guard lock{impl_->mutex};
         if (impl_->closing || client == kInvalidLinuxDbusClientId ||
@@ -340,20 +346,20 @@ bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
         }
         entry = std::move(found->second);
         impl_->calls.erase(found);
-        completion_gate = impl_->completion_gate;
     }
 
     (void)impl_->ledger.release_request(client, id);
 
     auto dispatcher = std::move(entry->dispatcher);
     auto callback = std::move(entry->callback);
+    auto active = std::move(entry->active);
     entry.reset();
 
     try {
         (void)dispatcher.post(
-            [completion_gate = std::move(completion_gate), callback = std::move(callback),
+            [active = std::move(active), callback = std::move(callback),
              completion = std::move(completion)]() mutable {
-                if (!completion_gate->load(std::memory_order_acquire)) {
+                if (!active || !active->load(std::memory_order_acquire)) {
                     return;
                 }
                 callback(std::move(completion));
@@ -371,16 +377,61 @@ bool LinuxDbusPendingCallSet::cancel(LinuxDbusClientId client, LinuxDbusRequestI
                     LinuxDbusCompletion{LinuxDbusErrorCode::Cancelled, {}, {}});
 }
 
+void LinuxDbusPendingCallSet::discard_client(LinuxDbusClientId client) noexcept {
+    if (client == kInvalidLinuxDbusClientId) {
+        return;
+    }
+
+    try {
+        {
+            std::lock_guard lock{impl_->mutex};
+            const auto gate = impl_->client_gates.find(client);
+            if (gate != impl_->client_gates.end() && gate->second) {
+                gate->second->store(false, std::memory_order_release);
+            }
+        }
+
+        for (;;) {
+            LinuxDbusRequestId id = kInvalidLinuxDbusRequestId;
+            std::unique_ptr<Impl::Entry> discarded;
+            {
+                std::lock_guard lock{impl_->mutex};
+                for (auto it = impl_->calls.begin(); it != impl_->calls.end(); ++it) {
+                    if (it->second && it->second->client == client) {
+                        id = it->first;
+                        discarded = std::move(it->second);
+                        impl_->calls.erase(it);
+                        break;
+                    }
+                }
+            }
+            if (!discarded) {
+                break;
+            }
+            (void)impl_->ledger.release_request(client, id);
+        }
+    } catch (...) {
+        // Teardown is noexcept. Any already-posted callback remains guarded by
+        // the per-client gate, which is disabled before pending entries drain.
+    }
+}
+
 void LinuxDbusPendingCallSet::shutdown() noexcept {
     std::unordered_map<LinuxDbusRequestId, std::unique_ptr<Impl::Entry>> discarded;
     try {
         {
             std::lock_guard lock{impl_->mutex};
-            impl_->completion_gate->store(false, std::memory_order_release);
             if (impl_->closing) {
                 return;
             }
             impl_->closing = true;
+            for (auto& [client, gate] : impl_->client_gates) {
+                (void)client;
+                if (gate) {
+                    gate->store(false, std::memory_order_release);
+                }
+            }
+            impl_->client_gates.clear();
             discarded.swap(impl_->calls);
         }
 
@@ -1346,6 +1397,71 @@ bool LinuxDbusTransport::unregister_object_path(LinuxDbusClientId client,
 std::size_t LinuxDbusTransport::object_path_count() const noexcept {
     std::lock_guard lock{impl_->object_mutex};
     return impl_->object_paths.size();
+}
+
+void LinuxDbusTransport::release_client(LinuxDbusClientId client) noexcept {
+    if (client == kInvalidLinuxDbusClientId) {
+        return;
+    }
+
+    // Disable completion gates first so a reply that was already marshalled to
+    // the UI dispatcher cannot escape after this logical client is released.
+    impl_->calls.discard_client(client);
+
+    for (;;) {
+        Impl::NativePendingCall native;
+        bool found = false;
+        {
+            std::lock_guard lock{impl_->pending_mutex};
+            for (auto it = impl_->pending_calls.begin(); it != impl_->pending_calls.end(); ++it) {
+                if (it->second.client == client) {
+                    native = it->second;
+                    impl_->pending_calls.erase(it);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            break;
+        }
+        if (native.pending != nullptr) {
+            dbus_pending_call_cancel(native.pending);
+            dbus_pending_call_unref(native.pending);
+        }
+    }
+
+    for (;;) {
+        LinuxDbusSubscriptionId id = kInvalidLinuxDbusSubscriptionId;
+        {
+            std::lock_guard lock{impl_->signal_mutex};
+            for (const auto& [candidate, entry] : impl_->signals) {
+                if (entry && entry->client == client) {
+                    id = candidate;
+                    break;
+                }
+            }
+        }
+        if (id == kInvalidLinuxDbusSubscriptionId || !unsubscribe_signal(client, id)) {
+            break;
+        }
+    }
+
+    for (;;) {
+        LinuxDbusObjectRegistrationId id = kInvalidLinuxDbusObjectRegistrationId;
+        {
+            std::lock_guard lock{impl_->object_mutex};
+            for (const auto& [candidate, entry] : impl_->object_paths) {
+                if (entry && entry->client == client) {
+                    id = candidate;
+                    break;
+                }
+            }
+        }
+        if (id == kInvalidLinuxDbusObjectRegistrationId || !unregister_object_path(client, id)) {
+            break;
+        }
+    }
 }
 
 } // namespace ui::detail
