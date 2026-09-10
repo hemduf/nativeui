@@ -19,6 +19,8 @@ This roadmap turns NativeUI into a reusable desktop retained-mode UI toolkit whi
 
 `main` now contains the standard widget set through T033 and the supported T060 multi-window lifecycle stress from #139. T052 / PR #120 completes the v0.1 developer-preview release/package qualification once its final documentation-only head passes the same exact-head gates and is merged. The state/widget lane remains on T034 / PR #135 and the platform/event lane on T065 / PR #133.
 
+Cross-cutting rendering regression #152 / PR #153 removes implicit Tree-level visual decoration: `Tree::paint()` no longer paints a default viewport background or the hard-coded `TAB / SHIFT+TAB...` instruction line. Visual backgrounds and overlays belong to consumer/component composition, with a headless regression protecting that ownership boundary.
+
 Current dependency frontier:
 
 ```text
