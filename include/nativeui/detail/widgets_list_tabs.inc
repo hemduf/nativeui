@@ -94,8 +94,6 @@ public:
     ListRowComponent(std::shared_ptr<ListViewRuntime<T>> runtime, std::size_t index)
         : runtime_(std::move(runtime)), index_(index) {}
 
-    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
-
     [[nodiscard]] ComponentAvailability local_availability() const noexcept override {
         ComponentAvailability result{};
         result.enabled = runtime_->enabled_at(index_);
@@ -125,36 +123,6 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
-    EventResult input(const InputEvent& event, InputContext& context) override {
-        switch (event.type) {
-        case InputType::PointerDown:
-            pointer_armed_ = context.bounds().contains(event.position);
-            if (!pointer_armed_) return EventResult::Ignored;
-            context.capture_pointer();
-            return EventResult::Handled;
-
-        case InputType::PointerUp: {
-            if (!pointer_armed_) return EventResult::Ignored;
-            const bool activate = context.bounds().contains(event.position);
-            pointer_armed_ = false;
-            context.release_pointer();
-            if (activate) (void)runtime_->select(index_);
-            return EventResult::Handled;
-        }
-
-        case InputType::PointerCancel:
-            if (!pointer_armed_) return EventResult::Ignored;
-            pointer_armed_ = false;
-            context.release_pointer();
-            return EventResult::Handled;
-
-        default:
-            return EventResult::Ignored;
-        }
-    }
-
-    void deactivate(LifecycleContext&) override { pointer_armed_ = false; }
-
     void paint(PaintContext& context) const override {
         if (index_ >= runtime_->keys.size()) return;
         const auto& selected = runtime_->selection->get();
@@ -166,7 +134,6 @@ public:
 private:
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::size_t index_{};
-    bool pointer_armed_{};
     typename State<std::optional<T>>::Subscription subscription_;
 };
 
@@ -224,6 +191,7 @@ public:
         : runtime_(std::move(runtime)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;
@@ -240,31 +208,63 @@ public:
         if (!placements.empty()) placements.front().bounds = bounds;
     }
 
-    EventResult input(const InputEvent& event, InputContext&) override {
-        if (event.type != InputType::KeyDown) return EventResult::Ignored;
+    EventResult input(const InputEvent& event, InputContext& context) override {
+        if (event.type == InputType::KeyDown) {
+            std::optional<std::size_t> target;
+            const auto current = runtime_->selected_index();
+            switch (event.key) {
+            case Key::Down:
+                target = current ? runtime_->next_enabled(*current) : runtime_->first_enabled();
+                break;
+            case Key::Up:
+                target = current ? runtime_->previous_enabled(*current) : runtime_->last_enabled();
+                break;
+            case Key::Home:
+                target = runtime_->first_enabled();
+                break;
+            case Key::End:
+                target = runtime_->last_enabled();
+                break;
+            default:
+                return EventResult::Ignored;
+            }
 
-        std::optional<std::size_t> target;
-        const auto current = runtime_->selected_index();
-        switch (event.key) {
-        case Key::Down:
-            target = current ? runtime_->next_enabled(*current) : runtime_->first_enabled();
-            break;
-        case Key::Up:
-            target = current ? runtime_->previous_enabled(*current) : runtime_->last_enabled();
-            break;
-        case Key::Home:
-            target = runtime_->first_enabled();
-            break;
-        case Key::End:
-            target = runtime_->last_enabled();
-            break;
+            if (target) (void)runtime_->select(*target);
+            return EventResult::Handled;
+        }
+
+        switch (event.type) {
+        case InputType::PointerDown: {
+            const auto index = row_at(event.position, context.bounds());
+            if (!index) return EventResult::Ignored;
+            if (!runtime_->enabled_at(*index)) return EventResult::Handled;
+            pointer_armed_ = index;
+            context.capture_pointer();
+            return EventResult::Handled;
+        }
+
+        case InputType::PointerUp: {
+            if (!pointer_armed_) return EventResult::Ignored;
+            const auto armed = *pointer_armed_;
+            pointer_armed_.reset();
+            context.release_pointer();
+            const auto index = row_at(event.position, context.bounds());
+            if (index && *index == armed) (void)runtime_->select(armed);
+            return EventResult::Handled;
+        }
+
+        case InputType::PointerCancel:
+            if (!pointer_armed_) return EventResult::Ignored;
+            pointer_armed_.reset();
+            context.release_pointer();
+            return EventResult::Handled;
+
         default:
             return EventResult::Ignored;
         }
-
-        if (target) (void)runtime_->select(*target);
-        return EventResult::Handled;
     }
+
+    void deactivate(LifecycleContext&) override { pointer_armed_.reset(); }
 
     void paint(PaintContext& context) const override {
         context.painter().stroke_rounded_rect(
@@ -273,7 +273,20 @@ public:
     }
 
 private:
+    [[nodiscard]] std::optional<std::size_t> row_at(Point position, Rect bounds) const noexcept {
+        if (!bounds.contains(position)) return std::nullopt;
+        const auto offset = runtime_->scroll.offset();
+        const Point content_point{
+            position.x - bounds.x + offset.x,
+            position.y - bounds.y + offset.y};
+        for (std::size_t index = 0; index < runtime_->row_bounds.size(); ++index) {
+            if (runtime_->row_bounds[index].contains(content_point)) return index;
+        }
+        return std::nullopt;
+    }
+
     std::shared_ptr<ListViewRuntime<T>> runtime_;
+    std::optional<std::size_t> pointer_armed_;
 };
 
 template <class T>
