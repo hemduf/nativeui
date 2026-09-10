@@ -89,10 +89,28 @@ void t059_availability_contract() {
     NUI_CHECK_NEAR(disabled_state.offset().y, 0.0f, 0.001f);
 }
 
+void inert_overlay_does_not_block_pointer_target() {
+    int activations = 0;
+    ui::UI tree{
+        ui::Stack{
+            ui::Button{"under", [&] { ++activations; }},
+            ui::Spacer{100.0f, 100.0f}}};
+    test::MockPlatform platform;
+    tree.resize({100.0f, 100.0f});
+    tree.activate(platform);
+
+    NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(activations == 1);
+}
+
 void suite() {
     wheel_consumption_uses_scroll_state();
     pointer_pan_is_opt_in();
     t059_availability_contract();
+    inert_overlay_does_not_block_pointer_target();
 }
 
 } // namespace
