@@ -183,8 +183,13 @@ def main() -> int:
             "v0.1.0",
             "T071",
             "T060 / PR #118 is complete",
+            "T032 / PR #115 is complete",
         ),
         "v0.1.0 release notes",
+    )
+    require(
+        "Button/Checkbox/Radio baseline" not in release_notes,
+        "v0.1.0 known gaps must not describe the pre-T032 widget baseline as current",
     )
     require(
         "future explicit application-level owner in T060" not in release_notes,
