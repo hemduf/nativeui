@@ -379,6 +379,11 @@ public:
 
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
 
+    /// Whether this component may start a pointer route independently of keyboard focus.
+    /// The default preserves the historic retained-tree contract: focusable components are
+    /// pointer targets, while non-focusable components must explicitly opt in.
+    [[nodiscard]] virtual bool pointer_targetable() const noexcept { return focusable(); }
+
     /// Local availability supplied by generic wrappers/custom components. The
     /// retained tree resolves this monotonically through ancestry and stores the
     /// effective result on each component instance.
