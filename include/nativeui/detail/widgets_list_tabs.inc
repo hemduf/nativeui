@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/state.hpp>
+#include <nativeui/virtual_list.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -853,9 +854,14 @@ public:
     using ActivationCallback = std::function<void(const T&)>;
 
     explicit ListView(State<std::optional<T>>& selection) : selection_(&selection) {}
+    explicit ListView(VirtualListState<T>& state)
+        : selection_(&state.selection()), virtual_state_(&state) {}
 
     template <class Child>
     ListView&& item(T key, Child&& child, bool enabled = true) && {
+        if (virtual_state_) {
+            throw std::logic_error("ListView::item is unavailable for a virtualized ListView");
+        }
         reject_duplicate(key);
         items_.push_back(Item{
             std::move(key), enabled, make_spec(std::forward<Child>(child))});
@@ -863,11 +869,19 @@ public:
     }
 
     ListView&& on_activate(ActivationCallback callback) && {
+        if (virtual_state_) {
+            throw std::logic_error(
+                "ListView::on_activate is not available on the virtualized path yet");
+        }
         activation_callback_ = std::move(callback);
         return std::move(*this);
     }
 
     Spec spec() && {
+        if (virtual_state_) {
+            return detail::make_virtual_list_retained_spec(virtual_state_->runtime());
+        }
+
         auto runtime = std::make_shared<detail::ListViewRuntime<T>>(*selection_);
         runtime->keys.reserve(items_.size());
         runtime->enabled.reserve(items_.size());
@@ -919,6 +933,7 @@ private:
     }
 
     State<std::optional<T>>* selection_{};
+    VirtualListState<T>* virtual_state_{};
     std::vector<Item> items_;
     ActivationCallback activation_callback_;
 };
