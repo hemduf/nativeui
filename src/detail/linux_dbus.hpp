@@ -369,6 +369,11 @@ public:
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::string unique_name() const;
 
+    /// Register one logical Portal/accessibility client on this transport.
+    /// IDs are transport-local, monotonically generated and never reused.
+    [[nodiscard]] LinuxDbusClientId register_client();
+    [[nodiscard]] std::size_t client_count() const noexcept;
+
     /// Thread-safe non-blocking method call. Arguments and successful method
     /// return values are copied through the owned T072 value model. Invalid
     /// syntax/value shapes or inactive transport return 0.
