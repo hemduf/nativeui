@@ -44,7 +44,9 @@ int main(int argc, char** argv) {
 #else
     try {
         auto parent_ui = make_parent_ui();
+        ui::Application application;
         ui::StandaloneWindow parent{
+            application,
             *parent_ui,
             ui::WindowDesc{.title = "NativeUI T041 - Smoke Harness",
                            .size = {640.0f, 360.0f},
@@ -58,7 +60,7 @@ int main(int argc, char** argv) {
                   << " child handle=" << child.native_handle() << '\n';
 
         while (!parent.should_close()) {
-            (void)parent.poll(0.016);
+            (void)application.poll(0.016);
             (void)child.poll();
             if (!parent.last_error().empty()) {
                 std::cerr << "parent error: " << parent.last_error() << '\n';

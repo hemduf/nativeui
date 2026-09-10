@@ -303,6 +303,27 @@ When that happens, implement the generic capability first, then the widget.
 
 CMake + CPM is mandatory.
 
+### 10.1 Compiler warning policy
+
+NativeUI-owned code must compile with **zero unapproved warnings**. `nativeui_enable_project_warnings()` treats warnings as errors (`-Werror` on Clang/GCC, `/WX` on MSVC); do not weaken that policy on individual NativeUI targets.
+
+The only normal way to accept a diagnostic temporarily is the explicit CMake cache setting `NATIVEUI_ALLOWED_WARNINGS`, whose default is empty. An accepted Clang/GCC diagnostic is named without the `-W` prefix (for example `deprecated-declarations`); an MSVC diagnostic uses its four-digit warning code. The configure invocation is the approval record, for example:
+
+```bash
+cmake -S . -B build -DNATIVEUI_ALLOWED_WARNINGS=deprecated-declarations
+```
+
+Rules:
+
+- fix the warning instead of allowing it whenever the code is under NativeUI control;
+- never add a warning to the default allowed set;
+- never bypass this policy in NativeUI-owned code with `-Wno-*`, `/wd*`, diagnostic pragmas, `COMPILE_WARNING_AS_ERROR=OFF`, or equivalent target/source-local suppression;
+- if a warning genuinely must be accepted, keep the allowance as narrow as possible, document the reason in the ticket/PR, and require the explicit CMake opt-in;
+- dependency-boundary/platform suppressions for third-party source must remain narrowly scoped and documented; any new third-party exception must be exposed as an explicit CMake opt-in rather than silently broadening suppression;
+- CI and completion validation use the default empty `NATIVEUI_ALLOWED_WARNINGS` unless a ticket records an explicitly approved exception.
+
+A build that emits an unapproved NativeUI warning is failed work, not a successful build with a note.
+
 ### Pugl
 
 - source dependency;
@@ -336,7 +357,7 @@ A ticket is `Done` only when:
 - acceptance criteria are met;
 - required tests exist and pass;
 - every feature ticket has a dedicated executable example with a passing `--self-test`;
-- no newly introduced compiler errors/warnings attributable to NativeUI remain on the tested platform;
+- NativeUI-owned targets build with the default empty `NATIVEUI_ALLOWED_WARNINGS` and emit no compiler warnings; any explicitly approved exception is recorded in the ticket/PR and requires the corresponding CMake opt-in;
 - all applicable review passes are complete;
 - the mandatory `CODE_REVIEW.md` review record is present in the issue or PR and all blocking findings are corrected;
 - multi-instance/global-state impact is explicitly assessed for every code change;
