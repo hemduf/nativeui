@@ -41,7 +41,10 @@ public:
 
     explicit operator bool() const noexcept { return valid(); }
 
-    bool operator==(const OverlayHandle&) const noexcept = default;
+    [[nodiscard]] bool operator==(const OverlayHandle& other) const noexcept {
+        return id_ == other.id_ && !owner_.owner_before(other.owner_) &&
+               !other.owner_.owner_before(owner_);
+    }
 
 private:
     friend class UI;
