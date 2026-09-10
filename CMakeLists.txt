@@ -315,6 +315,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t032_slider
   t033_progress_meter
   t034_scroll_view
+  t036_list_tabs
   t041_smoke_harness
   t057_embedded_resources
   t059_component_state
