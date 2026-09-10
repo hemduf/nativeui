@@ -101,5 +101,19 @@ int main() {
         check(near(continuous.fraction(value), fraction, 2.0e-6f));
     }
 
+    // Finite float endpoints are valid even when their span is wider than a
+    // representable float. Intermediate arithmetic must stay finite and keep
+    // the center/keyboard mapping deterministic rather than overflowing.
+    const float fmax = std::numeric_limits<float>::max();
+    const SliderDomain wide{-fmax, fmax, 0.0f};
+    check(std::isfinite(wide.fraction(0.0f)));
+    check(near(wide.fraction(0.0f), 0.5f));
+    check(std::isfinite(wide.raw_value_from_fraction(0.5f)));
+    check(near(wide.raw_value_from_fraction(0.5f), 0.0f));
+    check(std::isfinite(wide.keyboard_increment(false)));
+    check(wide.keyboard_increment(false) > 0.0f);
+    check(std::isfinite(wide.value_from_fraction(0.75f)));
+    check(wide.value_from_fraction(0.75f) > 0.0f);
+
     return failures == 0 ? 0 : 1;
 }
