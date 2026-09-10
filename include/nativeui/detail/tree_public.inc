@@ -9,6 +9,7 @@
         mounted_ = true;
         focusables_.clear();
         focus_active_ = false;
+        pointer_hover_target_ = nullptr;
         focus_structure_dirty_ = true;
         initialize_availability(*root_);
         availability_structure_dirty_ = false;
@@ -62,6 +63,13 @@
         if (!active_) return;
         sync_availability_structure(platform);
 
+        // Hover and capture callbacks must run while components and platform
+        // services are still active. Hover is presentation-only and is cleared
+        // independently from any in-flight captured interaction.
+        InputEvent leave{};
+        leave.type = InputType::PointerLeave;
+        (void)clear_pointer_hover(leave, platform);
+
         // Cancel any in-flight pointer interaction while components and
         // platform services are still active. This is the deterministic
         // lifecycle boundary used for focus loss and view teardown.
@@ -77,6 +85,7 @@
 
         focus_active_ = false;
         clear_pointer_capture();
+        pointer_hover_target_ = nullptr;
         active_platform_ = nullptr;
         deactivate_node(*root_);
         reset_focus_scope_cache(*root_);
@@ -95,6 +104,7 @@
         // tree directly.
         focus_active_ = false;
         clear_pointer_capture();
+        pointer_hover_target_ = nullptr;
         active_platform_ = nullptr;
         if (active_) {
             deactivate_node(*root_);
@@ -170,8 +180,10 @@
     /// - key/text/composition/tick events target the focused node while focus is active;
     /// - PointerDown cancels an older capture, hit-tests the deepest interactive visual node,
     ///   focuses its nearest focusable ancestor when one exists, then routes from the visual target;
-    /// - PointerMove/PointerWheel route to the capture owner first, otherwise the visual target;
-    /// - PointerUp routes to the capture owner then releases capture automatically;
+    /// - PointerMove/PointerWheel update the retained hover route, then route to the capture owner
+    ///   first when present, otherwise the current visual target;
+    /// - PointerLeave clears the previous retained hover route without cancelling capture;
+    /// - PointerUp updates hover, routes to the capture owner, then releases capture automatically;
     /// - PointerCancel is delivered exactly once to the capture owner and clears capture;
     /// - external drop offers/data hit-test a mounted tree even without window focus;
     /// - ignored target events bubble through ancestors until handled or root.
@@ -265,6 +277,11 @@
             return finish(result);
         }
 
+        if (event.type == InputType::PointerLeave) {
+            const bool changed = clear_pointer_hover(event, platform);
+            return finish(changed ? EventResult::Handled : EventResult::Ignored);
+        }
+
         if (event.type == InputType::PointerCancel) {
             return finish(cancel_pointer_capture(platform, event));
         }
@@ -274,7 +291,10 @@
             // owner captured if a previous interaction missed its PointerUp.
             if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
 
-            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
+            auto* target = hit_test_pointer(
+                hit_test_pointer, *root_, event.position, viewport_rect());
+            (void)update_pointer_hover_target(target, event, platform);
+            if (target) {
                 focus_nearest_ancestor(target);
                 return finish(route_from(*target, event, platform));
             }
@@ -282,22 +302,28 @@
         }
 
         if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
+            auto* target = hit_test_pointer(
+                hit_test_pointer, *root_, event.position, viewport_rect());
+            (void)update_pointer_hover_target(target, event, platform);
             if (auto* owner = pointer_capture_owner()) {
                 return finish(route_from(*owner, event, platform));
             }
-            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
+            if (target) {
                 return finish(route_from(*target, event, platform));
             }
             return finish(EventResult::Ignored);
         }
 
         if (event.type == InputType::PointerUp) {
+            auto* target = hit_test_pointer(
+                hit_test_pointer, *root_, event.position, viewport_rect());
+            (void)update_pointer_hover_target(target, event, platform);
             if (auto* owner = pointer_capture_owner()) {
                 const auto result = route_from(*owner, event, platform);
                 clear_pointer_capture();
                 return finish(result);
             }
-            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
+            if (target) {
                 return finish(route_from(*target, event, platform));
             }
             return finish(EventResult::Ignored);

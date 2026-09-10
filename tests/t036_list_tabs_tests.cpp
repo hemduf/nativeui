@@ -170,6 +170,13 @@ void hover_presentation_contract() {
             test::pointer(ui::InputType::PointerMove, 20.0f, 75.0f), platform);
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(pixel_matches(renderer.pixel(20, 75), kHoverSurface));
+
+        ui::InputEvent leave{};
+        leave.type = ui::InputType::PointerLeave;
+        leave.position = {120.0f, 75.0f};
+        NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(20, 75), kHoverSurface));
     }
 
     {
@@ -196,7 +203,40 @@ void hover_presentation_contract() {
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!pixel_matches(renderer.pixel(220, 20), kHoverSurface));
         NUI_CHECK(!pixel_matches(renderer.pixel(150, 20), kHoverSurface));
+
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 220.0f, 20.0f), platform);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(220, 20), kHoverSurface));
+        ui::InputEvent leave{};
+        leave.type = ui::InputType::PointerLeave;
+        leave.position = {300.0f, 20.0f};
+        NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!pixel_matches(renderer.pixel(220, 20), kHoverSurface));
     }
+
+    // Hover bookkeeping belongs to each retained Tree/component instance.
+    ui::State<int> left_selected{1};
+    ui::State<int> right_selected{1};
+    ui::UI left{ui::Tabs<int>{left_selected}
+        .tab(1, "One", ui::Spacer{200.0f, 40.0f})
+        .tab(2, "Two", ui::Spacer{200.0f, 40.0f})};
+    ui::UI right{ui::Tabs<int>{right_selected}
+        .tab(1, "One", ui::Spacer{200.0f, 40.0f})
+        .tab(2, "Two", ui::Spacer{200.0f, 40.0f})};
+    left.resize({200.0f, 100.0f});
+    right.resize({200.0f, 100.0f});
+    left.activate(platform);
+    right.activate(platform);
+    (void)left.dispatch(
+        test::pointer(ui::InputType::PointerMove, 150.0f, 20.0f), platform);
+    ui::HeadlessRenderer left_renderer{{200.0f, 100.0f}, 1.0f};
+    ui::HeadlessRenderer right_renderer{{200.0f, 100.0f}, 1.0f};
+    NUI_CHECK(left_renderer.render(left));
+    NUI_CHECK(right_renderer.render(right));
+    NUI_CHECK(pixel_matches(left_renderer.pixel(150, 20), kHoverSurface));
+    NUI_CHECK(!pixel_matches(right_renderer.pixel(150, 20), kHoverSurface));
 }
 
 void deterministic_headless_states() {
