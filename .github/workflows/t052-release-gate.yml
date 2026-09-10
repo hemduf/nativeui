@@ -1,0 +1,218 @@
+name: T052 v0.1 Release Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t052-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASELINE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+
+jobs:
+  contract:
+    name: T052 release contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Validate release source and checksum contracts
+        run: python3 tests/t052_release_gate_contract.py
+
+      - name: Record exact candidate evidence
+        run: |
+          mkdir -p t052-evidence
+          {
+            echo "release=0.1.0"
+            echo "candidate_sha=${CANDIDATE_SHA}"
+            echo "baseline_sha=${BASELINE_SHA}"
+            echo "contract_workflow=${GITHUB_RUN_ID}"
+          } > t052-evidence/release-candidate.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t052-release-evidence
+          path: t052-evidence/release-candidate.txt
+          if-no-files-found: error
+
+  bootstrap:
+    name: T052 clean bootstrap — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux X11
+            os: ubuntu-24.04
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.t052-cpm-source-cache
+      T052_INSTALL_PREFIX: ${{ github.workspace }}/t052-install
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Start from an empty dependency/build cache
+        shell: bash
+        run: rm -rf build-t052-bootstrap build-t052-release-consumer t052-release-consumer t052-install "${CPM_SOURCE_CACHE}"
+
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # Hosted images include unrelated third-party apt sources. A stale
+          # Chrome index must not turn a NativeUI clean-bootstrap gate red.
+          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - name: Configure clean Unix bootstrap
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build-t052-bootstrap -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure clean Windows bootstrap
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-t052-bootstrap -A x64
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build clean bootstrap
+        run: cmake --build build-t052-bootstrap --config Release --parallel 2
+
+      - name: Verify pinned dependency/hash contract is present
+        shell: bash
+        run: |
+          grep -F 'GITHUB_REPOSITORY hemduf/pugl' cmake/Dependencies.cmake
+          grep -F 'URL_HASH "${_skia_hash}"' cmake/Dependencies.cmake
+          grep -F 'NATIVEUI_SKIA_TAG "chrome/m149"' cmake/Dependencies.cmake
+
+      - name: Install exact candidate package
+        run: cmake --install build-t052-bootstrap --config Release --prefix "${{ env.T052_INSTALL_PREFIX }}"
+
+      - name: Prepare release-doc consumer from exact snippet (Unix)
+        if: runner.os != 'Windows'
+        run: python3 tests/t052_prepare_release_consumer.py --output t052-release-consumer
+
+      - name: Prepare release-doc consumer from exact snippet (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tests/t052_prepare_release_consumer.py --output t052-release-consumer
+
+      - name: Configure release-doc consumer (Unix)
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S t052-release-consumer -B build-t052-release-consumer -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH=${{ env.T052_INSTALL_PREFIX }}
+
+      - name: Configure release-doc consumer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S t052-release-consumer -B build-t052-release-consumer -A x64
+          -DCMAKE_PREFIX_PATH="${{ env.T052_INSTALL_PREFIX }}"
+
+      - name: Build release-doc consumer
+        run: cmake --build build-t052-release-consumer --config Release --parallel 2
+
+  benchmark:
+    name: T052 exact-head T051 benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Checkout benchmark baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASELINE_SHA }}
+          path: t052-baseline-src
+
+      - name: Install benchmark dependencies
+        shell: bash
+        run: |
+          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev
+
+      - name: Configure approved-base benchmark project
+        run: >-
+          cmake -S t052-baseline-src/tests/t051 -B build-t052-base -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}/t052-baseline-src
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ env.BASELINE_SHA }}
+
+      - name: Build approved-base benchmark project
+        run: |
+          cmake --build build-t052-base --parallel 2
+          ctest --test-dir build-t052-base --output-on-failure
+          ./build-t052-base/nativeui_benchmarks --self-test
+
+      - name: Configure exact-head T051 benchmark project
+        run: >-
+          cmake -S tests/t051 -B build-t052-bench -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ env.CANDIDATE_SHA }}
+
+      - name: Build and validate benchmark contract
+        run: |
+          cmake --build build-t052-bench --parallel 2
+          ctest --test-dir build-t052-bench --output-on-failure
+          ./build-t052-bench/nativeui_benchmarks --self-test
+
+      - name: Build T051 policy gate
+        run: |
+          cmake --build build-t052-bench --target nativeui_t052_benchmark_gate --parallel 2
+          cp build-t052-bench/t052-benchmark-gate ./t052-benchmark-gate
+
+      - name: Capture one approved-base run and two candidate runs
+        run: |
+          ./build-t052-base/nativeui_benchmarks --json t052-approved-base.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-candidate-a.json
+          ./build-t052-bench/nativeui_benchmarks --json t052-candidate-b.json
+
+      - name: Validate exact SHAs, idle hard gate and T051 regression budget
+        run: >-
+          ./t052-benchmark-gate
+          --baseline t052-approved-base.json
+          --candidate-a t052-candidate-a.json
+          --candidate-b t052-candidate-b.json
+          --baseline-sha "${BASELINE_SHA}"
+          --candidate-sha "${CANDIDATE_SHA}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t052-v0.1-benchmark-baseline
+          path: |
+            t052-approved-base.json
+            t052-candidate-a.json
+            t052-candidate-b.json
+          if-no-files-found: error
