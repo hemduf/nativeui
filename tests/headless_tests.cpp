@@ -141,6 +141,122 @@ private:
     std::shared_ptr<EscapeProbeState> state_;
 };
 
+struct FocusProbeState {
+    int gains{};
+    int losses{};
+    bool focused{};
+};
+
+class FocusProbeComponent final : public ui::Component {
+public:
+    FocusProbeComponent(ui::Size size, std::shared_ptr<FocusProbeState> state)
+        : size_(size), state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return size_;
+    }
+
+    void focus_changed(bool focused, ui::FocusContext&) override {
+        state_->focused = focused;
+        if (focused) ++state_->gains;
+        else ++state_->losses;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    ui::Size size_{};
+    std::shared_ptr<FocusProbeState> state_;
+};
+
+class FocusProbe {
+public:
+    FocusProbe(ui::Size size, std::shared_ptr<FocusProbeState> state)
+        : size_(size), state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        const auto size = size_;
+        auto state = std::move(state_);
+        return ui::Spec{
+            [size, state = std::move(state)] {
+                return std::make_unique<FocusProbeComponent>(size, state);
+            },
+            {}};
+    }
+
+private:
+    ui::Size size_{};
+    std::shared_ptr<FocusProbeState> state_;
+};
+
+struct CaptureCloseState {
+    int pointer_downs{};
+    int pointer_cancels{};
+    int unmounts{};
+    bool in_pointer_down{};
+    bool destroyed_reentrantly{};
+    bool close_result{};
+    std::function<void()> close;
+};
+
+class CaptureCloseComponent final : public ui::Component {
+public:
+    explicit CaptureCloseComponent(std::shared_ptr<CaptureCloseState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {24.0f, 16.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
+        if (event.type == ui::InputType::PointerCancel) {
+            ++state_->pointer_cancels;
+            return ui::EventResult::Handled;
+        }
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+
+        ++state_->pointer_downs;
+        state_->in_pointer_down = true;
+        context.capture_pointer();
+        if (state_->close) state_->close();
+        if (state_->unmounts != 0) state_->destroyed_reentrantly = true;
+        state_->in_pointer_down = false;
+        return ui::EventResult::Handled;
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        if (state_->in_pointer_down) state_->destroyed_reentrantly = true;
+        ++state_->unmounts;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<CaptureCloseState> state_;
+};
+
+class CaptureCloseProbe {
+public:
+    explicit CaptureCloseProbe(std::shared_ptr<CaptureCloseState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<CaptureCloseComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<CaptureCloseState> state_;
+};
+
 struct AnchorProbeState {
     ui::NodeId id{ui::kInvalidNodeId};
 };
@@ -507,21 +623,16 @@ void overlay_anchor_contract() {
     NUI_CHECK(ui::handled(tree.dispatch(first, platform)));
     NUI_CHECK(overlay->pointer_downs == 1);
 
-    // Anchor geometry is resolved from the retained NodeId on every relevant
-    // layout checkpoint, so a viewport change repositions the overlay.
     tree.resize({120.0f, 48.0f});
     ui::InputEvent moved = first;
     moved.position = {92.0f, 20.0f};
     NUI_CHECK(ui::handled(tree.dispatch(moved, platform)));
     NUI_CHECK(overlay->pointer_downs == 2);
 
-    // T058 removal invalidates the retained NodeId. The anchored overlay closes
-    // at the same safe checkpoint rather than retaining stale geometry/pointers.
     anchor_present.set(false);
     tree.resize({120.0f, 48.0f});
     NUI_CHECK(!handle.valid());
 
-    // UI deactivation is also an explicit anchor-loss boundary.
     ui::State<bool> second_present{true};
     auto second_anchor = std::make_shared<AnchorProbeState>();
     ui::UI second{AnchorRoot{second_present, second_anchor}};
@@ -536,6 +647,68 @@ void overlay_anchor_contract() {
     NUI_CHECK(second_handle.valid());
     second.deactivate(platform);
     NUI_CHECK(!second_handle.valid());
+}
+
+void overlay_focus_and_capture_contract() {
+    test::MockPlatform platform;
+    auto root_focus = std::make_shared<FocusProbeState>();
+    auto first_focus = std::make_shared<FocusProbeState>();
+    auto second_focus = std::make_shared<FocusProbeState>();
+
+    ui::UI tree{FocusProbe{{96.0f, 48.0f}, root_focus}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+    NUI_CHECK(root_focus->focused);
+
+    auto first_modal = centered_overlay(ui::make_spec(FocusProbe{{24.0f, 16.0f}, first_focus}));
+    first_modal.mode = ui::OverlayMode::Modal;
+    const auto first_handle = tree.show_overlay(std::move(first_modal));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(!root_focus->focused);
+    NUI_CHECK(first_focus->focused);
+
+    auto second_modal = centered_overlay(ui::make_spec(FocusProbe{{24.0f, 16.0f}, second_focus}));
+    second_modal.mode = ui::OverlayMode::Modal;
+    const auto second_handle = tree.show_overlay(std::move(second_modal));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(!first_focus->focused);
+    NUI_CHECK(second_focus->focused);
+
+    NUI_CHECK(tree.close_overlay(second_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(!root_focus->focused);
+    NUI_CHECK(first_focus->focused);
+    NUI_CHECK(!second_focus->focused);
+
+    NUI_CHECK(tree.close_overlay(first_handle));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(root_focus->focused);
+    NUI_CHECK(!first_focus->focused);
+
+    auto capture = std::make_shared<CaptureCloseState>();
+    ui::UI capture_tree{
+        ui::Canvas{ui::Size{96.0f, 48.0f}, [](ui::CanvasContext2D&) {}}
+    };
+    capture_tree.resize({96.0f, 48.0f});
+    capture_tree.activate(platform);
+
+    auto capture_spec = centered_overlay(ui::make_spec(CaptureCloseProbe{capture}));
+    const auto capture_handle = capture_tree.show_overlay(std::move(capture_spec));
+    capture_tree.resize({96.0f, 48.0f});
+    capture->close = [&capture_tree, capture_handle, capture] {
+        capture->close_result = capture_tree.close_overlay(capture_handle);
+    };
+
+    ui::InputEvent down;
+    down.type = ui::InputType::PointerDown;
+    down.position = {48.0f, 24.0f};
+    NUI_CHECK(ui::handled(capture_tree.dispatch(down, platform)));
+    NUI_CHECK(capture->pointer_downs == 1);
+    NUI_CHECK(capture->close_result);
+    NUI_CHECK(!capture_handle.valid());
+    NUI_CHECK(capture->pointer_cancels == 1);
+    NUI_CHECK(capture->unmounts == 1);
+    NUI_CHECK(!capture->destroyed_reentrantly);
 }
 
 void overlay_structural_queue_contract() {
@@ -649,6 +822,7 @@ void suite() {
     overlay_modal_pointer_barrier_contract();
     overlay_dismissal_contract();
     overlay_anchor_contract();
+    overlay_focus_and_capture_contract();
     overlay_structural_queue_contract();
 }
 
