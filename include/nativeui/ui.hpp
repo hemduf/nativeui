@@ -1,10 +1,16 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/overlay.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ui {
 
@@ -66,12 +72,51 @@ public:
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) { tree_.paint(canvas, platform); }
 
+    /// Queue one in-view overlay description for this UI. The retained-tree
+    /// integration is completed by T061; this owner-scoped handle seam rejects
+    /// the one structurally invalid v1 policy combination up front.
+    [[nodiscard]] OverlayHandle show_overlay(OverlaySpec overlay) {
+        if (overlay.mode == OverlayMode::Modal &&
+            overlay.pointer_policy == OverlayPointerPolicy::Ignore) {
+            return {};
+        }
+        if (next_overlay_id_ == 0) return {};
+
+        const auto id = next_overlay_id_;
+        if (next_overlay_id_ == std::numeric_limits<std::uint64_t>::max()) {
+            next_overlay_id_ = 0;
+        } else {
+            ++next_overlay_id_;
+        }
+        overlays_.push_back(PendingOverlay{id, std::move(overlay)});
+        return OverlayHandle{overlay_owner_, id};
+    }
+
+    /// Close an overlay handle owned by this UI. Stale, cross-UI and already
+    /// closed handles are deterministic no-ops.
+    bool close_overlay(OverlayHandle handle) {
+        const auto owner = handle.owner_.lock();
+        if (!owner || owner != overlay_owner_ || handle.id_ == 0) return false;
+        const auto before = overlays_.size();
+        std::erase_if(overlays_, [id = handle.id_](const PendingOverlay& entry) {
+            return entry.id == id;
+        });
+        return overlays_.size() != before;
+    }
+
 private:
+    struct PendingOverlay {
+        std::uint64_t id{};
+        OverlaySpec spec;
+    };
+
     Tree tree_;
+    std::shared_ptr<const detail::OverlayOwnerToken> overlay_owner_{
+        std::make_shared<const detail::OverlayOwnerToken>()};
+    std::uint64_t next_overlay_id_{1};
+    std::vector<PendingOverlay> overlays_;
 };
 
-
 using PluginUI = UI; // compatibility alias for the original POC
-
 
 } // namespace ui
