@@ -40,8 +40,12 @@ int main() {
     DispatcherOwner owner;
     const auto dispatcher = owner.dispatcher();
     const auto ui_thread = std::this_thread::get_id();
-    constexpr LinuxDbusClientId client = 41;
-    constexpr LinuxDbusClientId sibling_client = 42;
+    const auto client = transport.register_client();
+    const auto sibling_client = transport.register_client();
+    if (client == kInvalidLinuxDbusClientId ||
+        sibling_client == kInvalidLinuxDbusClientId || client == sibling_client) {
+        return EXIT_FAILURE;
+    }
 
     std::size_t callback_count = 0;
     std::thread::id callback_thread;
@@ -65,6 +69,8 @@ int main() {
 
     LinuxDbusTransport peer;
     if (peer.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
+    const auto peer_client = peer.register_client();
+    if (peer_client == kInvalidLinuxDbusClientId) return EXIT_FAILURE;
     const auto peer_name = peer.unique_name();
     if (!drain_until(owner, [&] { return callback_count == 1; }, 2s) ||
         callback_thread != ui_thread || received.path != "/org/freedesktop/DBus" ||
@@ -132,7 +138,7 @@ int main() {
     emitted_match.interface = "org.nativeui.T072.Test";
     emitted_match.member = "Changed";
     const auto emitted_subscription = peer.subscribe_signal(
-        sibling_client, dispatcher, emitted_match,
+        peer_client, dispatcher, emitted_match,
         [&](LinuxDbusSignal signal) {
             emitted_signal = std::move(signal);
             ++emitted_callback_count;
@@ -153,8 +159,11 @@ int main() {
         transport.send_signal("/org/nativeui/T072/Signal", "org.nativeui.T072.Test", "bad.member", {}))
         return EXIT_FAILURE;
     stage("emitted-signal-ok");
-    if (!peer.unsubscribe_signal(sibling_client, emitted_subscription)) return EXIT_FAILURE;
+    if (!peer.unsubscribe_signal(peer_client, emitted_subscription)) return EXIT_FAILURE;
 
+    transport.release_client(client);
+    transport.release_client(sibling_client);
+    peer.release_client(peer_client);
     later_peer.stop();
     peer.stop();
     transport.stop();
