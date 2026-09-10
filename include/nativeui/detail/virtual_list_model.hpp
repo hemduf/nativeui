@@ -211,6 +211,28 @@ public:
         return index ? std::optional<VirtualSemanticItemToken>{entries_[*index].token} : std::nullopt;
     }
 
+    [[nodiscard]] std::optional<float> scroll_offset_for_index(
+        std::size_t index,
+        float row_height,
+        float viewport_height,
+        float current_offset,
+        VirtualListAlignment alignment = VirtualListAlignment::Nearest) const noexcept {
+        return virtual_list_scroll_offset(
+            entries_.size(), row_height, viewport_height, current_offset, index, alignment);
+    }
+
+    [[nodiscard]] std::optional<float> scroll_offset_for_key(
+        const Key& key,
+        float row_height,
+        float viewport_height,
+        float current_offset,
+        VirtualListAlignment alignment = VirtualListAlignment::Nearest) const {
+        const auto index = index_of_key(key);
+        if (!index) return std::nullopt;
+        return scroll_offset_for_index(
+            *index, row_height, viewport_height, current_offset, alignment);
+    }
+
     [[nodiscard]] std::optional<std::vector<std::size_t>> materialized_indices(
         float row_height,
         float scroll_y,
