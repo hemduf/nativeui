@@ -21,6 +21,15 @@ bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 3) {
            std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
 }
 
+ui::Color source_over(ui::Color foreground, ui::Color background) {
+    const float inverse_alpha = 1.0f - foreground.a;
+    return {
+        foreground.r * foreground.a + background.r * inverse_alpha,
+        foreground.g * foreground.a + background.g * inverse_alpha,
+        foreground.b * foreground.a + background.b * inverse_alpha,
+        1.0f};
+}
+
 void suite() {
     using VirtualState = ui::VirtualListState<int>;
 
@@ -71,14 +80,15 @@ void suite() {
               ui::EventResult::Handled);
     NUI_CHECK(selected.get() && *selected.get() == 2);
     NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(20, 50), ui::colors::selection));
+    const auto selected_surface = source_over(ui::colors::selection, ui::colors::panel);
+    NUI_CHECK(pixel_matches(renderer.pixel(20, 50), selected_surface));
 
     ui::InputEvent leave{};
     leave.type = ui::InputType::PointerLeave;
     leave.position = {100.0f, 50.0f};
     NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
     NUI_CHECK(renderer.render(tree));
-    NUI_CHECK(pixel_matches(renderer.pixel(20, 50), ui::colors::selection));
+    NUI_CHECK(pixel_matches(renderer.pixel(20, 50), selected_surface));
 }
 
 } // namespace
