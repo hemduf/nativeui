@@ -199,6 +199,14 @@ struct LinuxDbusCompletion final {
     std::string remote_error_name;
     std::string message;
     std::vector<LinuxDbusValue> values;
+
+    LinuxDbusCompletion() = default;
+    LinuxDbusCompletion(LinuxDbusErrorCode error_code,
+                        std::string remote_name,
+                        std::string diagnostic)
+        : code(error_code),
+          remote_error_name(std::move(remote_name)),
+          message(std::move(diagnostic)) {}
 };
 
 using LinuxDbusCompletionCallback = std::function<void(LinuxDbusCompletion)>;
@@ -210,6 +218,18 @@ struct LinuxDbusMethodCall final {
     std::string member;
     std::chrono::milliseconds timeout{kLinuxDbusDefaultTimeout};
     std::vector<LinuxDbusValue> arguments;
+
+    LinuxDbusMethodCall() = default;
+    LinuxDbusMethodCall(std::string destination_name,
+                        std::string object_path,
+                        std::string interface_name,
+                        std::string member_name,
+                        std::chrono::milliseconds method_timeout = kLinuxDbusDefaultTimeout)
+        : destination(std::move(destination_name)),
+          path(std::move(object_path)),
+          interface(std::move(interface_name)),
+          member(std::move(member_name)),
+          timeout(method_timeout) {}
 };
 
 [[nodiscard]] bool linux_dbus_library_probe() noexcept;
