@@ -182,8 +182,17 @@ def main() -> int:
             "nativeui_attach_platform(",
             "v0.1.0",
             "T071",
+            "T060 / PR #118 is complete",
         ),
         "v0.1.0 release notes",
+    )
+    require(
+        "future explicit application-level owner in T060" not in release_notes,
+        "v0.1.0 release notes must not describe completed T060 ownership as future work",
+    )
+    require(
+        "T060's explicit application/shared-PROGRAM multi-window ownership API" not in release_notes,
+        "v0.1.0 known gaps must not list completed T060 work",
     )
 
     print("PASS T052 v0.1 release-gate source contract")
