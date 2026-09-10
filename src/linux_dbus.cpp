@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -175,6 +176,144 @@ bool LinuxDbusResourceLedger::release_object_path(LinuxDbusClientId client,
 std::size_t LinuxDbusResourceLedger::object_path_count() const noexcept {
     std::lock_guard lock{impl_->mutex};
     return impl_->object_paths.size();
+}
+
+struct LinuxDbusPendingCallSet::Impl final {
+    struct Entry final {
+        LinuxDbusClientId client{};
+        ui::Dispatcher dispatcher;
+        LinuxDbusCompletionCallback callback;
+    };
+
+    explicit Impl(LinuxDbusResourceLedger& resource_ledger)
+        : ledger(resource_ledger) {}
+
+    LinuxDbusResourceLedger& ledger;
+    mutable std::mutex mutex;
+    std::unordered_map<LinuxDbusRequestId, std::unique_ptr<Entry>> calls;
+    bool closing{};
+};
+
+LinuxDbusPendingCallSet::LinuxDbusPendingCallSet(LinuxDbusResourceLedger& ledger)
+    : impl_(std::make_unique<Impl>(ledger)) {}
+
+LinuxDbusPendingCallSet::~LinuxDbusPendingCallSet() {
+    shutdown();
+}
+
+LinuxDbusRequestId LinuxDbusPendingCallSet::begin(LinuxDbusClientId client,
+                                                   ui::Dispatcher dispatcher,
+                                                   std::chrono::milliseconds timeout,
+                                                   LinuxDbusCompletionCallback callback) {
+    if (client == kInvalidLinuxDbusClientId || !dispatcher.valid() ||
+        !linux_dbus_valid_timeout(timeout) || !callback) {
+        return kInvalidLinuxDbusRequestId;
+    }
+
+    LinuxDbusRequestId id = kInvalidLinuxDbusRequestId;
+    try {
+        id = impl_->ledger.acquire_request(client);
+        if (id == kInvalidLinuxDbusRequestId) {
+            return id;
+        }
+
+        auto entry = std::make_unique<Impl::Entry>();
+        entry->client = client;
+        entry->dispatcher = std::move(dispatcher);
+        entry->callback = std::move(callback);
+
+        bool inserted = false;
+        {
+            std::lock_guard lock{impl_->mutex};
+            if (!impl_->closing) {
+                auto [it, did_insert] = impl_->calls.try_emplace(id);
+                if (did_insert) {
+                    it->second = std::move(entry);
+                    inserted = true;
+                }
+            }
+        }
+
+        if (!inserted) {
+            (void)impl_->ledger.release_request(client, id);
+            return kInvalidLinuxDbusRequestId;
+        }
+        return id;
+    } catch (...) {
+        if (id != kInvalidLinuxDbusRequestId) {
+            (void)impl_->ledger.release_request(client, id);
+        }
+        return kInvalidLinuxDbusRequestId;
+    }
+}
+
+bool LinuxDbusPendingCallSet::complete(LinuxDbusClientId client,
+                                       LinuxDbusRequestId id,
+                                       LinuxDbusCompletion completion) {
+    std::unique_ptr<Impl::Entry> entry;
+    {
+        std::lock_guard lock{impl_->mutex};
+        if (impl_->closing || client == kInvalidLinuxDbusClientId ||
+            id == kInvalidLinuxDbusRequestId) {
+            return false;
+        }
+        const auto found = impl_->calls.find(id);
+        if (found == impl_->calls.end() || !found->second ||
+            found->second->client != client) {
+            return false;
+        }
+        entry = std::move(found->second);
+        impl_->calls.erase(found);
+    }
+
+    (void)impl_->ledger.release_request(client, id);
+
+    auto dispatcher = std::move(entry->dispatcher);
+    auto callback = std::move(entry->callback);
+    entry.reset();
+
+    try {
+        (void)dispatcher.post(
+            [callback = std::move(callback), completion = std::move(completion)]() mutable {
+                callback(std::move(completion));
+            });
+    } catch (...) {
+        // A completion is terminal even when the UI owner is gone or its
+        // bounded queue cannot accept the callback. Never execute on the I/O
+        // thread as a fallback.
+    }
+    return true;
+}
+
+bool LinuxDbusPendingCallSet::cancel(LinuxDbusClientId client, LinuxDbusRequestId id) {
+    return complete(client, id, LinuxDbusCompletion{LinuxDbusErrorCode::Cancelled});
+}
+
+void LinuxDbusPendingCallSet::shutdown() noexcept {
+    std::unordered_map<LinuxDbusRequestId, std::unique_ptr<Impl::Entry>> discarded;
+    try {
+        {
+            std::lock_guard lock{impl_->mutex};
+            if (impl_->closing) {
+                return;
+            }
+            impl_->closing = true;
+            discarded.swap(impl_->calls);
+        }
+
+        for (const auto& [id, entry] : discarded) {
+            if (entry) {
+                (void)impl_->ledger.release_request(entry->client, id);
+            }
+        }
+    } catch (...) {
+        // Destruction must not throw. Pending callbacks remain suppressed.
+    }
+}
+
+std::size_t LinuxDbusPendingCallSet::pending_count() const noexcept {
+    std::lock_guard lock{impl_->mutex};
+    return impl_->calls.size();
 }
 
 struct LinuxDbusTransport::Impl final {
