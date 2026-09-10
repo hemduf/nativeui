@@ -22,9 +22,12 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace ui {
