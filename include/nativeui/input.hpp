@@ -68,6 +68,7 @@ enum class InputType {
     Tick,
     PointerDown,
     PointerMove,
+    PointerLeave,
     PointerUp,
     PointerCancel,
     PointerWheel,
