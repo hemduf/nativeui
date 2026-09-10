@@ -16,7 +16,11 @@ target_include_directories(t072_core_stub PUBLIC
 )
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/NativeUILinuxDbus.cmake")
-nativeui_add_linux_dbus_transport()
+# This isolated fixture validates the low-level T072 transport without pulling
+# the full Skia-backed Application implementation into a transport-only test
+# project. Production source-tree/package builds call the same helper without
+# TRANSPORT_ONLY and therefore compile the Application bridge as well.
+nativeui_add_linux_dbus_transport(TRANSPORT_ONLY)
 
 function(t072_add_test name source)
   add_executable(${name} ${source})
