@@ -127,6 +127,14 @@ _t047_run_case(slash FALSE
 _t047_run_case(colon FALSE
   "add_executable(app main.cpp)\nnativeui_attach_platform(TARGET app CONSUMER_ID com.example:app)"
   "reverse-DNS")
+# Call the shared validator directly here: nativeui_attach_platform() intentionally
+# parses its public macro arguments first, and a literal semicolon is already a
+# CMake list boundary there. T054 validates its one-value BUNDLE_ID with this
+# shared function before invoking the attachment macro, so this regression must
+# exercise the validator itself rather than succeed for an earlier parser error.
+_t047_run_case(semicolon FALSE
+  "_nativeui_validate_consumer_id(\"com.example;app\")"
+  "reverse-DNS")
 _t047_run_case(empty_segment FALSE
   "add_executable(app main.cpp)\nnativeui_attach_platform(TARGET app CONSUMER_ID com..app)"
   "reverse-DNS")

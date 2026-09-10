@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-09
+**Updated:** 2026-09-10
 
 This roadmap turns the current implementation into a reusable desktop UI toolkit while preserving the architecture: Pugl for native views/events, Skia for rendering, NativeUI for retained UI behavior. GitHub Issues are the source of truth for exact ticket status/dependencies. Milestone ordering is architectural progression, not a global execution lock.
 
@@ -17,9 +17,9 @@ This roadmap turns the current implementation into a reusable desktop UI toolkit
 
 ## Current execution snapshot
 
-Current `main` is `ce86c86e663ad5f8464224874039312143146300`, including merged T051 / PR #116.
+Current `main` is `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` and includes the completed T057 ResourceManager.
 
-Recently completed foundations:
+Recently completed foundations relevant to the dependency graph:
 
 - **T053 / PR #88:** consumer-specific macOS Objective-C platform bridge.
 - **#64 / PR #90:** standalone PROGRAM-world ownership Decision B.
@@ -29,25 +29,27 @@ Recently completed foundations:
 - **T048 / PR #99:** relocated external package consumers and macOS two-consumer isolation.
 - **T031 / PR #95:** Checkbox + typed RadioGroup/RadioButton.
 - **T042 / PR #93:** deterministic supported-path lifecycle stress.
-- **T056 / PR #111:** deterministic binary-resource packaging.
-- **T051 / PR #116:** reproducible Release performance benchmark/regression harness.
+- **T051 / PR #116:** reproducible Release benchmark harness and regression policy.
+- **T054 / PR #119:** high-level `nativeui_add_application()` package helper.
+- **T056 / PR #111:** deterministic binary-resource packaging and sorted immutable generated tables.
+- **T057 / PR #126:** embedded `ResourceManager` and explicit `ResourceManagerProvider` compatibility adapter.
 
 Current dependency frontier:
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(ready)
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
-                                       +-> T054
-                                       +-> T056(done) -> T057
+                                       +-> T054(done)
+                                       +-> T056(done) + T022(done) -> T057(done)
 state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        |
-                                       +-> T032(in review)
-                                       +-> T033(completion candidate)
-                                       +-> T034(ready) -> T035 / T036
+                                       +-> T032
+                                       +-> T033
+                                       +-> T034 -> T035 / T036
 ```
 
-The current widget lane has two existing implementation streams, T032 / PR #115 and T033 / PR #123. They must be resumed rather than duplicated. T034 is Ready but should not displace recoverable in-progress widget work.
+T057 / issue #69 / PR #126 is complete. The independent P0 Pugl/X11 regression #124 / PR #125 and T042 are separate work; T059, T030 and #64 belong to other lanes and are not part of the platform/package lane.
 
 ## Milestone 0 — Baseline hardening
 
@@ -71,33 +73,17 @@ The current widget lane has two existing implementation streams, T032 / PR #115 
 
 ## Milestone 5 — Standard widget set
 
-**Status: T030/T031 complete; T032 and T033 in completion/review; T034 Ready.** Button and Checkbox/Radio are merged. Slider/RangeSlider and ProgressBar/Meter have active completion candidates. ScrollView is the next Ready widget item once existing streams are resolved.
+**Status: T030/T031 complete; remaining widgets proceed through their explicit issue DAG.** Button and Checkbox/Radio are merged. Slider/RangeSlider, ProgressBar/Meter and subsequent selection/container widgets belong to the parallel widget lane.
 
 Current widget frontier:
 
 ```text
 T059(done) -> T030(done) -> T031(done)
                               |
-                              +-> T032(in review)
-                              +-> T033(completion candidate)
-                              +-> T034(ready) -> T035 / T036
+                              +-> T032
+                              +-> T033
+                              +-> T034 -> T035 / T036
 ```
-
-### T033 — ProgressBar and Meter completion contract
-
-PR #123 delivers the display-only bounded-value widgets with one shared presentation domain:
-
-- finite `minimum < maximum` range validation;
-- finite values presentation-clamped, non-finite values shown at minimum, with no State writeback;
-- horizontal left-to-right and vertical bottom-to-top fill;
-- non-focusable, input-ignored behavior with no pointer capture, timer, hidden smoothing or animation source;
-- paint-only invalidation from external State changes while geometry is stable;
-- optional presentation formatter receiving the effective value;
-- deterministic headless minimum/midpoint/maximum/out-of-range/NaN coverage for both orientations;
-- renderer-reference visual assertions that avoid backend color-space byte assumptions;
-- interactive + deterministic `examples/features/t033_progress_meter.cpp --self-test`.
-
-T033 merges only after final documentation synchronization, exact-head normal platform/sanitizer CI, T042 lifecycle stress and a clean mandatory `CODE_REVIEW.md` record.
 
 ## Milestone 6 — Styling, theme and animation
 
@@ -117,15 +103,15 @@ Delivered safety includes:
 - #107 documented non-fatal standalone raise handling;
 - T042 deterministic headless/embedded/standalone lifecycle stress.
 
-T041/T042 and the above fixes provide the current supported-path qualification foundation. T043/T044/T046 and later application/platform tickets remain governed by their explicit dependencies.
+The P0 Pugl/X11 regression is tracked independently as #124 / PR #125. It owns any shared Pugl pin change and associated dependency documentation; the platform/package lane does not absorb that change.
 
 ## Milestone 8 — Packaging, tooling and release
 
-**Status: package and performance foundations complete; T052 is Ready.**
+**Status: low-level packaging, relocated consumers, native application helper, benchmark harness, binary-data generation and ResourceManager are complete.** Remaining M8 work proceeds through explicit dependencies and parallel lane ownership.
 
 ### Delivered package foundation
 
-The low-level public package contract is:
+Low-level final-target attachment:
 
 ```cmake
 find_package(NativeUI CONFIG REQUIRED)
@@ -137,39 +123,78 @@ nativeui_attach_platform(
 )
 ```
 
+High-level application packaging:
+
+```cmake
+nativeui_add_application(MyApp
+  PRODUCT_NAME "My App"
+  BUNDLE_ID "com.example.myapp"
+  VERSION "1.2.3"
+  SOURCES src/main.cpp
+  # MACOS_ICON path/to/icon.icns
+  # WINDOWS_ICON path/to/icon.ico
+)
+```
+
+Delivered contracts:
+
 - **T053:** exact consumer-scoped macOS Objective-C runtime naming and bridge ownership.
 - **T047:** install/export package exposing Core plus the platform-attach helper; no unsafe generic precompiled macOS Objective-C bridge.
 - **T048:** independent relocated Core/standalone/embedded consumers on supported platforms, including macOS two-consumer symbol/runtime isolation.
-- **T056:** deterministic `nativeui_add_binary_data()` resources with stable IDs, exact bytes, package relocation and no runtime registry.
+- **T054:** validated build-tree/relocated `nativeui_add_application()` with macOS app bundles, Windows GUI resources and normal Linux executables, delegating platform attachment to T047/T053.
+- **T056:** deterministic `nativeui_add_binary_data()` resources with stable IDs, exact bytes, package relocation, sorted immutable generated tables and no runtime registry.
+- **T057:** non-owning validated `ResourceManager`, zero-copy binary-search lookup and explicit allocating `ResourceManagerProvider` adapter for existing cache/provider APIs.
+
+### T057 — embedded `ResourceManager`
+
+T057 / issue #69 / PR #126 is merged.
+
+Delivered behavior:
+
+- constructor performs one allocation-free O(N) validation pass over borrowed entries;
+- valid IDs are non-empty, unique and strictly ascending by exact unsigned-byte lexicographic order;
+- invalid managers fail atomically and direct APIs behave empty/false;
+- `find()` performs allocation-free O(log N) binary search and returns borrowed zero-copy `ResourceView` spans;
+- `resources()` returns the original validated table and copies/moves retain the same borrowed identity;
+- independent managers have no shared mutable registry/cache state and immutable concurrent reads require no lock;
+- `ResourceManagerProvider` is the explicit allocating compatibility seam for `ResourceProvider`; successful non-empty loads copy exact bytes and are documented not real-time safe;
+- ImageCache/SvgCache consume the adapter without ResourceManager-specific decoding;
+- the real T056 generated table is consumed by build-tree and relocated install-tree external consumers;
+- the dedicated `t057_embedded_resources` example supports interactive use and deterministic `--self-test`.
+
+TDD/review corrections covered empty-resource provider semantics, exact generated-table ordering, allocation probes, extensible public-header contracts and deterministic SVG contain-fit sampling. Final exact head `20ec256241c9419b5a4d60f8f68968f4433d2855` passed CI #600 on Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts. The final mandatory `CODE_REVIEW.md` pass reported no Blocking/Important finding. PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`; issue #69 is closed Done.
 
 ### T051 — reproducible performance regression contract
 
-T051 / PR #116 is merged and provides the Release-only microbenchmark harness consumed by T052/T071:
+T051 / PR #116 is merged. It provides the Release-only microbenchmark harness and relative regression policy consumed by T052/T071, with its benchmark/baseline contract documented in `docs/performance-benchmarks.md`.
 
-- exact **5 warmup + 30 measured** `steady_clock` protocol;
-- fixed batch counts for layout, hit-testing, pointer/keyboard dispatch, text edit, headless paint and headless lifecycle construction;
-- schema/workload metadata including compiler, OS/architecture, build type and exact NativeUI commit SHA;
-- benchmark-only allocation count/bytes instrumentation, isolated from production NativeUI;
-- exact JSON round-trip and immutable CI result artifacts;
-- metadata compatibility enforced before threshold comparison;
-- timing blocker = median **>15%** and p95 **>20%**, reproduced by two complete independent candidate runs;
-- allocation blocker = allocations/op or bytes/op **>10%**, also reproduced twice; explicit zero-recurring-allocation scenarios block on any recurring allocation;
-- `idle_invalidation` = 1,000 deterministic 10 ms logical scheduler checkpoints / 10 seconds logical idle, requiring exactly zero framework invalidations;
-- deterministic workload-shape and allocator-scope contract coverage;
-- baseline policy in `docs/performance-benchmarks.md`: T052 selects the controlled v0.1 CI artifact; the benchmark never self-updates a baseline.
-
-### Remaining release frontier
+### Remaining release/platform-package frontier
 
 ```text
-T024(done) + T042(done) -> T051(done) -> T052(ready)
+T024(done) + T042(done) -> T051(done) -> T052
 T047(done) + T048(done) -------------------^
 
-T047(done) + T053(done) -> T054
-T056(done) + T022(done) -> T057
+T047(done) + T053(done) -> T054(done)
+T056(done) + T022(done) -> T057(done)
+T065 -> T072 -> T064
 T055 nativeui_add_plugin: Not planned for current v1
 ```
 
-T052 now owns the aggregate v0.1 developer-preview exact-head CI/package/lifecycle/performance baseline gate. T071 remains the later full NativeUI 1.0 qualification gate.
+T052 belongs to the separate release/lifecycle lane. T064 and T072 remain blocked by T065. T065 is dependency-ready, but its standalone wake backend explicitly shares the event-loop integration seam that the active T060 work is changing; live branch/PR overlap must be re-evaluated before a competing implementation starts. Independent platform-hardening tickets T043/T044 remain separate scopes and are selected only according to current lane ownership and conflict risk.
+
+## T057 completion protocol
+
+- [x] RED validation/direct lookup/provider/cache/public-header contracts established before implementation;
+- [x] immutable non-owning ResourceManager and explicit allocating provider adapter implemented;
+- [x] generated T056 table integration covered in build-tree and relocated external consumer;
+- [x] validation, zero-copy, allocation, copy/move, concurrency, multi-manager, provider and cache integration tests covered;
+- [x] dedicated feature example + `--self-test` wired;
+- [x] mandatory `CODE_REVIEW.md` passes report no Blocking/Important T057 finding;
+- [x] exact final documentation-complete head passed Linux X11 / Windows / macOS / Linux ASan+UBSan CI #600;
+- [x] final exact-head review clean;
+- [x] candidate refreshed against then-current `main` immediately before merge;
+- [x] PR #126 merged and #69 marked Done/closed;
+- [x] completion status synchronized into `CONTEXT.md` and this roadmap.
 
 ## Prioritization rule
 

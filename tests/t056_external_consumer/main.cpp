@@ -28,5 +28,22 @@ int main() {
         static_cast<unsigned char>(other[i])) return 7;
   }
 
+  // T057 consumes the exact sorted immutable table produced by T056 without
+  // copying or re-indexing it. This fixture runs for both build-tree and
+  // relocated install-tree packages on every CI platform.
+  const ui::ResourceManager manager{entries};
+  if (!manager.valid()) return 8;
+  if (manager.resources().data() != entries.data()) return 9;
+  const auto direct_message = manager.find("message");
+  if (!direct_message || direct_message->bytes.data() != entries[0].bytes.data()) return 10;
+  const auto direct_semicolon = manager.find("punct;../semi");
+  if (!direct_semicolon || direct_semicolon->bytes.data() != entries[1].bytes.data()) return 11;
+
+  ui::ResourceManagerProvider provider{manager};
+  const auto owned_message = provider.load("message");
+  if (!owned_message || owned_message->size() != message.size()) return 12;
+  if (owned_message->data() == entries[0].bytes.data()) return 13;
+  if (provider.load("missing").has_value()) return 14;
+
   return 0;
 }

@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-09
+**Updated:** 2026-09-10
 
 ## Mission and invariants
 
@@ -18,7 +18,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`.
+- Pugl: `hemduf/pugl` commit `d12d63815b8cfe3f36293d3791a418e8f558ff1b`. The independent P0 platform regression #124 / PR #125 owns any later Pugl pin change and stays outside the platform/package resource work.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -26,51 +26,57 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` is `ce86c86e663ad5f8464224874039312143146300`, including merged T051 / PR #116.
+`main` `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` contains the completed T057 ResourceManager in addition to the established platform/package foundations.
 
-Completed foundations relevant to the current widget lane:
+Completed foundations relevant to this lane:
 
-- T059 / PR #89: generic inherited visibility/enabled/read-only availability model.
-- T030 / PR #94: Button.
-- T031 / PR #95: Checkbox + typed RadioGroup/RadioButton.
-- T024: deterministic headless raster/golden foundation.
-- T042 / PR #93: deterministic lifecycle stress used as a cross-lane exact-head gate.
-- T051 / PR #116: reproducible Release performance benchmark/regression harness; T052 is now dependency-unblocked in the separate release lane.
+- T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
+- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
+- T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
+- T051 / PR #116: reproducible Release benchmark and regression policy.
+- T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
+- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging with sorted immutable generated tables.
+- T057 / PR #126: immutable non-owning `ResourceManager` plus explicit allocating `ResourceManagerProvider` adapter.
 
-## T033 ProgressBar / Meter — PR #123
+## T057 completed state
 
-T033 is the current retained-widget completion candidate. It adds display-only bounded-value widgets driven by externally owned `State<float>`.
+T057 is merged and issue #69 is closed Done.
 
 Delivered contract:
 
-- `ProgressBar` and `Meter` share one bounded display domain with finite `minimum < maximum` validation;
-- finite external values clamp only for presentation; NaN/Inf display at the minimum fallback; application State is never normalized or rewritten by mount/paint;
-- horizontal fill is left-to-right and vertical fill is bottom-to-top;
-- widgets are non-focusable, ignore input, capture no pointer, schedule no timer and perform no hidden smoothing;
-- State observation produces paint invalidation only while geometry is unchanged and unmount releases the subscription;
-- optional formatter receives the effective presentation value and is presentation-only;
-- deterministic headless coverage exercises minimum, midpoint, maximum, finite out-of-range and NaN states in both orientations;
-- raster assertions compare semantic empty/full reference states captured by the same Skia surface, avoiding backend color-space byte assumptions;
-- dedicated `examples/features/t033_progress_meter.cpp` provides interactive controls plus deterministic `--self-test`.
+- `ui::ResourceManager` borrows `std::span<const EmbeddedResourceEntry>` and performs one allocation-free O(N) validation pass;
+- valid IDs are non-empty and strictly ascending by exact unsigned-byte lexicographic comparison;
+- invalid tables fail atomically: direct lookup/enumeration APIs behave empty/false and retain only a small enum-backed diagnostic;
+- `find()` uses binary search, is allocation-free and returns `ResourceView` spans pointing to original storage;
+- copy/move managers remain lightweight immutable views with no registry/cache/mutex; independent managers remain isolated and concurrent read-only lookup is safe for live immutable backing storage;
+- `ResourceManagerProvider` is the explicit compatibility seam for `ResourceProvider`; successful non-empty loads copy into the owned vector and are intentionally not real-time safe;
+- ImageCache and SvgCache consume the adapter without manager-specific decoding APIs;
+- the actual T056 generated table is consumed by build-tree and relocated install-tree external consumers;
+- `t057_embedded_resources --self-test` covers direct lookup, provider copy semantics and SVG integration; the public header has an isolated compile probe.
 
-The exact-head review found no mutable global/singleton/`thread_local` state, no platform header/runtime leakage, no lifetime/capture/timer hazard and no application-State writeback. Normal CI and T042 lifecycle stress remain the final exact-head gates after completion-document synchronization.
+TDD correction cycles covered empty-resource ownership semantics, exact generated-table byte ordering, allocation instrumentation, extensible public-header contracts and deterministic SVG contain-fit self-test sampling.
+
+Final evidence:
+
+- exact PR head `20ec256241c9419b5a4d60f8f68968f4433d2855`;
+- CI #600 passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts;
+- final `CODE_REVIEW.md` pass reports no Blocking/Important finding and no unresolved review thread;
+- PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f`;
+- issue #69 is closed with `status:done` and a completed review/validation record.
 
 ## Current DAG frontier
 
 ```text
-lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(ready)
+lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |
-                                       +-> T054
-                                       +-> T056(done) -> T057
-state/widgets:     T059(done) -> T030(done) -> T031(done)
-                                       |
-                                       +-> T032(in review)
-                                       +-> T033(completion candidate)
-                                       +-> T034(ready) -> T035 / T036
+                                       +-> T054(done)
+                                       +-> T056(done) + T022(done) -> T057(done)
 ```
 
-T032 remains a separate existing widget stream and must be resumed rather than duplicated. T034 is the next currently Ready widget ticket once existing in-progress widget work is resolved according to `AGENTS.md`.
+T059, T030, #64 and T042 are owned by other lanes and must not be taken by this platform/package lane. #124 / PR #125 is also an independent Pugl/X11 regression stream and must not be folded into unrelated package/resource work.
+
+The next platform/package selection must be made from live GitHub dependency/status data. T064/T072 remain blocked by T065, while T065 is dependency-ready but shares an event-loop integration seam with the active T060 stream; re-check current branches/PRs and conflict risk before starting it. Platform-hardening tickets such as T043/T044 are separate issue scopes and should only be taken if they are the live unowned choice for this lane.
 
 ## Build / validation
 
@@ -82,11 +88,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Linux CI retains X11/Xvfb/Mesa native smoke; macOS retains consumer-specific Objective-C symbol/isolation checks; sanitizer CI keeps the repository's current Skia/Fontconfig boundary policy. T042 lifecycle stress remains a separate exact-head gate.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T057 exact-head CI #600 is green in every required lane.
 
 ## Next actions
 
-1. Require exact-head normal CI and T042 lifecycle stress to complete green on the final T033 documentation-synchronized head.
-2. Record the final mandatory `CODE_REVIEW.md` pass against that exact head and resolve any Blocking/Important finding.
-3. Merge PR #123, mark #33 Done/closed, then re-evaluate the existing T032 stream before starting another widget ticket.
-4. If T032 remains blocked by unrelated platform integration state, preserve lane ownership and continue the next dependency-unblocked widget work without modifying platform scope.
+1. Keep T057 closed unless a real regression is discovered.
+2. Re-read live open PRs/issues before selecting the next platform/package item; resume existing work rather than duplicating it.
+3. Do not absorb T059, T030, #64, T042 or the independent #124 Pugl regression.
+4. Prefer a dependency-unblocked platform/package item that does not conflict with an active parallel branch; if T060 remains active, reassess T065 overlap before opening a competing implementation.
+5. Apply strict TDD, mandatory `CODE_REVIEW.md`, exact-head platform validation, and `CONTEXT.md`/`ROADMAP.md` synchronization on the selected ticket.
