@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -127,11 +128,11 @@ public:
         last_notified_.reset();
     }
 
-    [[nodiscard]] bool dispatching() const noexcept { return dispatching_; }
+    [[nodiscard]] bool dispatching() const noexcept { return !dispatch_token_.expired(); }
 
     template <class Callback>
     bool dispatch_once(Callback&& callback) {
-        if (dispatching_ || !pending_) return false;
+        if (dispatching() || !pending_) return false;
 
         const Size next = *pending_;
         pending_.reset();
@@ -141,11 +142,13 @@ public:
         // queue of the same value is therefore coalesced, while a new value is
         // retained for the next safe checkpoint rather than recursively fired.
         last_notified_ = next;
-        dispatching_ = true;
-        struct DispatchGuard final {
-            bool& flag;
-            ~DispatchGuard() { flag = false; }
-        } guard{dispatching_};
+
+        // The callback may destroy the owning window/view and therefore this
+        // PreferredSizeState. Keep the in-flight marker in separately owned
+        // storage so returning from user code never touches destroyed owner
+        // memory. Reentrant dispatches observe the weak token while it is live.
+        auto dispatch_token = std::make_shared<unsigned char>(0);
+        dispatch_token_ = dispatch_token;
         std::forward<Callback>(callback)(next);
         return true;
     }
@@ -156,7 +159,7 @@ private:
                std::fabs(a.h - b.h) > kPreferredSizeEpsilon;
     }
 
-    bool dispatching_{};
+    std::weak_ptr<unsigned char> dispatch_token_;
     std::optional<Size> pending_;
     std::optional<Size> last_notified_;
 };
