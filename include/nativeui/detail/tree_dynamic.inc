@@ -183,6 +183,7 @@
         const auto current_keys = record->keys;
         const auto teardown_epoch = structural_epoch_;
         bool removed_focus = false;
+        NodeId surviving_focus_scope{kInvalidNodeId};
 
         if (active_ && active_platform_) {
             if (auto* capture = pointer_capture_owner();
@@ -192,6 +193,11 @@
 
             if (auto* focused = current_focus_node();
                 subtree_is_being_removed(focused, owner, current_keys, desired_keys)) {
+                if (auto* trap = trapping_scope_for(focused);
+                    trap && !subtree_is_being_removed(
+                                trap, owner, current_keys, desired_keys)) {
+                    surviving_focus_scope = trap->id;
+                }
                 removed_focus = true;
                 clear_focus(*active_platform_);
             }
@@ -264,9 +270,15 @@
         if (active_ && active_platform_) {
             sync_focus_structure(*active_platform_);
             if (removed_focus && !focus_active_) {
-                if (auto* fallback = first_available_focusable()) {
-                    set_focus(fallback, *active_platform_);
+                Node* fallback = nullptr;
+                if (surviving_focus_scope != kInvalidNodeId) {
+                    if (auto* scope = find_node_mutable(*root_, surviving_focus_scope)) {
+                        fallback = default_focus_for_scope(*scope);
+                    }
+                } else {
+                    fallback = first_available_focusable();
                 }
+                if (fallback) set_focus(fallback, *active_platform_);
             }
         }
         return true;
