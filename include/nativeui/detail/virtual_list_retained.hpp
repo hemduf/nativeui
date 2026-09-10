@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -25,6 +26,7 @@ public:
     using Item = typename Model::Item;
     using RowFactory = std::function<Spec(const Item&)>;
     using ActivationCallback = std::function<void(const Key&)>;
+    using MetadataSnapshot = VirtualSemanticChildren::MetadataSnapshot;
 
     VirtualListRetainedRuntime(
         float row_height,
@@ -84,6 +86,24 @@ public:
     [[nodiscard]] float row_height() const noexcept { return row_height_; }
     [[nodiscard]] std::size_t overscan() const noexcept { return overscan_; }
     [[nodiscard]] std::size_t size() const noexcept { return model_.size(); }
+
+    [[nodiscard]] std::uint64_t dataset_generation() const noexcept {
+        return model_.generation();
+    }
+
+    [[nodiscard]] const MetadataSnapshot& metadata_snapshot() const noexcept {
+        return model_.metadata_snapshot();
+    }
+
+    [[nodiscard]] VirtualSemanticChildren semantic_children(Rect list_bounds) const {
+        std::optional<Key> selected;
+        if (selection_) selected = selection_->get();
+        return model_.semantic_children(
+            std::move(selected),
+            list_bounds,
+            row_height_,
+            scroll_.offset().y);
+    }
 
     [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
         const auto* item = model_.item_at(index);
