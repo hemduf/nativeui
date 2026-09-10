@@ -312,6 +312,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t030_button
   t031_checkbox_radio
   t032_slider
+  t033_progress_meter
   t041_smoke_harness
   t057_embedded_resources
   t059_component_state

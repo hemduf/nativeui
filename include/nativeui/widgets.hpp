@@ -9,3 +9,4 @@
 #include <nativeui/detail/widgets_checkbox_radio.inc>
 #include <nativeui/detail/widgets_slider.inc>
 #include <nativeui/detail/widgets_range_slider.inc>
+#include <nativeui/detail/widgets_progress_meter.inc>
