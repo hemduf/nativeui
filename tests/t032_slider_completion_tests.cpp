@@ -143,6 +143,38 @@ void range_slider_nearest_thumb_uses_raw_pointer_position() {
     tree.dispatch(test::pointer(ui::InputType::PointerUp, 110.0f, 30.0f), platform);
 }
 
+void extreme_finite_range_interaction_is_stable() {
+    const float fmax = std::numeric_limits<float>::max();
+
+    {
+        ui::State<float> value{fmax};
+        ui::UI tree{ui::Slider{value}.range(-fmax, fmax)};
+        test::MockPlatform platform;
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Right), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(std::isfinite(value.get()));
+        NUI_CHECK(value.get() == fmax);
+    }
+
+    {
+        ui::State<ui::RangeValue> value{ui::RangeValue{-fmax, -0.5f * fmax}};
+        ui::UI tree{ui::RangeSlider{value}.range(-fmax, fmax)};
+        test::MockPlatform platform;
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 200.0f, 30.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(value.get().low == -fmax);
+        NUI_CHECK(value.get().high == fmax);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 200.0f, 30.0f), platform);
+    }
+}
+
 void formatter_is_display_only_and_uses_effective_value() {
     ui::State<float> value{2.0f};
     int calls = 0;
@@ -166,6 +198,7 @@ void suite() {
     observer_reentrancy_does_not_duplicate_widget_writes();
     t059_hidden_and_collapsed_cancel_capture_once();
     range_slider_nearest_thumb_uses_raw_pointer_position();
+    extreme_finite_range_interaction_is_stable();
     formatter_is_display_only_and_uses_effective_value();
 }
 
