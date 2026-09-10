@@ -1,9 +1,19 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/semantics.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
-void nativeui_header_compile_nativeui() {}
+void nativeui_header_compile_nativeui() {
+    ui::Theme theme = ui::default_theme();
+    (void)theme;
+
+    ui::SemanticInfo info;
+    info.role = ui::SemanticRole::Custom;
+    ui::SemanticNodeSnapshot snapshot;
+    snapshot.info = std::move(info);
+}
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
