@@ -246,7 +246,7 @@ void suite() {
         NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
     }
 
-    // T034 RED: scrollbar overlay input must win over an interactive content descendant.
+    // T034 scrollbar overlay input must win over an interactive content descendant.
     {
         auto content = std::make_shared<PointerEatingState>();
         ui::ScrollState state{ui::ScrollAxis::Vertical};
@@ -267,6 +267,31 @@ void suite() {
                   ui::EventResult::Handled);
         NUI_CHECK(content->move == 0);
         NUI_CHECK(content->up == 0);
+    }
+
+    // T034 RED: moving focus to an offscreen descendant reveals it with Nearest before paint.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{
+            ui::ScrollView{state,
+                ui::Column{
+                    ui::Button{"first", [] {}},
+                    ui::Spacer{100.0f, 180.0f},
+                    ui::Button{"target", [] {}}}}};
+        test::MockPlatform platform;
+        tree.resize({100.0f, 100.0f});
+        tree.activate(platform);
+        NUI_CHECK_NEAR(state.offset().y, 0.0f, 0.001f);
+
+        ui::InputEvent tab{};
+        tab.type = ui::InputType::KeyDown;
+        tab.key = ui::Key::Tab;
+        NUI_CHECK(tree.dispatch(tab, platform) == ui::EventResult::Handled);
+        NUI_CHECK_NEAR(state.offset().y, 160.0f, 0.001f);
+
+        const float revealed = state.offset().y;
+        tree.refresh_focus(platform);
+        NUI_CHECK_NEAR(state.offset().y, revealed, 0.001f);
     }
 }
 
