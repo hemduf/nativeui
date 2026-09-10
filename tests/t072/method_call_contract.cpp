@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -135,6 +136,56 @@ int main() {
         transport.pending_request_count() != 0) {
         return EXIT_FAILURE;
     }
+
+    // Timeout is a distinct exactly-once terminal state, not a generic remote
+    // error. Use a second private transport so its deliberately slow handler
+    // cannot block the caller transport's I/O thread from observing timeout.
+    LinuxDbusTransport slow_peer;
+    if (slow_peer.start() != LinuxDbusErrorCode::None) {
+        return EXIT_FAILURE;
+    }
+    constexpr LinuxDbusClientId slow_peer_client = 2;
+    const auto slow_path = slow_peer.register_object_path(
+        slow_peer_client,
+        "/org/nativeui/T072/Slow",
+        [](const LinuxDbusMethodRequest&) {
+            std::this_thread::sleep_for(100ms);
+            return LinuxDbusMethodReply::method_return({LinuxDbusValue::string("late")});
+        });
+    if (slow_path == kInvalidLinuxDbusObjectRegistrationId) {
+        return EXIT_FAILURE;
+    }
+
+    std::size_t timeout_callbacks = 0;
+    LinuxDbusCompletion timeout_result;
+    const auto timeout_id = transport.call_method(
+        client,
+        dispatcher,
+        LinuxDbusMethodCall{
+            slow_peer.unique_name(),
+            "/org/nativeui/T072/Slow",
+            "org.nativeui.T072.Test",
+            "Wait",
+            10ms,
+        },
+        [&](LinuxDbusCompletion result) {
+            timeout_result = std::move(result);
+            ++timeout_callbacks;
+        });
+    if (timeout_id == kInvalidLinuxDbusRequestId ||
+        !drain_until(owner, [&] { return timeout_callbacks == 1; }, 2s) ||
+        timeout_result.code != LinuxDbusErrorCode::Timeout ||
+        transport.pending_request_count() != 0 ||
+        transport.cancel_request(client, timeout_id)) {
+        return EXIT_FAILURE;
+    }
+    std::this_thread::sleep_for(150ms);
+    (void)owner.checkpoint();
+    if (timeout_callbacks != 1 ||
+        !slow_peer.unregister_object_path(slow_peer_client, slow_path)) {
+        return EXIT_FAILURE;
+    }
+    slow_peer.stop();
 
     if (transport.call_method(
             client,
