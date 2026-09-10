@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -134,6 +135,37 @@ int main() {
         transport.unregister_object_path(client_a, echo_registration) ||
         !transport.unregister_object_path(client_b, error_registration) ||
         transport.object_path_count() != 0) {
+        return EXIT_FAILURE;
+    }
+
+    std::vector<LinuxDbusObjectRegistrationId> capacity_registrations;
+    capacity_registrations.reserve(kLinuxDbusMaxObjectPaths);
+    for (std::size_t i = 0; i < kLinuxDbusMaxObjectPaths; ++i) {
+        const auto path = "/org/nativeui/T072/Capacity/Path" + std::to_string(i);
+        const auto id = transport.register_object_path(
+            client_a, path, [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            });
+        if (id == kInvalidLinuxDbusObjectRegistrationId) {
+            return EXIT_FAILURE;
+        }
+        capacity_registrations.push_back(id);
+    }
+    if (transport.object_path_count() != kLinuxDbusMaxObjectPaths ||
+        transport.register_object_path(
+            client_a,
+            "/org/nativeui/T072/Capacity/Overflow",
+            [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            }) != kInvalidLinuxDbusObjectRegistrationId) {
+        return EXIT_FAILURE;
+    }
+    for (const auto id : capacity_registrations) {
+        if (!transport.unregister_object_path(client_a, id)) {
+            return EXIT_FAILURE;
+        }
+    }
+    if (transport.object_path_count() != 0) {
         return EXIT_FAILURE;
     }
 
