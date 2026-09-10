@@ -67,7 +67,8 @@
         auto* old = focusables_[focused_index_];
         if (syncing_availability_) {
             auto* trap = trapping_scope_for(old);
-            availability_cleared_focus_ = trap && trap->focus_restore ? old : nullptr;
+            availability_cleared_focus_ =
+                trap && trap->focus_restore != kInvalidNodeId ? old : nullptr;
         } else {
             availability_cleared_focus_ = nullptr;
         }
@@ -113,7 +114,7 @@
 
     static void reset_focus_scope_cache(Node& node) noexcept {
         node.focus_scope_active_cached = false;
-        node.focus_restore = nullptr;
+        node.focus_restore = kInvalidNodeId;
         for (auto& child : node.children) reset_focus_scope_cache(*child);
     }
 
@@ -127,11 +128,14 @@
                     is_descendant_or_self(availability_cleared_focus_, &node)
                 ? availability_cleared_focus_
                 : focused;
-            auto* restore = node.focus_restore;
+            const auto restore_id = node.focus_restore;
             node.focus_scope_active_cached = false;
-            node.focus_restore = nullptr;
+            node.focus_restore = kInvalidNodeId;
             if (transition_focus && is_descendant_or_self(transition_focus, &node)) {
-                if (restore && focus_target_available(restore)) {
+                Node* restore = restore_id == kInvalidNodeId
+                    ? nullptr
+                    : find_node_mutable(*root_, restore_id);
+                if (focus_target_available(restore)) {
                     set_focus(restore, platform);
                 } else if (auto* fallback = first_available_focusable()) {
                     set_focus(fallback, platform);
@@ -147,7 +151,11 @@
             const bool now = scope_effectively_active(node);
             if (!node.focus_scope_active_cached && now) {
                 node.focus_scope_active_cached = true;
-                node.focus_restore = current_focus_node();
+                if (auto* restore = current_focus_node()) {
+                    node.focus_restore = restore->id;
+                } else {
+                    node.focus_restore = kInvalidNodeId;
+                }
                 if (auto* target = default_focus_for_scope(node)) {
                     set_focus(target, platform);
                 }
