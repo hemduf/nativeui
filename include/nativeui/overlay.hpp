@@ -4,6 +4,7 @@
 #include <nativeui/detail/dynamic_source.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -83,11 +84,167 @@ struct OverlaySpec {
 
 namespace detail {
 
+[[nodiscard]] inline float overlay_finite_extent(float value) noexcept {
+    return std::isfinite(value) && value > 0.0f ? value : 0.0f;
+}
+
+[[nodiscard]] inline float overlay_finite_coordinate(float value, float fallback) noexcept {
+    return std::isfinite(value) ? value : fallback;
+}
+
+[[nodiscard]] inline Rect overlay_sanitize_viewport(Rect viewport) noexcept {
+    viewport.x = overlay_finite_coordinate(viewport.x, 0.0f);
+    viewport.y = overlay_finite_coordinate(viewport.y, 0.0f);
+    viewport.w = overlay_finite_extent(viewport.w);
+    viewport.h = overlay_finite_extent(viewport.h);
+    return viewport;
+}
+
+[[nodiscard]] inline Rect overlay_sanitize_anchor(Rect anchor, Rect viewport) noexcept {
+    anchor.x = overlay_finite_coordinate(anchor.x, viewport.x);
+    anchor.y = overlay_finite_coordinate(anchor.y, viewport.y);
+    anchor.w = overlay_finite_extent(anchor.w);
+    anchor.h = overlay_finite_extent(anchor.h);
+    return anchor;
+}
+
+[[nodiscard]] inline Rect overlay_clamp_origin(Rect viewport, Rect candidate) noexcept {
+    candidate.w = overlay_finite_extent(candidate.w);
+    candidate.h = overlay_finite_extent(candidate.h);
+    candidate.x = overlay_finite_coordinate(candidate.x, viewport.x);
+    candidate.y = overlay_finite_coordinate(candidate.y, viewport.y);
+
+    if (candidate.w <= viewport.w) {
+        const float max_x = viewport.x + viewport.w - candidate.w;
+        if (candidate.x < viewport.x) candidate.x = viewport.x;
+        else if (candidate.x > max_x) candidate.x = max_x;
+    } else {
+        candidate.x = viewport.x;
+    }
+
+    if (candidate.h <= viewport.h) {
+        const float max_y = viewport.y + viewport.h - candidate.h;
+        if (candidate.y < viewport.y) candidate.y = viewport.y;
+        else if (candidate.y > max_y) candidate.y = max_y;
+    } else {
+        candidate.y = viewport.y;
+    }
+    return candidate;
+}
+
+[[nodiscard]] inline bool overlay_fully_fits(Rect viewport, Rect candidate) noexcept {
+    return candidate.x >= viewport.x && candidate.y >= viewport.y &&
+           candidate.x + candidate.w <= viewport.x + viewport.w &&
+           candidate.y + candidate.h <= viewport.y + viewport.h;
+}
+
+[[nodiscard]] inline float overlay_intersection_area(Rect viewport, Rect candidate) noexcept {
+    const Rect clipped = intersect(viewport, candidate);
+    return clipped.w * clipped.h;
+}
+
+[[nodiscard]] inline Rect overlay_side_candidate(
+    Rect anchor, Size content, OverlayPlacement placement) noexcept {
+    switch (placement) {
+        case OverlayPlacement::AnchorBelow:
+            return {anchor.x, anchor.y + anchor.h, content.w, content.h};
+        case OverlayPlacement::AnchorAbove:
+            return {anchor.x, anchor.y - content.h, content.w, content.h};
+        case OverlayPlacement::AnchorRight:
+            return {anchor.x + anchor.w, anchor.y, content.w, content.h};
+        case OverlayPlacement::AnchorLeft:
+            return {anchor.x - content.w, anchor.y, content.w, content.h};
+        case OverlayPlacement::Center:
+        case OverlayPlacement::Auto:
+            break;
+    }
+    return {anchor.x, anchor.y, content.w, content.h};
+}
+
+[[nodiscard]] inline OverlayPlacement overlay_opposite_side(OverlayPlacement placement) noexcept {
+    switch (placement) {
+        case OverlayPlacement::AnchorBelow: return OverlayPlacement::AnchorAbove;
+        case OverlayPlacement::AnchorAbove: return OverlayPlacement::AnchorBelow;
+        case OverlayPlacement::AnchorRight: return OverlayPlacement::AnchorLeft;
+        case OverlayPlacement::AnchorLeft: return OverlayPlacement::AnchorRight;
+        case OverlayPlacement::Center:
+        case OverlayPlacement::Auto:
+            return placement;
+    }
+    return placement;
+}
+
+/// Deterministic T061 placement policy. Content retains its measured natural
+/// size; only the final origin is clamped. For a requested side, the opposite
+/// side is preferred only when the requested side does not fit, or when neither
+/// fits and the opposite has strictly greater viewport intersection. Equal-area
+/// ties therefore preserve the requested side. Auto uses Below/Above/Right/Left
+/// in that exact priority for both full-fit and equal-area selection.
+[[nodiscard]] inline Rect overlay_placement_bounds(
+    Rect viewport, Rect anchor, Size natural_size, OverlayPlacement placement) noexcept {
+    viewport = overlay_sanitize_viewport(viewport);
+    anchor = overlay_sanitize_anchor(anchor, viewport);
+    const Size content{
+        overlay_finite_extent(natural_size.w),
+        overlay_finite_extent(natural_size.h)};
+
+    if (placement == OverlayPlacement::Center) {
+        return overlay_clamp_origin(
+            viewport,
+            Rect{
+                viewport.x + (viewport.w - content.w) * 0.5f,
+                viewport.y + (viewport.h - content.h) * 0.5f,
+                content.w,
+                content.h});
+    }
+
+    if (placement == OverlayPlacement::Auto) {
+        constexpr OverlayPlacement priority[] = {
+            OverlayPlacement::AnchorBelow,
+            OverlayPlacement::AnchorAbove,
+            OverlayPlacement::AnchorRight,
+            OverlayPlacement::AnchorLeft,
+        };
+
+        Rect best = overlay_side_candidate(anchor, content, priority[0]);
+        float best_area = overlay_intersection_area(viewport, best);
+        for (const auto side : priority) {
+            const Rect candidate = overlay_side_candidate(anchor, content, side);
+            if (overlay_fully_fits(viewport, candidate)) {
+                return overlay_clamp_origin(viewport, candidate);
+            }
+            const float area = overlay_intersection_area(viewport, candidate);
+            if (area > best_area) {
+                best = candidate;
+                best_area = area;
+            }
+        }
+        return overlay_clamp_origin(viewport, best);
+    }
+
+    const Rect requested = overlay_side_candidate(anchor, content, placement);
+    if (overlay_fully_fits(viewport, requested)) {
+        return overlay_clamp_origin(viewport, requested);
+    }
+
+    const Rect opposite = overlay_side_candidate(
+        anchor, content, overlay_opposite_side(placement));
+    if (overlay_fully_fits(viewport, opposite)) {
+        return overlay_clamp_origin(viewport, opposite);
+    }
+
+    const float requested_area = overlay_intersection_area(viewport, requested);
+    const float opposite_area = overlay_intersection_area(viewport, opposite);
+    return overlay_clamp_origin(
+        viewport, opposite_area > requested_area ? opposite : requested);
+}
+
 struct OverlayEntry {
     std::uint64_t id{};
     OverlaySpec spec;
     std::shared_ptr<const OverlayLifetimeToken> lifetime;
     std::optional<Rect> anchor_bounds;
+    Rect resolved_bounds{};
 };
 
 // One OverlayState belongs to one UI. It stores only logical overlay state and
@@ -116,7 +273,7 @@ struct OverlayState {
         else ++next_id;
 
         auto lifetime = std::make_shared<const OverlayLifetimeToken>();
-        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt});
+        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt, {}});
         invalidate_structure();
         return OverlayHandle{owner, lifetime, id};
     }
@@ -247,11 +404,14 @@ public:
         const auto overlay_count = std::min(state_->entries.size(), placements.size() - 1);
         for (std::size_t i = 0; i < overlay_count; ++i) {
             const auto size = children[i + 1].preferred;
-            placements[i + 1].bounds = Rect{
-                bounds.x + (bounds.w - size.w) * 0.5f,
-                bounds.y + (bounds.h - size.h) * 0.5f,
-                size.w,
-                size.h};
+            auto& entry = state_->entries[i];
+            const bool has_anchor = entry.spec.anchor.has_value() && entry.anchor_bounds.has_value();
+            const Rect anchor = has_anchor ? *entry.anchor_bounds : bounds;
+            const OverlayPlacement placement = has_anchor
+                ? entry.spec.placement
+                : OverlayPlacement::Center;
+            entry.resolved_bounds = overlay_placement_bounds(bounds, anchor, size, placement);
+            placements[i + 1].bounds = entry.resolved_bounds;
         }
     }
 
