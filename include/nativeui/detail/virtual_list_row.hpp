@@ -8,6 +8,35 @@
 
 namespace ui::detail {
 
+// Keeps arbitrary row content out of global keyboard focus traversal while
+// allowing the sibling/parent row interaction component to remain pointer
+// targetable. Inactive focus scopes are intentionally excluded from pointer
+// hit testing by Tree, so the barrier must live *inside* the row owner rather
+// than around the complete virtual-list content subtree.
+class VirtualListRowContentBarrierComponent final : public Component {
+public:
+    [[nodiscard]] bool is_focus_scope() const noexcept override { return true; }
+    [[nodiscard]] bool focus_scope_active() const noexcept override { return false; }
+    [[nodiscard]] bool focus_scope_traps() const noexcept override { return false; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().minimum;
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void paint(PaintContext&) const override {}
+};
+
 class VirtualListRowInteractionComponent final : public Component {
 public:
     using BeginCapture = std::function<bool()>;
