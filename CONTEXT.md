@@ -26,9 +26,9 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` is `645679b3c375d54c68227753583c9cb0a74fd801`, which includes T034 / PR #135 in addition to the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, standard widgets through T034 and the T052 v0.1 developer-preview release gate.
+The pre-T058 merge baseline is `main` at `96dc57a2cc3395fcb00f5cd2c0398f3da60b4675`. It contains T034 and T065, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification, standard widgets through T034, and the T052 v0.1 developer-preview release gate.
 
-Cross-cutting rendering regression #152 / PR #153 removes Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is therefore consumer/component-owned. The headless renderer now mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
+Cross-cutting rendering regression #152 / PR #153 removed Tree-owned visual decoration: `Tree::paint()` no longer forces a viewport background or draws a hard-coded keyboard/mouse help line. Generic retained-tree painting is consumer/component-owned; renderer-level framebuffer clear remains outside Tree.
 
 Relevant completed foundations:
 
@@ -43,37 +43,31 @@ Relevant completed foundations:
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
 - T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
 - T051 / PR #116: reproducible Release benchmark and regression policy.
-- T052 / PR #120: v0.1 developer-preview release gate with clean-cache bootstrap, exact package consumer, lifecycle, benchmark, idle-invalidation and platform qualification.
+- T052 / PR #120: v0.1 developer-preview release gate.
 - T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
 - T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
 - T057 / PR #126: immutable non-owning `ResourceManager` plus allocating provider adapter.
 - T060 / PR #118: one explicit `ui::Application` owns one standalone `PUGL_PROGRAM` world and multiple independent `StandaloneWindow(Application&, ...)` views.
 - #139 / PR #140: T042 stress qualification of the supported T060 multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM compatibility path.
+- T065 / PR #133: bounded UI-thread dispatcher/timer service and native wake integration; issue #77 is Done.
 
-## T065 platform/event lane — completion candidate
+## T058 dynamic composition lane
 
-T065 / issue #77 / PR #133 is the active critical platform prerequisite. The branch is refreshed onto current `main` and is no longer behind T034.
+T058 / issue #70 / PR #154 introduces explicit retained dynamic containers without a global VDOM or reconciler:
 
-Delivered behavior:
+- `ui::If`, `ui::Switch` and keyed `ui::ForEach` reconcile only their owned retained subtrees;
+- State observers enqueue structural work and never splice/delete nodes synchronously inside callbacks;
+- multiple writes coalesce to the latest source snapshot at the next structure-dependent checkpoint;
+- unchanged keyed children retain component/NodeId identity across insert/remove/reorder; changing a key forces teardown and a fresh identity;
+- duplicate-key snapshots are rejected atomically and preserve the previous valid retained subtree;
+- removal cancels capture and repairs focus while nodes are still valid, then deactivates/unmounts/destroys before replacement construction;
+- removed subscriptions/invalidators are detached before destruction, and NodeIds use a per-tree lifetime high-water mark so removed IDs are never recycled;
+- lifecycle-triggered structural mutations are deferred to later passes;
+- a top-level checkpoint performs at most exactly 32 reconciliation passes; remaining dirty work is preserved for a later checkpoint and exposes the bounded `structural reconciliation pass limit exceeded` diagnostic;
+- focus rehoming honors the nearest surviving trapping FocusScope, including nested-scope removal cases;
+- `examples/features/t058_dynamic_composition.cpp` provides interactive behavior and deterministic `--self-test` coverage.
 
-- public weak/copyable `Dispatcher` handles with per-owner FIFO task queues;
-- exact limits of 65,536 pending tasks, 8,192 active timers and 1,024 callbacks per checkpoint snapshot;
-- deterministic zero-delay one-shot and fixed-delay repeating timers with cancellation, queue-saturation retry and no catch-up bursts;
-- injected clock and wake seams, including deterministic fake-time tests;
-- per-window/view logical ownership with no process-global dispatcher/current-window registry;
-- callback and callback-capture destruction outside dispatcher locks, including post rejection, timer cancellation and owner shutdown;
-- callback-driven owner destruction without executing later callbacks from the captured snapshot;
-- explicit-Application standalone windows share one Application-owned low-level wake backend while retaining independent task/timer namespaces;
-- worker-originated standalone wake uses captured native primitives rather than concurrent Pugl calls: CFRunLoop source/wake on macOS, `PostMessageW` on Windows and `XSendEvent`/`XFlush` on X11;
-- positive/indefinite Application waits are bounded by dispatcher timer deadlines and interruptible by worker posts without busy polling;
-- `EmbeddedView` dispatch remains host-driven and non-blocking with no background polling thread;
-- dedicated `examples/features/t065_ui_dispatcher.cpp` provides interactive worker/timer behavior plus deterministic `--self-test`.
-
-TDD/review corrections already incorporated include stable mutable repeating callback state, root CMake/header/test registration, dedicated workflow path coverage, safe worker wake primitives, X11 portability fixes, the test-only self-post LSan cycle, and lock-free user-capture destruction boundaries.
-
-The pre-refresh exact code head `d12064ab485aa9f21128eeb2059d40b1f8c3f969` passed normal CI, T065 Dispatcher Contract, T065 Platform Dispatcher, T060 Application Contract, T042 Lifecycle Stress and T052 Release Gate. PR #133 has since been cleanly refreshed onto `main` through merge candidate `e302b1e5f26ab4e078f80c3971c76d13cb7ed09f`; this documentation synchronization creates the final completion candidate and therefore requires a fresh exact-head validation pass plus the final exact-head `CODE_REVIEW.md` record before merge.
-
-The legacy `StandaloneWindow(UI&, ...)` path remains pre-v1 compatibility only and is removed by T069. T065 does not introduce a hidden shared Application or a second supported PROGRAM-world ownership model.
+The T058 branch is refreshed against the #153 Tree-paint ownership fix so dynamic checkpoint calls coexist with the consumer-owned painting contract. PR #154 remains the canonical T058 stream; exact-head CI and the final mandatory `CODE_REVIEW.md` audit are the merge gates.
 
 ## Current dependency frontier
 
@@ -82,7 +76,13 @@ widgets/layout:    T059(done) -> T030(done) -> T031(done)
                                        |-> T032(done)
                                        |-> T033(done)
                                        +-> T034(done) -> T036
-                                                      -> T035 only after T061
+                                                      -> T035 after T061
+
+dynamic/overlay:   T058(PR #154) -> T061 -> T035 -> T063
+                                   |             ^
+                                   +------------ T063 also requires T034(done)
+                                   +-> T062 after T065(done)
+                   T058 ----------> T067 / T068 dependency paths
 
 lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
                    T042(done) -> T051(done) ---------------------> T052(done)
@@ -91,13 +91,13 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(completion PR #133) -> T072 -> T064
-                   T041(done) -> T043(active PR #142) -> T066
-                                              |-------> T068
-                   T065 + T072 + T043 + other feature deps ------> T068 -> T069
+critical platform: T065(done) -> T072 -> T064
+                   T041(done) -> T043 -> T066
+                                      |-> T068
+                   dynamic/widget/platform convergence -> T068 -> T069 -> T070 -> T071
 ```
 
-T072 must not start until T065 is merged. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently while T065 is waiting only on CI. T044 is not on the T068/T069 critical path and remains lower priority until these prerequisites are complete.
+For the owned overlay chain, after T061 merges: T035 and T063 are enabled by already-complete T034, while T062 is enabled by already-complete T065. If those downstream tickets are simultaneously Ready, the critical-unblock priority is T035, then T063, then T062.
 
 ## Build / validation
 
@@ -109,12 +109,11 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-T065 completion additionally requires its dedicated core and platform dispatcher workflows, T060 Application Contract, T042 Lifecycle Stress, normal Linux X11/Windows/macOS/Linux ASan+UBSan CI and the current T052 release-regression gate on the exact final head.
+T058 additionally requires its targeted dynamic composition and lifecycle coverage, feature `--self-test`, normal Linux X11/Windows/macOS CI, Linux ASan+UBSan, and applicable T042/T052/T060/T065 regression workflows on the exact final head.
 
 ## Next actions
 
-1. Complete fresh exact-head qualification and final `CODE_REVIEW.md` review for T065 / PR #133 after this documentation synchronization; merge only if every required executed gate is green and no Blocking/Important finding remains.
-2. Immediately after T065 merges, start/resume T072 / issue #84; it is the shared Linux D-Bus prerequisite for T064 and T068.
-3. Advance existing T043 / PR #142 whenever T065 is waiting only on external CI; merge T043 before T066 and before T068 integration.
-4. After T072 and T043 are complete, finish T064 and T066 according to their explicit dependencies and existing branch state.
-5. Keep unrelated widget/style/dynamic/accessibility/release work in their own lanes and do not duplicate active PRs.
+1. Finish exact-head qualification and final `CODE_REVIEW.md` audit for T058 / PR #154; merge only when every required executed gate is green and no Blocking/Important finding remains.
+2. Immediately start/resume T061 / issue #73 after T058 merges.
+3. After T061, prioritize T035 / issue #35, then T063 / issue #75, then T062 / issue #74 as their explicit dependencies permit.
+4. Keep T034/T036/T045/T067/T068, T043/T065/T072/T064/T066, and T037-T040/T049/T050 in their separate lanes; do not duplicate active work.
