@@ -52,5 +52,11 @@ add_executable(nativeui_t051_workload_contract_tests
 )
 nativeui_configure_t051_target(nativeui_t051_workload_contract_tests)
 
+add_executable(nativeui_t052_benchmark_gate
+  "${NATIVEUI_SOURCE_DIR}/tests/t052_benchmark_gate.cpp"
+)
+nativeui_configure_t051_target(nativeui_t052_benchmark_gate)
+set_target_properties(nativeui_t052_benchmark_gate PROPERTIES OUTPUT_NAME "t052-benchmark-gate")
+
 enable_testing()
 add_test(NAME t051.workload_contract COMMAND nativeui_t051_workload_contract_tests)
