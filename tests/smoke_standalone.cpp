@@ -21,7 +21,7 @@ int fail(std::string_view stage, std::string_view message) {
     return 1;
 }
 
-#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
+#if defined(NATIVEUI_ALLOW_DEPRECATED_DECLARATIONS)
 void issue64_trace(std::string_view stage) {
     std::cerr << "[nativeui issue64] " << stage << '\n' << std::flush;
 }
@@ -135,7 +135,7 @@ int run_t060_multi_window() {
     return 0;
 }
 
-#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
+#if defined(NATIVEUI_ALLOW_DEPRECATED_DECLARATIONS)
 int run_issue64_sequential() {
     install_issue64_crash_handler();
     issue64_trace("sequential-begin");
@@ -357,14 +357,14 @@ int main(int argc, char** argv) {
         if (argc == 2) {
             const std::string_view mode{argv[1]};
             if (mode == "--t060-multi-window") return run_t060_multi_window();
-#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
+#if defined(NATIVEUI_ALLOW_DEPRECATED_DECLARATIONS)
             if (mode == "--issue64-sequential") return run_issue64_sequential();
             if (mode == "--issue64-simultaneous") return run_issue64_simultaneous();
 #else
             if (mode == "--issue64-sequential" || mode == "--issue64-simultaneous") {
                 return fail(
                     "arguments",
-                    "legacy issue64 diagnostics require an explicit deprecated-warning CMake opt-in");
+                    "legacy issue64 diagnostics require -DNATIVEUI_ALLOWED_WARNINGS=deprecated-declarations");
             }
 #endif
             return fail("arguments", "unknown diagnostic mode");
