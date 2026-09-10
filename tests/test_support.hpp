@@ -48,6 +48,9 @@ public:
         text_input_transitions.push_back(active);
     }
 
+    void begin_pointer_capture() noexcept override { ++pointer_capture_begin_count; }
+    void end_pointer_capture() noexcept override { ++pointer_capture_end_count; }
+
     void set_clipboard_text(std::string_view text) override {
         clipboard.assign(text);
         ++clipboard_write_count;
@@ -69,12 +72,6 @@ public:
         rejected_drop_region = region;
         ++drop_reject_count;
     }
-
-    // T044 RED seam: these intentionally are not overrides yet. The capture
-    // lifecycle tests require the retained tree to call the platform boundary
-    // only when toolkit capture actually transitions none <-> owner.
-    void begin_pointer_capture() { ++pointer_capture_begin_count; }
-    void end_pointer_capture() { ++pointer_capture_end_count; }
 
     bool text_input_active{};
     bool paste_requested{};
