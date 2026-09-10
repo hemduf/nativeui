@@ -174,6 +174,20 @@ void large_dataset_contract() {
     check(model.size() == 100000);
     check(model.metadata_snapshot()->size() == 100000);
 
+    const auto materialized = model.materialized_indices(
+        20.0f,
+        4000.0f,
+        400.0f,
+        2,
+        std::size_t{0},
+        std::size_t{99999});
+    check(materialized.has_value());
+    check(materialized && materialized->size() == 26);
+    check(materialized && materialized->front() == 0);
+    check(materialized && materialized->back() == 99999);
+    check(materialized && std::find(materialized->begin(), materialized->end(), 200) != materialized->end());
+    check(!model.materialized_indices(0.0f, 0.0f, 400.0f, 2));
+
     const auto metadata = model.metadata_snapshot();
     const auto generation = model.generation();
     for (std::size_t i = 0; i < 1000; ++i) {
