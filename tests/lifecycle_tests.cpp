@@ -176,6 +176,29 @@ void suite() {
         NUI_CHECK(!tree.layout_dirty());
     }
 
+    // Duplicate keys in the initial keyed snapshot are invalid as a whole.
+    // No ambiguous retained child may mount; a later valid snapshot can recover
+    // at the next structural checkpoint.
+    {
+        ui::State<int> observed{0};
+        auto duplicate_log = std::make_shared<LifecycleLog>();
+        ui::State<std::vector<DynamicItem>> items{{
+            DynamicItem{"duplicate", 10.0f},
+            DynamicItem{"duplicate", 20.0f},
+        }};
+        ui::UI tree{ui::ForEach<DynamicItem>{
+            items,
+            [](const DynamicItem& item) { return item.key; },
+            [duplicate_log, &observed](const DynamicItem& item) {
+                return LifecycleProbe{item.key, duplicate_log, observed};
+            }}};
+
+        NUI_CHECK(duplicate_log->events.empty());
+        items.set({DynamicItem{"A", 10.0f}, DynamicItem{"B", 20.0f}});
+        tree.resize({120.0f, 80.0f});
+        NUI_CHECK((duplicate_log->events == std::vector<std::string>{"A.mount", "B.mount"}));
+    }
+
     // Deterministic mount/activate/deactivate/unmount order and stable IDs.
     ui::State<int> observed{0};
     auto log = std::make_shared<LifecycleLog>();
