@@ -23,7 +23,11 @@
 
     void set_pointer_capture(Node& node) noexcept {
         if (cancelling_pointer_capture_) return;
+        if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) return;
+
+        if (pointer_capture_.node) clear_pointer_capture();
         pointer_capture_ = PointerCaptureState{&node, node.id};
+        if (active_platform_) active_platform_->begin_pointer_capture();
     }
 
     void release_pointer_capture(Node& node) noexcept {
@@ -33,7 +37,9 @@
     }
 
     void clear_pointer_capture() noexcept {
+        if (!pointer_capture_.node) return;
         pointer_capture_ = {};
+        if (active_platform_) active_platform_->end_pointer_capture();
     }
 
     [[nodiscard]] EventResult cancel_pointer_capture(
