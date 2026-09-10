@@ -206,6 +206,38 @@ void dataset_identity_contract() {
     check(model.metadata_snapshot().get() == metadata_before_duplicate.get());
 }
 
+void dataset_scroll_contract() {
+    using Model = ui::detail::VirtualListDatasetModel<int>;
+    using ui::detail::VirtualListAlignment;
+
+    Model model;
+    check(model.replace({
+        Model::Item{10, "ten"},
+        Model::Item{20, "twenty"},
+        Model::Item{30, "thirty"},
+        Model::Item{40, "forty"},
+    }));
+
+    const auto by_index = model.scroll_offset_for_index(
+        3, 20.0f, 40.0f, 0.0f, VirtualListAlignment::End);
+    const auto by_key = model.scroll_offset_for_key(
+        20, 20.0f, 40.0f, 40.0f, VirtualListAlignment::Nearest);
+    check(by_index && *by_index == 40.0f);
+    check(by_key && *by_key == 20.0f);
+    check(!model.scroll_offset_for_key(
+        99, 20.0f, 40.0f, 0.0f, VirtualListAlignment::Nearest));
+
+    check(model.replace({
+        Model::Item{40, "forty"},
+        Model::Item{30, "thirty"},
+        Model::Item{10, "ten"},
+        Model::Item{20, "twenty"},
+    }));
+    const auto reordered_key = model.scroll_offset_for_key(
+        20, 20.0f, 40.0f, 0.0f, VirtualListAlignment::Start);
+    check(reordered_key && *reordered_key == 40.0f);
+}
+
 void large_dataset_contract() {
     using Model = ui::detail::VirtualListDatasetModel<std::size_t>;
     std::vector<Model::Item> items;
@@ -254,6 +286,7 @@ int main() {
     content_height_contract();
     scroll_alignment_contract();
     dataset_identity_contract();
+    dataset_scroll_contract();
     large_dataset_contract();
     return failures == 0 ? 0 : 1;
 }
