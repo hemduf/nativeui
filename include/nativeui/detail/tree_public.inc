@@ -168,8 +168,9 @@
     ///
     /// - Tab/Shift+Tab is owned by the tree and never double-delivered;
     /// - key/text/composition/tick events target the focused node while focus is active;
-    /// - PointerDown cancels an older capture, then hit-tests/focuses a new target;
-    /// - PointerMove/PointerWheel route to the capture owner first;
+    /// - PointerDown cancels an older capture, hit-tests the deepest interactive visual node,
+    ///   focuses its nearest focusable ancestor when one exists, then routes from the visual target;
+    /// - PointerMove/PointerWheel route to the capture owner first, otherwise the visual target;
     /// - PointerUp routes to the capture owner then releases capture automatically;
     /// - PointerCancel is delivered exactly once to the capture owner and clears capture;
     /// - external drop offers/data hit-test a mounted tree even without window focus;
@@ -191,6 +192,40 @@
                 if (active_) sync_focus_structure(platform);
             }
             return result;
+        };
+
+        // Pointer targeting is intentionally independent from keyboard focus.
+        // This lets non-focusable retained containers such as ScrollView receive
+        // wheel/pan input while preserving the existing focus traversal contract.
+        // Reverse child order matches paint stacking: later/overlay children are
+        // input-frontmost. Inactive focus scopes remain unavailable to normal input.
+        auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
+            if (inherited_clip.empty() || !inherited_clip.contains(point) ||
+                !node.component->effective_availability().interactive()) {
+                return nullptr;
+            }
+            if (node.component->is_focus_scope() && !node.component->focus_scope_active()) {
+                return nullptr;
+            }
+
+            Rect child_clip = inherited_clip;
+            if (node.component->clips_children()) {
+                child_clip = intersect(inherited_clip, node.bounds);
+            }
+            if (!child_clip.empty()) {
+                for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
+                    if (auto* result = self(self, **it, point, child_clip)) return result;
+                }
+            }
+            return node.bounds.contains(point) ? &node : nullptr;
+        };
+
+        auto focus_nearest_ancestor = [this, &platform](Node* target) {
+            for (auto* current = target; current; current = current->parent) {
+                if (!current->component->focusable()) continue;
+                set_focus(current, platform);
+                return;
+            }
         };
 
         if (event.type == InputType::KeyDown && event.key == Key::Tab) {
@@ -239,8 +274,8 @@
             // owner captured if a previous interaction missed its PointerUp.
             if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
 
-            if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
-                set_focus(target, platform);
+            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
+                focus_nearest_ancestor(target);
                 return finish(route_from(*target, event, platform));
             }
             return finish(EventResult::Ignored);
@@ -250,7 +285,7 @@
             if (auto* owner = pointer_capture_owner()) {
                 return finish(route_from(*owner, event, platform));
             }
-            if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
+            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
                 return finish(route_from(*target, event, platform));
             }
             return finish(EventResult::Ignored);
@@ -262,7 +297,7 @@
                 clear_pointer_capture();
                 return finish(result);
             }
-            if (auto* target = hit_test_focusable(*root_, event.position, viewport_rect())) {
+            if (auto* target = hit_test_pointer(hit_test_pointer, *root_, event.position, viewport_rect())) {
                 return finish(route_from(*target, event, platform));
             }
             return finish(EventResult::Ignored);
