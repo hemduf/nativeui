@@ -145,9 +145,33 @@ public:
 
     void paint(PaintContext& context) const override {
         if (index_ >= runtime_->keys.size()) return;
+
+        const auto bounds = context.bounds();
+        auto& painter = context.painter();
         const auto& selected = runtime_->selection->get();
         if (selected && *selected == runtime_->keys[index_]) {
-            context.painter().fill_rounded_rect(context.bounds(), 4.0f, colors::selection);
+            const Rect highlight{
+                bounds.x + 4.0f,
+                bounds.y + 2.0f,
+                std::max(0.0f, bounds.w - 8.0f),
+                std::max(0.0f, bounds.h - 4.0f)};
+            painter.fill_rounded_rect(highlight, 6.0f, colors::selection);
+            painter.fill_rounded_rect(
+                {highlight.x + 3.0f,
+                 highlight.y + 7.0f,
+                 3.0f,
+                 std::max(0.0f, highlight.h - 14.0f)},
+                1.5f,
+                colors::accent);
+        }
+
+        if (index_ + 1 < runtime_->keys.size() && bounds.w > 24.0f) {
+            const float y = bounds.y + bounds.h - 0.5f;
+            painter.line(
+                {bounds.x + 12.0f, y},
+                {bounds.x + bounds.w - 12.0f, y},
+                1.0f,
+                Color{0.20f, 0.22f, 0.25f, 0.7f});
         }
     }
 
@@ -324,8 +348,13 @@ public:
     void deactivate(LifecycleContext&) override { pointer_armed_.reset(); }
 
     void paint(PaintContext& context) const override {
-        context.painter().stroke_rounded_rect(
-            context.bounds(), 6.0f, context.focused() ? 2.0f : 1.0f,
+        const auto bounds = context.bounds();
+        auto& painter = context.painter();
+        painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
+        painter.stroke_rounded_rect(
+            bounds,
+            9.0f,
+            context.focused() ? 1.5f : 1.0f,
             context.focused() ? colors::borderFocus : colors::border);
     }
 
@@ -469,7 +498,9 @@ public:
         Size result{120.0f, kHeaderHeight};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.preferred.w);
-            result.h = std::max(result.h, kHeaderHeight + child.preferred.h);
+            result.h = std::max(
+                result.h,
+                kHeaderHeight + kPanelGap + child.preferred.h);
         }
         return result;
     }
@@ -478,7 +509,9 @@ public:
         Size result{0.0f, kHeaderHeight};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.minimum.w);
-            result.h = std::max(result.h, kHeaderHeight + child.minimum.h);
+            result.h = std::max(
+                result.h,
+                kHeaderHeight + kPanelGap + child.minimum.h);
         }
         return result;
     }
@@ -487,11 +520,14 @@ public:
         Rect bounds,
         const std::vector<ChildMetrics>&,
         std::vector<ChildPlacement>& placements) const override {
+        const float header_height = std::min(bounds.h, kHeaderHeight);
+        const float remaining = std::max(0.0f, bounds.h - header_height);
+        const float gap = std::min(remaining, kPanelGap);
         const Rect panel{
             bounds.x,
-            bounds.y + std::min(bounds.h, kHeaderHeight),
+            bounds.y + header_height + gap,
             bounds.w,
-            std::max(0.0f, bounds.h - kHeaderHeight)};
+            std::max(0.0f, bounds.h - header_height - gap)};
         for (auto& placement : placements) placement.bounds = panel;
     }
 
@@ -587,29 +623,87 @@ public:
 
     void paint(PaintContext& context) const override {
         if (runtime_->keys.empty()) return;
+
         const auto bounds = context.bounds();
-        const float width = bounds.w / static_cast<float>(runtime_->keys.size());
+        const float header_height = std::min(bounds.h, kHeaderHeight);
+        if (!(header_height > 0.0f) || !(bounds.w > 0.0f)) return;
+
         auto& painter = context.painter();
+        const Rect header{bounds.x, bounds.y, bounds.w, header_height};
+        painter.fill_rounded_rect(header, kCornerRadius, colors::panel);
+        painter.stroke_rounded_rect(
+            header,
+            kCornerRadius,
+            context.focused() ? 1.5f : 1.0f,
+            context.focused() ? colors::borderFocus : colors::border);
+
+        const float width = bounds.w / static_cast<float>(runtime_->keys.size());
         for (std::size_t index = 0; index < runtime_->keys.size(); ++index) {
             const Rect tab{
-                bounds.x + width * static_cast<float>(index), bounds.y,
+                bounds.x + width * static_cast<float>(index),
+                bounds.y,
                 index + 1 == runtime_->keys.size()
-                    ? std::max(0.0f, bounds.x + bounds.w - (bounds.x + width * static_cast<float>(index)))
+                    ? std::max(
+                          0.0f,
+                          bounds.x + bounds.w -
+                              (bounds.x + width * static_cast<float>(index)))
                     : width,
-                std::min(bounds.h, kHeaderHeight)};
+                header_height};
             const bool selected = runtime_->selection->get() == runtime_->keys[index];
             const bool enabled = runtime_->enabled_at(index);
-            painter.fill_rounded_rect(tab, 4.0f, selected ? colors::selection : colors::panel);
-            painter.stroke_rounded_rect(
-                tab, 4.0f, selected || context.focused() ? 2.0f : 1.0f,
-                selected || context.focused() ? colors::borderFocus : colors::border);
+
+            if (selected) {
+                painter.fill_rounded_rect(
+                    {tab.x + 3.0f,
+                     tab.y + 3.0f,
+                     std::max(0.0f, tab.w - 6.0f),
+                     std::max(0.0f, tab.h - 6.0f)},
+                    6.0f,
+                    colors::input);
+                const float underline_width = std::max(0.0f, tab.w - 28.0f);
+                if (underline_width > 0.0f) {
+                    painter.fill_rounded_rect(
+                        {tab.x + 14.0f,
+                         tab.y + tab.h - 4.0f,
+                         underline_width,
+                         2.0f},
+                        1.0f,
+                        colors::accent);
+                }
+            }
+
+            if (index > 0) {
+                const float x = tab.x;
+                painter.line(
+                    {x, tab.y + 10.0f},
+                    {x, tab.y + tab.h - 10.0f},
+                    1.0f,
+                    Color{0.20f, 0.22f, 0.25f, 0.75f});
+            }
+
             if (index < runtime_->labels.size()) {
+                const Color text_color = !enabled
+                    ? Color{0.39f, 0.42f, 0.47f, 1.0f}
+                    : (selected ? colors::text : colors::textMuted);
                 painter.text(
                     Point{tab.x + tab.w * 0.5f, tab.y + tab.h * 0.5f},
-                    runtime_->labels[index], 13.0f,
-                    enabled ? colors::text : colors::textMuted,
+                    runtime_->labels[index],
+                    13.0f,
+                    text_color,
                     TextAlign::Center);
             }
+        }
+
+        const float remaining = std::max(0.0f, bounds.h - header_height);
+        const float gap = std::min(remaining, kPanelGap);
+        const Rect panel{
+            bounds.x,
+            bounds.y + header_height + gap,
+            bounds.w,
+            std::max(0.0f, bounds.h - header_height - gap)};
+        if (!panel.empty()) {
+            painter.fill_rounded_rect(panel, 10.0f, colors::panel);
+            painter.stroke_rounded_rect(panel, 10.0f, 1.0f, colors::border);
         }
     }
 
@@ -628,7 +722,9 @@ private:
         return index;
     }
 
-    static constexpr float kHeaderHeight = 36.0f;
+    static constexpr float kHeaderHeight = 40.0f;
+    static constexpr float kPanelGap = 10.0f;
+    static constexpr float kCornerRadius = 8.0f;
 
     std::shared_ptr<TabsRuntime<T>> runtime_;
     std::optional<std::size_t> active_index_;
