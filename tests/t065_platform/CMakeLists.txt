@@ -59,3 +59,24 @@ set_tests_properties(
     LABELS "integration;platform;dispatcher;t065"
     TIMEOUT 20
 )
+
+add_executable(nativeui_example_t065_ui_dispatcher
+  "${NATIVEUI_SOURCE_DIR}/examples/features/t065_ui_dispatcher.cpp"
+)
+target_include_directories(nativeui_example_t065_ui_dispatcher PRIVATE
+  "${NATIVEUI_SOURCE_DIR}/examples/features"
+)
+_nativeui_attach_consumer_platform(
+  TARGET nativeui_example_t065_ui_dispatcher
+  CONSUMER_ID org.nativeui.example.t065-ui-dispatcher
+)
+nativeui_enable_project_warnings(nativeui_example_t065_ui_dispatcher)
+nativeui_enable_sanitizers(nativeui_example_t065_ui_dispatcher)
+add_test(
+  NAME nativeui_example_t065_ui_dispatcher_self_test
+  COMMAND nativeui_example_t065_ui_dispatcher --self-test
+)
+set_tests_properties(nativeui_example_t065_ui_dispatcher_self_test PROPERTIES
+  LABELS "example;feature;dispatcher;t065"
+  TIMEOUT 20
+)
