@@ -34,7 +34,14 @@ if(NOT EXISTS "${NATIVEUI_PUGL_SOURCE_DIR}/include/pugl/pugl.h")
   message(FATAL_ERROR "T044 derived invalid Pugl source root: ${NATIVEUI_PUGL_SOURCE_DIR}")
 endif()
 
-set(_t044_source "${NATIVEUI_SOURCE_DIR}/tests/t044_pointer_capture_smoke.cpp")
+if(UNIX AND NOT APPLE)
+  # X11 needs a real server-generated button press to exercise the automatic
+  # grab. Keep its deterministic XTest/XWarp driver separate from the AppKit
+  # and Win32 native-event driver.
+  set(_t044_source "${NATIVEUI_SOURCE_DIR}/tests/t044_pointer_capture_x11_smoke.cpp")
+else()
+  set(_t044_source "${NATIVEUI_SOURCE_DIR}/tests/t044_pointer_capture_smoke.cpp")
+endif()
 if(APPLE)
   set_source_files_properties("${_t044_source}" PROPERTIES LANGUAGE OBJCXX)
 endif()
