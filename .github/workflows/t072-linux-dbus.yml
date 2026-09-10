@@ -4,9 +4,17 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'include/nativeui/window.hpp'
       - 'src/linux_dbus.cpp'
+      - 'src/linux_dbus_codec.cpp'
+      - 'src/linux_application_backend.cpp'
+      - 'src/pugl_skia.cpp'
       - 'src/detail/linux_dbus.hpp'
+      - 'src/detail/linux_dbus_codec.hpp'
+      - 'src/detail/linux_dbus_application_transport_owner.hpp'
+      - 'src/detail/application_platform_state.hpp'
       - 'cmake/NativeUILinuxDbus.cmake'
+      - 'cmake/NativeUIAttachPlatform.cmake'
       - 'tests/t072/**'
       - 'tests/t072_linux_dbus_build_contract.cmake'
       - 'CMakeLists.txt'
