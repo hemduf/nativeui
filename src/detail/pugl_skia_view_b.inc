@@ -83,6 +83,22 @@
             return PUGL_SUCCESS;
         }
 
+        case PUGL_POINTER_IN:
+        case PUGL_POINTER_OUT: {
+            InputEvent input{};
+            input.type = event->type == PUGL_POINTER_IN
+                ? InputType::PointerMove
+                : InputType::PointerLeave;
+            input.position = Point{
+                static_cast<float>(event->crossing.x) / scale_factor_,
+                static_cast<float>(event->crossing.y) / scale_factor_};
+            apply_modifiers(input, event->crossing.state);
+            last_pointer_position_ = input.position;
+            have_pointer_position_ = event->type == PUGL_POINTER_IN;
+            (void)ui_.dispatch(input, services_);
+            return PUGL_SUCCESS;
+        }
+
         case PUGL_BUTTON_PRESS:
         case PUGL_BUTTON_RELEASE: {
             if (event->button.button != 0) return PUGL_SUCCESS;
