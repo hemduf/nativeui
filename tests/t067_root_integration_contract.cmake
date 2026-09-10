@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.24)
+
+if(NOT DEFINED SOURCE_DIR)
+  message(FATAL_ERROR "SOURCE_DIR is required")
+endif()
+
+file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
+set(_example "${SOURCE_DIR}/examples/features/t067_virtual_list.cpp")
+
+function(require_text haystack needle description)
+  string(FIND "${haystack}" "${needle}" _index)
+  if(_index EQUAL -1)
+    message(FATAL_ERROR "T067 root integration contract: missing ${description}: ${needle}")
+  endif()
+endfunction()
+
+require_text("${_root_cmake}" "  t067_virtual_list\n" "feature example registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)" "model contract registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)" "materialization-window contract registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_retained_tests tests/t067_retained_tests.cpp)" "retained runtime test registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)" "public API test registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)" "semantic API test registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)" "visual test registration")
+require_text("${_root_cmake}" "resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets" "isolated virtual_list public-header compile coverage")
+require_text("${_umbrella}" "#include <nativeui/virtual_list.hpp>" "virtual-list umbrella export")
+
+if(NOT EXISTS "${_example}")
+  message(FATAL_ERROR "T067 root integration contract: missing dedicated feature example: ${_example}")
+endif()
+file(READ "${_example}" _example_source)
+string(FIND "${_example_source}" "nativeui/detail/" _detail_index)
+if(NOT _detail_index EQUAL -1)
+  message(FATAL_ERROR "T067 feature example must use only the normal public NativeUI API")
+endif()
+
+message(STATUS "T067 root integration contract passed")

@@ -9,6 +9,13 @@ permissions:
   contents: read
 
 jobs:
+  root-integration-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify root integration contract
+        run: cmake -DSOURCE_DIR="$GITHUB_WORKSPACE" -P tests/t067_root_integration_contract.cmake
+
   virtual-list-contract:
     strategy:
       fail-fast: false
