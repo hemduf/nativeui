@@ -263,7 +263,7 @@ void keyed_contract() {
     ui::UI tree{ui::ForEach<DynamicItem>{
         items,
         [](const DynamicItem& item) { return item.key; },
-        [log](const DynamicItem& item) { return DynamicProbe{item.name, log};
+        [log](const DynamicItem& item) { return DynamicProbe{item.name, log}; }
     }};
     tree.resize({160.0f, 80.0f});
     tree.activate(platform);
