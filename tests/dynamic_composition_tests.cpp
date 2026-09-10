@@ -70,6 +70,53 @@ private:
     std::shared_ptr<DynamicLog> log_;
 };
 
+class LifetimeOrderProbeComponent final : public ui::Component {
+public:
+    LifetimeOrderProbeComponent(std::string name, std::shared_ptr<DynamicLog> log)
+        : name_(std::move(name)), log_(std::move(log)) {}
+
+    ~LifetimeOrderProbeComponent() override {
+        log_->events.push_back(name_ + ".destroy");
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    void mount(ui::MountContext&) override { log_->events.push_back(name_ + ".mount"); }
+    void activate(ui::LifecycleContext&) override { log_->events.push_back(name_ + ".activate"); }
+    void deactivate(ui::LifecycleContext&) override {
+        log_->events.push_back(name_ + ".deactivate");
+    }
+    void unmount(ui::LifecycleContext&) override { log_->events.push_back(name_ + ".unmount"); }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+};
+
+class LifetimeOrderProbe {
+public:
+    LifetimeOrderProbe(std::string name, std::shared_ptr<DynamicLog> log)
+        : name_(std::move(name)), log_(std::move(log)) {}
+
+    ui::Spec spec() && {
+        auto name = std::move(name_);
+        auto log = std::move(log_);
+        return ui::Spec{
+            [name = std::move(name), log = std::move(log)]() mutable {
+                return std::make_unique<LifetimeOrderProbeComponent>(
+                    std::move(name), std::move(log));
+            },
+            {}};
+    }
+
+private:
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+};
+
 class InteractiveDynamicProbeComponent final : public ui::Component {
 public:
     InteractiveDynamicProbeComponent(std::shared_ptr<DynamicLog> log, ui::State<int>& observed)
@@ -252,6 +299,25 @@ void switch_contract() {
         "fallback.mount", "fallback.activate"}));
 }
 
+void replacement_destroys_before_insert_contract() {
+    ui::State<int> selected{1};
+    auto log = std::make_shared<DynamicLog>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::Switch<int>{selected}
+                    .when(1, LifetimeOrderProbe{"old", log})
+                    .when(2, LifetimeOrderProbe{"new", log})};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+    NUI_CHECK((log->events == std::vector<std::string>{"old.mount", "old.activate"}));
+
+    selected.set(2);
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "old.mount", "old.activate", "old.deactivate", "old.unmount", "old.destroy",
+        "new.mount", "new.activate"}));
+}
+
 void keyed_contract() {
     ui::State<std::vector<DynamicItem>> items{{
         DynamicItem{"A", "A"},
@@ -300,6 +366,72 @@ void keyed_contract() {
     NUI_CHECK(log->mounted_ids.at("C").size() == 1);
     NUI_CHECK((log->events == std::vector<std::string>{
         "A.mount", "B.mount", "A.activate", "B.activate", "C.mount", "C.activate"}));
+
+    // Remove, prepend, append and middle-insert all preserve unchanged keys.
+    items.set({DynamicItem{"C", "C"}, DynamicItem{"A", "A"}});
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->events.size() == 8);
+    NUI_CHECK(log->events[6] == "B.deactivate");
+    NUI_CHECK(log->events[7] == "B.unmount");
+
+    items.set({DynamicItem{"D", "D"}, DynamicItem{"C", "C"}, DynamicItem{"A", "A"}});
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->events.size() == 10);
+    NUI_CHECK(log->mounted_ids.at("D").size() == 1);
+
+    items.set({
+        DynamicItem{"D", "D"}, DynamicItem{"C", "C"}, DynamicItem{"A", "A"},
+        DynamicItem{"E", "E"}});
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->events.size() == 12);
+    NUI_CHECK(log->mounted_ids.at("E").size() == 1);
+
+    items.set({
+        DynamicItem{"D", "D"}, DynamicItem{"C", "C"}, DynamicItem{"F", "F"},
+        DynamicItem{"A", "A"}, DynamicItem{"E", "E"}});
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->events.size() == 14);
+    NUI_CHECK(log->mounted_ids.at("F").size() == 1);
+    NUI_CHECK(log->mounted_ids.at("A").front() == a_id);
+    NUI_CHECK(log->mounted_ids.at("C").size() == 1);
+
+    // Changing a logical key forces one old teardown and one new retained node.
+    items.set({
+        DynamicItem{"G", "G"}, DynamicItem{"C", "C"}, DynamicItem{"F", "F"},
+        DynamicItem{"A", "A"}, DynamicItem{"E", "E"}});
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->events.size() == 18);
+    NUI_CHECK(log->events[14] == "D.deactivate");
+    NUI_CHECK(log->events[15] == "D.unmount");
+    NUI_CHECK(log->events[16] == "G.mount");
+    NUI_CHECK(log->events[17] == "G.activate");
+    NUI_CHECK(log->mounted_ids.at("G").size() == 1);
+}
+
+void coalesced_writes_contract() {
+    ui::State<bool> visible{true};
+    auto log = std::make_shared<DynamicLog>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::If{visible, DynamicProbe{"child", log}}};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    visible.set(false);
+    visible.set(true);
+    visible.set(false);
+    NUI_CHECK(log->events.size() == 2);
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.activate", "child.deactivate", "child.unmount"}));
+
+    visible.set(true);
+    visible.set(false);
+    visible.set(true);
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.activate", "child.deactivate", "child.unmount",
+        "child.mount", "child.activate"}));
 }
 
 void focus_capture_and_lifetime_contract() {
@@ -369,6 +501,49 @@ void focus_scope_rehome_contract() {
     NUI_CHECK(fallback_value.get());
 }
 
+void nested_focus_scope_rehome_contract() {
+    ui::State<bool> outer_active{true};
+    ui::State<bool> inner_active{true};
+    ui::State<bool> inner_visible{true};
+    ui::State<bool> global_value{false};
+    ui::State<bool> outer_fallback{false};
+    ui::State<bool> inner_value{false};
+    test::MockPlatform platform;
+
+    ui::UI tree{
+        ui::Column{
+            ui::Toggle{"Global", global_value},
+            ui::FocusScope{
+                outer_active,
+                ui::Row{
+                    ui::Toggle{"Outer fallback", outer_fallback},
+                    ui::If{
+                        inner_visible,
+                        ui::FocusScope{inner_active, ui::Toggle{"Inner", inner_value}}
+                            .trap(true)
+                            .default_focus(0)}
+                }.gap(4.0f)}
+                .trap(true)
+                .default_focus(1)
+        }.gap(4.0f).padding(0.0f)};
+
+    tree.resize({360.0f, 120.0f});
+    tree.activate(platform);
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(inner_value.get());
+    NUI_CHECK(!global_value.get());
+    NUI_CHECK(!outer_fallback.get());
+
+    // The nearest trap is removed with the focused child, but the surviving
+    // outer trap still owns focus. Rehoming must climb to that scope rather
+    // than escaping to the global first focusable.
+    inner_visible.set(false);
+    tree.resize({360.0f, 120.0f});
+    tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(!global_value.get());
+    NUI_CHECK(outer_fallback.get());
+}
+
 void bounded_reconciliation_contract() {
     ui::State<bool> visible{true};
     auto loop = std::make_shared<LoopState>();
@@ -402,9 +577,12 @@ void bounded_reconciliation_contract() {
 void suite() {
     conditional_contract();
     switch_contract();
+    replacement_destroys_before_insert_contract();
     keyed_contract();
+    coalesced_writes_contract();
     focus_capture_and_lifetime_contract();
     focus_scope_rehome_contract();
+    nested_focus_scope_rehome_contract();
     bounded_reconciliation_contract();
 }
 
