@@ -391,6 +391,14 @@ public:
                                           LinuxDbusSubscriptionId id);
     [[nodiscard]] std::size_t subscription_count() const noexcept;
 
+    /// Emit one validated signal through this transport's private connection.
+    /// Values are encoded before the non-blocking libdbus send; no libdbus
+    /// object escapes the transport and invalid/inactive sends fail atomically.
+    [[nodiscard]] bool send_signal(std::string_view path,
+                                   std::string_view interface,
+                                   std::string_view member,
+                                   const std::vector<LinuxDbusValue>& arguments);
+
     /// Register an internal D-Bus object path. Handlers execute only on the
     /// owned I/O thread and receive copied plain values, never libdbus objects.
     [[nodiscard]] LinuxDbusObjectRegistrationId register_object_path(
