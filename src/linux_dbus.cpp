@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -20,6 +21,24 @@ bool g_dbus_threads_initialized = false;
            (c >= 'a' && c <= 'z') ||
            (c >= '0' && c <= '9') ||
            c == '_';
+}
+
+[[nodiscard]] bool contains_nul(std::string_view text) noexcept {
+    return text.find('\0') != std::string_view::npos;
+}
+
+[[nodiscard]] bool valid_method_call(const LinuxDbusMethodCall& call) noexcept {
+    if (call.destination.empty() || call.path.empty() || call.interface.empty() ||
+        call.member.empty() || contains_nul(call.destination) || contains_nul(call.path) ||
+        contains_nul(call.interface) || contains_nul(call.member) ||
+        !linux_dbus_valid_timeout(call.timeout)) {
+        return false;
+    }
+
+    return dbus_validate_bus_name(call.destination.c_str(), nullptr) != FALSE &&
+           dbus_validate_path(call.path.c_str(), nullptr) != FALSE &&
+           dbus_validate_interface(call.interface.c_str(), nullptr) != FALSE &&
+           dbus_validate_member(call.member.c_str(), nullptr) != FALSE;
 }
 
 template <typename Map>
@@ -317,23 +336,136 @@ std::size_t LinuxDbusPendingCallSet::pending_count() const noexcept {
 }
 
 struct LinuxDbusTransport::Impl final {
+    struct NativePendingCall final {
+        LinuxDbusClientId client{};
+        DBusPendingCall* pending{};
+    };
+
+    struct NotifyContext final {
+        Impl* owner{};
+        LinuxDbusClientId client{};
+        LinuxDbusRequestId id{};
+    };
+
+    Impl()
+        : calls(ledger) {}
+
+    [[nodiscard]] std::optional<NativePendingCall> take_pending(
+        LinuxDbusClientId client,
+        LinuxDbusRequestId id,
+        DBusPendingCall* expected = nullptr) {
+        std::lock_guard lock{pending_mutex};
+        const auto found = pending_calls.find(id);
+        if (found == pending_calls.end() || found->second.client != client ||
+            (expected != nullptr && found->second.pending != expected)) {
+            return std::nullopt;
+        }
+        NativePendingCall result = found->second;
+        pending_calls.erase(found);
+        return result;
+    }
+
+    [[nodiscard]] static LinuxDbusCompletion classify_reply(DBusMessage* reply) {
+        if (reply == nullptr) {
+            return LinuxDbusCompletion{LinuxDbusErrorCode::LocalProtocolError, {},
+                                       "D-Bus pending call completed without a reply"};
+        }
+
+        const int type = dbus_message_get_type(reply);
+        if (type == DBUS_MESSAGE_TYPE_METHOD_RETURN) {
+            return LinuxDbusCompletion{};
+        }
+        if (type != DBUS_MESSAGE_TYPE_ERROR) {
+            return LinuxDbusCompletion{LinuxDbusErrorCode::LocalProtocolError, {},
+                                       "D-Bus method call produced an unexpected message type"};
+        }
+
+        LinuxDbusCompletion completion;
+        const char* error_name = dbus_message_get_error_name(reply);
+        if (error_name != nullptr) {
+            completion.remote_error_name = error_name;
+        }
+
+        if (completion.remote_error_name == DBUS_ERROR_NO_REPLY) {
+            completion.code = LinuxDbusErrorCode::Timeout;
+        } else if (completion.remote_error_name == DBUS_ERROR_DISCONNECTED) {
+            completion.code = LinuxDbusErrorCode::Disconnected;
+        } else {
+            completion.code = LinuxDbusErrorCode::RemoteError;
+        }
+
+        DBusError error;
+        dbus_error_init(&error);
+        const char* message = nullptr;
+        if (dbus_message_get_args(reply, &error,
+                                  DBUS_TYPE_STRING, &message,
+                                  DBUS_TYPE_INVALID) != FALSE &&
+            message != nullptr) {
+            completion.message = message;
+        }
+        dbus_error_free(&error);
+        return completion;
+    }
+
+    static void free_notify_context(void* data) {
+        delete static_cast<NotifyContext*>(data);
+    }
+
+    static void pending_notify(DBusPendingCall* pending, void* data) {
+        auto* context = static_cast<NotifyContext*>(data);
+        if (context == nullptr || context->owner == nullptr) {
+            return;
+        }
+
+        Impl* owner = context->owner;
+        const LinuxDbusClientId client = context->client;
+        const LinuxDbusRequestId id = context->id;
+        auto native = owner->take_pending(client, id, pending);
+        if (!native) {
+            return;
+        }
+
+        DBusMessage* reply = dbus_pending_call_steal_reply(pending);
+        LinuxDbusCompletion completion = classify_reply(reply);
+        if (reply != nullptr) {
+            dbus_message_unref(reply);
+        }
+
+        (void)owner->calls.complete(client, id, std::move(completion));
+        dbus_pending_call_unref(native->pending);
+    }
+
     mutable std::mutex lifecycle_mutex;
+    mutable std::mutex pending_mutex;
     DBusConnection* connection{};
     std::thread io_thread;
     std::atomic<bool> stop_requested{false};
     std::atomic<bool> running{false};
     std::string unique_name;
+    bool destroying{};
+
+    LinuxDbusResourceLedger ledger;
+    LinuxDbusPendingCallSet calls;
+    std::unordered_map<LinuxDbusRequestId, NativePendingCall> pending_calls;
 };
 
 LinuxDbusTransport::LinuxDbusTransport()
     : impl_(std::make_unique<Impl>()) {}
 
 LinuxDbusTransport::~LinuxDbusTransport() {
+    {
+        std::lock_guard lock{impl_->lifecycle_mutex};
+        impl_->destroying = true;
+    }
     stop();
+    impl_->calls.shutdown();
 }
 
 LinuxDbusErrorCode LinuxDbusTransport::start() {
     std::lock_guard lock{impl_->lifecycle_mutex};
+    if (impl_->destroying) {
+        return LinuxDbusErrorCode::Shutdown;
+    }
     if (impl_->running.load(std::memory_order_acquire)) {
         return LinuxDbusErrorCode::None;
     }
@@ -387,20 +519,46 @@ LinuxDbusErrorCode LinuxDbusTransport::start() {
 }
 
 void LinuxDbusTransport::stop() noexcept {
-    std::lock_guard lock{impl_->lifecycle_mutex};
-    impl_->stop_requested.store(true, std::memory_order_release);
+    bool suppress_completions = false;
+    {
+        std::lock_guard lock{impl_->lifecycle_mutex};
+        impl_->stop_requested.store(true, std::memory_order_release);
+        suppress_completions = impl_->destroying;
 
-    if (impl_->io_thread.joinable()) {
-        impl_->io_thread.join();
+        if (impl_->io_thread.joinable()) {
+            impl_->io_thread.join();
+        }
+
+        if (impl_->connection != nullptr) {
+            dbus_connection_close(impl_->connection);
+            dbus_connection_unref(impl_->connection);
+            impl_->connection = nullptr;
+        }
+
+        impl_->running.store(false, std::memory_order_release);
+        impl_->unique_name.clear();
     }
 
-    if (impl_->connection != nullptr) {
-        dbus_connection_close(impl_->connection);
-        dbus_connection_unref(impl_->connection);
-        impl_->connection = nullptr;
+    std::unordered_map<LinuxDbusRequestId, Impl::NativePendingCall> pending;
+    {
+        std::lock_guard lock{impl_->pending_mutex};
+        pending.swap(impl_->pending_calls);
     }
 
-    impl_->running.store(false, std::memory_order_release);
+    for (const auto& [id, native] : pending) {
+        if (native.pending != nullptr) {
+            dbus_pending_call_cancel(native.pending);
+            dbus_pending_call_unref(native.pending);
+        }
+        if (!suppress_completions) {
+            (void)impl_->calls.complete(
+                native.client, id, LinuxDbusCompletion{LinuxDbusErrorCode::Shutdown});
+        }
+    }
+
+    if (suppress_completions) {
+        impl_->calls.shutdown();
+    }
 }
 
 bool LinuxDbusTransport::running() const noexcept {
@@ -410,6 +568,141 @@ bool LinuxDbusTransport::running() const noexcept {
 std::string LinuxDbusTransport::unique_name() const {
     std::lock_guard lock{impl_->lifecycle_mutex};
     return impl_->unique_name;
+}
+
+LinuxDbusRequestId LinuxDbusTransport::call_method(
+    LinuxDbusClientId client,
+    ui::Dispatcher dispatcher,
+    const LinuxDbusMethodCall& call,
+    LinuxDbusCompletionCallback callback) {
+    if (client == kInvalidLinuxDbusClientId || !dispatcher.valid() || !callback ||
+        !valid_method_call(call)) {
+        return kInvalidLinuxDbusRequestId;
+    }
+
+    {
+        std::lock_guard lock{impl_->lifecycle_mutex};
+        if (impl_->destroying || impl_->connection == nullptr ||
+            !impl_->running.load(std::memory_order_acquire) ||
+            impl_->stop_requested.load(std::memory_order_acquire)) {
+            return kInvalidLinuxDbusRequestId;
+        }
+    }
+
+    const LinuxDbusRequestId id =
+        impl_->calls.begin(client, dispatcher, call.timeout, std::move(callback));
+    if (id == kInvalidLinuxDbusRequestId) {
+        return id;
+    }
+
+    LinuxDbusCompletion immediate_completion;
+    bool complete_immediately = false;
+
+    {
+        std::lock_guard lock{impl_->lifecycle_mutex};
+        if (impl_->destroying || impl_->connection == nullptr ||
+            !impl_->running.load(std::memory_order_acquire) ||
+            impl_->stop_requested.load(std::memory_order_acquire)) {
+            immediate_completion.code = LinuxDbusErrorCode::Shutdown;
+            complete_immediately = true;
+        } else {
+            DBusMessage* message = dbus_message_new_method_call(
+                call.destination.c_str(), call.path.c_str(), call.interface.c_str(),
+                call.member.c_str());
+            if (message == nullptr) {
+                immediate_completion = LinuxDbusCompletion{
+                    LinuxDbusErrorCode::LocalProtocolError, {},
+                    "Unable to allocate D-Bus method-call message"};
+                complete_immediately = true;
+            } else {
+                DBusPendingCall* pending = nullptr;
+                const int timeout_ms = static_cast<int>(call.timeout.count());
+                const dbus_bool_t sent = dbus_connection_send_with_reply(
+                    impl_->connection, message, &pending, timeout_ms);
+                dbus_message_unref(message);
+
+                if (sent == FALSE) {
+                    immediate_completion = LinuxDbusCompletion{
+                        LinuxDbusErrorCode::LocalProtocolError, {},
+                        "Unable to queue D-Bus method call"};
+                    complete_immediately = true;
+                } else if (pending == nullptr) {
+                    immediate_completion = LinuxDbusCompletion{
+                        LinuxDbusErrorCode::Disconnected, {},
+                        "D-Bus connection disconnected before method call was queued"};
+                    complete_immediately = true;
+                } else {
+                    auto* context = new (std::nothrow) Impl::NotifyContext{impl_.get(), client, id};
+                    if (context == nullptr) {
+                        dbus_pending_call_cancel(pending);
+                        dbus_pending_call_unref(pending);
+                        immediate_completion = LinuxDbusCompletion{
+                            LinuxDbusErrorCode::LocalProtocolError, {},
+                            "Unable to allocate D-Bus pending-call notification state"};
+                        complete_immediately = true;
+                    } else {
+                        dbus_pending_call_ref(pending);
+                        bool inserted = false;
+                        try {
+                            std::lock_guard pending_lock{impl_->pending_mutex};
+                            inserted = impl_->pending_calls
+                                           .try_emplace(id, Impl::NativePendingCall{client, pending})
+                                           .second;
+                        } catch (...) {
+                            inserted = false;
+                        }
+
+                        if (!inserted) {
+                            dbus_pending_call_cancel(pending);
+                            dbus_pending_call_unref(pending);
+                            dbus_pending_call_unref(pending);
+                            delete context;
+                            immediate_completion = LinuxDbusCompletion{
+                                LinuxDbusErrorCode::LocalProtocolError, {},
+                                "Unable to retain D-Bus pending-call state"};
+                            complete_immediately = true;
+                        } else if (dbus_pending_call_set_notify(
+                                       pending, &Impl::pending_notify, context,
+                                       &Impl::free_notify_context) == FALSE) {
+                            auto native = impl_->take_pending(client, id, pending);
+                            dbus_pending_call_cancel(pending);
+                            if (native) {
+                                dbus_pending_call_unref(native->pending);
+                            }
+                            dbus_pending_call_unref(pending);
+                            delete context;
+                            immediate_completion = LinuxDbusCompletion{
+                                LinuxDbusErrorCode::LocalProtocolError, {},
+                                "Unable to register D-Bus pending-call notification"};
+                            complete_immediately = true;
+                        } else {
+                            dbus_pending_call_unref(pending);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (complete_immediately) {
+        (void)impl_->calls.complete(client, id, std::move(immediate_completion));
+    }
+    return id;
+}
+
+bool LinuxDbusTransport::cancel_request(LinuxDbusClientId client, LinuxDbusRequestId id) {
+    auto native = impl_->take_pending(client, id);
+    if (!native) {
+        return false;
+    }
+
+    dbus_pending_call_cancel(native->pending);
+    dbus_pending_call_unref(native->pending);
+    return impl_->calls.cancel(client, id);
+}
+
+std::size_t LinuxDbusTransport::pending_request_count() const noexcept {
+    return impl_->calls.pending_count();
 }
 
 } // namespace ui::detail
