@@ -4,7 +4,7 @@
 
 ## Mission and invariants
 
-NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, generic state, drawing/widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio, host parameter semantics and a custom native windowing stack remain out of scope.
+NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, generic state, drawing/widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio and host parameter semantics remain out of scope.
 
 Non-negotiable rules:
 
@@ -18,7 +18,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`. This reviewed pin includes the X11 `SelectionNotify.property == None` guard merged through #124 / PR #125 in addition to the established drag-and-drop fixes.
+- Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`, including the reviewed X11 failed-selection guard from #124 / PR #125.
 - Skia: `olilarkin/skia-builder` `chrome/m149`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -26,81 +26,75 @@ Non-negotiable rules:
 
 ## Current baseline
 
-Current `main` is `58f45ee02b32a1a3fcb139cc8345276ee334844c`. It includes the completed T057 ResourceManager and the reviewed #124 / PR #125 Pugl X11 failed-selection correction.
+Current `main` is `c5270a1a971d1d409a53b3715df0340fc445fb33`. It contains the completed T060 explicit Application/multi-window ownership model and its recovery-context synchronization on top of the reviewed Pugl X11 correction.
 
-Completed foundations relevant to this lane:
+Completed foundations relevant to current release/platform work:
 
 - T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
 - T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
+- #64 / PR #90: standalone ownership frozen as Decision B.
+- T042 / PR #93: deterministic supported-path lifecycle/multi-instance stress.
 - T051 / PR #116: reproducible Release benchmark and regression policy.
 - T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
-- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging with sorted immutable generated tables.
-- T057 / PR #126: immutable non-owning `ResourceManager` plus explicit allocating `ResourceManagerProvider` adapter.
-- #64 / PR #90: standalone ownership is frozen as Decision B.
-- T042 / PR #93: deterministic supported-path lifecycle/multi-instance stress.
-- #124 / PR #125: Pugl X11 failed-selection correction; the NativeUI completion head passed normal CI and T042 Lifecycle Stress before merge.
+- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
+- T057 / PR #126: immutable non-owning `ResourceManager` plus explicit allocating provider adapter.
+- #124 / PR #125: reviewed Pugl X11 `SelectionNotify.property == None` correction pinned into NativeUI.
+- T060 / PR #118: one explicit `ui::Application` owns exactly one standalone `PUGL_PROGRAM` world; explicit `StandaloneWindow(Application&, ...)` instances borrow that world while retaining independent per-window UI/render/input state. `EmbeddedView` remains independent `PUGL_MODULE` ownership. The legacy standalone constructor remains pre-v1 only for later T069 removal.
 
-## T057 completed state
+T060 exact merge candidate `0e4cce56bd8874545794fdf1137d1c7ec5489dde` passed T060 Application Contract `34422787634`, T042 Lifecycle Stress `34422787683`, and normal CI `34422787695`. Final `CODE_REVIEW.md` review `5161881319` reported no Blocking/Important finding. PR #118 merged as `352bdf0e734df46e8edcb53a0a81a07c9e0d7d6d`; issue #72 is closed Done.
 
-T057 is merged and issue #69 is closed Done.
+## Active lifecycle/release work — T052 / issue #52 / PR #120
 
-Delivered contract:
-
-- `ui::ResourceManager` borrows `std::span<const EmbeddedResourceEntry>` and performs one allocation-free O(N) validation pass;
-- valid IDs are non-empty and strictly ascending by exact unsigned-byte lexicographic comparison;
-- invalid tables fail atomically: direct lookup/enumeration APIs behave empty/false and retain only a small enum-backed diagnostic;
-- `find()` uses binary search, is allocation-free and returns `ResourceView` spans pointing to original storage;
-- copy/move managers remain lightweight immutable views with no registry/cache/mutex; independent managers remain isolated and concurrent read-only lookup is safe for live immutable backing storage;
-- `ResourceManagerProvider` is the explicit compatibility seam for `ResourceProvider`; successful non-empty loads copy into the owned vector and are intentionally not real-time safe;
-- ImageCache and SvgCache consume the adapter without manager-specific decoding APIs;
-- the actual T056 generated table is consumed by build-tree and relocated install-tree external consumers;
-- `t057_embedded_resources --self-test` covers direct lookup, provider copy semantics and SVG integration; the public header has an isolated compile probe.
-
-Final evidence: exact PR head `20ec256241c9419b5a4d60f8f68968f4433d2855`; CI #600 passed Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts; final `CODE_REVIEW.md` pass had no Blocking/Important finding; PR #126 merged as `c2cc83b35ee8cdf469df03d40a93ca2194e6923f` and #69 closed Done.
-
-## #124 completed platform correction
-
-PR #125 advanced the shared Pugl pin to `195f79b22644010c81a5e0c3231c591856787ec6`. The defect was in the X11 failed-selection path: `SelectionNotify.property == None` could reach `XGetWindowProperty()` as atom `None`, causing `BadAtom` during lifecycle/clipboard stress. The reviewed Pugl correction rejects that path before the X11 property read; NativeUI did not weaken the T042 fixture or introduce a local workaround.
-
-The synchronized completion head passed normal CI and T042 Lifecycle Stress with a clean mandatory review before PR #125 merged to `main` as `58f45ee02b32a1a3fcb139cc8345276ee334844c`.
-
-## T052 v0.1 release gate — PR #120
-
-T052 is dependency-unblocked and is the active P0 lifecycle/release completion candidate. It is an aggregate validation/release ticket, not a feature implementation ticket.
+T052 is dependency-unblocked and is the active P0 v0.1 developer-preview release gate. It is aggregate validation/release infrastructure only and must not absorb unrelated feature work.
 
 Current contract:
 
 - exact candidate SHA and approved-base SHA are explicit release-gate inputs;
-- exact-head normal Linux/X11, Windows/MSVC, macOS and Linux ASan+UBSan validation remains mandatory;
-- T042 supported-path lifecycle stress remains an independent exact-head gate and preserves #64 Decision B;
+- exact-head normal Linux/X11, Windows/MSVC, macOS and Linux ASan+UBSan validation is mandatory;
+- T042 supported-path lifecycle stress remains an independent exact-head gate and preserves #64 Decision B plus the T060 explicit Application ownership model;
 - clean dependency/bootstrap builds start from an empty CPM cache on Linux/X11, Windows and macOS and verify the exact Pugl/Skia pin/hash contract;
 - the exact release-note `find_package(NativeUI CONFIG REQUIRED)` / `NativeUI::Core` / `nativeui_attach_platform()` snippet is materialized and built against the installed package on all supported desktop platforms;
 - T047/T048 package relocation and macOS two-consumer Objective-C namespace/runtime isolation remain part of normal CI;
 - one approved-base T051 benchmark run and two complete candidate runs are compared through T051's canonical C++ `compare_two_complete_runs()` policy rather than duplicated workflow thresholds;
-- `idle_invalidation` remains an exact zero timing/allocation hard gate;
-- v0.1 release notes explicitly identify developer-preview semantics, Decision B, known v1 gaps, pinned dependencies, reproducible exact-SHA tag procedure, and the `AGPL-3.0-only` / commercial dual-licensing model;
+- `idle_invalidation` remains an exact-zero timing/allocation hard gate;
+- v0.1 release notes explicitly identify developer-preview semantics, Decision B/T060 ownership, known v1 gaps, pinned dependencies, reproducible exact-SHA tag procedure, and the `AGPL-3.0-only` / commercial dual-licensing model;
 - T047's installed package legal-payload contract remains required for `LICENSE.md`, `NOTICE.md`, `THIRD_PARTY.md`, `EULA.md`, `PRIVACY.md`, `TERMS.md` and `LEGAL.md`.
 
-The branch is synchronized with current `main` using a real merge commit so the current baseline remains a parent of the candidate. Conflict resolution preserves the completed T054/T057/#124 documentation while retaining T052's release-only diff. Any synchronized head is a new release candidate and must rerun all exact-head gates.
+The T052 branch must be refreshed from current `main` through a real merge commit so current source history remains an ancestor of the release candidate. Any synchronized head is a new exact release candidate and must rerun T052 Release Gate, normal CI, T042 Lifecycle Stress and T051 Release Benchmarks before final merge.
 
-## Current DAG frontier
+## Current dependency frontier
 
 ```text
 lifecycle/release: #64(done) -> T042(done) -> T051(done) -> T052(in review)
 platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |
-                                       +-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057(done)
-state/widgets:     T059(done) -> T030(done) -> T031(done)
-                                       |
-                                       +-> T032
-                                       +-> T033
-                                       +-> T034 -> T035 / T036
-platform fix:       #124(done)
+                                       |-> T054(done)
+                     T056(done) + T022(done) -> T057(done)
+
+#64(done) -> T060(done) -> T065(active PR #133) -> T072 -> T064
+                     |
+                     +-> T066 (also depends on T043)
+
+T043 ready
+T044 ready
 ```
 
-T052 is the current P0 release/lifecycle item. T071 remains the later full NativeUI 1.0 qualification gate. Other implementation lanes remain independent.
+T052 owns only the release/lifecycle lane. T065/T072/T064 and T043/T044 remain separate platform work; widget/state tickets remain in their own lane.
+
+## Active platform work — T065 / issue #77 / PR #133
+
+The existing T065 stream delivers the bounded Core dispatcher/timer engine and root integration. Its reviewed contract includes per-owner bounded queues/timers, deterministic fake time, FIFO ordering, finite drain fairness, owner shutdown semantics and no process-global dispatcher.
+
+Remaining T065 work after T060 merge:
+
+1. refresh PR #133 from current `main` without duplicating the branch or widening scope;
+2. expose one dispatcher per `StandaloneWindow` and one independent dispatcher per `EmbeddedView` while preserving T060 shared-world ownership;
+3. implement the smallest thread-safe standalone wake mechanism and preserve embedded host-driven non-blocking polling;
+4. add native wake/multi-owner/lifecycle coverage and the required `t065_ui_dispatcher` feature example/self-test;
+5. run targeted T065 tests, normal CI, T042 regression coverage and Linux ASan+UBSan on the exact final head;
+6. perform the mandatory final `CODE_REVIEW.md` pass, synchronize issue/CONTEXT/ROADMAP, refresh from current main and merge only when exact-head gates are green.
+
+T072 remains blocked by T065. T064 remains blocked by T065 and T072.
 
 ## Build / validation
 
@@ -125,12 +119,13 @@ ctest --test-dir build-t051 --output-on-failure
 ./build-t051/nativeui_benchmarks --json t051-results.json
 ```
 
-The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, T047/T048/T054/T056 package contracts, relocated consumers and platform isolation checks. T042 lifecycle stress and T052 release qualification remain separate exact-head gates.
+The normal CI matrix additionally validates Linux X11, Windows/MSVC, macOS, Linux ASan+UBSan, package/relocation contracts, macOS consumer isolation and feature/platform smokes. T042 lifecycle stress and T052 release qualification remain separate exact-head gates.
 
 ## Next actions
 
-1. Require T052 v0.1 Release Gate, normal CI, T042 Lifecycle Stress and T051 Release Benchmarks to complete green on the exact synchronized head.
-2. Perform the mandatory aggregate `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
-3. Refresh from current `main` immediately before merge; any source change invalidates previous exact-head evidence.
-4. Record exact run/SHA evidence, mark PR #120 ready, merge without rewriting the validated candidate, then mark #52 Done/closed.
-5. Keep v0.1 developer-preview status distinct from the later T071 NativeUI 1.0 gate.
+1. Complete the T052 refresh from exact current `main` while preserving T060 and all unrelated completed-lane records.
+2. Require T052 v0.1 Release Gate, normal CI, T042 Lifecycle Stress and T051 Release Benchmarks to complete green on the resulting exact candidate head.
+3. Perform the aggregate mandatory `CODE_REVIEW.md` pass against that exact head and fix any Blocking/Important finding before merge.
+4. Re-check `main` immediately before final merge; any source advance requires another refresh and fresh exact-head qualification.
+5. Merge PR #120 without rewriting the validated candidate, mark #52 Done/closed, and keep v0.1 developer-preview status distinct from the later T071 NativeUI 1.0 gate.
+6. Leave T065 and all unrelated platform/widget lanes to their existing owners.
