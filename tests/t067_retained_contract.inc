@@ -33,6 +33,16 @@ private:
     LifetimeCounters* counters_{};
 };
 
+class SpecRoot {
+public:
+    explicit SpecRoot(ui::Spec value) : value_(std::move(value)) {}
+
+    [[nodiscard]] ui::Spec spec() && { return std::move(value_); }
+
+private:
+    ui::Spec value_;
+};
+
 void behavior_contract() {
     using Runtime = ui::detail::VirtualListRetainedRuntime<int>;
 
@@ -52,7 +62,7 @@ void behavior_contract() {
     }
     NUI_CHECK(runtime->replace(items));
 
-    ui::UI tree{ui::detail::make_virtual_list_retained_spec(runtime)};
+    ui::UI tree{SpecRoot{ui::detail::make_virtual_list_retained_spec(runtime)}};
     tree.resize({100.0f, 100.0f});
     ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
 
