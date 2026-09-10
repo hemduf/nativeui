@@ -4,9 +4,9 @@
 #  include <CoreFoundation/CFRunLoop.h>
 #elif defined(__linux__)
 #  include <X11/Xlib.h>
+#  undef None
 #endif
 
-#include <atomic>
 #include <mutex>
 #include <vector>
 
