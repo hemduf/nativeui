@@ -26,7 +26,7 @@ Non-negotiable rules:
 
 ## Current baseline
 
-`main` contains the explicit T060 Application/multi-window ownership model, the post-T060 T042 lifecycle qualification from #139, the completed standard widgets through T033, and the T052 v0.1 developer-preview release gate after PR #120 merges.
+`main` contains the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the completed standard widgets through T033, and the merged T052 v0.1 developer-preview release gate (`bc5e38e7e87168d6faf1edcb15f9beb3b725c070`).
 
 Relevant completed foundations:
 
@@ -45,32 +45,42 @@ Relevant completed foundations:
 - T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
 - T057 / PR #126: immutable non-owning `ResourceManager` plus allocating provider adapter.
 - T060 / PR #118: one explicit `ui::Application` owns one standalone `PUGL_PROGRAM` world and multiple independent `StandaloneWindow(Application&, ...)` views.
-- #139 / PR #140: T042 now stress-tests that supported T060 A+B multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM path.
+- #139 / PR #140: T042 stress-tests that supported T060 A+B multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM path.
 
 ## T052 v0.1 developer-preview release gate
 
-T052 qualifies the current infrastructure/package baseline as a developer preview, not as the NativeUI 1.0 product-completeness gate. The final pre-completion candidate was synchronized from current `main` `63e2603a6d85be3636347d476d2df0247f180622` and passed all exact-head workflows before the final documentation-only completion update: T052 Release Gate `34442124731`, normal CI `34442124735`, T042 Lifecycle Stress `34442124762`, T051 Release Benchmarks `34442124746`, and T060 Application Contract `34442124771`.
+T052 / issue #52 / PR #120 is complete and merged on `main` as `bc5e38e7e87168d6faf1edcb15f9beb3b725c070`. It qualifies the current infrastructure/package baseline as a developer preview, not as the NativeUI 1.0 product-completeness gate.
 
-The completed gate preserves the low-level installed package contract `NativeUI::Core + nativeui_attach_platform()`, validates relocated external consumers and consumer-scoped macOS Objective-C namespaces, verifies clean-cache pinned dependency acquisition/fail-closed checksum behavior, retains the T051 exact-zero idle invalidation hard gate, and publishes `docs/releases/v0.1.0.md` with developer-preview semantics and current known v1 gaps. The final documentation head must rerun the same exact-head workflows before PR #120 is merged.
+The gate preserves the low-level installed package contract `NativeUI::Core + nativeui_attach_platform()`, validates relocated external consumers and consumer-scoped macOS Objective-C namespaces, verifies clean-cache pinned dependency acquisition/fail-closed checksum behavior, retains the T051 exact-zero idle invalidation hard gate, and publishes `docs/releases/v0.1.0.md` with developer-preview semantics and current known v1 gaps.
 
-## State/widget lane — T033 complete, T034 active
+## Widget/layout lane — T034 completion candidate
 
-T032 provides the shared finite numeric-domain and track-axis behavior used by Slider/RangeSlider. T033 adds display-only ProgressBar/Meter widgets with finite bounded normalization performed in `double`, presentation clamp/no-writeback semantics, horizontal left-to-right and vertical bottom-to-top fill, optional presentation formatter, paint-only state invalidation and no focus/input/timer/capture behavior.
+T032 provides the shared finite numeric-domain and track-axis behavior used by Slider/RangeSlider. T033 adds display-only ProgressBar/Meter widgets. T034 / issue #34 / PR #135 is the active widget/container completion stream and remains built around the existing T012 `ScrollState` as the sole scroll offset/metrics model.
 
-Final T033 head `149b36c063b27eea6bb0bb370de7d736110fb357` passed normal CI `34437578487`, T060 Application Contract `34437578456` and T042 Lifecycle Stress `34437578451` after the failed Linux lifecycle diagnostic job was successfully rerun on the same exact head. Mandatory final `CODE_REVIEW.md` review `5162886816` found no Blocking/Important issue. PR #123 squash-merged as `44626fef8d70f73428aa6ce906357a922cb010f5`; issue #33 is Done.
+Current T034 implementation delivers:
 
-T034 / issue #34 / PR #135 is now the active existing widget/container stream. The current implementation work covers `ScrollView` over the existing `ScrollState`, wheel/pan behavior, scrollbar geometry/dragging and `ensure_visible`. Exact-head CI exposed the current RED at `tests/scroll_layout_tests.cpp:109`: a ScrollView containing non-focusable content cannot currently receive pointer-wheel targeting because the retained tree only selects focusable pointer targets. This is a real generic input-targeting seam required before T034 can be completed; do not paper over it with platform code or a hidden event pump. Mandatory review also requires scrollbar overlay input precedence over interactive content and paint ordering after content.
+- change-based wheel scrolling through `ScrollState`, so nested ScrollViews bubble naturally at clamped boundaries;
+- opt-in pointer pan with retained pointer capture and no inertia/timer;
+- retained 8 px overlay scrollbars with 18 px minimum thumb, deterministic thumb drag, handled/no-jump track clicks and both-axis corner shortening;
+- scrollbar input/paint precedence through retained overlay children after content and reverse paint-order pointer hit testing;
+- public `ensure_visible` with Nearest/Start/Center/End plus automatic focused-descendant Nearest reveal;
+- T059 Disabled/Hidden/Collapsed interaction suppression/cancellation while ReadOnly remains scrollable;
+- one existing T012 content clip and no native scrollbar/platform-specific event path;
+- a generic retained `pointer_targetable()` seam, defaulting to historical `focusable()` behavior, so ScrollView/scrollbar overlays can receive pointer input without becoming keyboard Tab stops while inert visual siblings do not mask interactive content.
+
+Review `5164075036` found one Important test-quality gap: a legacy overlay-precedence helper intended to represent interactive content did not explicitly opt into pointer targeting. Exact code head `4cac2b82b0cf775c1e691ec412460072f6abaf06` corrects that regression fixture. Follow-up CODE_REVIEW.md review `5164615464` finds no remaining Blocking/Important production finding. On that code head, T042 Lifecycle Stress, T060 Application Contract and T052 Release Gate are green; normal CI is green on Linux ASan+UBSan, Linux X11 and Windows while macOS qualification is completing. This documentation synchronization creates the final completion candidate and therefore requires fresh exact-head validation before merge.
 
 ## Current dependency frontier
 
 ```text
-state/widgets:     T059(done) -> T030(done) -> T031(done)
+widgets/layout:    T059(done) -> T030(done) -> T031(done)
                                        |-> T032(done)
                                        |-> T033(done)
-                                       +-> T034(active PR #135) -> T035 / T036
+                                       +-> T034(completion PR #135) -> T036
+                                                                    -> T035 only after T061
 
-lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done after PR #120)
-                   T042(done) -> T051(done) ---------------------> T052
+lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
+                   T042(done) -> T051(done) ---------------------> T052(done)
 
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
@@ -79,7 +89,7 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 platform/event:    T060(done) -> T065(active PR #133) -> T072 -> T064
 ```
 
-T034 and subsequent standard widgets belong to the state/widget lane. T065/T072/T064 and platform hardening are separate streams and must not be duplicated by widget work. After T052 merges, the platform/package lane has no further dependency-unblocked P0 package implementation until later v1 freeze/release work becomes ready.
+T034 and then T036 belong to the widget/layout lane. T035 additionally depends on T061 and must remain blocked until that dependency is merged. T065/T072/T064 and other platform hardening are separate streams and must not be duplicated by widget work.
 
 ## Build / validation
 
@@ -91,11 +101,11 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Normal CI validates Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts and native lifecycle/platform smokes. Code-changing widget candidates also require exact-head T042 Lifecycle Stress and T060 Application Contract when those workflows are registered for the PR.
+Normal CI validates Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts and native lifecycle/platform smokes. Code-changing widget candidates also require exact-head T042 Lifecycle Stress and T060 Application Contract when those workflows are registered for the PR; current completion candidates also run the T052 Release Gate.
 
 ## Next actions
 
-1. Complete the final documentation-head exact-SHA qualification and merge T052 / PR #120 if every required workflow remains green and the final `CODE_REVIEW.md` audit is clean.
-2. Resume T034 / PR #135 in the independent state/widget lane; do not create a duplicate stream.
-3. Continue T065 / PR #133 only in its independent platform/event lane; T072 and T064 remain downstream of it.
-4. Keep later package/release work dependency-gated; do not start T069/T071 until their explicit dependency sets are complete.
+1. Qualify the final documentation-synchronized T034 / PR #135 head with normal CI, T042 Lifecycle Stress, T060 Application Contract and T052 Release Gate; complete final CODE_REVIEW.md evidence and merge only if current `main` is still its base and every required executed gate is green.
+2. After T034 merges, start/resume T036 / issue #36 in this widget/layout lane using strict TDD; do not duplicate an existing branch/PR if one appears.
+3. Keep T035 blocked until T061 is merged.
+4. Leave T065 / PR #133 and downstream T072/T064 to their independent platform/event lane, and keep later v1 freeze/release work dependency-gated.
