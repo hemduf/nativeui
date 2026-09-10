@@ -21,6 +21,7 @@ int fail(std::string_view stage, std::string_view message) {
     return 1;
 }
 
+#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
 void issue64_trace(std::string_view stage) {
     std::cerr << "[nativeui issue64] " << stage << '\n' << std::flush;
 }
@@ -44,6 +45,7 @@ void install_issue64_crash_handler() {
 }
 #else
 void install_issue64_crash_handler() {}
+#endif
 #endif
 
 bool valid_window(const ui::StandaloneWindow& window, std::string_view stage) {
@@ -133,6 +135,7 @@ int run_t060_multi_window() {
     return 0;
 }
 
+#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
 int run_issue64_sequential() {
     install_issue64_crash_handler();
     issue64_trace("sequential-begin");
@@ -226,6 +229,7 @@ int run_issue64_simultaneous() {
     issue64_trace("simultaneous-complete");
     return 0;
 }
+#endif
 
 int run_regular_smoke() {
     const char* stage = "font-manager";
@@ -238,15 +242,17 @@ int run_regular_smoke() {
 
         stage = "construct-ui";
         ui::State<bool> enabled{true};
-        ui::UI app{
+        ui::UI app_ui{
             ui::Column{
                 ui::Header{"NativeUI standalone smoke"},
                 ui::Toggle{"Enabled", enabled},
             }.padding(16.0f).gap(12.0f)};
 
         stage = "construct-window";
+        ui::Application application;
         ui::StandaloneWindow window{
-            app,
+            application,
+            app_ui,
             ui::WindowDesc{.title = "NativeUI standalone smoke",
                            .size = {320.0f, 180.0f},
                            .resizable = true}};
@@ -274,7 +280,7 @@ int run_regular_smoke() {
         child_a->set_clipboard_text("NativeUI embedded A clipboard smoke");
         child_b.set_clipboard_text("NativeUI embedded B clipboard smoke");
         for (int i = 0; i < 4; ++i) {
-            (void)window.poll(0.0);
+            (void)application.poll(0.0);
             (void)child_a->poll();
             (void)child_b.poll();
         }
@@ -288,7 +294,7 @@ int run_regular_smoke() {
             return fail(stage, "surviving embedded view set_size failed");
         }
         for (int i = 0; i < 4; ++i) {
-            (void)window.poll(0.0);
+            (void)application.poll(0.0);
             (void)child_b.poll();
         }
         if (!child_b.last_error().empty()) return fail(stage, child_b.last_error());
@@ -302,7 +308,7 @@ int run_regular_smoke() {
             if (!cycle.native_handle()) return fail(stage, "cycle native handle is zero");
             cycle.set_clipboard_text("NativeUI embedded lifecycle " + std::to_string(iteration));
             for (int i = 0; i < 3; ++i) {
-                (void)window.poll(0.0);
+                (void)application.poll(0.0);
                 (void)cycle.poll();
             }
             if (!cycle.last_error().empty()) return fail(stage, cycle.last_error());
@@ -313,13 +319,15 @@ int run_regular_smoke() {
         if (!window.set_size({340.0f, 190.0f})) {
             return fail(stage, "surviving window set_size failed");
         }
-        (void)window.poll(0.0);
+        (void)application.poll(0.0);
         if (!window.last_error().empty()) return fail(stage, window.last_error());
 
         stage = "poll";
         for (int i = 0; i < 8 && !window.should_close(); ++i) {
-            if (!window.poll(0.0) && !window.should_close()) {
-                return fail(stage, window.last_error());
+            if (!application.poll(0.0) && !window.should_close()) {
+                return fail(stage, application.last_error().empty()
+                                       ? window.last_error()
+                                       : application.last_error());
             }
         }
         if (!window.last_error().empty()) return fail(stage, window.last_error());
@@ -327,7 +335,7 @@ int run_regular_smoke() {
         stage = "resize";
         if (!window.set_size({360.0f, 200.0f})) return fail(stage, "set_size failed");
         for (int i = 0; i < 4 && !window.should_close(); ++i) {
-            (void)window.poll(0.0);
+            (void)application.poll(0.0);
         }
         if (!window.last_error().empty()) return fail(stage, window.last_error());
 
@@ -349,8 +357,16 @@ int main(int argc, char** argv) {
         if (argc == 2) {
             const std::string_view mode{argv[1]};
             if (mode == "--t060-multi-window") return run_t060_multi_window();
+#if defined(NATIVEUI_ENABLE_LEGACY_STANDALONE_DIAGNOSTICS)
             if (mode == "--issue64-sequential") return run_issue64_sequential();
             if (mode == "--issue64-simultaneous") return run_issue64_simultaneous();
+#else
+            if (mode == "--issue64-sequential" || mode == "--issue64-simultaneous") {
+                return fail(
+                    "arguments",
+                    "legacy issue64 diagnostics require an explicit deprecated-warning CMake opt-in");
+            }
+#endif
             return fail("arguments", "unknown diagnostic mode");
         }
         if (argc != 1) return fail("arguments", "expected at most one diagnostic mode");
