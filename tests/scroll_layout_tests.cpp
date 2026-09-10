@@ -6,6 +6,61 @@ bool accent(ui::Rgba8 p) {
     return p.r > 220 && p.g > 120 && p.g < 190 && p.b < 100 && p.a > 220;
 }
 
+struct PointerEatingState {
+    int down{};
+    int move{};
+    int up{};
+};
+
+class PointerEatingComponent final : public ui::Component {
+public:
+    explicit PointerEatingComponent(std::shared_ptr<PointerEatingState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {100.0f, 400.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        switch (event.type) {
+        case ui::InputType::PointerDown:
+            ++state_->down;
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerMove:
+            ++state_->move;
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerUp:
+            ++state_->up;
+            return ui::EventResult::Handled;
+        default:
+            return ui::EventResult::Ignored;
+        }
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<PointerEatingState> state_;
+};
+
+class PointerEatingContent {
+public:
+    explicit PointerEatingContent(std::shared_ptr<PointerEatingState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<PointerEatingComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<PointerEatingState> state_;
+};
+
 void suite() {
     // Vertical scrolling exposes metrics and repositions content by a clamped offset.
     {
@@ -165,7 +220,7 @@ void suite() {
         NUI_CHECK_NEAR(bars.horizontal.thumb.x, 15.3333f, 0.002f);
     }
 
-    // T034 RED: thumb dragging maps linearly; track clicks consume without panning.
+    // T034 thumb dragging maps linearly; track clicks consume without panning.
     {
         ui::ScrollState state{ui::ScrollAxis::Vertical};
         ui::UI tree{ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)};
@@ -189,6 +244,29 @@ void suite() {
         NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerMove, 96.0f, 40.0f), platform) ==
                   ui::EventResult::Ignored);
         NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
+    }
+
+    // T034 RED: scrollbar overlay input must win over an interactive content descendant.
+    {
+        auto content = std::make_shared<PointerEatingState>();
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{
+            ui::ScrollView{state, PointerEatingContent{content}}.pointer_pan(true)};
+        test::MockPlatform platform;
+        tree.resize({100.0f, 100.0f});
+        tree.activate(platform);
+        state.set_offset({0.0f, 100.0f});
+
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerDown, 96.0f, 30.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(content->down == 0);
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerMove, 96.0f, 80.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK_NEAR(state.offset().y, 300.0f, 0.001f);
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerUp, 96.0f, 80.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(content->move == 0);
+        NUI_CHECK(content->up == 0);
     }
 }
 
