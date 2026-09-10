@@ -228,3 +228,12 @@ T026 remains `Doing` until the corrected suite is rerun on real macOS/Skia.
 - Main `ed81a201ea459ea2443ae51f27dfcac7af5d7e63` is integrated with all T048 fixtures and CI gates preserved. The sole merge conflict was the roadmap execution snapshot; no production-code conflict resolution was needed. The exact final-head CI result, including relocated consumers, is recorded in PR #87 before merge.
 - Native macOS smoke tests require access to the graphical session. A sandboxed baseline run passed 62/63 but could not create the Cocoa window (non-finite frame before drop dispatch); the identical native test passed immediately with authorized graphical-session access. Run the full platform suite in that environment, not a display-isolated sandbox.
 - Main-integrated local Release build and full CTest in the graphical session: **63/63 PASS**, no compiler warnings. `nativeui_smoke_standalone` and the T048 external-consumer source contract also pass.
+
+## #124 Pugl X11 failed-selection correction — 2026-09-10
+
+- NativeUI advances the shared Pugl pin to reviewed commit `195f79b22644010c81a5e0c3231c591856787ec6`.
+- Root cause: on a failed X11 selection conversion, `SelectionNotify.property == None` could be passed to `XGetWindowProperty()` as atom `None`, causing `BadAtom` and terminating the deterministic lifecycle/clipboard stress path.
+- The correction is owned by the Pugl dependency and guards the failed conversion before the property read. NativeUI keeps the existing T042 fixture unchanged and does not add a local X11 workaround.
+- The Pugl correction was validated by its focused X11 regression and the dependency's Linux, Windows, macOS and WebAssembly validation before the NativeUI pin update.
+- NativeUI dependency-only head `91c8040168703c80fe89cd933bef8e199fd38f1b` passed normal CI run `34399583006` and T042 Lifecycle Stress run `34399583146` before the branch was refreshed onto the current `main`.
+- The refreshed candidate also updates `THIRD_PARTY.md`, `CONTEXT.md`, `ROADMAP.md` and this validation record as required by the dependency-update workflow. Final merge remains gated on normal CI plus T042 Lifecycle Stress for the resulting exact head and a clean mandatory `CODE_REVIEW.md` pass.

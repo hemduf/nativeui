@@ -97,22 +97,26 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/t042-diagnose.sh" <<'EOF'
           set -euo pipefail
-          exe='./build-t042/nativeui_t042_platform_stress'
           diagnose() {
+            exe="$1"
+            shift
             set +e
             "$exe" "$@"
             status=$?
             set -e
             if [ "$status" -ne 0 ]; then
-              echo "T042 fixture $* failed with exit $status; collecting GDB backtrace"
+              echo "T042 fixture $exe $* failed with exit $status; collecting GDB backtrace"
               gdb -batch -ex run -ex 'thread apply all bt' --args "$exe" "$@" || true
               exit "$status"
             fi
           }
-          diagnose --embedded-sequential
-          diagnose --embedded-two-live
-          diagnose --embedded-teardown
-          diagnose --standalone-once 0
+          platform_exe='./build-t042/nativeui_t042_platform_stress'
+          application_exe='./build-t042/nativeui_t042_application_stress'
+          diagnose "$platform_exe" --embedded-sequential
+          diagnose "$platform_exe" --embedded-two-live
+          diagnose "$platform_exe" --embedded-teardown
+          diagnose "$platform_exe" --standalone-once 0
+          diagnose "$application_exe"
           EOF
           xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" \
             bash "$RUNNER_TEMP/t042-diagnose.sh"
@@ -122,22 +126,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          exe='./build-t042/nativeui_t042_platform_stress'
           diagnose() {
+            exe="$1"
+            shift
             set +e
             "$exe" "$@"
             status=$?
             set -e
             if [ "$status" -ne 0 ]; then
-              echo "T042 fixture $* failed with exit $status; collecting LLDB backtrace"
+              echo "T042 fixture $exe $* failed with exit $status; collecting LLDB backtrace"
               lldb --batch -o run -o 'thread backtrace all' -- "$exe" "$@" || true
               exit "$status"
             fi
           }
-          diagnose --embedded-sequential
-          diagnose --embedded-two-live
-          diagnose --embedded-teardown
-          diagnose --standalone-once 0
+          platform_exe='./build-t042/nativeui_t042_platform_stress'
+          application_exe='./build-t042/nativeui_t042_application_stress'
+          diagnose "$platform_exe" --embedded-sequential
+          diagnose "$platform_exe" --embedded-two-live
+          diagnose "$platform_exe" --embedded-teardown
+          diagnose "$platform_exe" --standalone-once 0
+          diagnose "$application_exe"
 
       - name: Test Linux X11
         if: runner.os == 'Linux'
