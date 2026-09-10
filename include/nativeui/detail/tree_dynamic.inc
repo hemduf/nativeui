@@ -203,10 +203,12 @@
                 continue;
             }
 
-            auto* restore = current->focus_restore;
+            const auto restore_id = current->focus_restore;
+            if (restore_id == kInvalidNodeId) continue;
+            const auto* restore = find_node(*root_, restore_id);
             if (restore &&
                 !subtree_is_being_removed(restore, owner, current_keys, desired_keys)) {
-                return restore->id;
+                return restore_id;
             }
         }
         return kInvalidNodeId;
@@ -217,9 +219,12 @@
         const Node& owner,
         const std::vector<std::string>& current_keys,
         const std::vector<std::string>& desired_keys) noexcept {
-        if (node.focus_restore &&
-            subtree_is_being_removed(node.focus_restore, owner, current_keys, desired_keys)) {
-            node.focus_restore = nullptr;
+        if (node.focus_restore != kInvalidNodeId) {
+            const auto* restore = find_node(*root_, node.focus_restore);
+            if (!restore ||
+                subtree_is_being_removed(restore, owner, current_keys, desired_keys)) {
+                node.focus_restore = kInvalidNodeId;
+            }
         }
         for (auto& child : node.children) {
             clear_removed_focus_restore_targets(
