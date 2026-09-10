@@ -1,3 +1,5 @@
+#include <nativeui/detail/dispatcher_owner.hpp>
+
 #include "detail/native_ime_bridge.h"
 #include "detail/pugl_skia_setup.inc"
 #include "detail/pugl_skia_show_policy.inc"

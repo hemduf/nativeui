@@ -119,6 +119,8 @@ struct StandaloneWindow::Impl final : PlatformServices {
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner{
+        std::make_shared<detail::DispatcherOwner>()};
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -235,6 +237,11 @@ std::string_view StandaloneWindow::last_error() const noexcept {
     if (!impl_->construction_error.empty()) return impl_->construction_error;
     return impl_->core ? std::string_view{impl_->core->last_error()} : std::string_view{};
 }
+Dispatcher StandaloneWindow::dispatcher() const noexcept {
+    return impl_ && impl_->core && impl_->dispatcher_owner
+        ? impl_->dispatcher_owner->dispatcher()
+        : Dispatcher{};
+}
 bool StandaloneWindow::set_size(Size size) {
     return impl_ && impl_->core && impl_->core->set_size(size);
 }
@@ -273,6 +280,8 @@ struct EmbeddedView::Impl final : PlatformServices {
     void reject_drop(Rect region) override { core.reject_drop(region); }
 
     ViewCore core;
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner{
+        std::make_shared<detail::DispatcherOwner>()};
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
@@ -286,6 +295,9 @@ Size EmbeddedView::size() const noexcept { return impl_ ? impl_->core.size() : S
 float EmbeddedView::scale_factor() const noexcept { return impl_ ? impl_->core.scale_factor() : 1.0f; }
 NativeViewHandle EmbeddedView::native_handle() const noexcept { return impl_ ? impl_->core.native_handle() : 0; }
 std::string_view EmbeddedView::last_error() const noexcept { return impl_ ? std::string_view{impl_->core.last_error()} : std::string_view{}; }
+Dispatcher EmbeddedView::dispatcher() const noexcept {
+    return impl_ && impl_->dispatcher_owner ? impl_->dispatcher_owner->dispatcher() : Dispatcher{};
+}
 bool EmbeddedView::set_size(Size size) { return impl_ && impl_->core.set_size(size); }
 void EmbeddedView::set_text_input(bool active, Rect area, float cursor_offset) {
     impl_->core.set_text_input(active, area, cursor_offset);

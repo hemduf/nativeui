@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/dispatcher.hpp>
 #include <nativeui/ui.hpp>
 
 #include <cstdint>
@@ -89,6 +90,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept;
     bool set_size(Size logical_size);
 
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
@@ -129,6 +131,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept;
     bool set_size(Size logical_size);
 
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
