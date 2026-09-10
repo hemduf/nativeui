@@ -148,6 +148,10 @@ public:
     LoopProbeComponent(ui::State<bool>& visible, std::shared_ptr<LoopState> state)
         : visible_(&visible), state_(std::move(state)) {}
 
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {1.0f, 1.0f};
+    }
+
     void mount(ui::MountContext&) override {
         ++state_->mounts;
         if (state_->armed) visible_->set(false);
@@ -268,27 +272,23 @@ void keyed_contract() {
     const auto a_id = log->mounted_ids.at("A").front();
     const auto b_id = log->mounted_ids.at("B").front();
 
-    // Reorder preserves retained identity with zero lifecycle churn.
     items.set({DynamicItem{"B", "B"}, DynamicItem{"A", "A"}});
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(log->events.size() == 4);
     NUI_CHECK(log->mounted_ids.at("A").front() == a_id);
     NUI_CHECK(log->mounted_ids.at("B").front() == b_id);
 
-    // Same key with different child content deliberately does not replace.
     items.set({DynamicItem{"B", "replacement-B"}, DynamicItem{"A", "A"}});
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(log->events.size() == 4);
     NUI_CHECK(!log->mounted_ids.contains("replacement-B"));
 
-    // Duplicate-key update is rejected atomically; prior retained children stay.
     items.set({DynamicItem{"A", "A"}, DynamicItem{"A", "duplicate"}});
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(log->events.size() == 4);
     NUI_CHECK(log->mounted_ids.at("A").front() == a_id);
     NUI_CHECK(log->mounted_ids.at("B").front() == b_id);
 
-    // A later valid update recovers from the rejected snapshot and adds only C.
     items.set({
         DynamicItem{"B", "B"},
         DynamicItem{"C", "C"},
@@ -344,14 +344,11 @@ void bounded_reconciliation_contract() {
     loop->armed = true;
     visible.set(false);
 
-    // One top-level checkpoint is bounded to exactly 32 structural passes.
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(loop->mounts == 17);
     NUI_CHECK(loop->unmounts == 16);
     NUI_CHECK(!visible.get());
 
-    // Pass-33 work was preserved, and the next checkpoint resumes it with the
-    // same exact bound rather than dropping work or recursing indefinitely.
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(loop->mounts == 33);
     NUI_CHECK(loop->unmounts == 32);
