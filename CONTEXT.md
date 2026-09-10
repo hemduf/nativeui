@@ -27,7 +27,7 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-Current `main` is `2d483ffe3585b9ab619a743a2131badb4709fa4f`, which includes completed T045 / PR #210 and the post-T036 hover correction #212 / PR #213 on top of T037, T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and the warning-free source-tree baseline.
+The current implementation baseline includes completed T045 / PR #210 and the post-T036 hover correction #212 / PR #213 (squash merge `2d483ffe3585b9ab619a743a2131badb4709fa4f`) on top of T037, T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and the warning-free source-tree baseline.
 
 The UI/accessibility critical path is now:
 
