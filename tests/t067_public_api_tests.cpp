@@ -150,6 +150,41 @@ void suite() {
         NUI_CHECK(activated == 50);
     }
 
+    // Composite keyboard focus is logical-key identity, not the row's old
+    // dataset index. Reordering while focused but unselected must preserve the
+    // active key so the next arrow continues from that key's new position.
+    {
+        ui::State<std::optional<int>> selected{std::nullopt};
+        VirtualState state{
+            selected,
+            20.0f,
+            [](const VirtualState::Item&) { return ui::Spacer{100.0f, 20.0f}; }};
+        NUI_CHECK(state.replace({
+            VirtualState::Item{10, "ten"},
+            VirtualState::Item{20, "twenty"},
+            VirtualState::Item{30, "thirty"},
+        }));
+
+        ui::UI tree{ui::ListView<int>{state}};
+        test::MockPlatform platform;
+        tree.resize({100.0f, 60.0f});
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{{100.0f, 60.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!selected.get());
+
+        NUI_CHECK(state.replace({
+            VirtualState::Item{30, "thirty"},
+            VirtualState::Item{10, "ten"},
+            VirtualState::Item{20, "twenty"},
+        }));
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!selected.get());
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Down), platform) == ui::EventResult::Handled);
+        NUI_CHECK(selected.get() && *selected.get() == 20);
+    }
+
     // Focus and capture are two independent bounded exceptions. Keep logical
     // focus on row 99, capture row 0, then scroll the normal window to row 50.
     // The materialized set may exceed the normal 9-row window by at most two.
