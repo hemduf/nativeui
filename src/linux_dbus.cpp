@@ -633,6 +633,11 @@ struct LinuxDbusTransport::Impl final {
         return wait_ms;
     }
 
+    void wake_io() noexcept {
+        io_wake_generation.fetch_add(1, std::memory_order_release);
+        io_wakeup.notify_one();
+    }
+
     void expire_pending_calls() noexcept {
         for (;;) {
             LinuxDbusRequestId id = kInvalidLinuxDbusRequestId;
@@ -1066,6 +1071,7 @@ struct LinuxDbusTransport::Impl final {
 
     mutable std::mutex lifecycle_mutex;
     std::condition_variable lifecycle_idle;
+    std::condition_variable io_wakeup;
     mutable std::mutex pending_mutex;
     mutable std::mutex signal_mutex;
     mutable std::mutex object_mutex;
@@ -1074,6 +1080,7 @@ struct LinuxDbusTransport::Impl final {
     std::thread io_thread;
     std::atomic<bool> stop_requested{false};
     std::atomic<bool> running{false};
+    std::atomic<std::uint64_t> io_wake_generation{0};
     std::string unique_name;
     bool destroying{};
     bool stopping{};
@@ -1148,10 +1155,25 @@ LinuxDbusErrorCode LinuxDbusTransport::start() {
         Impl* state = impl_.get();
         impl_->io_thread = std::thread([state] {
             while (!state->stop_requested.load(std::memory_order_acquire)) {
+                const auto wake_generation =
+                    state->io_wake_generation.load(std::memory_order_acquire);
+                const int wait_ms = state->io_wait_timeout_ms();
+                {
+                    std::unique_lock control_lock{state->control_mutex};
+                    state->io_wakeup.wait_for(
+                        control_lock, std::chrono::milliseconds{wait_ms}, [&] {
+                            return state->stop_requested.load(std::memory_order_acquire) ||
+                                   state->io_wake_generation.load(std::memory_order_acquire) !=
+                                       wake_generation ||
+                                   !state->signal_setup_commands.empty();
+                        });
+                }
+                if (state->stop_requested.load(std::memory_order_acquire)) {
+                    break;
+                }
                 state->process_signal_setup_commands();
                 state->expire_pending_calls();
-                if (dbus_connection_read_write_dispatch(
-                        state->connection, state->io_wait_timeout_ms()) == FALSE) {
+                if (dbus_connection_read_write_dispatch(state->connection, 0) == FALSE) {
                     break;
                 }
                 state->expire_pending_calls();
@@ -1181,6 +1203,7 @@ void LinuxDbusTransport::stop() noexcept {
         if (impl_->stopping) {
             if (impl_->io_thread.get_id() == std::this_thread::get_id()) {
                 impl_->stop_requested.store(true, std::memory_order_release);
+                impl_->wake_io();
                 return;
             }
             impl_->lifecycle_idle.wait(lock, [&] { return !impl_->stopping; });
@@ -1192,6 +1215,7 @@ void LinuxDbusTransport::stop() noexcept {
 
         if (impl_->io_thread.joinable() &&
             impl_->io_thread.get_id() == std::this_thread::get_id()) {
+            impl_->wake_io();
             return;
         }
 
@@ -1210,6 +1234,7 @@ void LinuxDbusTransport::stop() noexcept {
         }
     }
 
+    impl_->wake_io();
     if (io_thread.joinable()) {
         io_thread.join();
     }
@@ -1426,6 +1451,7 @@ LinuxDbusRequestId LinuxDbusTransport::call_method(
         }
     }
 
+    impl_->wake_io();
     if (complete_immediately) {
         (void)impl_->calls.complete(client, id, std::move(immediate_completion));
     }
@@ -1513,6 +1539,7 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
                 std::lock_guard control_lock{impl_->control_mutex};
                 impl_->signal_setup_commands.push_back(setup);
             }
+            impl_->wake_io();
 
             std::unique_lock setup_lock{setup->mutex};
             if (!setup->ready.wait_for(setup_lock, std::chrono::milliseconds{1'500},
