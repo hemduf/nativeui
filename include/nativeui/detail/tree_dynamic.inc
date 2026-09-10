@@ -44,6 +44,21 @@
         return nullptr;
     }
 
+    [[nodiscard]] static bool contains_dynamic_key(
+        const std::vector<std::string>& keys, const std::string& key) {
+        return std::find(keys.begin(), keys.end(), key) != keys.end();
+    }
+
+    [[nodiscard]] static bool has_duplicate_dynamic_keys(
+        const std::vector<std::string>& keys) {
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            for (std::size_t j = i + 1; j < keys.size(); ++j) {
+                if (keys[i] == keys[j]) return true;
+            }
+        }
+        return false;
+    }
+
     void register_dynamic_node(Node& node) {
         auto* source = dynamic_source(node);
         if (!source) return;
@@ -53,6 +68,10 @@
         });
 
         auto keys = source->desired_keys();
+        if (has_duplicate_dynamic_keys(keys)) {
+            structural_diagnostic_ = "duplicate dynamic key";
+            keys.clear();
+        }
         if (keys.size() != node.children.size()) {
             structural_diagnostic_ = "dynamic initial child/key count mismatch";
             keys.clear();
@@ -90,21 +109,6 @@
         // reconcile_dynamic_node() performs the actual layout invalidation only
         // when the retained key/branch structure changes.
         invalidate_paint(viewport_rect());
-    }
-
-    [[nodiscard]] static bool contains_dynamic_key(
-        const std::vector<std::string>& keys, const std::string& key) {
-        return std::find(keys.begin(), keys.end(), key) != keys.end();
-    }
-
-    [[nodiscard]] static bool has_duplicate_dynamic_keys(
-        const std::vector<std::string>& keys) {
-        for (std::size_t i = 0; i < keys.size(); ++i) {
-            for (std::size_t j = i + 1; j < keys.size(); ++j) {
-                if (keys[i] == keys[j]) return true;
-            }
-        }
-        return false;
     }
 
     static void collect_dirty_dynamic_nodes(
