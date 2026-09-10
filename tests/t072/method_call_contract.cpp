@@ -41,7 +41,10 @@ int main() {
 
     DispatcherOwner owner;
     const auto dispatcher = owner.dispatcher();
-    constexpr LinuxDbusClientId client = 1;
+    const auto client = transport.register_client();
+    if (client == kInvalidLinuxDbusClientId) {
+        return EXIT_FAILURE;
+    }
 
     bool success_done = false;
     LinuxDbusCompletion success;
@@ -130,7 +133,11 @@ int main() {
         stage("slow-peer-start-failed");
         return EXIT_FAILURE;
     }
-    constexpr LinuxDbusClientId slow_peer_client = 2;
+    const auto slow_peer_client = slow_peer.register_client();
+    if (slow_peer_client == kInvalidLinuxDbusClientId) {
+        stage("slow-peer-client-failed");
+        return EXIT_FAILURE;
+    }
     const auto slow_path = slow_peer.register_object_path(
         slow_peer_client, "/org/nativeui/T072/Slow",
         [](const LinuxDbusMethodRequest&) {
@@ -193,6 +200,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    transport.release_client(client);
     transport.stop();
     stage("complete");
     return EXIT_SUCCESS;
