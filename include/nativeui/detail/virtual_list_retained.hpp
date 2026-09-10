@@ -19,6 +19,8 @@
 
 namespace ui::detail {
 
+inline constexpr Color kVirtualListHoverSurface{0.145f, 0.155f, 0.175f, 1.0f};
+
 template <class Key>
 class VirtualListRetainedRuntime {
 public:
@@ -114,6 +116,11 @@ public:
         if (!selection_ || !selection_->get()) return std::nullopt;
         const auto index = model_.index_of_key(*selection_->get());
         return index && enabled_at(*index) ? index : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> materialized_selected_index() const noexcept {
+        if (!selection_ || !selection_->get()) return std::nullopt;
+        return materialized_index_for_key(*selection_->get());
     }
 
     [[nodiscard]] std::optional<std::size_t> first_enabled() const noexcept {
@@ -466,8 +473,21 @@ public:
         runtime_->set_focused_index(active_index_);
     }
 
-    EventResult input(const InputEvent& event, InputContext&) override {
+    EventResult input(const InputEvent& event, InputContext& context) override {
         auto runtime = runtime_;
+        switch (event.type) {
+        case InputType::PointerMove: {
+            const auto index = row_at(event.position, context.bounds());
+            set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
+            return EventResult::Ignored;
+        }
+        case InputType::PointerLeave:
+            set_hovered(std::nullopt, context);
+            return EventResult::Ignored;
+        default:
+            break;
+        }
+
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
 
         if (const auto selected = runtime->selected_index()) {
@@ -513,7 +533,28 @@ public:
         return EventResult::Handled;
     }
 
-    void paint(PaintContext&) const override {}
+    void deactivate(LifecycleContext&) override { hovered_index_.reset(); }
+
+    void paint(PaintContext& context) const override {
+        const auto bounds = context.bounds();
+        auto& painter = context.painter();
+        painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
+
+        const auto selected = runtime_->materialized_selected_index();
+        if (selected) {
+            paint_row_highlight(painter, bounds, *selected, colors::selection, true);
+        }
+        if (effective_enabled() && hovered_index_ && runtime_->enabled_at(*hovered_index_) &&
+            (!selected || *selected != *hovered_index_)) {
+            paint_row_highlight(painter, bounds, *hovered_index_, kVirtualListHoverSurface, false);
+        }
+
+        painter.stroke_rounded_rect(
+            bounds,
+            9.0f,
+            context.focused() ? 1.5f : 1.0f,
+            context.focused() ? colors::borderFocus : colors::border);
+    }
 
 private:
     [[nodiscard]] State<std::optional<Key>>* selection_state() const noexcept {
@@ -523,8 +564,60 @@ private:
         return runtime_->selection_state();
     }
 
+    void set_hovered(std::optional<std::size_t> index, InputContext& context) {
+        if (hovered_index_ == index) return;
+        hovered_index_ = index;
+        context.invalidate();
+    }
+
+    [[nodiscard]] std::optional<std::size_t> row_at(Point position, Rect bounds) const noexcept {
+        if (!bounds.contains(position)) return std::nullopt;
+        const double content_y = static_cast<double>(position.y - bounds.y) +
+                                 static_cast<double>(runtime_->scroll().offset().y);
+        const double row_height = static_cast<double>(runtime_->row_height());
+        if (!std::isfinite(content_y) || content_y < 0.0 || !(row_height > 0.0)) {
+            return std::nullopt;
+        }
+        const double index_value = std::floor(content_y / row_height);
+        if (index_value < 0.0 || index_value >= static_cast<double>(runtime_->size())) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(index_value);
+    }
+
+    void paint_row_highlight(
+        Painter& painter,
+        Rect bounds,
+        std::size_t index,
+        Color color,
+        bool selected) const {
+        const double local_y = static_cast<double>(index) *
+                                   static_cast<double>(runtime_->row_height()) -
+                               static_cast<double>(runtime_->scroll().offset().y);
+        if (!std::isfinite(local_y)) return;
+
+        const Rect highlight{
+            bounds.x + 4.0f,
+            bounds.y + static_cast<float>(local_y) + 2.0f,
+            std::max(0.0f, bounds.w - 8.0f),
+            std::max(0.0f, runtime_->row_height() - 4.0f)};
+        const auto visible = intersect(highlight, bounds);
+        if (visible.empty()) return;
+        painter.fill_rounded_rect(visible, 6.0f, color);
+        if (selected && visible.w > 6.0f && visible.h > 14.0f) {
+            painter.fill_rounded_rect(
+                {visible.x + 3.0f,
+                 visible.y + 7.0f,
+                 3.0f,
+                 std::max(0.0f, visible.h - 14.0f)},
+                1.5f,
+                colors::accent);
+        }
+    }
+
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime_;
     std::optional<std::size_t> active_index_;
+    std::optional<std::size_t> hovered_index_;
     typename State<std::optional<Key>>::Subscription selection_subscription_;
 };
 
