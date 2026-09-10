@@ -3,7 +3,10 @@
 #include <string>
 #include <vector>
 
-void nativeui_header_compile_nativeui() {}
+void nativeui_header_compile_nativeui() {
+    ui::Theme theme = ui::default_theme();
+    (void)theme;
+}
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
