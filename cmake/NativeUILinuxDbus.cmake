@@ -10,6 +10,7 @@ function(nativeui_add_linux_dbus_transport)
   endif()
 
   find_package(PkgConfig REQUIRED)
+  find_package(Threads REQUIRED)
   pkg_check_modules(NATIVEUI_DBUS REQUIRED IMPORTED_TARGET dbus-1)
 
   add_library(nativeui_linux_dbus STATIC
@@ -25,6 +26,7 @@ function(nativeui_add_linux_dbus_transport)
   target_link_libraries(nativeui_linux_dbus PRIVATE
     NativeUI::Core
     PkgConfig::NATIVEUI_DBUS
+    Threads::Threads
   )
 
   if(COMMAND nativeui_enable_project_warnings)
