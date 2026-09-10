@@ -114,28 +114,121 @@ struct SemanticInfo {
 // mints a non-zero token when a logical key enters the accepted dataset, keeps
 // it stable while that key remains present (including reorder), and never
 // reuses it for another live/stale item identity in that collection lifetime.
+struct VirtualSemanticItemMetadata {
+    VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
+    std::string name;
+    std::string description;
+    bool enabled{true};
+    bool read_only{};
+    SemanticCheckedState checked{SemanticCheckedState::NotApplicable};
+    std::vector<SemanticAction> actions;
+
+    bool operator==(const VirtualSemanticItemMetadata&) const = default;
+};
+
 struct VirtualSemanticItem {
     VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
     SemanticInfo info;
     Rect logical_bounds{};
 };
 
-// Immutable snapshot interface for a logical virtual collection generation.
-// Implementations may share an O(N) immutable metadata object and combine it
-// with small per-generation selection/geometry state; item_at() must not mount
-// or otherwise materialize visual retained rows.
+// Immutable, data-only virtual ListView snapshot. The O(N) metadata allocation
+// is shared between semantic generations while selection/scroll geometry can
+// vary in this cheap value. item_at() never calls application code or a visual
+// row factory and therefore remains safe for immutable native read snapshots.
 class VirtualSemanticChildren {
 public:
-    virtual ~VirtualSemanticChildren() = default;
+    using Metadata = std::vector<VirtualSemanticItemMetadata>;
+    using MetadataSnapshot = std::shared_ptr<const Metadata>;
 
-    [[nodiscard]] virtual std::uint64_t dataset_generation() const noexcept = 0;
-    [[nodiscard]] virtual std::size_t size() const noexcept = 0;
-    [[nodiscard]] virtual std::optional<VirtualSemanticItem> item_at(
-        std::size_t index) const = 0;
-    [[nodiscard]] virtual std::optional<std::size_t> index_of_selected_item() const noexcept = 0;
+    VirtualSemanticChildren()
+        : metadata_(std::make_shared<const Metadata>()) {}
+
+    [[nodiscard]] static VirtualSemanticChildren from_metadata(
+        std::uint64_t dataset_generation,
+        MetadataSnapshot metadata,
+        std::optional<VirtualSemanticItemToken> selected,
+        Rect list_bounds,
+        float row_height,
+        float scroll_y) {
+        if (!metadata) {
+            metadata = std::make_shared<const Metadata>();
+        }
+        return VirtualSemanticChildren{
+            dataset_generation, std::move(metadata), selected, list_bounds, row_height, scroll_y};
+    }
+
+    [[nodiscard]] std::uint64_t dataset_generation() const noexcept {
+        return dataset_generation_;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept {
+        return metadata_->size();
+    }
+
+    [[nodiscard]] std::optional<VirtualSemanticItem> item_at(std::size_t index) const {
+        if (index >= metadata_->size()) {
+            return std::nullopt;
+        }
+
+        const auto& metadata = (*metadata_)[index];
+        VirtualSemanticItem item;
+        item.token = metadata.token;
+        item.info.role = SemanticRole::ListItem;
+        item.info.name = metadata.name;
+        item.info.description = metadata.description;
+        item.info.enabled = metadata.enabled;
+        item.info.read_only = metadata.read_only;
+        item.info.checked = metadata.checked;
+        item.info.selected = selected_.has_value() && *selected_ == metadata.token;
+        item.info.focusable = true;
+        item.info.actions = metadata.actions;
+        item.logical_bounds = {
+            list_bounds_.x,
+            list_bounds_.y + static_cast<float>(index) * row_height_ - scroll_y_,
+            list_bounds_.w,
+            row_height_,
+        };
+        return item;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> index_of_selected_item() const noexcept {
+        if (!selected_.has_value()) {
+            return std::nullopt;
+        }
+        for (std::size_t index = 0; index < metadata_->size(); ++index) {
+            if ((*metadata_)[index].token == *selected_) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] const MetadataSnapshot& metadata_snapshot() const noexcept {
+        return metadata_;
+    }
+
+private:
+    VirtualSemanticChildren(std::uint64_t dataset_generation,
+                            MetadataSnapshot metadata,
+                            std::optional<VirtualSemanticItemToken> selected,
+                            Rect list_bounds,
+                            float row_height,
+                            float scroll_y)
+        : dataset_generation_(dataset_generation),
+          metadata_(std::move(metadata)),
+          selected_(selected),
+          list_bounds_(list_bounds),
+          row_height_(row_height),
+          scroll_y_(scroll_y) {}
+
+    std::uint64_t dataset_generation_{};
+    MetadataSnapshot metadata_;
+    std::optional<VirtualSemanticItemToken> selected_;
+    Rect list_bounds_{};
+    float row_height_{};
+    float scroll_y_{};
 };
-
-using VirtualSemanticChildrenSnapshot = std::shared_ptr<const VirtualSemanticChildren>;
 
 struct SemanticNodeSnapshot {
     SemanticId id{kInvalidSemanticId};
@@ -143,7 +236,7 @@ struct SemanticNodeSnapshot {
     SemanticInfo info;
     Rect bounds{};
     std::vector<SemanticId> children;
-    VirtualSemanticChildrenSnapshot virtual_children;
+    std::optional<VirtualSemanticChildren> virtual_children;
 };
 
 struct SemanticTreeSnapshot {
