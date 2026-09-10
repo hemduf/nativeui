@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <functional>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -106,6 +107,34 @@ int main() {
     if (transport.subscribe_signal(client, dispatcher, invalid,
                                    [](LinuxDbusSignal) {}) !=
         kInvalidLinuxDbusSubscriptionId) {
+        return EXIT_FAILURE;
+    }
+
+    LinuxDbusSignalMatch never_emitted;
+    never_emitted.interface = "org.nativeui.T072.Capacity";
+    never_emitted.member = "NeverEmitted";
+    std::vector<LinuxDbusSubscriptionId> capacity_subscriptions;
+    capacity_subscriptions.reserve(kLinuxDbusMaxSubscriptions);
+    for (std::size_t i = 0; i < kLinuxDbusMaxSubscriptions; ++i) {
+        const auto id = transport.subscribe_signal(
+            client, dispatcher, never_emitted, [](LinuxDbusSignal) {});
+        if (id == kInvalidLinuxDbusSubscriptionId) {
+            return EXIT_FAILURE;
+        }
+        capacity_subscriptions.push_back(id);
+    }
+    if (transport.subscription_count() != kLinuxDbusMaxSubscriptions ||
+        transport.subscribe_signal(client, dispatcher, never_emitted,
+                                   [](LinuxDbusSignal) {}) !=
+            kInvalidLinuxDbusSubscriptionId) {
+        return EXIT_FAILURE;
+    }
+    for (const auto id : capacity_subscriptions) {
+        if (!transport.unsubscribe_signal(client, id)) {
+            return EXIT_FAILURE;
+        }
+    }
+    if (transport.subscription_count() != 0) {
         return EXIT_FAILURE;
     }
 
