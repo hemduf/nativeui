@@ -17,7 +17,7 @@ This roadmap turns NativeUI into a reusable desktop retained-mode UI toolkit whi
 
 ## Current execution snapshot
 
-`main` now contains the standard widget set through T033 and the supported T060 multi-window lifecycle stress from #139. T052 / PR #120 completes the v0.1 developer-preview release/package qualification once its final documentation-only head passes the same exact-head gates and is merged. The state/widget lane remains on T034 / PR #135 and the platform/event lane on T065 / PR #133.
+`main` contains the standard widget set through T033, the supported T060 multi-window lifecycle stress from #139, and the completed T052 v0.1 developer-preview release/package gate from PR #120. The state/widget lane remains on T034 / PR #135, the platform/event lane on T065 / PR #133, and the platform geometry/input lane is completing T043 / PR #142 before taking T044.
 
 Current dependency frontier:
 
@@ -27,12 +27,14 @@ state/widgets:     T059(done) -> T030(done) -> T031(done)
                                        |-> T033(done)
                                        +-> T034(active PR #135) -> T035 / T036
 
-lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done after PR #120)
+lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
                    T042(done) -> T051(done) ---------------------> T052
 
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
+
+platform/geometry: T041(done) -> T043(active PR #142) -> T044
 
 platform/event:    T060(done) -> T065(active PR #133) -> T072 -> T064
 ```
@@ -126,7 +128,15 @@ Core lifecycle/consumer-safety baseline is delivered:
 
 #139's final head `ee482da974222299bc94904ed8256511da1a256d` passed T042 Lifecycle Stress `34434737094`, T060 Application Contract `34434737109` and normal CI `34434737107`; final review found no Blocking/Important issue.
 
-Independent platform hardening such as T043/T044 remains outside the state/widget and package/release lanes.
+### T043 — Resize/scale negotiation
+
+T043 / issue #43 / PR #142 is the active completion candidate for the geometry/input lane. It establishes one per-view logical/native geometry contract: finite positive retained scale, configure-authoritative logical viewport, transient zero-size suppression, one-time physical/logical conversion for size/input/dirty/drop/text-input geometry, and advisory preferred-size callbacks for standalone and embedded views.
+
+Review/TDD corrections in the candidate include dedicated build registration, Release-active tests, teardown-safe preferred callback dispatch, and an exact Pugl span conversion that keeps covering `ceil` rounding while preserving the pinned dependency's documented 1..10000 view-size range. Embedded native smoke covers parent authority and reentrant callback-driven size grants. T043 may merge only after the final documentation head is refreshed from current `main`, its exact CI/T042/T060/platform/sanitizer gates are green, and the final `CODE_REVIEW.md` pass reports no Blocking/Important finding.
+
+### T044 — OS pointer capture evidence/fix
+
+T044 follows T043 in this lane once T043 is merged. Its T015/T041 dependencies are already complete. The ticket is evidence-gated: run the same outside-view drag/release/focus-loss/two-view fixture on macOS, Windows and Linux/X11, classify each platform as toolkit capture sufficient or native capture required, and add only the smallest per-platform native extension where loss is reproduced.
 
 ## Milestone 8 — Packaging, tooling and release
 
@@ -134,9 +144,9 @@ Delivered foundations include T047 low-level package export, T048 relocated exte
 
 ### T052 — v0.1 developer-preview release gate
 
-T052 / PR #120 establishes the infrastructure/package release baseline without claiming NativeUI 1.0 product completeness. Its final pre-completion candidate was synchronized from current `main` `63e2603a6d85be3636347d476d2df0247f180622` and passed the complete exact-head workflow set: T052 Release Gate `34442124731`, normal CI `34442124735`, T042 Lifecycle Stress `34442124762`, T051 Release Benchmarks `34442124746`, and T060 Application Contract `34442124771`.
+T052 / PR #120 establishes the infrastructure/package release baseline without claiming NativeUI 1.0 product completeness. Its pre-completion candidate was synchronized from `main` `63e2603a6d85be3636347d476d2df0247f180622` and passed T052 Release Gate `34442124731`, normal CI `34442124735`, T042 Lifecycle Stress `34442124762`, T051 Release Benchmarks `34442124746`, and T060 Application Contract `34442124771`. PR #120 is now merged on `main`.
 
-The gate validates clean-cache pinned Pugl/Skia bootstrap and fail-closed checksums on Linux X11, Windows and macOS; relocated low-level package consumption through `NativeUI::Core + nativeui_attach_platform()`; macOS consumer-specific T053 Objective-C namespaces; the supported T060/#139 lifecycle path; T051 comparative performance policy and exact-zero idle invalidation; and developer-preview release/legal documentation. The documentation-only completion head must rerun the same exact-head workflows before merge, because T052 records evidence only for the exact current candidate.
+The gate validates clean-cache pinned Pugl/Skia bootstrap and fail-closed checksums on Linux X11, Windows and macOS; relocated low-level package consumption through `NativeUI::Core + nativeui_attach_platform()`; macOS consumer-specific T053 Objective-C namespaces; the supported T060/#139 lifecycle path; T051 comparative performance policy and exact-zero idle invalidation; and developer-preview release/legal documentation.
 
 Remaining release/package frontier after T052:
 
@@ -149,9 +159,9 @@ There is no additional dependency-unblocked P0 package implementation immediatel
 
 ## Immediate cross-lane plan
 
-1. Finish the final documentation-head exact-SHA qualification and merge T052 / PR #120 if every required workflow is green and the final aggregate `CODE_REVIEW.md` audit is clean.
-2. Resume T034 / PR #135 in the independent state/widget lane.
-3. Continue T065 / PR #133 in the independent platform/event lane; T072/T064 remain downstream.
+1. Finish T043 / PR #142 exact-head qualification/review and merge it if the complete candidate is green; then take T044 in the geometry/input lane.
+2. Resume T034 / PR #135 only in the independent state/widget lane.
+3. Continue T065 / PR #133 only in the independent platform/event lane; T072/T064 remain downstream.
 4. Keep T069/T070/T071 blocked until their explicit dependency sets are complete; do not broaden package work to bypass those gates.
 
 ## Prioritization rule
