@@ -138,6 +138,51 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // T072 is shared by the Portal and AT-SPI clients. In addition to receiving
+    // signals, the transport must be able to emit a bounded plain-value signal
+    // without exposing libdbus objects to either client.
+    std::size_t emitted_callback_count = 0;
+    LinuxDbusSignal emitted_signal;
+    LinuxDbusSignalMatch emitted_match;
+    emitted_match.path = "/org/nativeui/T072/Signal";
+    emitted_match.interface = "org.nativeui.T072.Test";
+    emitted_match.member = "Changed";
+    const auto emitted_subscription = peer.subscribe_signal(
+        sibling_client,
+        dispatcher,
+        emitted_match,
+        [&](LinuxDbusSignal signal) {
+            emitted_signal = std::move(signal);
+            ++emitted_callback_count;
+        });
+    if (emitted_subscription == kInvalidLinuxDbusSubscriptionId) {
+        return EXIT_FAILURE;
+    }
+
+    const std::vector<LinuxDbusValue> emitted_arguments{
+        LinuxDbusValue::string("payload"),
+        LinuxDbusValue::uint32(7),
+    };
+    if (!transport.send_signal(
+            "/org/nativeui/T072/Signal",
+            "org.nativeui.T072.Test",
+            "Changed",
+            emitted_arguments) ||
+        !drain_until(owner, [&] { return emitted_callback_count == 1; }, 2s) ||
+        emitted_signal.sender != transport.unique_name() ||
+        emitted_signal.path != "/org/nativeui/T072/Signal" ||
+        emitted_signal.interface != "org.nativeui.T072.Test" ||
+        emitted_signal.member != "Changed" ||
+        emitted_signal.arguments != emitted_arguments ||
+        transport.send_signal("relative/path", "org.nativeui.T072.Test", "Changed", {}) ||
+        transport.send_signal("/org/nativeui/T072/Signal", "not an interface", "Changed", {}) ||
+        transport.send_signal("/org/nativeui/T072/Signal", "org.nativeui.T072.Test", "bad.member", {})) {
+        return EXIT_FAILURE;
+    }
+    if (!peer.unsubscribe_signal(sibling_client, emitted_subscription)) {
+        return EXIT_FAILURE;
+    }
+
     later_peer.stop();
     peer.stop();
     transport.stop();
