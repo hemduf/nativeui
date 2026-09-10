@@ -6,9 +6,12 @@ on:
     paths:
       - 'include/nativeui/dispatcher.hpp'
       - 'include/nativeui/detail/dispatcher_owner.hpp'
+      - 'include/nativeui/nativeui.hpp'
       - 'src/dispatcher.cpp'
       - 'tests/dispatcher_tests.cpp'
+      - 'tests/dispatcher_edge_tests.cpp'
       - 'tests/t065/**'
+      - 'tests/t065_root_integration_contract.cmake'
       - 'examples/features/t065_ui_dispatcher.cpp'
       - 'CMakeLists.txt'
       - '.github/workflows/t065-dispatcher-contract.yml'
@@ -39,6 +42,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Root integration contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t065_root_integration_contract.cmake
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
