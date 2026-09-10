@@ -443,14 +443,14 @@ int run_standalone_once(int cycle) {
 }
 
 int run_standalone_contract() {
-    // Issue #64 froze Decision B: simultaneous independent StandaloneWindow /
-    // PUGL_PROGRAM worlds are not a supported current contract. T060 owns the
-    // future one-Application/one-PROGRAM-world multi-window fixture. This mode
-    // is deliberately executable evidence that T042 does not hide a singleton
-    // or create unsupported A+B PROGRAM worlds merely to satisfy a stress test.
+    // #64 Decision B remains the ownership rule, but T060 now provides the
+    // supported multi-window path through one explicit Application/PROGRAM
+    // owner. The registered T042 gate exercises that path in
+    // nativeui_t042_application_stress. Keep this legacy diagnostic only to
+    // assert that independent simultaneous PROGRAM worlds are still forbidden.
     std::cout
-        << "PASS standalone_supported_multi_instance: Decision B; "
-           "simultaneous top-level windows deferred to T060\n";
+        << "PASS standalone_legacy_contract: Decision B preserved; "
+           "supported multi-window stress uses one explicit ui::Application / PUGL_PROGRAM world\n";
     return 0;
 }
 
