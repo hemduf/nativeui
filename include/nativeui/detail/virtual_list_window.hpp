@@ -38,23 +38,21 @@ public:
         float scroll_y,
         float viewport_height,
         std::size_t overscan = 2,
-        std::optional<Key> focused_key = std::nullopt,
-        std::optional<Key> captured_key = std::nullopt) {
-        const auto next_indices = model_->materialized_indices(
-            row_height_,
-            scroll_y,
-            viewport_height,
-            overscan,
-            std::move(focused_key),
-            std::move(captured_key));
-        if (!next_indices) return false;
+        std::optional<std::size_t> focused_index = std::nullopt,
+        std::optional<std::size_t> captured_index = std::nullopt) {
+        const auto range = virtual_list_materialization_range(
+            model_->size(), row_height_, scroll_y, viewport_height, overscan);
+        if (!range) return false;
+
+        const auto next_indices = virtual_list_materialized_indices(
+            model_->size(), *range, focused_index, captured_index);
 
         std::vector<MaterializedItem> next_items;
         std::vector<std::string> next_keys;
-        next_items.reserve(next_indices->size());
-        next_keys.reserve(next_indices->size());
+        next_items.reserve(next_indices.size());
+        next_keys.reserve(next_indices.size());
 
-        for (const auto index : *next_indices) {
+        for (const auto index : next_indices) {
             const auto* encoded_key = model_->encoded_key_at(index);
             const auto* item = model_->item_at(index);
             if (!encoded_key || !item) return false;
@@ -76,7 +74,7 @@ public:
             next_items.push_back(MaterializedItem{retained_key, index, std::move(payload)});
         }
 
-        indices_ = *next_indices;
+        indices_ = next_indices;
         keys_ = std::move(next_keys);
         items_ = std::move(next_items);
         return true;
