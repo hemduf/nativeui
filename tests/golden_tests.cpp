@@ -238,13 +238,13 @@ bool verify_label(bool update) {
 
 bool verify_overlay_portal(bool update) {
     // The retained root owns a deliberately small nested clip. T061 overlays
-    // are siblings in the per-UI overlay host, so their red/green surfaces must
+    // are siblings in the per-UI overlay host, so the lower red surface must
     // paint outside that ordinary root clip. The later Ignore overlay must
     // still paint on top even though pointer hit testing ignores its subtree.
     ui::UI tree{
-        ui::Padding{24.0f,
+        ui::Padding{3.0f,
             ui::Clip{
-                ui::Canvas{64.0f, 64.0f, [](ui::CanvasContext2D& g) {
+                ui::Canvas{8.0f, 8.0f, [](ui::CanvasContext2D& g) {
                     g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
                                 {0.0f, 0.0f, 1.0f, 1.0f});
                 }}}}
@@ -253,7 +253,7 @@ bool verify_overlay_portal(bool update) {
     ui::OverlaySpec lower;
     lower.placement = ui::OverlayPlacement::Center;
     lower.content = ui::make_spec(
-        ui::Canvas{32.0f, 24.0f, [](ui::CanvasContext2D& g) {
+        ui::Canvas{6.0f, 4.0f, [](ui::CanvasContext2D& g) {
             g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
                         {1.0f, 0.0f, 0.0f, 1.0f});
         }});
@@ -263,22 +263,22 @@ bool verify_overlay_portal(bool update) {
     upper.placement = ui::OverlayPlacement::Center;
     upper.pointer_policy = ui::OverlayPointerPolicy::Ignore;
     upper.content = ui::make_spec(
-        ui::Canvas{16.0f, 12.0f, [](ui::CanvasContext2D& g) {
+        ui::Canvas{2.0f, 2.0f, [](ui::CanvasContext2D& g) {
             g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
                         {0.0f, 1.0f, 0.0f, 1.0f});
         }});
     const auto upper_handle = tree.show_overlay(std::move(upper));
     if (!lower_handle.valid() || !upper_handle.valid()) return false;
 
-    ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+    ui::HeadlessRenderer renderer{{8.0f, 8.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
     CompareOptions options;
     options.channel_tolerance = 1;
     options.compare_regions = {
-        Region{4, 4, 8, 8},    // renderer background outside root/overlays
-        Region{18, 22, 4, 4},  // lower overlay visibly escapes root clip
-        Region{28, 28, 8, 8},  // later Ignore overlay still paints topmost
+        Region{0, 0, 1, 1}, // renderer background outside root/overlays
+        Region{1, 2, 1, 1}, // lower overlay visibly escapes root clip
+        Region{3, 3, 2, 2}, // later Ignore overlay still paints topmost
     };
     return test::golden::verify(
         "overlay_portal_stack", test::golden::from_renderer(renderer),
