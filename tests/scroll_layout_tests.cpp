@@ -110,7 +110,7 @@ void suite() {
         NUI_CHECK_NEAR(state.offset().y, 40.0f, 0.001f);
     }
 
-    // T034 RED: ensure-visible alignment uses ScrollState as the sole offset authority.
+    // T034 ensure-visible alignment uses ScrollState as the sole offset authority.
     {
         ui::ScrollState state{ui::ScrollAxis::Both};
         ui::UI tree{ui::ScrollView{state, ui::Spacer{300.0f, 400.0f}}};
@@ -138,7 +138,7 @@ void suite() {
         NUI_CHECK_NEAR(state.offset().y, 50.0f, 0.001f);
     }
 
-    // T034 RED: overlay scrollbar geometry follows the fixed 8px/18px policy.
+    // T034 overlay scrollbar geometry follows the fixed 8px/18px policy.
     {
         ui::ScrollState state{ui::ScrollAxis::Both};
         ui::UI tree{ui::ScrollView{state, ui::Spacer{300.0f, 400.0f}}};
@@ -158,6 +158,32 @@ void suite() {
         NUI_CHECK_NEAR(bars.vertical.thumb.y, 23.0f, 0.001f);
         NUI_CHECK_NEAR(bars.horizontal.thumb.w, 30.6667f, 0.002f);
         NUI_CHECK_NEAR(bars.horizontal.thumb.x, 15.3333f, 0.002f);
+    }
+
+    // T034 RED: thumb dragging maps linearly; track clicks consume without panning.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)};
+        test::MockPlatform platform;
+        tree.resize({100.0f, 100.0f});
+        tree.activate(platform);
+        state.set_offset({0.0f, 100.0f});
+
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerDown, 96.0f, 30.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerMove, 96.0f, 80.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK_NEAR(state.offset().y, 300.0f, 0.001f);
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerUp, 96.0f, 80.0f), platform) ==
+                  ui::EventResult::Handled);
+
+        state.set_offset({0.0f, 100.0f});
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerDown, 96.0f, 90.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
+        NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::PointerMove, 96.0f, 40.0f), platform) ==
+                  ui::EventResult::Ignored);
+        NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
     }
 }
 
