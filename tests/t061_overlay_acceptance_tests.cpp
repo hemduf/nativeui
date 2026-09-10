@@ -217,6 +217,31 @@ void stale_focus_restoration_contract() {
     NUI_CHECK(second->focused);
 }
 
+void pointer_transparent_focus_contract() {
+    test::MockPlatform platform;
+    auto root_focus = std::make_shared<FocusState>();
+    auto overlay_focus = std::make_shared<FocusState>();
+
+    ui::UI tree{FocusProbe{root_focus}};
+    tree.resize({96.0f, 48.0f});
+    tree.activate(platform);
+    NUI_CHECK(root_focus->focused);
+
+    auto overlay = centered(ui::make_spec(FocusProbe{overlay_focus}));
+    overlay.pointer_policy = ui::OverlayPointerPolicy::Ignore;
+    const auto handle = tree.show_overlay(std::move(overlay));
+    tree.resize({96.0f, 48.0f});
+    NUI_CHECK(handle.valid());
+    NUI_CHECK(root_focus->focused);
+    NUI_CHECK(!overlay_focus->focused);
+
+    tree.dispatch(test::key(ui::Key::Tab), platform);
+    NUI_CHECK(root_focus->focused);
+    NUI_CHECK(!overlay_focus->focused);
+
+    NUI_CHECK(tree.close_overlay(handle));
+}
+
 void per_ui_handle_isolation_contract() {
     test::MockPlatform platform;
     auto a_root = std::make_shared<FocusState>();
@@ -257,6 +282,7 @@ void per_ui_handle_isolation_contract() {
 void suite() {
     anchor_visibility_contract();
     stale_focus_restoration_contract();
+    pointer_transparent_focus_contract();
     per_ui_handle_isolation_contract();
 }
 
