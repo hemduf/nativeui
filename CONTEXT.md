@@ -28,9 +28,9 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-The pre-T043 completion baseline is `main` `fc15cbf4798b5071570aac5c8b0819c14ddd56c9`, which includes completed T061 / PR #216 in addition to T067, T045, T037, T058, T036, T065, T034, T060/T042 lifecycle qualification, the T052 developer-preview release gate, the warning-free source-tree baseline, post-T036 hover correction #212 and Tree paint-ownership correction #152.
+The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea1908541dc6a701c8a`. It includes completed T043 / PR #142 on top of T061, T067 / PR #219, T045, T037, T058, T036, T065, T034, T060/T042 lifecycle qualification, the T052 developer-preview release gate, the warning-free source-tree baseline, post-T036 hover correction #212 and Tree paint-ownership correction #152.
 
-T043 / issue #43 / PR #142 is now a mergeable completion candidate on top of that exact baseline. Its stale-base conflicts with T061 were reconciled without dropping overlay/pointer-leave behavior, and the previously missing direct proofs for configure sequencing and request/echo non-recursion are now part of the dedicated T043 geometry test surface.
+T067 remains architecturally complete from PR #219. PR #233 carries a post-completion example startup regression closure: the 100k-item virtual ListView was inserted directly into a `Column` with the default `shrink = 0`, so its 2.8-million-pixel preferred content height became the initial viewport and almost the full dataset was materialized before the native window was shown. The corrected example constrains the virtual list with `Flex(grow=1, shrink=1)`, adds a production-composition startup materialization regression, executes the example `--self-test` in the dedicated T067 workflow and guards that CI wiring from the root integration contract.
 
 Current convergence:
 
@@ -47,13 +47,13 @@ dynamic/overlay:   T058(done) -> T061(done)
                                       +-> T062
 
 critical platform: T065(done) -> T072 -> T064
-                   T041(done) -> T043(completion PR #142) -> T066
-                                                   |-------> T068
+                   T041(done) -> T043(done) -> T066
+                                      |-------> T068
 
 release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 unlocks T066 and is an explicit T068 dependency.
+T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 is complete and unlocks T066 while remaining an explicit completed T068 dependency.
 
 ## Completed foundations relevant to v1
 
@@ -64,6 +64,7 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable selection and composite focus.
 - #212 / PR #213: deterministic ListView/Tabs hover presentation and retained pointer-leave lifetime.
 - T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
+- T043 / PR #142: resize/scale negotiation with logical public geometry, per-view scale state, authoritative configure snapshots and non-recursive native size requests.
 - T045 / PR #210: accessibility semantic architecture and immutable virtual collection contract.
 - T047 / PR #92 + T048 / PR #99: relocatable package and external-consumer qualification.
 - T051 / PR #116 + T052 / PR #120: reproducible performance policy and v0.1 developer-preview release gate.
@@ -72,15 +73,13 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
-- T067 / PR #219: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata.
+- T067 / PR #219, with startup regression closure in PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
 
 ## T043 resize/scale completion state
 
-T043 freezes one platform-boundary contract for logical public geometry, physical native/framebuffer geometry and per-view scale state.
-
-Completion-candidate contract:
+T043 is complete in PR #142. Its platform-boundary contract is:
 
 - `Size`, component/layout geometry, preferred sizes and invalidation rectangles stay logical; Pugl/native extents and Skia framebuffer extents stay physical;
 - every view owns its own `last_valid_scale`, initialized to `1.0f`; only finite strictly-positive observations replace it;
@@ -91,17 +90,15 @@ Completion-candidate contract:
 - pointer/drop/text-input/invalidation conversion uses the same retained per-view scale exactly once, including fractional 1.25/1.5 scale;
 - embedded child resizing never resizes the native parent; preferred-size notification remains a one-way advisory from `UI::measure().preferred`;
 - preferred notifications use exact component epsilon `> 0.0001f`, coalesce to the latest safe value, reject recursive same-stack dispatch and keep the in-flight marker independent from owner lifetime;
-- the current T061 embedded-overlay smoke behavior is preserved while adding invalid-size, parent-authority and synchronous preferred-grant coverage;
-- `t043_resize_scale --self-test`, `nativeui_t043_view_geometry_tests`, registration checks and the platform smoke surface are wired into the current root CMake without removing later feature/test registrations.
+- the T061 embedded-overlay smoke behavior is preserved while invalid-size, parent-authority and synchronous preferred-grant coverage remain qualified;
+- `t043_resize_scale --self-test`, `nativeui_t043_view_geometry_tests`, registration checks and the platform smoke surface are wired into the root CMake.
 
-The dedicated geometry suite now includes direct synthetic resize-only, scale-only and combined configure snapshots and verifies exactly one layout dispatch per accepted configure. It also instruments public-request semantics so one logical request produces one native request, configure remains authoritative, an echoed configure emits no second request, invalid requests do not call the native boundary, and failed native requests do not mutate authoritative/pending geometry.
-
-This completion candidate still follows the normal anti-rush gate: exact-head Linux X11/macOS/Windows/Linux ASan+UBSan qualification plus relevant dedicated workflows and the final `CODE_REVIEW.md` review must be green before PR #142 is marked ready and merged. Historical green results from the stale head are not substituted for current-head evidence.
+The dedicated geometry suite includes direct synthetic resize-only, scale-only and combined configure snapshots and verifies exactly one layout dispatch per accepted configure. It also instruments public-request semantics so one logical request produces one native request, configure remains authoritative, an echoed configure emits no second request, invalid requests do not call the native boundary, and failed native requests do not mutate authoritative/pending geometry.
 
 ## Other critical lanes
 
 - UI/accessibility: T061 and T067 are complete; T035/T063/T062 may advance as their dependencies permit, while T068 remains blocked until every explicit issue #80 dependency is Done.
-- Platform: finish/qualify T043, then T066; finish T072, then T064.
+- Platform: T043 is complete and T066 is unblocked; continue T072, then T064.
 - T044 / issue #44 / PR #145 remains a T071 release dependency and requires its own current-main reconciliation and exact-head evidence before merge.
 - Styling: T037 is complete; continue T038 -> T039 and T040 when dependencies permit.
 - T069/T070/T071 remain dependency-gated; do not freeze the v1 API early.
@@ -118,11 +115,13 @@ ctest --test-dir build --output-on-failure
 
 The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A code-changing completion candidate must use its exact current head for normal CI plus every relevant dedicated workflow named by the ticket, followed by the mandatory `CODE_REVIEW.md` review. Documentation changes are part of the exact completion head and therefore require requalification before autonomous merge.
 
+For the T067 startup regression closure, the exact completion head must keep normal CI green on Linux X11, Linux ASan+UBSan, macOS and Windows, plus T042, T045, T052, T060 and the dedicated T067 workflow including `nativeui_example_t067_virtual_list --self-test`.
+
 ## Next actions
 
-1. Complete exact-head qualification and final review for T043 / PR #142; merge only at 100% evidenced conformity.
+1. Complete the exact-head requalification after the T067 regression completion-doc update and merge PR #233 only if every gate remains green.
 2. Reconcile and qualify T044 / PR #145 independently; do not reuse T043 evidence.
 3. Continue T035, T063 and T062 now that T061 is complete, respecting their explicit dependency/priority order.
 4. Keep T068 blocked until all of its explicit dependencies are genuinely Done.
-5. Continue T072 -> T064 and, after T043, T066 in the platform lane.
+5. Continue T072 -> T064 and T066 in the platform lane.
 6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.

@@ -40,9 +40,17 @@ struct DemoState {
     int last_activated{-1};
     VirtualState list;
 
-    DemoState()
-        : list(selection, 28.0f, [](const VirtualState::Item& item) { return row_view(item); }) {
-        (void)list.replace(make_items(100000));
+    explicit DemoState(
+        std::size_t item_count = 100000,
+        std::size_t* row_factory_calls = nullptr)
+        : list(
+              selection,
+              28.0f,
+              [row_factory_calls](const VirtualState::Item& item) {
+                  if (row_factory_calls) ++*row_factory_calls;
+                  return row_view(item);
+              }) {
+        (void)list.replace(make_items(item_count));
     }
 };
 
@@ -53,8 +61,10 @@ ui::UI make_ui(DemoState& state) {
             ui::Label{
                 "100,000 logical items · fixed 28 px rows · 2-row overscan · immutable semantics"
             }.size(12.0f).color(ui::colors::textMuted),
-            std::move(ui::ListView<int>{state.list})
-                .on_activate([&state](const int& key) { state.last_activated = key; }),
+            ui::Flex{
+                std::move(ui::ListView<int>{state.list})
+                    .on_activate([&state](const int& key) { state.last_activated = key; })
+            }.grow(1.0f).shrink(1.0f),
             ui::Label{"↑ ↓ navigate  ·  Home / End  ·  Enter activates  ·  wheel scrolls"}
                 .size(11.0f)
                 .color(ui::colors::textMuted)
@@ -119,6 +129,19 @@ int self_test() {
 
     if (tree.dispatch(example::key(ui::Key::Enter), platform) != ui::EventResult::Handled) {
         return example::fail("virtual-list activation was not handled");
+    }
+
+    std::size_t startup_row_factory_calls = 0;
+    DemoState startup_state{1000, &startup_row_factory_calls};
+    auto startup_tree = make_ui(startup_state);
+    startup_tree.resize({560.0f, 620.0f});
+    startup_tree.activate(platform);
+    ui::HeadlessRenderer startup_renderer{{560.0f, 620.0f}, 1.0f};
+    if (!startup_renderer.render(startup_tree)) {
+        return example::fail("example startup-layout render failed");
+    }
+    if (startup_row_factory_calls > 32) {
+        return example::fail("example startup materialization exceeded viewport bound");
     }
 
     return 0;
