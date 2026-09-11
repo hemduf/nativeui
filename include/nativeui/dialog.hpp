@@ -399,22 +399,11 @@ public:
         if (generation_ != 0 || state->active_generation != 0) return DialogShowResult::Busy;
         if (!valid_spec(spec)) return DialogShowResult::InvalidSpec;
 
-        const auto generation = state->acquire();
-        if (generation == 0) return DialogShowResult::Unavailable;
-
-        generation_ = generation;
-        completion_ = std::move(completion);
-
+        // Build all allocation-heavy local policy before acquiring the per-UI
+        // Dialog slot. A construction failure therefore cannot strand the UI in
+        // Busy with no visible overlay. Only show_overlay() remains after the
+        // acquire and is rolled back explicitly if it throws.
         const auto escape_result = escape_result_for(spec);
-        if (!state->bind_handlers(
-                generation,
-                guarded_completion(escape_result),
-                guarded_abandon())) {
-            (void)state->release(generation);
-            clear_local_state();
-            return DialogShowResult::Unavailable;
-        }
-
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
         overlay.pointer_policy = OverlayPointerPolicy::Normal;
@@ -424,7 +413,28 @@ public:
         overlay.dismiss_on_outside_pointer_down = false;
         overlay.content = build_content(std::move(spec));
 
-        const auto handle = ui_->show_overlay(std::move(overlay));
+        const auto generation = state->acquire();
+        if (generation == 0) return DialogShowResult::Unavailable;
+
+        generation_ = generation;
+        completion_ = std::move(completion);
+        if (!state->bind_handlers(
+                generation,
+                guarded_completion(escape_result),
+                guarded_abandon())) {
+            (void)state->release(generation);
+            clear_local_state();
+            return DialogShowResult::Unavailable;
+        }
+
+        OverlayHandle handle;
+        try {
+            handle = ui_->show_overlay(std::move(overlay));
+        } catch (...) {
+            (void)state->release(generation);
+            clear_local_state();
+            throw;
+        }
         if (!handle.valid()) {
             (void)state->release(generation);
             clear_local_state();
