@@ -1,4 +1,4 @@
-class TextInputComponent final : public Component {
+class TextInputComponent final : public Component, public detail::ThemeBinding {
 public:
     using SubmitCallback = std::function<void(const std::string&)>;
 
@@ -7,17 +7,20 @@ public:
         State<std::string>& state,
         std::string placeholder,
         std::size_t max_length,
-        SubmitCallback on_submit)
+        SubmitCallback on_submit,
+        TextInputStyle style)
         : label_(std::move(label)),
           state_(state),
           model_(state.get(), max_length),
           placeholder_(std::move(placeholder)),
-          on_submit_(std::move(on_submit)) {}
+          on_submit_(std::move(on_submit)),
+          style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        return Size{420.0f, 82.0f};
+        const auto resolved = resolved_style(focused_);
+        return Size{resolved.control_width, resolved.control_height};
     }
 
     void mount(MountContext& ctx) override {
@@ -44,13 +47,42 @@ public:
             pending_ime_commit_.clear();
             model_.cancel_composition();
             drag_select_ = false;
+            pressed_ = false;
             ctx.set_text_input(false);
         }
         ctx.invalidate();
     }
 
+    void deactivate(LifecycleContext& ctx) override {
+        const bool dirty = hovered_ || pressed_;
+        hovered_ = false;
+        pressed_ = false;
+        if (dirty) ctx.invalidate();
+    }
+
     EventResult input(const InputEvent& event, InputContext& ctx) override {
         const bool read_only = effective_read_only();
+
+        if (event.type == InputType::PointerMove) {
+            const bool inside = ctx.bounds().contains(event.position);
+            if (hovered_ != inside) {
+                hovered_ = inside;
+                ctx.invalidate();
+            }
+        } else if (event.type == InputType::PointerUp) {
+            const bool inside = ctx.bounds().contains(event.position);
+            if (pressed_ || hovered_ != inside) {
+                pressed_ = false;
+                hovered_ = inside;
+                ctx.invalidate();
+            }
+        } else if (event.type == InputType::PointerCancel) {
+            if (pressed_ || hovered_) {
+                pressed_ = false;
+                hovered_ = false;
+                ctx.invalidate();
+            }
+        }
 
         if (event.type == InputType::Tick) {
             if (!focused_) return EventResult::Ignored;
@@ -141,6 +173,8 @@ public:
         if (event.type == InputType::PointerDown) {
             pending_ime_commit_.clear();
             model_.cancel_composition();
+            hovered_ = true;
+            pressed_ = true;
             const auto clicked = index_from_x(ctx, event.position.x);
             if (event.clicks >= 3) {
                 model_.select_all();
@@ -266,25 +300,28 @@ public:
     void paint(PaintContext& p) const override {
         const auto b = p.bounds();
         auto& dl = p.painter();
-        constexpr float text_size = kTextSize;
+        const auto resolved = resolved_style(p.focused());
         const bool show_composition = model_.composition_active() && !effective_read_only();
 
-        dl.text(
-            Point{b.x, b.y + 10.0f},
-            label_,
-            12.0f,
-            colors::textMuted,
-            TextAlign::Left);
+        TextStyle label_style{};
+        label_style.size = resolved.label_size;
+        label_style.color = resolved.label;
+        label_style.align = TextAlign::Left;
+        label_style.weight = resolved.text_weight;
+        label_style.slant = resolved.text_slant;
+        label_style.family = resolved.font_family;
+        label_style.fallback_families = resolved.fallback_families;
+        dl.text(Point{b.x, b.y + resolved.label_offset_y}, label_, label_style);
 
-        const auto field = field_rect(b);
-        dl.fill_rounded_rect(field, 9.0f, colors::input);
+        const auto field = field_rect(b, resolved);
+        dl.fill_rounded_rect(field, resolved.corner_radius, resolved.field_fill);
         dl.stroke_rounded_rect(
             field,
-            9.0f,
-            p.focused() ? 2.0f : 1.0f,
-            p.focused() ? colors::borderFocus : colors::border);
+            resolved.corner_radius,
+            resolved.border_width,
+            resolved.border);
 
-        const auto content = content_rect(field);
+        const auto content = content_rect(field, resolved);
         dl.push_clip(content);
 
         const float base_x = content.x - scroll_x_;
@@ -293,12 +330,16 @@ public:
         if (model_.has_selection() && !show_composition) {
             const auto begin = model_.selection_begin();
             const auto end = model_.selection_end();
-            const float x1 = base_x + p.text_width(prefix(begin), text_size);
-            const float x2 = base_x + p.text_width(prefix(end), text_size);
+            const float x1 = base_x + p.text_width(prefix(begin), resolved.text_size);
+            const float x2 = base_x + p.text_width(prefix(end), resolved.text_size);
             dl.fill_rounded_rect(
-                Rect{x1, field.y + 8.0f, std::max(1.0f, x2 - x1), field.h - 16.0f},
-                3.0f,
-                colors::selection);
+                Rect{
+                    x1,
+                    field.y + resolved.selection_vertical_inset,
+                    std::max(1.0f, x2 - x1),
+                    std::max(1.0f, field.h - resolved.selection_vertical_inset * 2.0f)},
+                resolved.selection_corner_radius,
+                resolved.selection);
         }
 
         if (show_composition) {
@@ -311,74 +352,91 @@ public:
 
             float x = base_x;
             if (!before.empty()) {
-                dl.text(Point{x, center_y}, before, text_size, colors::text, TextAlign::Left);
-                x += p.text_width(before, text_size);
+                dl.text(Point{x, center_y}, before, resolved.text_size, resolved.text, TextAlign::Left);
+                x += p.text_width(before, resolved.text_size);
             }
 
             if (!preedit.empty()) {
-                dl.text(Point{x, center_y}, preedit, text_size, colors::text, TextAlign::Left);
-                const float preedit_width = p.text_width(preedit, text_size);
-                const float underline_y = field.y + field.h - 9.0f;
+                dl.text(Point{x, center_y}, preedit, resolved.text_size, resolved.text, TextAlign::Left);
+                const float preedit_width = p.text_width(preedit, resolved.text_size);
+                const float underline_y = field.y + field.h - resolved.composition_underline_inset;
                 dl.line(
                     Point{x, underline_y},
                     Point{x + std::max(1.0f, preedit_width), underline_y},
-                    1.5f,
-                    colors::borderFocus);
+                    resolved.composition_underline_width,
+                    resolved.composition_underline);
                 x += preedit_width;
             }
 
             if (!after.empty()) {
-                dl.text(Point{x, center_y}, after, text_size, colors::text, TextAlign::Left);
+                dl.text(Point{x, center_y}, after, resolved.text_size, resolved.text, TextAlign::Left);
             }
         } else if (model_.text().empty() && !placeholder_.empty()) {
             dl.text(
                 Point{base_x, center_y},
                 placeholder_,
-                text_size,
-                colors::textMuted,
+                resolved.text_size,
+                resolved.placeholder,
                 TextAlign::Left);
         } else {
             dl.text(
                 Point{base_x, center_y},
                 model_.text(),
-                text_size,
-                colors::text,
+                resolved.text_size,
+                resolved.text,
                 TextAlign::Left);
         }
 
         if (p.focused() && caret_visible_) {
-            float caret_x = base_x + p.text_width(prefix(model_.cursor()), text_size);
+            float caret_x = base_x + p.text_width(prefix(model_.cursor()), resolved.text_size);
             if (show_composition) {
                 const auto before = std::string_view{model_.text()}.substr(0, model_.selection_begin());
                 const auto preedit_cursor = std::string_view{model_.composition_text()}.substr(
                     0,
                     std::min(model_.composition_cursor_byte(), model_.composition_text().size()));
-                caret_x = base_x + p.text_width(before, text_size) + p.text_width(preedit_cursor, text_size);
+                caret_x = base_x + p.text_width(before, resolved.text_size) +
+                          p.text_width(preedit_cursor, resolved.text_size);
             }
             dl.line(
-                Point{caret_x, field.y + 9.0f},
-                Point{caret_x, field.y + field.h - 9.0f},
-                1.5f,
-                colors::caret);
+                Point{caret_x, field.y + resolved.caret_vertical_inset},
+                Point{caret_x, field.y + field.h - resolved.caret_vertical_inset},
+                resolved.caret_width,
+                resolved.caret);
         }
 
         dl.pop_clip();
     }
 
 private:
-    static constexpr float kTextSize = 15.0f;
-    static constexpr float kHorizontalPadding = 12.0f;
-
-    [[nodiscard]] static Rect field_rect(Rect bounds) noexcept {
-        return Rect{bounds.x, bounds.y + 24.0f, bounds.w, 46.0f};
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = hovered_,
+            .pressed = pressed_,
+            .focused = focused,
+        };
     }
 
-    [[nodiscard]] static Rect content_rect(Rect field) noexcept {
+    [[nodiscard]] ResolvedTextInputStyle resolved_style(bool focused) const {
+        return resolve_text_input_style(
+            default_text_input_style(current_theme()), style_, current_visual_state(focused));
+    }
+
+    [[nodiscard]] static Rect field_rect(
+        Rect bounds,
+        const ResolvedTextInputStyle& style) noexcept {
+        return Rect{bounds.x, bounds.y + style.field_top, bounds.w, style.field_height};
+    }
+
+    [[nodiscard]] static Rect content_rect(
+        Rect field,
+        const ResolvedTextInputStyle& style) noexcept {
         return Rect{
-            field.x + kHorizontalPadding,
-            field.y + 4.0f,
-            std::max(1.0f, field.w - kHorizontalPadding * 2.0f),
-            std::max(1.0f, field.h - 8.0f)};
+            field.x + style.horizontal_padding,
+            field.y + style.content_vertical_inset,
+            std::max(1.0f, field.w - style.horizontal_padding * 2.0f),
+            std::max(1.0f, field.h - style.content_vertical_inset * 2.0f)};
     }
 
     [[nodiscard]] std::string_view prefix(std::size_t byte_index) const noexcept {
@@ -424,8 +482,9 @@ private:
 
     template <class Context>
     [[nodiscard]] std::size_t index_from_x(Context& ctx, float x) const {
-        const auto field = field_rect(ctx.bounds());
-        const auto content = content_rect(field);
+        const auto resolved = resolved_style(focused_);
+        const auto field = field_rect(ctx.bounds(), resolved);
+        const auto content = content_rect(field, resolved);
         const float wanted = std::max(0.0f, x - content.x + scroll_x_);
 
         std::size_t previous = 0;
@@ -434,7 +493,7 @@ private:
              i <= model_.text().size() && i > previous;
              i = (i == model_.text().size() ? model_.text().size() + 1 : text::next_codepoint(model_.text(), i))) {
             const auto bounded = std::min(i, model_.text().size());
-            const float width = ctx.text_width(prefix(bounded), kTextSize);
+            const float width = ctx.text_width(prefix(bounded), resolved.text_size);
             if (wanted < (previous_width + width) * 0.5f) return previous;
             previous = bounded;
             previous_width = width;
@@ -445,11 +504,12 @@ private:
 
     template <class Context>
     void ensure_cursor_visible(Context& ctx) {
-        const auto field = field_rect(ctx.bounds());
-        const auto content = content_rect(field);
+        const auto resolved = resolved_style(focused_);
+        const auto field = field_rect(ctx.bounds(), resolved);
+        const auto content = content_rect(field, resolved);
 
-        float caret = ctx.text_width(prefix(model_.cursor()), kTextSize);
-        float total = ctx.text_width(model_.text(), kTextSize);
+        float caret = ctx.text_width(prefix(model_.cursor()), resolved.text_size);
+        float total = ctx.text_width(model_.text(), resolved.text_size);
         if (model_.composition_active()) {
             const auto committed = std::string_view{model_.text()};
             const auto before = committed.substr(0, model_.selection_begin());
@@ -459,9 +519,11 @@ private:
                 0,
                 std::min(model_.composition_cursor_byte(), preedit.size()));
 
-            caret = ctx.text_width(before, kTextSize) + ctx.text_width(preedit_cursor, kTextSize);
-            total = ctx.text_width(before, kTextSize) + ctx.text_width(preedit, kTextSize) +
-                    ctx.text_width(after, kTextSize);
+            caret = ctx.text_width(before, resolved.text_size) +
+                    ctx.text_width(preedit_cursor, resolved.text_size);
+            total = ctx.text_width(before, resolved.text_size) +
+                    ctx.text_width(preedit, resolved.text_size) +
+                    ctx.text_width(after, resolved.text_size);
         }
         constexpr float margin = 4.0f;
 
@@ -472,7 +534,7 @@ private:
         scroll_x_ = std::clamp(scroll_x_, 0.0f, std::max(0.0f, total - content.w));
 
         const float cursor_offset =
-            kHorizontalPadding + std::clamp(caret - scroll_x_, 0.0f, content.w);
+            resolved.horizontal_padding + std::clamp(caret - scroll_x_, 0.0f, content.w);
         ctx.set_text_input(true, field, cursor_offset);
     }
 
@@ -487,9 +549,12 @@ private:
     TextEditModel model_;
     std::string placeholder_;
     SubmitCallback on_submit_;
+    TextInputStyle style_;
 
     bool drag_select_{};
     bool focused_{};
+    bool hovered_{};
+    bool pressed_{};
     bool caret_visible_{true};
     float scroll_x_{};
     std::string focus_snapshot_;
