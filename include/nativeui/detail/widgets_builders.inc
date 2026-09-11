@@ -180,11 +180,18 @@ public:
     Toggle(std::string label, State<bool>& state)
         : label_(std::move(label)), state_(&state) {}
 
+    Toggle&& style(ToggleStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto* state = state_;
-        return Spec{[label = std::move(label), state]() mutable {
-                        return std::make_unique<ToggleComponent>(std::move(label), *state);
+        auto style = std::move(style_);
+        return Spec{[label = std::move(label), state, style = std::move(style)]() mutable {
+                        return std::make_unique<ToggleComponent>(
+                            std::move(label), *state, std::move(style));
                     },
                     {}};
     }
@@ -192,6 +199,7 @@ public:
 private:
     std::string label_;
     State<bool>* state_{};
+    ToggleStyle style_;
 };
 
 
