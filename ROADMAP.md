@@ -23,6 +23,8 @@ The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea19085
 
 PR #233 is the T067 post-completion regression closure. The 100k-item example previously put the virtual `ListView` directly in a `Column`; with default `shrink = 0`, the list's full 2.8-million-pixel preferred content height became the initial viewport and almost all rows were materialized before window show. The closure constrains that viewport with `Flex(grow=1, shrink=1)`, adds a startup materialization regression through the real production composition, runs the production `--self-test` in dedicated T067 CI and adds a root-integration guard for that workflow wiring.
 
+Build regression #234 / PR #235 removes the manually maintained feature-example list. Root CMake now discovers canonical `examples/features/tNNN_<feature>.cpp` sources deterministically with `CONFIGURE_DEPENDS`, so feature examples such as T060 and T065 cannot silently exist without their normal root targets/compile-only coverage.
+
 Current dependency frontier:
 
 ```text
@@ -109,6 +111,10 @@ T044 / issue #44 / PR #145 remains a T071 release dependency and requires its ow
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
 Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView and the T045 semantic architecture it consumes.
+
+### Build/example registration hardening
+
+**Complete in PR #235 / issue #234.** Canonical feature example sources are auto-discovered from `examples/features/tNNN_<feature>.cpp`; the root build no longer maintains a parallel manual list. Discovery is deterministic, source additions/removals trigger CMake reconfiguration, malformed ticket-style example filenames fail configuration, and a dedicated CMake contract ensures the previously omitted T060/T065 examples remain part of normal root target and compile-only coverage.
 
 ### T061 — Generic overlay / portal layer
 
