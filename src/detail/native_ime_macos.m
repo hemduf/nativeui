@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define NATIVEUI_STRINGIFY_IMPL(value) #value
+#define NATIVEUI_STRINGIFY(value) NATIVEUI_STRINGIFY_IMPL(value)
+
 struct NativeUIImeBridge {
   NSView* view;
   Class originalClass;
@@ -355,10 +358,15 @@ bridgeSubclass(Class original)
 static Class
 closeGuardSubclass(Class original)
 {
-  // The delegate class is already prefixed per final consumer by T053. Keep
-  // the close-policy adapter in that same namespace and attach it per delegate
-  // object, with no process-global instance registry or mutable singleton.
+#if defined(PuglWindowDelegate)
+  // Only NativeUI's consumer-prefixed Pugl top-level delegate is eligible.
+  // Embedded views live inside host-owned NSWindows and must never mutate or
+  // retain the host's window delegate.
   const char* const originalName = class_getName(original);
+  if (strcmp(originalName, NATIVEUI_STRINGIFY(PuglWindowDelegate)) != 0) {
+    return original;
+  }
+
   const size_t nameSize = strlen(originalName) + sizeof("_NativeUICloseGuard");
   char* const name = (char*)calloc(nameSize, 1U);
   if (!name) {
@@ -386,6 +394,9 @@ closeGuardSubclass(Class original)
 
   objc_registerClassPair(subclass);
   return subclass;
+#else
+  return original;
+#endif
 }
 
 NativeUIImeBridge*
@@ -411,15 +422,18 @@ nativeuiImeCreate(PuglWorld* world,
   }
 
   NSWindow* const window = [view window];
-  id const windowDelegate = window ? [window delegate] : nil;
-  Class const originalWindowDelegateClass =
-    windowDelegate ? object_getClass(windowDelegate) : Nil;
-  Class const closeGuard = originalWindowDelegateClass
-    ? closeGuardSubclass(originalWindowDelegateClass)
+  id const candidateDelegate = window ? [window delegate] : nil;
+  Class const candidateDelegateClass =
+    candidateDelegate ? object_getClass(candidateDelegate) : Nil;
+  Class const closeGuard = candidateDelegateClass
+    ? closeGuardSubclass(candidateDelegateClass)
     : Nil;
-  if (!windowDelegate || !closeGuard) {
+  if (candidateDelegateClass && !closeGuard) {
     return NULL;
   }
+
+  const bool installCloseGuard =
+    candidateDelegate && closeGuard && closeGuard != candidateDelegateClass;
 
   NativeUIImeBridge* const bridge =
     (NativeUIImeBridge*)calloc(1U, sizeof(NativeUIImeBridge));
@@ -429,13 +443,16 @@ nativeuiImeCreate(PuglWorld* world,
 
   bridge->view = view;
   bridge->originalClass = original;
-  bridge->windowDelegate = windowDelegate;
-  bridge->originalWindowDelegateClass = originalWindowDelegateClass;
+  bridge->windowDelegate = installCloseGuard ? candidateDelegate : nil;
+  bridge->originalWindowDelegateClass =
+    installCloseGuard ? candidateDelegateClass : Nil;
   bridge->userData = userData;
   bridge->callback = callback;
 
   object_setClass(view, subclass);
-  object_setClass(windowDelegate, closeGuard);
+  if (installCloseGuard) {
+    object_setClass(candidateDelegate, closeGuard);
+  }
   setBridgeForObject(view, bridge);
   return bridge;
 }
