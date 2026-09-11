@@ -51,3 +51,13 @@ _nativeui_attach_consumer_platform(
 )
 nativeui_enable_project_warnings(nativeui_t066_window_controls_platform_tests)
 nativeui_enable_sanitizers(nativeui_t066_window_controls_platform_tests)
+
+add_executable(nativeui_t066_destroy_survivor_tests
+  "${NATIVEUI_SOURCE_DIR}/tests/t066_destroy_survivor_tests.cpp"
+)
+_nativeui_attach_consumer_platform(
+  TARGET nativeui_t066_destroy_survivor_tests
+  CONSUMER_ID org.nativeui.test.t066-destroy-survivor
+)
+nativeui_enable_project_warnings(nativeui_t066_destroy_survivor_tests)
+nativeui_enable_sanitizers(nativeui_t066_destroy_survivor_tests)
