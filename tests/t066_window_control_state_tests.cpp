@@ -28,8 +28,10 @@ void test_size_constraints_validate_and_clamp_atomically() {
     const auto previous_min = constraints.min_size();
     const auto previous_max = constraints.max_size();
     NUI_CHECK(!constraints.update(ui::Size{500.0f, 80.0f}, ui::Size{400.0f, 300.0f}));
-    NUI_CHECK(constraints.min_size() == previous_min);
-    NUI_CHECK(constraints.max_size() == previous_max);
+    NUI_CHECK(constraints.min_size().has_value() == previous_min.has_value());
+    NUI_CHECK(constraints.max_size().has_value() == previous_max.has_value());
+    if (previous_min) NUI_CHECK(same(*constraints.min_size(), *previous_min));
+    if (previous_max) NUI_CHECK(same(*constraints.max_size(), *previous_max));
 }
 
 void test_size_constraints_reject_non_finite_or_non_positive_values() {
