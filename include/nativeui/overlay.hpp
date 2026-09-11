@@ -410,8 +410,8 @@ public:
 
 class OverlayHostComponent final : public Component, public DynamicChildrenSource {
 public:
-    OverlayHostComponent(std::shared_ptr<OverlayState> state, std::shared_ptr<const Spec> root)
-        : state_(std::move(state)), root_(std::move(root)) {}
+    explicit OverlayHostComponent(std::shared_ptr<OverlayState> state)
+        : state_(std::move(state)) {}
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;
@@ -471,7 +471,12 @@ public:
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
         std::vector<DynamicChildSpec> children;
         children.reserve(state_->entries.size() * 2 + 1);
-        children.push_back(DynamicChildSpec{"root", *root_});
+
+        // `root` is present as the host's statically compiled child from the
+        // first mount and its key is permanently retained. T058 never consults
+        // the Spec for a retained key, so keep only a zero-allocation sentinel
+        // here instead of owning/copying the complete application Spec tree.
+        children.push_back(DynamicChildSpec{"root", Spec{}});
         for (const auto& entry : state_->entries) {
             if (entry.spec.mode == OverlayMode::Modal) {
                 children.push_back(DynamicChildSpec{
@@ -498,17 +503,16 @@ public:
 
 private:
     std::shared_ptr<OverlayState> state_;
-    std::shared_ptr<const Spec> root_;
 };
 
 [[nodiscard]] inline Spec make_overlay_host_spec(
     Spec root, const std::shared_ptr<OverlayState>& state) {
-    auto retained_root = std::make_shared<const Spec>(std::move(root));
+    std::vector<Spec> children;
+    children.reserve(1);
+    children.push_back(std::move(root));
     return Spec{
-        [state, retained_root] {
-            return std::make_unique<OverlayHostComponent>(state, retained_root);
-        },
-        {*retained_root}};
+        [state] { return std::make_unique<OverlayHostComponent>(state); },
+        std::move(children)};
 }
 
 } // namespace detail
