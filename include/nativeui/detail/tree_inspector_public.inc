@@ -53,3 +53,24 @@
         append(append, *root_, kInvalidNodeId, 0, 0, viewport_rect());
         return snapshot;
     }
+
+    /// Paint normal retained content and return the exact diagnostic snapshot
+    /// for that frame before dirty regions are cleared. This is a dedicated
+    /// inspector path rather than an application overlay, so it cannot affect
+    /// retained z-order, hit testing, focus, or T061 overlay ownership.
+    [[nodiscard]] debug::InspectorSnapshot paint_with_inspector_snapshot(
+        SkCanvas& canvas,
+        PlatformServices& platform) {
+        flush_dynamic_mutations();
+        if (active_) {
+            sync_availability_structure(platform);
+            sync_focus_structure(platform);
+        }
+        ensure_layout();
+
+        auto snapshot = inspector_snapshot();
+        Painter painter{canvas};
+        paint_node(*root_, painter, platform, viewport_rect());
+        paint_dirty_.clear();
+        return snapshot;
+    }
