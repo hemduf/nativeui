@@ -183,6 +183,29 @@ void nativeui_header_compile_t038_text_input_style(const ui::Theme& theme,
     (void)spec;
 }
 
+void nativeui_header_compile_t038_text_area_style(const ui::Theme& theme,
+                                                   ui::State<std::string>& value) {
+    ui::TextAreaStyle style{};
+    style.base.field_fill = ui::Color{0.1f, 0.1f, 0.1f, 1.0f};
+    style.base.border = ui::Color{0.3f, 0.3f, 0.3f, 1.0f};
+    style.base.text = ui::Color{0.9f, 0.9f, 0.9f, 1.0f};
+    style.base.placeholder = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    style.base.selection = ui::Color{0.2f, 0.5f, 0.8f, 0.4f};
+    style.base.caret = ui::Color{0.9f, 0.8f, 0.6f, 1.0f};
+    style.hovered.border = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    style.pressed.border = ui::Color{0.7f, 0.7f, 0.7f, 1.0f};
+    style.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    style.read_only.text = ui::Color{0.6f, 0.6f, 0.6f, 1.0f};
+    style.focused.border_width = 2.0f;
+    const auto resolved = ui::resolve_text_area_style(
+        ui::default_text_area_style(theme),
+        style,
+        ui::VisualState{.enabled = true, .focused = true});
+    (void)resolved;
+    auto spec = ui::make_spec(ui::TextArea{"Notes", value}.style(style));
+    (void)spec;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
