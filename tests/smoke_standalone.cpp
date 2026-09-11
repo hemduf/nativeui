@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #if defined(__APPLE__)
 #include <execinfo.h>
@@ -248,6 +249,16 @@ int run_regular_smoke() {
                 ui::Toggle{"Enabled", enabled},
             }.padding(16.0f).gap(12.0f)};
 
+        stage = "prepare-standalone-overlay";
+        ui::OverlaySpec standalone_overlay;
+        standalone_overlay.placement = ui::OverlayPlacement::Center;
+        standalone_overlay.content = ui::make_spec(ui::Spacer{24.0f, 16.0f});
+        const auto standalone_overlay_handle =
+            app_ui.show_overlay(std::move(standalone_overlay));
+        if (!standalone_overlay_handle.valid()) {
+            return fail(stage, "show_overlay rejected a valid standalone overlay");
+        }
+
         stage = "construct-window";
         ui::Application application;
         ui::StandaloneWindow window{
@@ -260,6 +271,19 @@ int run_regular_smoke() {
         stage = "validate-native-handle";
         if (!window.native_handle()) return fail(stage, "native handle is zero");
         if (!(window.scale_factor() > 0.0f)) return fail(stage, "invalid scale factor");
+
+        stage = "standalone-overlay";
+        for (int i = 0; i < 4; ++i) {
+            (void)application.poll(0.0);
+        }
+        if (!app_ui.close_overlay(standalone_overlay_handle) ||
+            standalone_overlay_handle.valid()) {
+            return fail(stage, "standalone overlay close/stale-handle contract failed");
+        }
+        for (int i = 0; i < 4; ++i) {
+            (void)application.poll(0.0);
+        }
+        if (!window.last_error().empty()) return fail(stage, window.last_error());
 
         stage = "clipboard";
         window.set_clipboard_text("NativeUI clipboard smoke");
