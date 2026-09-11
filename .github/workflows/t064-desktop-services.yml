@@ -1,0 +1,34 @@
+name: T064 Desktop Services Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/t064-desktop-services.yml'
+      - 'include/nativeui/desktop_services.hpp'
+      - 'tests/t064/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t064-desktop-services-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-contract:
+    name: T064 public contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure isolated contract
+        run: cmake -S tests/t064 -B build-t064 -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build isolated contract
+        run: cmake --build build-t064 --parallel 2
+
+      - name: Test isolated contract
+        run: ctest --test-dir build-t064 --output-on-failure
