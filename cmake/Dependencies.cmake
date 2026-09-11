@@ -281,3 +281,39 @@ elseif(UNIX AND NOT APPLE)
   set_property(TARGET SkiaBuilder::skia APPEND PROPERTY INTERFACE_LINK_LIBRARIES
     "Fontconfig::Fontconfig;pthread;${CMAKE_DL_LIBS}")
 endif()
+
+# NativeUI-owned targets are warning-free by default. Dependencies above are
+# created before this point, so their third-party diagnostics stay outside this
+# policy unless a NativeUI consumer/platform target compiles their sources.
+set(NATIVEUI_ALLOWED_WARNINGS "" CACHE STRING
+    "Semicolon-separated compiler warnings explicitly allowed for NativeUI-owned targets (Clang/GCC names without -W; MSVC numeric codes)")
+
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+if(MSVC)
+  add_compile_options(/W4 /permissive-)
+  foreach(_warning IN LISTS NATIVEUI_ALLOWED_WARNINGS)
+    if(NOT _warning MATCHES "^[0-9][0-9][0-9][0-9]$")
+      message(FATAL_ERROR
+        "Invalid NATIVEUI_ALLOWED_WARNINGS entry '${_warning}' for MSVC; use a four-digit warning code such as 4996")
+    endif()
+    add_compile_options("/wd${_warning}")
+    if(_warning STREQUAL "4996")
+      add_compile_definitions(NATIVEUI_ALLOW_DEPRECATED_DECLARATIONS=1)
+    endif()
+  endforeach()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+  foreach(_warning IN LISTS NATIVEUI_ALLOWED_WARNINGS)
+    if(NOT _warning MATCHES "^[A-Za-z0-9][A-Za-z0-9_-]*$")
+      message(FATAL_ERROR
+        "Invalid NATIVEUI_ALLOWED_WARNINGS entry '${_warning}'; use the diagnostic name without the -W prefix")
+    endif()
+    add_compile_options("-Wno-error=${_warning}")
+    if(_warning STREQUAL "deprecated-declarations")
+      add_compile_definitions(NATIVEUI_ALLOW_DEPRECATED_DECLARATIONS=1)
+    endif()
+  endforeach()
+else()
+  message(FATAL_ERROR
+    "NativeUI warning policy is not defined for compiler '${CMAKE_CXX_COMPILER_ID}'")
+endif()

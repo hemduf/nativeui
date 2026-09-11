@@ -315,9 +315,14 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t032_slider
   t033_progress_meter
   t034_scroll_view
+  t036_list_tabs
+  t037_theme
   t041_smoke_harness
   t057_embedded_resources
+  t058_dynamic_composition
   t059_component_state
+  t061_overlay_portal
+  t067_virtual_list
 )
 
 if(NATIVEUI_BUILD_EXAMPLES)
@@ -390,6 +395,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t065_root_integration_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t067_root_integration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
@@ -408,6 +419,10 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t065_root_integration_contract
     PROPERTIES LABELS "build;cmake;t065" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t067_root_integration_contract
+    PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
   )
 
   function(nativeui_add_core_test name source)
@@ -450,6 +465,7 @@ if(NATIVEUI_BUILD_TESTS)
   )
   nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
+  nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
   nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
@@ -460,8 +476,16 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_clipping_tests tests/clipping_tests.cpp)
   nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
   nativeui_add_core_test(nativeui_t034_scroll_view_tests tests/t034_scroll_view_tests.cpp)
+  nativeui_add_core_test(nativeui_t036_list_tabs_tests tests/t036_list_tabs_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)
+  nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)
+  nativeui_add_core_test(nativeui_t067_retained_tests tests/t067_retained_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)
   nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
+  nativeui_add_core_test(nativeui_dynamic_composition_tests tests/dynamic_composition_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
   nativeui_add_core_test(nativeui_checkbox_radio_tests tests/checkbox_radio_tests.cpp)
@@ -546,7 +570,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

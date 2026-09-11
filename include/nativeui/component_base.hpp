@@ -502,7 +502,7 @@ struct Node {
     Rect bounds{};
     bool layout_dirty{true};
     bool focus_scope_active_cached{};
-    Node* focus_restore{};
+    NodeId focus_restore{kInvalidNodeId};
 };
 
 struct Spec {
