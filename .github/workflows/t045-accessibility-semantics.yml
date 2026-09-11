@@ -2,11 +2,27 @@ name: T045 Accessibility Semantics
 
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - 'include/nativeui/semantics.hpp'
+      - 'tests/t045/**'
+      - 'tests/t045_semantics_tests.cpp'
+      - '.github/workflows/t045-accessibility-semantics.yml'
   push:
     branches: [main]
+    paths:
+      - 'include/nativeui/semantics.hpp'
+      - 'tests/t045/**'
+      - 'tests/t045_semantics_tests.cpp'
+      - '.github/workflows/t045-accessibility-semantics.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   semantics-contract:
