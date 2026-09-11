@@ -59,6 +59,34 @@ jobs:
           --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests
           --parallel 2
 
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
+          Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
+
       - name: Run pure state contract (Unix)
         if: runner.os != 'Windows'
         run: ./build-t066/nativeui_t066_window_control_state_tests
@@ -85,4 +113,6 @@ jobs:
       - name: Run Windows contract
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
+        run: |
+          $env:GALLIUM_DRIVER = 'llvmpipe'
+          ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
