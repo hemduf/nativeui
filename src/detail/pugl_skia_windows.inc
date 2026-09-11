@@ -40,8 +40,6 @@ public:
         CFRunLoopSourceContext context{};
         context.info = this;
         context.perform = [](void*) {
-            // Break only the innermost blocking run-loop wait. Application
-            // immediately re-enters its next pump after dispatcher draining.
             CFRunLoopStop(CFRunLoopGetCurrent());
         };
         wake_source_ = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
@@ -96,11 +94,6 @@ public:
     void request_wake() noexcept override {
         std::lock_guard lock{mutex_};
         if (closing_ || !view_) return;
-
-        // Worker threads must not call Pugl APIs: PUGL_WORLD_THREADS only makes
-        // the Xlib connection thread-aware and does not make Pugl world/view
-        // state itself concurrently accessible. Use only platform primitives
-        // whose native handles were captured on the UI thread at realization.
 #if defined(__APPLE__)
         if (wake_source_ && run_loop_) {
             CFRunLoopSourceSignal(wake_source_);
@@ -141,12 +134,6 @@ public:
 
         if (timeout_seconds == 0.0) return puglUpdate(world, 0.0);
 
-        // Do not use a Pugl repeating timer as a one-shot wait deadline here.
-        // X11 timers are optional (XSync-dependent), and Cocoa's NSEvent wait
-        // is not interrupted merely because an NSTimer/CF source fired. Wait on
-        // each platform's native event primitive, which the worker wake path
-        // above can interrupt, then let one non-blocking Pugl update own all
-        // actual Pugl world/view dispatch on the UI thread.
 #if defined(__APPLE__)
         constexpr double kIndefiniteRunLoopSliceSeconds = 24.0 * 60.0 * 60.0;
         const double wait_seconds =
@@ -166,11 +153,6 @@ public:
         return puglUpdate(world, 0.0);
 #elif defined(__linux__)
         if (!display) return PUGL_FAILURE;
-
-        // Xlib can already own decoded events even when the connection fd is
-        // no longer readable, so only block in poll() when its local queue is
-        // empty. PUGL_WORLD_THREADS initializes Xlib for the worker XSendEvent
-        // wake used by request_wake().
         if (XPending(display) == 0) {
             const int connection = ConnectionNumber(display);
             if (connection < 0) return PUGL_FAILURE;
@@ -276,9 +258,6 @@ struct Application::Impl final {
     std::string last_error;
 
     Impl() {
-        // Dispatcher worker posts use the platform wake primitive captured by
-        // PuglDispatcherWakeBackend. X11 requires XInitThreads before any other
-        // Xlib call, which Pugl performs for this PROGRAM world flag.
         world = puglNewWorld(PUGL_PROGRAM, PUGL_WORLD_THREADS);
         if (!world) {
             terminal_error = true;
@@ -290,15 +269,7 @@ struct Application::Impl final {
     }
 
     ~Impl() {
-        // Application must outlive every explicitly attached StandaloneWindow.
-        // Terminating here is deliberate: freeing the PROGRAM world while a
-        // borrowed view is still alive would turn a clear lifetime violation
-        // into a platform UAF during later window teardown.
         if (!windows.empty()) std::terminate();
-
-        // Stop worker-originated wakes first, process a final non-blocking
-        // native checkpoint, then detach the wake source/window before freeing
-        // the shared PROGRAM world.
         if (wake_backend) wake_backend->begin_shutdown();
         if (world) (void)puglUpdate(world, 0.0);
         if (wake_backend) {
@@ -398,10 +369,6 @@ struct Application::Impl final {
             return false;
         }
 
-        // Snapshot after native dispatch: a native close may have destroyed a
-        // logical owner, while another callback may have created a new one.
-        // DispatcherOwner::checkpoint itself is reentrancy-safe if a callback
-        // destroys its own window or a sibling.
         drain_dispatchers();
         return !quit_requested;
     }
@@ -530,10 +497,6 @@ StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
 
 StandaloneWindow::~StandaloneWindow() {
     if (!impl_) return;
-
-    // Direct C++ destruction is lifetime teardown, not an accepted-close
-    // notification path. Invalidate queued completion first so no user callback
-    // can run after this destructor returns.
     impl_->close_state.begin_teardown();
     impl_->lifetime_token.reset();
     impl_->close_request_callback = {};
@@ -558,8 +521,6 @@ void StandaloneWindow::handle_native_close_request() {
         try {
             decision = callback();
         } catch (...) {
-            // Never unwind a user callback through Pugl/OS event dispatch. A
-            // throwing veto callback leaves the window open deterministically.
             decision = CloseDecision::Cancel;
         }
     }
@@ -576,8 +537,6 @@ void StandaloneWindow::schedule_close_completion() {
         return;
     }
 
-    // The deprecated independent-world path can complete an explicit API close
-    // immediately when it is not currently inside native event dispatch.
     if (!impl_->application && !impl_->in_native_close_request) {
         complete_close();
         return;
@@ -594,10 +553,6 @@ void StandaloneWindow::schedule_close_completion() {
             self->complete_close();
         })) {
         impl_->close_completion_posted = false;
-        // Outside native dispatch it is safe to preserve progress without a
-        // queue slot. Inside native dispatch, legacy poll() retries after the
-        // callback unwinds; Application-backed queues have a live wake backend
-        // and normally accept this bounded one-shot task.
         if (!impl_->in_native_close_request) complete_close();
     }
 }
@@ -614,8 +569,6 @@ void StandaloneWindow::complete_close() {
         impl_->dispatcher_owner->shutdown();
     }
 
-    // Copy before invoking: on_closed may mutate callback registration, other
-    // windows/Application state, or destroy this already-closed C++ object.
     const auto callback = impl_->closed_callback;
     if (callback) callback();
 }
@@ -669,7 +622,8 @@ bool StandaloneWindow::valid() const noexcept {
            impl_->core->last_error().empty();
 }
 bool StandaloneWindow::should_close() const noexcept {
-    return !impl_ || !impl_->core || is_closed() || impl_->core->should_close();
+    return !impl_ || !impl_->core || impl_->close_state.pending() ||
+           is_closed() || impl_->core->should_close();
 }
 bool StandaloneWindow::is_closed() const noexcept {
     return impl_ && impl_->close_state.closed();
