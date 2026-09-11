@@ -79,11 +79,41 @@ private:
     std::shared_ptr<CaptureState> state_;
 };
 
+class OverlayPanelComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] ui::Size minimum_size(
+        const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().minimum;
+    }
+
+    void layout_children(
+        ui::Rect bounds,
+        const std::vector<ui::ChildMetrics>&,
+        std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        const auto bounds = context.bounds();
+        auto& painter = context.painter();
+        painter.fill_rounded_rect(bounds, 10.0f, ui::colors::panel);
+        painter.stroke_rounded_rect(bounds, 10.0f, 1.0f, ui::colors::border);
+    }
+};
+
 ui::OverlaySpec centered_label(std::string text) {
     ui::OverlaySpec overlay;
     overlay.placement = ui::OverlayPlacement::Center;
-    overlay.content = ui::make_spec(
+    auto content = ui::make_spec(
         ui::Padding{16.0f, ui::Label{std::move(text)}});
+    overlay.content = ui::Spec{
+        [] { return std::make_unique<OverlayPanelComponent>(); },
+        {std::move(content)}};
     return overlay;
 }
 
