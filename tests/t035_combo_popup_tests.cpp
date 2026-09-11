@@ -352,6 +352,40 @@ void popup_menu_contract() {
     NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
 }
 
+void popup_menu_immutable_snapshot_contract() {
+    test::MockPlatform platform;
+    int old_actions = 0;
+    int new_actions = 0;
+    int provider_calls = 0;
+    std::vector<ui::PopupMenuItem> model{
+        ui::PopupMenuItem::action("Old", [&] { ++old_actions; })};
+
+    ui::UI tree{ui::PopupMenu{"Actions", [&] {
+        ++provider_calls;
+        return model;
+    }}};
+    tree.resize({240.0f, 180.0f});
+    tree.activate(platform);
+
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(provider_calls == 1);
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
+
+    model = {ui::PopupMenuItem::action("New", [&] { ++new_actions; })};
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(old_actions == 1);
+    NUI_CHECK(new_actions == 0);
+    NUI_CHECK(provider_calls == 1);
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
+
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(provider_calls == 2);
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(old_actions == 1);
+    NUI_CHECK(new_actions == 1);
+}
+
 void popup_menu_pointer_non_action_contract() {
     test::MockPlatform platform;
     int disabled_actions = 0;
@@ -553,6 +587,7 @@ void suite() {
     hidden_and_collapsed_anchor_close_contract();
     popup_menu_empty_callback_is_not_actionable_contract();
     popup_menu_contract();
+    popup_menu_immutable_snapshot_contract();
     popup_menu_pointer_non_action_contract();
     pointer_commit_and_no_click_through_contract();
     reentrant_menu_callback_contract();
