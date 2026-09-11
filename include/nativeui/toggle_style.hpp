@@ -110,14 +110,15 @@ inline void apply_toggle_interaction_patch(ResolvedToggleStyle& target,
 
 } // namespace detail
 
-/// T037-backed default Toggle recipe. Geometry reproduces the existing v1
-/// Toggle contract; interaction/focus/read-only variants change paint only.
+/// T037-backed default Toggle recipe. Geometry and normal/checked presentation
+/// reproduce the existing v1 Toggle contract exactly; the extra T038 states
+/// remain paint-only and do not perturb the legacy track/thumb golden.
 [[nodiscard]] inline ToggleStyle default_toggle_style(const Theme& theme) {
     ToggleStyle style;
     style.base.fill = theme.palette.surface;
     style.base.border = theme.palette.border;
     style.base.text = theme.palette.text;
-    style.base.track = theme.palette.control_hover;
+    style.base.track = colors::toggleOff;
     style.base.thumb = theme.palette.text;
     style.base.border_width = theme.controls.border_width;
     style.base.corner_radius = theme.radii.large;
@@ -138,12 +139,11 @@ inline void apply_toggle_interaction_patch(ResolvedToggleStyle& target,
     style.hovered.border = theme.palette.control_hover;
     style.pressed.border = theme.palette.accent;
     style.pressed.thumb = theme.palette.active_highlight;
+    style.disabled.fill = theme.palette.control_background;
+    style.disabled.border = theme.palette.disabled;
     style.disabled.text = theme.palette.disabled;
-    style.disabled.track = theme.palette.control_background;
-    style.disabled.thumb = theme.palette.disabled;
+    style.read_only.border = theme.palette.track;
     style.read_only.text = theme.palette.muted_text;
-    style.read_only.track = theme.palette.track;
-    style.read_only.thumb = theme.palette.muted_text;
     style.focused.border = theme.palette.focus;
     style.focused.border_width = theme.controls.focus_ring_width;
     return style;
