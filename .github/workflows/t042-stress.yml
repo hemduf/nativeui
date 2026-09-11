@@ -38,7 +38,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb gdb
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb gdb
 
       - name: Configure Unix
         if: runner.os != 'Windows'
