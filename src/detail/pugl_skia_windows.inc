@@ -443,13 +443,20 @@ QuitPolicy Application::quit_policy() const noexcept {
 struct StandaloneWindow::Impl final : PlatformServices {
     explicit Impl(std::shared_ptr<detail::DispatcherWakeBackend> wake_backend = {})
         : dispatcher_owner(
-              std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))) {}
+              std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))),
+          lifetime_token(std::make_shared<int>(0)) {}
 
     std::unique_ptr<ViewCore> core;
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    detail::WindowCloseState close_state;
+    std::function<CloseDecision()> close_request_callback;
+    std::function<void()> closed_callback;
+    std::shared_ptr<int> lifetime_token;
+    bool close_completion_posted{};
+    bool in_native_close_request{};
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -488,7 +495,7 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
             std::move(desc),
             0,
             application.impl_->world,
-            [this] { mark_application_window_closed(); });
+            [this] { handle_native_close_request(); });
         impl_->registration_id =
             application.impl_->register_window(impl_->dispatcher_owner);
         if (!impl_->registration_id) {
@@ -518,18 +525,99 @@ StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
         std::move(desc),
         0,
         nullptr,
-        [this] {
-            if (impl_ && impl_->dispatcher_owner) impl_->dispatcher_owner->shutdown();
-        });
+        [this] { handle_native_close_request(); });
 }
 
 StandaloneWindow::~StandaloneWindow() {
     if (!impl_) return;
+
+    // Direct C++ destruction is lifetime teardown, not an accepted-close
+    // notification path. Invalidate queued completion first so no user callback
+    // can run after this destructor returns.
+    impl_->close_state.begin_teardown();
+    impl_->lifetime_token.reset();
+    impl_->close_request_callback = {};
+    impl_->closed_callback = {};
+    if (impl_->core) (void)impl_->core->close_native_view();
+
     if (impl_->application) {
         unregister_from_application();
     } else if (impl_->dispatcher_owner) {
         impl_->dispatcher_owner->shutdown();
     }
+}
+
+void StandaloneWindow::handle_native_close_request() {
+    if (!impl_ || !impl_->core || !impl_->close_state.begin_user_request()) return;
+
+    impl_->in_native_close_request = true;
+    const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+    const auto callback = impl_->close_request_callback;
+    CloseDecision decision = CloseDecision::Accept;
+    if (callback) {
+        try {
+            decision = callback();
+        } catch (...) {
+            // Never unwind a user callback through Pugl/OS event dispatch. A
+            // throwing veto callback leaves the window open deterministically.
+            decision = CloseDecision::Cancel;
+        }
+    }
+
+    if (lifetime.expired()) return;
+    impl_->in_native_close_request = false;
+    impl_->close_state.finish_user_request(decision == CloseDecision::Accept);
+    if (impl_->close_state.pending()) schedule_close_completion();
+}
+
+void StandaloneWindow::schedule_close_completion() {
+    if (!impl_ || !impl_->core || !impl_->close_state.pending() ||
+        impl_->close_completion_posted) {
+        return;
+    }
+
+    // The deprecated independent-world path can complete an explicit API close
+    // immediately when it is not currently inside native event dispatch.
+    if (!impl_->application && !impl_->in_native_close_request) {
+        complete_close();
+        return;
+    }
+
+    const auto dispatcher = impl_->dispatcher_owner
+        ? impl_->dispatcher_owner->dispatcher()
+        : Dispatcher{};
+    const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+    auto* self = this;
+    impl_->close_completion_posted = true;
+    if (!dispatcher.post([lifetime, self] {
+            if (lifetime.expired()) return;
+            self->complete_close();
+        })) {
+        impl_->close_completion_posted = false;
+        // Outside native dispatch it is safe to preserve progress without a
+        // queue slot. Inside native dispatch, legacy poll() retries after the
+        // callback unwinds; Application-backed queues have a live wake backend
+        // and normally accept this bounded one-shot task.
+        if (!impl_->in_native_close_request) complete_close();
+    }
+}
+
+void StandaloneWindow::complete_close() {
+    if (!impl_ || !impl_->core) return;
+    impl_->close_completion_posted = false;
+    if (!impl_->close_state.complete_accepted_close()) return;
+
+    (void)impl_->core->close_native_view();
+    if (impl_->application) {
+        mark_application_window_closed();
+    } else if (impl_->dispatcher_owner) {
+        impl_->dispatcher_owner->shutdown();
+    }
+
+    // Copy before invoking: on_closed may mutate callback registration, other
+    // windows/Application state, or destroy this already-closed C++ object.
+    const auto callback = impl_->closed_callback;
+    if (callback) callback();
 }
 
 void StandaloneWindow::mark_application_window_closed() noexcept {
@@ -569,23 +657,22 @@ bool StandaloneWindow::poll(double timeout_seconds) {
         platform_detail::bound_dispatch_timeout(requested, owners);
     const bool alive = impl_->core->poll(pugl_timeout);
     if (owner) (void)owner->checkpoint();
-    return alive;
+    if (impl_->close_state.pending() && !impl_->close_completion_posted) complete_close();
+    return alive && !is_closed();
 }
 void StandaloneWindow::request_close() {
     if (!impl_ || !impl_->core) return;
-    impl_->core->request_close();
-    if (impl_->application) {
-        mark_application_window_closed();
-    } else if (impl_->dispatcher_owner) {
-        impl_->dispatcher_owner->shutdown();
-    }
+    if (impl_->close_state.request_programmatic()) schedule_close_completion();
 }
 bool StandaloneWindow::valid() const noexcept {
     return impl_ && impl_->core && impl_->construction_error.empty() &&
            impl_->core->last_error().empty();
 }
 bool StandaloneWindow::should_close() const noexcept {
-    return !impl_ || !impl_->core || impl_->core->should_close();
+    return !impl_ || !impl_->core || is_closed() || impl_->core->should_close();
+}
+bool StandaloneWindow::is_closed() const noexcept {
+    return impl_ && impl_->close_state.closed();
 }
 Size StandaloneWindow::size() const noexcept {
     return impl_ && impl_->core ? impl_->core->size() : Size{};
@@ -606,23 +693,46 @@ Dispatcher StandaloneWindow::dispatcher() const noexcept {
         ? impl_->dispatcher_owner->dispatcher()
         : Dispatcher{};
 }
+bool StandaloneWindow::set_title(std::string_view title) {
+    return impl_ && impl_->core && !is_closed() && impl_->core->set_title(title);
+}
+bool StandaloneWindow::show() {
+    return impl_ && impl_->core && !is_closed() && impl_->core->show();
+}
+bool StandaloneWindow::hide() {
+    return impl_ && impl_->core && !is_closed() && impl_->core->hide();
+}
 bool StandaloneWindow::set_size(Size size) {
-    return impl_ && impl_->core && impl_->core->set_size(size);
+    return impl_ && impl_->core && !is_closed() && impl_->core->set_size(size);
+}
+bool StandaloneWindow::set_min_size(std::optional<Size> size) {
+    return impl_ && impl_->core && !is_closed() && impl_->core->set_min_size(size);
+}
+bool StandaloneWindow::set_max_size(std::optional<Size> size) {
+    return impl_ && impl_->core && !is_closed() && impl_->core->set_max_size(size);
+}
+void StandaloneWindow::on_close_request(std::function<CloseDecision()> callback) {
+    if (!impl_ || is_closed()) return;
+    impl_->close_request_callback = std::move(callback);
+}
+void StandaloneWindow::on_closed(std::function<void()> callback) {
+    if (!impl_ || is_closed()) return;
+    impl_->closed_callback = std::move(callback);
 }
 void StandaloneWindow::set_text_input(bool active, Rect area, float cursor_offset) {
-    if (impl_ && impl_->core) impl_->core->set_text_input(active, area, cursor_offset);
+    if (impl_ && impl_->core && !is_closed()) impl_->core->set_text_input(active, area, cursor_offset);
 }
 void StandaloneWindow::set_clipboard_text(std::string_view text) {
-    if (impl_ && impl_->core) impl_->core->set_clipboard_text(text);
+    if (impl_ && impl_->core && !is_closed()) impl_->core->set_clipboard_text(text);
 }
 void StandaloneWindow::request_clipboard_text() {
-    if (impl_ && impl_->core) impl_->core->request_clipboard_text();
+    if (impl_ && impl_->core && !is_closed()) impl_->core->request_clipboard_text();
 }
 bool StandaloneWindow::accept_drop(std::string_view type, Rect region) {
-    return impl_ && impl_->core && impl_->core->accept_drop(type, region);
+    return impl_ && impl_->core && !is_closed() && impl_->core->accept_drop(type, region);
 }
 void StandaloneWindow::reject_drop(Rect region) {
-    if (impl_ && impl_->core) impl_->core->reject_drop(region);
+    if (impl_ && impl_->core && !is_closed()) impl_->core->reject_drop(region);
 }
 
 struct EmbeddedView::Impl final : PlatformServices {
