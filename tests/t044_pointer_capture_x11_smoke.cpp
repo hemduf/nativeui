@@ -370,6 +370,8 @@ int main() {
     c.reset();
     c_ui.reset();
     if (!pump(app)) return 1;
+    if (!expect(driver.activate(*b), "destroy", "failed to reactivate B after destroying C") ||
+        !pump(app)) return 1;
     const int after_destroy = b_state->routed_move;
     if (!expect(driver.move_inside(*b, 72, 72), "destroy", "failed to move into B") || !pump(app)) return 1;
     if (!expect(b_state->routed_move > after_destroy,
