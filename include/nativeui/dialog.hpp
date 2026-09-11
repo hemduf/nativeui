@@ -6,6 +6,7 @@
 #include <nativeui/widgets.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -47,6 +48,7 @@ struct DialogSpec {
     std::string title;
     Spec body;
     std::vector<DialogAction> actions;
+    Color backdrop_color{0.0f, 0.0f, 0.0f, 0.48f};
 };
 
 enum class DialogShowResult {
@@ -105,6 +107,58 @@ private:
     bool enabled_{true};
 };
 
+/// Full-viewport T063 content shell. T061 remains the sole overlay/modal stack;
+/// this component only supplies the Dialog-specific visual backdrop and centers
+/// the bounded panel inside the viewport. Because the T061 OverlayEntry itself
+/// remains pointer-targetable over these full bounds, backdrop clicks are
+/// consumed without introducing another hit-test or dismissal layer.
+class DialogBackdropComponent final : public Component {
+public:
+    explicit DialogBackdropComponent(Color color) : color_(color) {}
+
+    [[nodiscard]] Constraints child_constraints(
+        const Constraints& constraints, std::size_t, std::size_t) const override {
+        return constraints.loosen();
+    }
+
+    [[nodiscard]] ChildMetrics measure_constrained(
+        const Constraints& constraints,
+        const std::vector<ChildMetrics>& children) const override {
+        const auto child = children.empty() ? ChildMetrics{} : children.front();
+        Size preferred = child.preferred;
+        if (constraints.bounded_width()) preferred.w = constraints.max.w;
+        if (constraints.bounded_height()) preferred.h = constraints.max.h;
+        preferred = constraints.constrain(preferred);
+        return ChildMetrics{constraints.constrain({}), preferred};
+    }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>& children,
+        std::vector<ChildPlacement>& placements) const override {
+        if (children.empty() || placements.empty()) return;
+        const auto preferred = children.front().preferred;
+        const float width = std::min(bounds.w, preferred.w);
+        const float height = std::min(bounds.h, preferred.h);
+        placements.front().bounds = Rect{
+            bounds.x + (bounds.w - width) * 0.5f,
+            bounds.y + (bounds.h - height) * 0.5f,
+            width,
+            height};
+    }
+
+    void paint(PaintContext& context) const override {
+        context.painter().fill_rounded_rect(context.bounds(), 0.0f, color_);
+    }
+
+private:
+    Color color_{};
+};
+
 struct DialogPanelLayout {
     std::size_t body_index{};
     std::optional<std::size_t> title_index;
@@ -116,18 +170,16 @@ public:
     DialogPanelComponent(
         DialogPanelLayout layout,
         std::shared_ptr<ScrollState> body_scroll,
-        std::function<void()> on_default,
-        std::function<void()> on_escape)
+        std::function<void()> on_default)
         : layout_(std::move(layout)),
           body_scroll_(std::move(body_scroll)),
-          on_default_(std::move(on_default)),
-          on_escape_(std::move(on_escape)) {}
+          on_default_(std::move(on_default)) {}
 
     // The nested focus scope lets T061 first enter this Dialog as one modal
-    // unit, then select its first logical descendant. build_dialog_content()
-    // orders an enabled Default action first when one exists; otherwise the
-    // body is first. If there is no focusable descendant the panel itself
-    // remains focused so Escape/programmatic close are still operational.
+    // unit, then select its first logical descendant. build_content() orders an
+    // enabled Default action first when one exists; otherwise body descendants
+    // are first. If there is no focusable descendant the panel itself remains
+    // focused, while UI-level T063 Escape/programmatic close stay operational.
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool is_focus_scope() const noexcept override { return true; }
     [[nodiscard]] bool focus_scope_active() const noexcept override { return true; }
@@ -147,6 +199,10 @@ public:
     [[nodiscard]] ChildMetrics measure_constrained(
         const Constraints& constraints,
         const std::vector<ChildMetrics>& children) const override {
+        // Keep the T034 ScrollState alive for every measurement/layout of its
+        // borrowed ScrollView descendant; this read also makes the lifetime
+        // ownership explicit to warning-clean compilers.
+        (void)body_scroll_.get();
         const auto outer = outer_constraints(constraints);
         const auto natural = panel_extent(children, false);
         const auto minimum = outer.constrain(panel_extent(children, true));
@@ -229,18 +285,10 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext&) override {
-        if (event.type != InputType::KeyDown) return EventResult::Ignored;
-
-        if (event.key == Key::Escape) {
-            auto callback = on_escape_;
-            if (callback) callback();
-            return EventResult::Handled;
-        }
-
         // Enter reaches this ancestor only after the focused descendant has
         // returned Ignored. TextInput/TextArea and any other child that owns
         // Enter therefore win before the Default action fallback.
-        if (event.key == Key::Enter && on_default_) {
+        if (event.type == InputType::KeyDown && event.key == Key::Enter && on_default_) {
             auto callback = on_default_;
             callback();
             return EventResult::Handled;
@@ -319,7 +367,6 @@ private:
     // descendants only borrow it and are destroyed before this parent.
     std::shared_ptr<ScrollState> body_scroll_;
     std::function<void()> on_default_;
-    std::function<void()> on_escape_;
 };
 
 } // namespace detail
@@ -337,9 +384,10 @@ public:
     Dialog& operator=(Dialog&&) = delete;
 
     ~Dialog() {
-        // Invalidate every retained action callback before a controller can
-        // disappear. Explicit live-UI destruction still follows close() and
-        // therefore delivers one Dismissed result; whole-UI teardown is inert.
+        // Invalidate every retained action/lifecycle callback before a
+        // controller can disappear. Explicit live-UI destruction still follows
+        // close() and therefore delivers one Dismissed result; whole-UI teardown
+        // is inert because DialogState is marked terminal first.
         lifetime_.reset();
         if (active()) (void)close();
         else clear_local_state();
@@ -357,13 +405,21 @@ public:
         generation_ = generation;
         completion_ = std::move(completion);
 
+        const auto escape_result = escape_result_for(spec);
+        if (!state->bind_handlers(
+                generation,
+                guarded_completion(escape_result),
+                guarded_abandon())) {
+            (void)state->release(generation);
+            clear_local_state();
+            return DialogShowResult::Unavailable;
+        }
+
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
         overlay.pointer_policy = OverlayPointerPolicy::Normal;
         overlay.placement = OverlayPlacement::Center;
-        // T063 Escape is routed through the DialogPanel so it can distinguish
-        // enabled Cancel action from Dismissed. UI still prevents lower modal/
-        // root content from observing an unhandled Escape.
+        // T063 owns Escape through DialogState/UI before generic T061 routing.
         overlay.dismiss_on_escape = false;
         overlay.dismiss_on_outside_pointer_down = false;
         overlay.content = build_content(std::move(spec));
@@ -416,12 +472,30 @@ private:
         return true;
     }
 
+    [[nodiscard]] static DialogResult escape_result_for(const DialogSpec& spec) {
+        for (const auto& action : spec.actions) {
+            if (action.role == DialogActionRole::Cancel && action.enabled) {
+                return DialogResult{DialogResultKind::Action, action.id};
+            }
+        }
+        return DialogResult{DialogResultKind::Dismissed, {}};
+    }
+
     [[nodiscard]] std::function<void()> guarded_completion(DialogResult result) {
         std::weak_ptr<int> lifetime = lifetime_;
         auto* self = this;
         return [lifetime = std::move(lifetime), self, result = std::move(result)]() mutable {
             if (lifetime.expired()) return;
             (void)self->complete(std::move(result));
+        };
+    }
+
+    [[nodiscard]] std::function<void()> guarded_abandon() {
+        std::weak_ptr<int> lifetime = lifetime_;
+        auto* self = this;
+        return [lifetime = std::move(lifetime), self] {
+            if (lifetime.expired()) return;
+            self->abandon_without_completion();
         };
     }
 
@@ -441,14 +515,10 @@ private:
     [[nodiscard]] Spec build_content(DialogSpec spec) {
         std::optional<std::size_t> default_action;
         std::optional<std::size_t> enabled_default;
-        std::optional<std::size_t> enabled_cancel;
         for (std::size_t i = 0; i < spec.actions.size(); ++i) {
             if (spec.actions[i].role == DialogActionRole::Default) {
                 default_action = i;
                 if (spec.actions[i].enabled) enabled_default = i;
-            }
-            if (spec.actions[i].role == DialogActionRole::Cancel && spec.actions[i].enabled) {
-                enabled_cancel = i;
             }
         }
 
@@ -461,9 +531,9 @@ private:
         std::vector<bool> action_moved(spec.actions.size(), false);
 
         // T061's modal focus scope enters its first available descendant. Put
-        // the configured Default action first in retained order so the outer
-        // scope can enter it deterministically; layout still renders actions in
-        // their original visual row order at the bottom of the panel.
+        // the configured Default action first in retained order so the nested
+        // Dialog scope enters it deterministically; layout still renders
+        // actions in their original visual row order at the bottom.
         if (default_action) {
             action_child_indices[*default_action] = children.size();
             children.push_back(std::move(action_specs[*default_action]));
@@ -500,26 +570,24 @@ private:
                 DialogResultKind::Action, spec.actions[*enabled_default].id});
         }
 
-        std::function<void()> on_escape;
-        if (enabled_cancel) {
-            on_escape = guarded_completion(DialogResult{
-                DialogResultKind::Action, spec.actions[*enabled_cancel].id});
-        } else {
-            on_escape = guarded_completion(DialogResult{DialogResultKind::Dismissed, {}});
-        }
-
-        return Spec{
+        Spec panel{
             [layout = std::move(layout),
              body_scroll = std::move(body_scroll),
-             on_default = std::move(on_default),
-             on_escape = std::move(on_escape)]() mutable {
+             on_default = std::move(on_default)]() mutable {
                 return std::make_unique<detail::DialogPanelComponent>(
                     std::move(layout),
                     std::move(body_scroll),
-                    std::move(on_default),
-                    std::move(on_escape));
+                    std::move(on_default));
             },
             std::move(children)};
+
+        std::vector<Spec> backdrop_children;
+        backdrop_children.push_back(std::move(panel));
+        return Spec{
+            [color = spec.backdrop_color] {
+                return std::make_unique<detail::DialogBackdropComponent>(color);
+            },
+            std::move(backdrop_children)};
     }
 
     bool complete(DialogResult result) {
@@ -543,6 +611,21 @@ private:
                 if (completion) completion(std::move(result));
             });
         return true;
+    }
+
+    void abandon_without_completion() {
+        auto state = state_.lock();
+        if (!state || state->ui_tearing_down || !ui_ || generation_ == 0 ||
+            !state->owns(generation_)) {
+            clear_local_state();
+            return;
+        }
+
+        const auto generation = std::exchange(generation_, 0);
+        auto overlay = std::exchange(overlay_, OverlayHandle{});
+        completion_ = {};
+        (void)ui_->close_overlay(std::move(overlay));
+        (void)state->release(generation);
     }
 
     void clear_local_state() noexcept {
