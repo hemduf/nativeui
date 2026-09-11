@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <nativeui/dynamic.hpp>
 #include <nativeui/headless.hpp>
 #include <nativeui/inspector.hpp>
 #include <nativeui/layout.hpp>
@@ -47,6 +48,31 @@ void state_is_per_ui_and_snapshot_is_value_based() {
     const auto later = ui::debug::inspector_snapshot(first);
     NUI_CHECK(later.nodes.size() == original_count);
     NUI_CHECK(snapshot.nodes.size() == original_count);
+}
+
+void destroyed_node_ids_disappear_without_stale_access() {
+    ui::State<bool> present{true};
+    ui::UI ui{ui::If{present, ui::Label{"Transient"}}};
+    ui.resize({120.0f, 80.0f});
+
+    const auto before = ui::debug::inspector_snapshot(ui);
+    ui::NodeId transient_id = ui::kInvalidNodeId;
+    for (const auto& node : before.nodes) {
+        if (node.parent_id != ui::kInvalidNodeId) {
+            transient_id = node.id;
+            break;
+        }
+    }
+    NUI_CHECK(transient_id != ui::kInvalidNodeId);
+    NUI_CHECK(before.find(transient_id) != nullptr);
+
+    present.set(false);
+    const auto after = ui::debug::inspector_snapshot(ui);
+    NUI_CHECK(after.find(transient_id) == nullptr);
+
+    // The old value snapshot remains self-contained and safe to inspect after
+    // the retained node has been destroyed.
+    NUI_CHECK(before.find(transient_id) != nullptr);
 }
 
 void enable_and_selection_changes_request_only_one_repaint_each() {
@@ -226,6 +252,7 @@ void inspector_post_paint_preserves_incoming_canvas_state() {
 
 void suite() {
     state_is_per_ui_and_snapshot_is_value_based();
+    destroyed_node_ids_disappear_without_stale_access();
     enable_and_selection_changes_request_only_one_repaint_each();
     query_reports_layout_dirty_and_exact_dirty_regions();
     snapshot_reports_focus_capture_and_effective_clip();
