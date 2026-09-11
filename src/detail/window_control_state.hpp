@@ -77,13 +77,17 @@ enum class WindowClosePhase {
 /// Pure close lifecycle state used at the native window boundary.
 ///
 /// User callbacks are deliberately outside this object. The platform owner
-/// enters Requesting before invoking a user veto callback, then revalidates the
-/// phase afterwards. A programmatic request made reentrantly from that callback
-/// moves directly to Pending, so a later Cancel result cannot undo the explicit
-/// accepted close. Teardown is terminal and suppresses pending completion.
+/// enters Requesting before scheduling a user veto callback at a safe Dispatcher
+/// checkpoint, then revalidates the phase afterwards. A programmatic request
+/// made reentrantly from that callback moves directly to Pending, so a later
+/// Cancel result cannot undo the explicit accepted close. Teardown is terminal
+/// and suppresses pending completion.
 class WindowCloseState final {
 public:
     [[nodiscard]] WindowClosePhase phase() const noexcept { return phase_; }
+    [[nodiscard]] bool requesting() const noexcept {
+        return phase_ == WindowClosePhase::Requesting;
+    }
     [[nodiscard]] bool closed() const noexcept { return phase_ == WindowClosePhase::Closed; }
     [[nodiscard]] bool pending() const noexcept { return phase_ == WindowClosePhase::Pending; }
 
