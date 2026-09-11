@@ -53,6 +53,15 @@ PuglStatus dispatch_x11_focus_transition(PuglView* view, bool focused) noexcept 
     auto& record = found->second;
     if (record.known && record.focused == focused) return PUGL_SUCCESS;
 
+    // A newly registered, currently unfocused view is already in NativeUI's
+    // inactive state. Learn that baseline without manufacturing a FocusOut
+    // callback that the native system never delivered to an active view.
+    if (!record.known && !focused) {
+        record.known = true;
+        record.focused = false;
+        return PUGL_SUCCESS;
+    }
+
     const auto callback = record.callback;
     record.known = true;
     record.focused = focused;
