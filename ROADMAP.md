@@ -116,9 +116,9 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T067 — Fixed-height virtualized ListView
 
-**Complete in PR #219, with startup regression closure in PR #233.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
+**Complete in PR #219; startup regression closure is carried by PR #233.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
 
-The required 100k-item example now also enforces viewport-bounded startup composition. It wraps the virtual list in `Flex(grow=1, shrink=1)` so the list viewport is the available window space rather than its full intrinsic content height. A deterministic startup self-test fails if initial row-factory materialization escapes a small bounded count, the dedicated T067 workflow builds and runs `nativeui_example_t067_virtual_list --self-test`, and the root integration contract requires that CI wiring to remain present.
+The required 100k-item example in PR #233 enforces viewport-bounded startup composition. It wraps the virtual list in `Flex(grow=1, shrink=1)` so the list viewport is the available window space rather than its full intrinsic content height. A deterministic startup self-test fails if initial row-factory materialization escapes a small bounded count, the dedicated T067 workflow builds and runs `nativeui_example_t067_virtual_list --self-test`, and the root integration contract requires that CI wiring to remain present.
 
 ### T068 convergence
 
