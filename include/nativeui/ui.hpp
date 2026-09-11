@@ -86,11 +86,14 @@ public:
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
         // before ordinary retained routing so a focused TextInput/custom body
         // cannot consume Escape ahead of the enabled Cancel action/Dismissed
-        // fallback. Dialog completion performs retained teardown before the app
-        // callback and therefore leaves no stale modal route behind.
-        if (event.type == InputType::KeyDown && event.key == Key::Escape &&
-            dialog_state_ && dialog_state_->handle_escape()) {
-            return EventResult::Handled;
+        // fallback. Keep a strong local DialogState reference because the
+        // application completion may destroy this UI before handle_escape()
+        // returns; no UI member is touched after a successful completion.
+        if (event.type == InputType::KeyDown && event.key == Key::Escape) {
+            auto dialog_state = dialog_state_;
+            if (dialog_state && dialog_state->handle_escape()) {
+                return EventResult::Handled;
+            }
         }
 
         // Keep the no-overlay path as close as possible to the pre-T061 UI
