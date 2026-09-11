@@ -32,6 +32,8 @@ The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea19085
 
 T067 remains architecturally complete from PR #219. PR #233 carries a post-completion example startup regression closure: the 100k-item virtual ListView was inserted directly into a `Column` with the default `shrink = 0`, so its 2.8-million-pixel preferred content height became the initial viewport and almost the full dataset was materialized before the native window was shown. The corrected example constrains the virtual list with `Flex(grow=1, shrink=1)`, adds a production-composition startup materialization regression, executes the example `--self-test` in the dedicated T067 workflow and guards that CI wiring from the root integration contract.
 
+Build regression #234 / PR #235 hardens source-tree feature example registration: root CMake now derives the canonical example set from `examples/features/tNNN_<feature>.cpp` with `CONFIGURE_DEPENDS`, deterministic ordering and a naming guard. This closes the omission that left `t060_multi_window_application` and `t065_ui_dispatcher` out of normal root builds while preserving their dedicated harnesses.
+
 Current convergence:
 
 ```text
@@ -72,10 +74,12 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
 - T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
+- #231 / PR #232: T061 example overlays paint an explicit panel background and border so popup/modal text cannot visually collide with underlying example content; the generic overlay API remains caller-styled.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
 - T067 / PR #219, with startup regression closure in PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
+- #234 / PR #235: canonical feature examples are auto-discovered by root CMake, with reconfigure-on-source-change and a regression contract covering T060/T065 registration.
 
 ## T043 resize/scale completion state
 

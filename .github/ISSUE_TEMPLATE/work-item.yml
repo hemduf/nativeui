@@ -102,12 +102,13 @@ body:
     id: tests
     attributes:
       label: Required tests
-      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering check.
+      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering check. Remote execution cadence follows CI_POLICY.md.
       value: |
         - [ ] Targeted regression/unit tests.
-        - [ ] Full relevant test suite.
+        - [ ] Full relevant test suite before final qualification.
         - [ ] Dedicated feature executable + `--self-test` when applicable.
         - [ ] Platform/headless/golden tests when applicable.
+        - [ ] Relevant path-scoped CI plus final-candidate qualification from `CI_POLICY.md`.
     validations:
       required: true
 
@@ -125,6 +126,8 @@ body:
         - [ ] Run targeted tests.
         - [ ] Run the full relevant test suite.
         - [ ] Run required platform/headless/golden tests.
+        - [ ] Keep active implementation PR Draft; mark the frozen candidate Ready for review to launch heavyweight final qualification per `CI_POLICY.md`.
+        - [ ] If source/tests/build/workflows change after final qualification, return the PR to Draft and requalify.
         - [ ] Perform all applicable review passes from `AGENTS.md`.
         - [ ] Perform the mandatory final review against `CODE_REVIEW.md` and record the result in the issue/PR.
         - [ ] Explicitly assess multi-instance isolation and mutable globals/statics.
