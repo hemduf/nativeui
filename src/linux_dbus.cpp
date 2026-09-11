@@ -1045,33 +1045,30 @@ struct LinuxDbusTransport::Impl final {
     }
 
     void unregister_all_object_paths(DBusConnection* current_connection) noexcept {
-        std::vector<std::pair<LinuxDbusObjectRegistrationId,
-                              std::shared_ptr<ObjectPathEntry>>> entries;
-        try {
+        for (;;) {
+            LinuxDbusObjectRegistrationId id = kInvalidLinuxDbusObjectRegistrationId;
+            std::shared_ptr<ObjectPathEntry> entry;
             {
                 std::lock_guard lock{object_mutex};
-                entries.reserve(object_paths.size());
-                for (const auto& [id, entry] : object_paths) {
-                    {
-                        std::lock_guard entry_lock{entry->mutex};
-                        entry->active = false;
-                    }
-                    entries.emplace_back(id, entry);
+                const auto found = object_paths.begin();
+                if (found == object_paths.end()) {
+                    object_path_ids.clear();
+                    break;
                 }
-                object_paths.clear();
-                object_path_ids.clear();
-            }
-            for (const auto& [id, entry] : entries) {
-                if (current_connection != nullptr) {
-                    (void)dbus_connection_unregister_object_path(
-                        current_connection, entry->path.c_str());
+                id = found->first;
+                entry = found->second;
+                {
+                    std::lock_guard entry_lock{entry->mutex};
+                    entry->active = false;
                 }
-                (void)ledger.release_object_path(entry->client, id);
+                object_path_ids.erase(entry->path);
+                object_paths.erase(found);
             }
-        } catch (...) {
-            // Teardown remains noexcept. The connection close below also
-            // unregisters any libdbus path still retained after allocation
-            // failure while collecting entries.
+            if (current_connection != nullptr) {
+                (void)dbus_connection_unregister_object_path(
+                    current_connection, entry->path.c_str());
+            }
+            (void)ledger.release_object_path(entry->client, id);
         }
     }
 
@@ -1743,10 +1740,17 @@ LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
             return id;
         }
 
-        auto entry = std::make_shared<Impl::ObjectPathEntry>();
-        entry->client = client;
-        entry->path = path;
-        entry->handler = std::move(handler);
+        std::shared_ptr<Impl::ObjectPathEntry> entry;
+        try {
+            entry = std::make_shared<Impl::ObjectPathEntry>();
+            entry->client = client;
+            entry->path = path;
+            entry->handler = std::move(handler);
+        } catch (...) {
+            (void)impl_->ledger.release_object_path(client, id);
+            return kInvalidLinuxDbusObjectRegistrationId;
+        }
+
         auto* context = new (std::nothrow) Impl::ObjectPathContext{impl_.get(), id};
         if (context == nullptr) {
             (void)impl_->ledger.release_object_path(client, id);
