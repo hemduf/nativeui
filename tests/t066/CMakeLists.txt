@@ -11,6 +11,16 @@ set(NATIVEUI_BUILD_PLATFORM ON CACHE BOOL "" FORCE)
 
 add_subdirectory("${NATIVEUI_SOURCE_DIR}" nativeui)
 
+add_executable(nativeui_t066_window_control_state_tests
+  "${NATIVEUI_SOURCE_DIR}/tests/t066_window_control_state_tests.cpp"
+)
+target_include_directories(nativeui_t066_window_control_state_tests PRIVATE
+  "${NATIVEUI_SOURCE_DIR}/tests"
+)
+target_link_libraries(nativeui_t066_window_control_state_tests PRIVATE NativeUI::Core)
+nativeui_enable_project_warnings(nativeui_t066_window_control_state_tests)
+nativeui_enable_sanitizers(nativeui_t066_window_control_state_tests)
+
 # The final-consumer attachment helper needs the exact pinned Pugl source root
 # in this outer project scope. Recover it from the Pugl target already created
 # by NativeUI rather than depending on a CPM build-directory layout.
