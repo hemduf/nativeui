@@ -445,11 +445,13 @@ struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
         : dispatcher_owner(
               std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))) {}
 
+    // Declared before `core` so ViewCore (which may discover this impl's
+    // dispatcher while deactivating its UI) is destroyed before the owner.
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     std::unique_ptr<ViewCore> core;
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
-    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
 
     // ViewCore receives this Impl (not the public StandaloneWindow wrapper) as
     // its PlatformServices object, so retained policies such as Tooltip must be
@@ -634,19 +636,20 @@ void StandaloneWindow::reject_drop(Rect region) {
 
 struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     Impl(UI& ui, NativeParentHandle parent, Size size)
-        : core(ui,
+        : dispatcher_owner(std::make_shared<detail::DispatcherOwner>()),
+          core(ui,
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true},
-               parent),
-          dispatcher_owner(std::make_shared<detail::DispatcherOwner>()) {}
+               parent) {}
 
     ~Impl() override {
         if (dispatcher_owner) dispatcher_owner->shutdown();
     }
 
     // ViewCore receives this Impl as its PlatformServices object, so embedded
-    // retained policies discover the per-view T065 dispatcher here.
+    // retained policies discover the per-view T065 dispatcher here. The owner
+    // is declared first so ViewCore teardown can still query it.
     [[nodiscard]] Dispatcher dispatcher() const noexcept override {
         return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
     }
@@ -661,8 +664,8 @@ struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     }
     void reject_drop(Rect region) override { core.reject_drop(region); }
 
-    ViewCore core;
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    ViewCore core;
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
