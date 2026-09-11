@@ -30,7 +30,7 @@ Non-negotiable rules:
 
 The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea1908541dc6a701c8a`. It includes completed T043 / PR #142 on top of T061, T067 / PR #219, T045, T037, T058, T036, T065, T034, T060/T042 lifecycle qualification, the T052 developer-preview release gate, the warning-free source-tree baseline, post-T036 hover correction #212 and Tree paint-ownership correction #152.
 
-T067 remains architecturally complete from PR #219. PR #233 closes a post-completion example startup regression: the 100k-item virtual ListView was inserted directly into a `Column` with the default `shrink = 0`, so its 2.8-million-pixel preferred content height became the initial viewport and almost the full dataset was materialized before the native window was shown. The corrected example constrains the virtual list with `Flex(grow=1, shrink=1)`, adds a production-composition startup materialization regression, executes the example `--self-test` in the dedicated T067 workflow and guards that CI wiring from the root integration contract.
+T067 remains architecturally complete from PR #219. PR #233 carries a post-completion example startup regression closure: the 100k-item virtual ListView was inserted directly into a `Column` with the default `shrink = 0`, so its 2.8-million-pixel preferred content height became the initial viewport and almost the full dataset was materialized before the native window was shown. The corrected example constrains the virtual list with `Flex(grow=1, shrink=1)`, adds a production-composition startup materialization regression, executes the example `--self-test` in the dedicated T067 workflow and guards that CI wiring from the root integration contract.
 
 Current convergence:
 
@@ -73,7 +73,7 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
-- T067 / PR #219 + PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is also constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
+- T067 / PR #219, with startup regression closure in PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
 
