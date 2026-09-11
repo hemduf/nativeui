@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR "T043 registration contract requires SOURCE_DIR")
 endif()
