@@ -161,17 +161,94 @@ int self_test() {
 
     auto transparent = centered_label("Transparent");
     transparent.pointer_policy = ui::OverlayPointerPolicy::Ignore;
+    transparent.dismiss_on_escape = true;
     state.tooltip = tree.show_overlay(std::move(transparent));
     if (!state.tooltip.valid() || !renderer.render(tree)) {
         return example::fail("pointer-transparent overlay failed");
     }
+    if (!ui::handled(tree.dispatch(example::key(ui::Key::Escape), platform)) ||
+        state.tooltip.valid()) {
+        return example::fail("pointer-transparent Escape dismissal failed");
+    }
 
-    if (!tree.close_overlay(state.popup) || !tree.close_overlay(state.tooltip)) {
+    if (!tree.close_overlay(state.popup)) {
         return example::fail("overlay close failed");
     }
     if (!renderer.render(tree)) return example::fail("final overlay teardown render failed");
-    if (state.popup.valid() || state.tooltip.valid()) {
+    if (state.popup.valid()) {
         return example::fail("closed overlay handle remained valid");
+    }
+
+    // A normal non-modal overlay must not steal keyboard focus from its root.
+    // A modal with no focusable content must still own keyboard activation and
+    // restore the root when it closes.
+    int a_activations = 0;
+    int b_activations = 0;
+    ui::UI a_ui{ui::Button{"A", [&] { ++a_activations; }}};
+    ui::UI b_ui{ui::Button{"B", [&] { ++b_activations; }}};
+    a_ui.resize({96.0f, 48.0f});
+    b_ui.resize({96.0f, 48.0f});
+    a_ui.activate(platform);
+    b_ui.activate(platform);
+
+    auto non_modal = centered_label("Non-modal keyboard probe");
+    const auto non_modal_handle = a_ui.show_overlay(std::move(non_modal));
+    a_ui.resize({96.0f, 48.0f});
+    if (!non_modal_handle.valid() ||
+        !ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        a_activations != 1) {
+        return example::fail("non-modal overlay stole root keyboard focus");
+    }
+    if (!a_ui.close_overlay(non_modal_handle)) {
+        return example::fail("non-modal keyboard probe close failed");
+    }
+    a_ui.resize({96.0f, 48.0f});
+
+    auto key_modal = centered_label("Modal keyboard probe");
+    key_modal.mode = ui::OverlayMode::Modal;
+    const auto key_modal_handle = a_ui.show_overlay(std::move(key_modal));
+    a_ui.resize({96.0f, 48.0f});
+    if (!key_modal_handle.valid() ||
+        !ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        a_activations != 1) {
+        return example::fail("modal overlay allowed lower keyboard activation");
+    }
+
+    // The modal/focus state of A must not perturb an independent UI B.
+    if (!ui::handled(b_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        b_activations != 1) {
+        return example::fail("modal focus leaked across UI instances");
+    }
+
+    if (!a_ui.close_overlay(key_modal_handle)) {
+        return example::fail("modal keyboard probe close failed");
+    }
+    a_ui.resize({96.0f, 48.0f});
+    if (!ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        a_activations != 2 || b_activations != 1) {
+        return example::fail("modal focus restoration or UI isolation failed");
+    }
+
+    // A normal non-modal overlay only owns its own region. Pointer input outside
+    // it remains eligible for the underlying root when no outside-dismiss policy
+    // consumes the event.
+    auto outside_state = std::make_shared<CaptureState>();
+    ui::UI outside_tree{CaptureProbe{outside_state}};
+    outside_tree.resize({96.0f, 48.0f});
+    outside_tree.activate(platform);
+    const auto outside_handle =
+        outside_tree.show_overlay(centered_label("Small non-modal"));
+    outside_tree.resize({96.0f, 48.0f});
+    ui::InputEvent outside_down;
+    outside_down.type = ui::InputType::PointerDown;
+    outside_down.position = {2.0f, 2.0f};
+    if (!outside_handle.valid() ||
+        !ui::handled(outside_tree.dispatch(outside_down, platform)) ||
+        outside_state->pointer_downs != 1 || !outside_handle.valid()) {
+        return example::fail("non-modal outside pointer did not reach root");
+    }
+    if (!outside_tree.close_overlay(outside_handle)) {
+        return example::fail("non-modal outside probe close failed");
     }
 
     auto capture = std::make_shared<CaptureState>();
@@ -206,6 +283,9 @@ int self_test() {
         return example::fail("modal capture barrier close failed");
     }
 
+    outside_tree.deactivate(platform);
+    a_ui.deactivate(platform);
+    b_ui.deactivate(platform);
     capture_tree.deactivate(platform);
     return 0;
 }
