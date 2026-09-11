@@ -590,3 +590,10 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
   nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
 endif()
+
+# T072 is Linux/X11-only infrastructure. macOS and Windows never discover or
+# link libdbus-1; Linux platform builds require the system development package.
+if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE)
+  include(cmake/NativeUILinuxDbus.cmake)
+  nativeui_add_linux_dbus_transport()
+endif()
