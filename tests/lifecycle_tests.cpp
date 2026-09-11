@@ -91,6 +91,46 @@ struct DynamicItem {
     bool operator==(const DynamicItem&) const = default;
 };
 
+struct DialogBodyState {
+    int mounts{};
+    int unmounts{};
+};
+
+class DialogBodyComponent final : public ui::Component {
+public:
+    explicit DialogBodyComponent(std::shared_ptr<DialogBodyState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {120.0f, 80.0f};
+    }
+
+    void mount(ui::MountContext&) override { ++state_->mounts; }
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<DialogBodyState> state_;
+};
+
+class DialogBody {
+public:
+    explicit DialogBody(std::shared_ptr<DialogBodyState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<DialogBodyComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<DialogBodyState> state_;
+};
+
 ui::DialogSpec dialog_spec() {
     ui::DialogSpec spec;
     spec.title = "Confirm";
@@ -99,6 +139,12 @@ ui::DialogSpec dialog_spec() {
         "confirm", "Confirm", true, ui::DialogActionRole::Default});
     spec.actions.push_back(ui::DialogAction{
         "cancel", "Cancel", true, ui::DialogActionRole::Cancel});
+    return spec;
+}
+
+ui::DialogSpec dialog_spec(std::shared_ptr<DialogBodyState> body) {
+    auto spec = dialog_spec();
+    spec.body = ui::make_spec(DialogBody{std::move(body)});
     return spec;
 }
 
@@ -234,6 +280,37 @@ void suite() {
         }) == ui::DialogShowResult::Shown);
         NUI_CHECK(second.close());
         NUI_CHECK(callbacks == 2);
+    }
+
+    // Completion callbacks run only after the T061/T058 subtree is actually
+    // detached and unmounted, not merely after the OverlayHandle becomes stale.
+    // The callback can therefore show the next Dialog immediately without the
+    // old subtree still participating in focus/capture/lifecycle state.
+    {
+        test::MockPlatform platform;
+        ui::UI tree{ui::Spacer{160.0f, 100.0f}};
+        tree.resize({160.0f, 100.0f});
+        tree.activate(platform);
+
+        auto body = std::make_shared<DialogBodyState>();
+        ui::Dialog first{tree};
+        ui::Dialog second{tree};
+        bool unmounted_before_callback = false;
+        ui::DialogShowResult reentrant_show = ui::DialogShowResult::Unavailable;
+
+        NUI_CHECK(first.show(dialog_spec(body), [&](ui::DialogResult result) {
+            NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+            unmounted_before_callback = body->unmounts == 1;
+            reentrant_show = second.show(dialog_spec(), [](ui::DialogResult) {});
+        }) == ui::DialogShowResult::Shown);
+        tree.resize({160.0f, 100.0f});
+        NUI_CHECK(body->mounts == 1);
+
+        NUI_CHECK(first.close());
+        NUI_CHECK(unmounted_before_callback);
+        NUI_CHECK(body->unmounts == 1);
+        NUI_CHECK(reentrant_show == ui::DialogShowResult::Shown);
+        NUI_CHECK(second.close());
     }
 
     // Whole-UI teardown is observably different from explicit controller
