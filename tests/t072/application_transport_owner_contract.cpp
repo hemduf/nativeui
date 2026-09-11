@@ -1,9 +1,14 @@
 #include "detail/linux_dbus_application_transport_owner.hpp"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+
+#include <chrono>
 #include <cstdlib>
 #include <string>
+#include <thread>
 
 int main() {
+    using namespace std::chrono_literals;
     using namespace ui::detail;
 
     LinuxDbusApplicationTransportOwner owner;
@@ -71,19 +76,52 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    owner.release_client(client_b);
-    if (owner.client_count() != 0 || owner.transport_if_started() != transport ||
-        !transport->running()) {
+    const auto slow_path = independent_transport->register_object_path(
+        independent_client,
+        "/org/nativeui/T072/ApplicationShutdown/Slow",
+        [](const LinuxDbusMethodRequest&) {
+            std::this_thread::sleep_for(100ms);
+            return LinuxDbusMethodReply::method_return({LinuxDbusValue::string("late")});
+        });
+    if (slow_path == kInvalidLinuxDbusObjectRegistrationId) {
         return EXIT_FAILURE;
     }
 
-    owner.shutdown();
-    owner.shutdown();
-    if (owner.transport_if_started() != nullptr || owner.client_count() != 0 ||
-        owner.register_client() != kInvalidLinuxDbusClientId) {
+    DispatcherOwner dispatcher_owner;
+    std::size_t late_callbacks = 0;
+    const auto request = transport->call_method(
+        client_b,
+        dispatcher_owner.dispatcher(),
+        LinuxDbusMethodCall{
+            independent_transport->unique_name(),
+            "/org/nativeui/T072/ApplicationShutdown/Slow",
+            "org.nativeui.T072.Test",
+            "Wait",
+            2s,
+        },
+        [&](LinuxDbusCompletion) { ++late_callbacks; });
+    if (request == kInvalidLinuxDbusRequestId) {
         return EXIT_FAILURE;
     }
 
+    // Application shutdown must tear logical clients down before transport
+    // stop/join. A pending request therefore cannot post a Shutdown completion
+    // into an owner that is already closing.
+    owner.shutdown();
+    owner.shutdown();
+    (void)dispatcher_owner.checkpoint();
+    std::this_thread::sleep_for(150ms);
+    (void)dispatcher_owner.checkpoint();
+    if (late_callbacks != 0 || owner.transport_if_started() != nullptr ||
+        owner.client_count() != 0 ||
+        owner.register_client() != kInvalidLinuxDbusClientId ||
+        !independent_transport->running()) {
+        return EXIT_FAILURE;
+    }
+
+    if (!independent_transport->unregister_object_path(independent_client, slow_path)) {
+        return EXIT_FAILURE;
+    }
     independent_owner.release_client(independent_client);
     independent_owner.shutdown();
     return EXIT_SUCCESS;

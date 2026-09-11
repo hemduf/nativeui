@@ -2,8 +2,10 @@
 
 #include "linux_dbus.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace ui::detail {
 
@@ -35,7 +37,17 @@ public:
         }
 
         if (transport_) {
-            return transport_->register_client();
+            const auto client = transport_->register_client();
+            if (client == kInvalidLinuxDbusClientId) {
+                return client;
+            }
+            try {
+                clients_.push_back(client);
+            } catch (...) {
+                transport_->release_client(client);
+                return kInvalidLinuxDbusClientId;
+            }
+            return client;
         }
 
         try {
@@ -46,6 +58,14 @@ public:
 
             const auto client = candidate->register_client();
             if (client == kInvalidLinuxDbusClientId) {
+                candidate->stop();
+                return kInvalidLinuxDbusClientId;
+            }
+
+            try {
+                clients_.push_back(client);
+            } catch (...) {
+                candidate->release_client(client);
                 candidate->stop();
                 return kInvalidLinuxDbusClientId;
             }
@@ -61,11 +81,18 @@ public:
         if (closing_ || !transport_ || client == kInvalidLinuxDbusClientId) {
             return;
         }
+
+        const auto found = std::find(clients_.begin(), clients_.end(), client);
+        if (found == clients_.end()) {
+            return;
+        }
+
         transport_->release_client(client);
+        clients_.erase(found);
     }
 
     [[nodiscard]] std::size_t client_count() const noexcept {
-        return transport_ ? transport_->client_count() : 0;
+        return clients_.size();
     }
 
     [[nodiscard]] LinuxDbusTransport* transport_if_started() noexcept {
@@ -84,13 +111,23 @@ public:
         closing_ = true;
         auto transport = std::move(transport_);
         if (transport) {
+            // Application teardown must close logical clients first so their
+            // pending Dispatcher completions and subscriptions are invalidated
+            // before the shared transport begins stop/join/connection teardown.
+            for (const auto client : clients_) {
+                transport->release_client(client);
+            }
+            clients_.clear();
             transport->stop();
+        } else {
+            clients_.clear();
         }
     }
 
 private:
     bool closing_{};
     std::unique_ptr<LinuxDbusTransport> transport_;
+    std::vector<LinuxDbusClientId> clients_;
 };
 
 } // namespace ui::detail
