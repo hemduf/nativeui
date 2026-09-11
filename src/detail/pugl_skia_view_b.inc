@@ -3,19 +3,30 @@
             renderer_.reset();
             return PUGL_SUCCESS;
 
-        case PUGL_CONFIGURE:
-            physical_size_ = Size{static_cast<float>(event->configure.width),
-                                  static_cast<float>(event->configure.height)};
-            scale_factor_ = static_cast<float>(puglGetScaleFactor(view_));
-            if (!(scale_factor_ > 0.0f)) scale_factor_ = 1.0f;
-            logical_size_ = Size{physical_size_.w / scale_factor_,
-                                 physical_size_.h / scale_factor_};
-            ui_.resize(logical_size_);
+        case PUGL_CONFIGURE: {
+            const Size physical{static_cast<float>(event->configure.width),
+                                static_cast<float>(event->configure.height)};
+            const auto logical = detail::apply_authoritative_configure(
+                geometry_,
+                physical,
+                static_cast<float>(puglGetScaleFactor(view_)),
+                [this](Size viewport) { ui_.resize(viewport); });
+            record_scale_observation(geometry_.last_scale_observation_valid());
+            if (!logical) {
+                // Zero/non-finite native extents are transient non-renderable
+                // states. Preserve the last valid logical viewport until a
+                // positive configure arrives.
+                return PUGL_SUCCESS;
+            }
+
             // refresh_focus() replays focus_changed(true) on the focused text
             // editor, which republishes its candidate rectangle using the new
             // layout and scale factor exactly once at the platform boundary.
             ui_.refresh_focus(services_);
+            preferred_measure_dirty_ = true;
+            flush_preferred_size_notification();
             return PUGL_SUCCESS;
+        }
 
         case PUGL_UPDATE:
             // XIM signals preedit-done before Xutf8LookupString returns a
@@ -23,10 +34,15 @@
             // event has already been consumed, so a remaining pending end is
             // a genuine composition cancellation.
             nativeuiImeFlushPendingCancel(ime_bridge_);
+            flush_preferred_size_notification();
             return PUGL_SUCCESS;
 
         case PUGL_EXPOSE:
-            if (!renderer_.render(ui_, services_, physical_size_, scale_factor_)) {
+            if (!geometry_.renderable()) return PUGL_SUCCESS;
+            if (!renderer_.render(ui_,
+                                  services_,
+                                  geometry_.physical_size(),
+                                  geometry_.last_valid_scale())) {
                 last_error_ = "Failed to initialize Skia Ganesh/OpenGL renderer";
                 should_close_ = true;
                 return PUGL_CREATE_CONTEXT_FAILED;
@@ -89,9 +105,10 @@
             input.type = event->type == PUGL_POINTER_IN
                 ? InputType::PointerMove
                 : InputType::PointerLeave;
-            input.position = Point{
-                static_cast<float>(event->crossing.x) / scale_factor_,
-                static_cast<float>(event->crossing.y) / scale_factor_};
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->crossing.x),
+                 static_cast<float>(event->crossing.y)},
+                geometry_.last_valid_scale());
             apply_modifiers(input, event->crossing.state);
             last_pointer_position_ = input.position;
             have_pointer_position_ = event->type == PUGL_POINTER_IN;
@@ -104,8 +121,9 @@
             if (event->button.button != 0) return PUGL_SUCCESS;
             InputEvent input{};
             input.type = event->type == PUGL_BUTTON_PRESS ? InputType::PointerDown : InputType::PointerUp;
-            input.position = Point{static_cast<float>(event->button.x) / scale_factor_,
-                                   static_cast<float>(event->button.y) / scale_factor_};
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->button.x), static_cast<float>(event->button.y)},
+                geometry_.last_valid_scale());
             apply_modifiers(input, event->button.state);
 
             if (event->type == PUGL_BUTTON_PRESS) {
@@ -126,8 +144,9 @@
         case PUGL_MOTION: {
             InputEvent input{};
             input.type = InputType::PointerMove;
-            input.position = Point{static_cast<float>(event->motion.x) / scale_factor_,
-                                   static_cast<float>(event->motion.y) / scale_factor_};
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->motion.x), static_cast<float>(event->motion.y)},
+                geometry_.last_valid_scale());
             if (have_pointer_position_) {
                 input.delta = Point{input.position.x - last_pointer_position_.x,
                                     input.position.y - last_pointer_position_.y};
@@ -142,8 +161,9 @@
         case PUGL_SCROLL: {
             InputEvent input{};
             input.type = InputType::PointerWheel;
-            input.position = Point{static_cast<float>(event->scroll.x) / scale_factor_,
-                                   static_cast<float>(event->scroll.y) / scale_factor_};
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->scroll.x), static_cast<float>(event->scroll.y)},
+                geometry_.last_valid_scale());
             input.delta = Point{static_cast<float>(event->scroll.dx),
                                 static_cast<float>(event->scroll.dy)};
             apply_modifiers(input, event->scroll.state);
@@ -166,8 +186,9 @@
             if (clipboard == PUGL_CLIPBOARD_DRAG) {
                 InputEvent input{};
                 input.type = InputType::DropOffer;
-                input.position = Point{static_cast<float>(event->offer.x) / scale_factor_,
-                                       static_cast<float>(event->offer.y) / scale_factor_};
+                input.position = detail::physical_to_logical_point(
+                    {static_cast<float>(event->offer.x), static_cast<float>(event->offer.y)},
+                    geometry_.last_valid_scale());
                 input.drop_types.reserve(count);
                 for (uint32_t i = 0; i < count; ++i) {
                     if (const char* type = puglGetClipboardType(view_, clipboard, i)) {
@@ -221,8 +242,9 @@
             if (clipboard == PUGL_CLIPBOARD_DRAG) {
                 InputEvent input{};
                 input.type = InputType::DropData;
-                input.position = Point{static_cast<float>(event->data.x) / scale_factor_,
-                                       static_cast<float>(event->data.y) / scale_factor_};
+                input.position = detail::physical_to_logical_point(
+                    {static_cast<float>(event->data.x), static_cast<float>(event->data.y)},
+                    geometry_.last_valid_scale());
                 input.drop_type = type;
                 const auto* bytes = static_cast<const std::uint8_t*>(data);
                 input.drop_data.assign(bytes, bytes + size);
@@ -251,9 +273,10 @@
     PuglView* view_{};
     NativeUIImeBridge* ime_bridge_{};
     SkiaGlRenderer renderer_;
-    Size logical_size_{};
-    Size physical_size_{};
-    float scale_factor_{1.0f};
+    detail::ViewGeometryState geometry_;
+    detail::PreferredSizeState preferred_size_state_;
+    PreferredSizeCallback preferred_size_callback_;
+    bool preferred_measure_dirty_{};
     bool should_close_{};
     bool text_input_active_{};
     Rect text_input_logical_area_{};
