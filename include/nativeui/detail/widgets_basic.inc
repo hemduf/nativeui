@@ -1,9 +1,12 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
+#include <nativeui/toggle_style.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -277,14 +280,18 @@ private:
 };
 
 
-class ToggleComponent final : public Component {
+class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
-    ToggleComponent(std::string label, State<bool>& state)
-        : label_(std::move(label)), state_(state), value_(state.get()) {}
+    ToggleComponent(std::string label, State<bool>& state, ToggleStyle style)
+        : label_(std::move(label)),
+          state_(state),
+          value_(state.get()),
+          style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        return Size{210.0f, 54.0f};
+        const auto resolved = resolved_style(focused_);
+        return Size{resolved.control_width, resolved.control_height};
     }
 
     void mount(MountContext& ctx) override {
@@ -295,36 +302,142 @@ public:
         });
     }
 
-    EventResult input(const InputEvent& event, InputContext& ctx) override {
-        const bool keyboard_toggle = event.type == InputType::KeyDown &&
-            (event.key == Key::Space || event.key == Key::Enter);
-        const bool pointer_toggle = event.type == InputType::PointerDown;
-        if (!keyboard_toggle && !pointer_toggle) return EventResult::Ignored;
-
-        if (!effective_read_only()) {
-            state_.set(!value_);
-            ctx.invalidate();
+    void focus_changed(bool focused, FocusContext& context) override {
+        focused_ = focused;
+        interaction_.focus_changed(focused, context);
+        if (!focused && (space_pressed_ || enter_pressed_)) {
+            space_pressed_ = false;
+            enter_pressed_ = false;
+            context.invalidate();
         }
-        return EventResult::Handled;
+    }
+
+    void deactivate(LifecycleContext& context) override {
+        focused_ = false;
+        interaction_.deactivate(context);
+        if (space_pressed_ || enter_pressed_) {
+            space_pressed_ = false;
+            enter_pressed_ = false;
+            context.invalidate();
+        }
+    }
+
+    EventResult input(const InputEvent& event, InputContext& ctx) override {
+        const bool pointer_event = event.type == InputType::PointerDown ||
+            event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
+            event.type == InputType::PointerCancel;
+
+        if (pointer_event) {
+            const bool mutating_pointer = event.type == InputType::PointerDown ||
+                interaction_.pressed();
+            if (effective_read_only() && mutating_pointer) {
+                interaction_.cancel_pending_mutation(ctx);
+                return EventResult::Handled;
+            }
+
+            const auto outcome = interaction_.input(event, ctx, false);
+            if (event.type == InputType::PointerDown && !effective_read_only()) {
+                state_.set(!value_);
+            }
+            return outcome.result;
+        }
+
+        if (event.type == InputType::KeyDown && event.key == Key::Space) {
+            if (effective_read_only()) return EventResult::Handled;
+            if (!space_pressed_) {
+                space_pressed_ = true;
+                state_.set(!value_);
+                ctx.invalidate();
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyDown && event.key == Key::Enter) {
+            if (effective_read_only()) return EventResult::Handled;
+            if (!enter_pressed_) {
+                enter_pressed_ = true;
+                state_.set(!value_);
+                ctx.invalidate();
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyUp && event.key == Key::Space) {
+            if (space_pressed_) {
+                space_pressed_ = false;
+                ctx.invalidate();
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyUp && event.key == Key::Enter) {
+            if (enter_pressed_) {
+                enter_pressed_ = false;
+                ctx.invalidate();
+            }
+            return EventResult::Handled;
+        }
+
+        return EventResult::Ignored;
     }
 
     void paint(PaintContext& p) const override {
         const auto b = p.bounds();
+        const auto resolved = resolved_style(p.focused());
         auto& dl = p.painter();
-        dl.fill_rounded_rect(b, 12.0f, colors::panel);
-        dl.stroke_rounded_rect(b, 12.0f, p.focused() ? 2.0f : 1.0f,
-                               p.focused() ? colors::borderFocus : colors::border);
-        dl.text(Point{b.x + 18.0f, b.y + b.h * 0.5f}, label_, 13.0f, colors::text, TextAlign::Left);
-        const Rect track{b.x + b.w - 62.0f, b.y + 14.0f, 44.0f, 26.0f};
-        dl.fill_rounded_rect(track, 13.0f, value_ ? colors::accent : colors::toggleOff);
-        const float knob_x = value_ ? track.x + track.w - 13.0f : track.x + 13.0f;
-        dl.circle(Point{knob_x, track.y + 13.0f}, 9.0f, colors::text);
+
+        TextStyle text_style{};
+        text_style.size = resolved.text_size;
+        text_style.color = resolved.text;
+        text_style.align = TextAlign::Left;
+        text_style.weight = resolved.text_weight;
+        text_style.slant = resolved.text_slant;
+        text_style.family = resolved.font_family;
+        text_style.fallback_families = resolved.fallback_families;
+
+        dl.fill_rounded_rect(b, resolved.corner_radius, resolved.fill);
+        dl.stroke_rounded_rect(
+            b, resolved.corner_radius, resolved.border_width, resolved.border);
+        dl.text(Point{b.x + resolved.leading_padding, b.y + b.h * 0.5f},
+                label_, text_style);
+
+        const Rect track{
+            b.x + b.w - resolved.trailing_padding - resolved.track_width,
+            b.y + (b.h - resolved.track_height) * 0.5f,
+            resolved.track_width,
+            resolved.track_height};
+        const float track_radius = resolved.track_height * 0.5f;
+        dl.fill_rounded_rect(track, track_radius, resolved.track);
+
+        const float thumb_radius = resolved.thumb_diameter * 0.5f;
+        const float thumb_x = value_
+            ? track.x + track.w - track_radius
+            : track.x + track_radius;
+        dl.circle(Point{thumb_x, track.y + track_radius}, thumb_radius, resolved.thumb);
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = interaction_.hovered(),
+            .pressed = interaction_.pressed() || space_pressed_ || enter_pressed_,
+            .focused = focused,
+            .checked = value_,
+        };
+    }
+
+    [[nodiscard]] ResolvedToggleStyle resolved_style(bool focused) const {
+        return resolve_toggle_style(
+            default_toggle_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     std::string label_;
     State<bool>& state_;
     bool value_{};
+    ToggleStyle style_;
+    detail::PressActivationState interaction_;
+    bool focused_{};
+    bool space_pressed_{};
+    bool enter_pressed_{};
     State<bool>::Subscription subscription_;
 };
 
