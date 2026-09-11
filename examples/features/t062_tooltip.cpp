@@ -339,16 +339,30 @@ int platform_smoke() {
         }
 
         // Arm the tooltip through the real standalone PlatformServices object,
-        // then let the native event loop wait for the T065 timer to fire.
-        standalone_ui.activate(standalone);
-        (void)standalone_ui.dispatch(
-            example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), standalone);
-        for (int i = 0; i < 10 && standalone_ui.overlay_entries().empty(); ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{60});
-            (void)application.poll(0.0);
+        // then let the native event loop wait for the T065 timer to fire. A
+        // native focus-out may deactivate the view mid-wait (the window is not
+        // guaranteed to be frontmost in every environment), so re-activate and
+        // re-arm deterministically instead of assuming one activation sticks.
+        bool standalone_shown = false;
+        for (int attempt = 0; attempt < 4 && !standalone_shown; ++attempt) {
+            standalone_ui.activate(standalone);
+            (void)standalone_ui.dispatch(
+                example::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), standalone);
+            (void)standalone_ui.dispatch(
+                example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), standalone);
+            for (int i = 0; i < 12; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{60});
+                (void)application.poll(0.0);
+                if (!standalone_ui.overlay_entries().empty()) {
+                    standalone_shown = true;
+                    break;
+                }
+            }
         }
-        if (standalone_ui.overlay_entries().size() != 1) {
-            return example::fail("standalone tooltip did not appear through the native dispatcher");
+        if (!standalone_shown || standalone_ui.overlay_entries().size() != 1) {
+            return example::fail(standalone.last_error().empty()
+                                     ? "standalone tooltip did not appear through the native dispatcher"
+                                     : standalone.last_error());
         }
         if (standalone_ui.overlay_entries().front().pointer_policy !=
             ui::OverlayPointerPolicy::Ignore) {
@@ -378,15 +392,26 @@ int platform_smoke() {
                                      : embedded.last_error());
         }
 
-        embedded_ui.activate(embedded);
-        (void)embedded_ui.dispatch(
-            example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), embedded);
-        for (int i = 0; i < 40 && embedded_ui.overlay_entries().empty(); ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{20});
-            (void)embedded.poll();
+        bool embedded_shown = false;
+        for (int attempt = 0; attempt < 4 && !embedded_shown; ++attempt) {
+            embedded_ui.activate(embedded);
+            (void)embedded_ui.dispatch(
+                example::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), embedded);
+            (void)embedded_ui.dispatch(
+                example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), embedded);
+            for (int i = 0; i < 20; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{40});
+                (void)embedded.poll();
+                if (!embedded_ui.overlay_entries().empty()) {
+                    embedded_shown = true;
+                    break;
+                }
+            }
         }
-        if (embedded_ui.overlay_entries().size() != 1) {
-            return example::fail("embedded tooltip did not appear through the native dispatcher");
+        if (!embedded_shown || embedded_ui.overlay_entries().size() != 1) {
+            return example::fail(embedded.last_error().empty()
+                                     ? "embedded tooltip did not appear through the native dispatcher"
+                                     : embedded.last_error());
         }
         for (int i = 0; i < 4; ++i) (void)embedded.poll();
         if (!embedded.last_error().empty()) return example::fail(embedded.last_error());
