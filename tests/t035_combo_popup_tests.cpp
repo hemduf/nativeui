@@ -271,6 +271,38 @@ void disabled_and_destroyed_anchor_close_contract() {
     NUI_CHECK(selection.get() == 1);
 }
 
+void visibility_anchor_close_contract(ui::VisibilityMode unavailable_mode) {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Visible};
+    auto after = std::make_shared<test::ProbeState>();
+    after->input_result = ui::EventResult::Handled;
+
+    ui::UI tree{ui::Column{
+        ui::Visibility{
+            visibility,
+            ui::ComboBox<int>{selection, {{1, "One", true}, {2, "Two", true}}}},
+        test::Probe{after},
+    }};
+    tree.resize({240.0f, 180.0f});
+    tree.activate(platform);
+
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+
+    visibility.set(unavailable_mode);
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(selection.get() == 1);
+    NUI_CHECK(after->focus_in >= 1);
+    NUI_CHECK(after->key_events == 1);
+}
+
+void hidden_and_collapsed_anchor_close_contract() {
+    visibility_anchor_close_contract(ui::VisibilityMode::Hidden);
+    visibility_anchor_close_contract(ui::VisibilityMode::Collapsed);
+}
+
 void popup_menu_empty_callback_is_not_actionable_contract() {
     test::MockPlatform platform;
     int actions = 0;
@@ -518,6 +550,7 @@ void suite() {
     immutable_open_snapshot_contract();
     tab_escape_and_read_only_contract();
     disabled_and_destroyed_anchor_close_contract();
+    hidden_and_collapsed_anchor_close_contract();
     popup_menu_empty_callback_is_not_actionable_contract();
     popup_menu_contract();
     popup_menu_pointer_non_action_contract();
