@@ -7,12 +7,12 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/t044-pointer-capture.yml'
-      - 'CMakeLists.txt'
-      - 'cmake/**'
-      - 'include/nativeui/**'
-      - 'src/**'
+      - 'include/nativeui/detail/tree_input.inc'
+      - 'include/nativeui/paint.hpp'
+      - 'src/pugl_skia.cpp'
       - 'tests/t044/**'
       - 'tests/t044_pointer_capture_smoke.cpp'
+      - 'tests/t044_pointer_capture_x11_smoke.cpp'
       - 'tests/pointer_capture_tests.cpp'
       - 'tests/test_support.hpp'
   workflow_dispatch:
