@@ -6,8 +6,11 @@
         case PUGL_CONFIGURE: {
             const Size physical{static_cast<float>(event->configure.width),
                                 static_cast<float>(event->configure.height)};
-            const auto logical = geometry_.configure(
-                physical, static_cast<float>(puglGetScaleFactor(view_)));
+            const auto logical = detail::apply_authoritative_configure(
+                geometry_,
+                physical,
+                static_cast<float>(puglGetScaleFactor(view_)),
+                [this](Size viewport) { ui_.resize(viewport); });
             record_scale_observation(geometry_.last_scale_observation_valid());
             if (!logical) {
                 // Zero/non-finite native extents are transient non-renderable
@@ -16,7 +19,6 @@
                 return PUGL_SUCCESS;
             }
 
-            ui_.resize(*logical);
             // refresh_focus() replays focus_changed(true) on the focused text
             // editor, which republishes its candidate rectangle using the new
             // layout and scale factor exactly once at the platform boundary.
@@ -94,6 +96,23 @@
             input.text.assign(text);
             apply_modifiers(input, event->text.state);
             ui_.dispatch(input, services_);
+            return PUGL_SUCCESS;
+        }
+
+        case PUGL_POINTER_IN:
+        case PUGL_POINTER_OUT: {
+            InputEvent input{};
+            input.type = event->type == PUGL_POINTER_IN
+                ? InputType::PointerMove
+                : InputType::PointerLeave;
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->crossing.x),
+                 static_cast<float>(event->crossing.y)},
+                geometry_.last_valid_scale());
+            apply_modifiers(input, event->crossing.state);
+            last_pointer_position_ = input.position;
+            have_pointer_position_ = event->type == PUGL_POINTER_IN;
+            (void)ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }
 
