@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-10
+**Updated:** 2026-09-11
 
 ## Mission and invariants
 
@@ -14,7 +14,9 @@ Non-negotiable rules:
 - retained UI state is UI/main-thread confined unless explicitly documented otherwise;
 - dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
 - macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
-- `CODE_REVIEW.md`, exact-head validation, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
+- NativeUI-owned source-tree targets compile with zero unapproved warnings and an empty default `NATIVEUI_ALLOWED_WARNINGS`;
+- behavior changes use RED -> GREEN -> REFACTOR and must not weaken tests or validation policy;
+- `CODE_REVIEW.md`, exact-head validation, a complete issue-to-code/test evidence matrix, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
 
 ## Pinned dependencies
 
@@ -24,74 +26,103 @@ Non-negotiable rules:
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline
+## Current baseline and critical path
 
-`main` contains the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the completed standard widgets through T033, and the merged T052 v0.1 developer-preview release gate (`bc5e38e7e87168d6faf1edcb15f9beb3b725c070`).
+Current `main` is `621a56e462590e47e7360e122f3d4031814d8947`, which includes completed T067 / PR #219 in addition to T045, T037, T058, T036, T065, T034, T060/T042 lifecycle qualification, the T052 developer-preview release gate, the warning-free source-tree baseline, post-T036 hover correction #212 and Tree paint-ownership correction #152.
 
-Relevant completed foundations:
+The active dynamic/overlay lane is completing T061 / issue #73 / PR #216 on top of that exact main. The pre-documentation exact source head is `d028d43c3ad95d229f02ff50e975f49a12f5b9e8`; compare against current main reports `behind_by=0`.
+
+Current convergence:
+
+```text
+critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
+                                                   T058(done) ------------^
+
+style:             T037(done) -> T038 -> T039
+                                +-> T040 with T065(done)
+
+dynamic/overlay:   T058(done) -> T061(completion PR #216)
+                                      |-> T035 --------------------------> T068
+                                      |-> T063 --------------------------> T068
+                                      +-> T062
+
+critical platform: T065(done) -> T072 -> T064
+                   T041(done) -> T043 -> T066
+                                      |-> T068
+
+release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
+```
+
+T035 and T063 require T061 plus already-complete T034. T062 requires T061 plus already-complete T065. After T061, the owned critical order remains T035, then T063, then T062.
+
+## Completed foundations relevant to v1
 
 - T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
 - #64 / PR #90: standalone PROGRAM-world ownership Decision B.
 - T059 / PR #89: inherited visibility/enabled/read-only state.
-- T030 / PR #94: Button.
-- T031 / PR #95: Checkbox + typed RadioGroup/RadioButton.
-- T032 / PR #115: Slider + RangeSlider.
-- T033 / PR #123: ProgressBar + Meter, squash-merged as `44626fef8d70f73428aa6ce906357a922cb010f5`.
-- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
-- T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
-- T051 / PR #116: reproducible Release benchmark and regression policy.
-- T052 / PR #120: v0.1 developer-preview release gate with clean-cache bootstrap, exact package consumer, lifecycle, benchmark, idle-invalidation and platform qualification.
-- T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
-- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
-- T057 / PR #126: immutable non-owning `ResourceManager` plus allocating provider adapter.
-- T060 / PR #118: one explicit `ui::Application` owns one standalone `PUGL_PROGRAM` world and multiple independent `StandaloneWindow(Application&, ...)` views.
-- #139 / PR #140: T042 stress-tests that supported T060 A+B multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM path.
+- T030–T034: standard Button, Checkbox/Radio, Slider/RangeSlider, ProgressBar/Meter and ScrollView baseline.
+- T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable selection and composite focus.
+- #212 / PR #213: deterministic ListView/Tabs hover presentation and retained pointer-leave lifetime.
+- T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
+- T045 / PR #210: accessibility semantic architecture and immutable virtual collection contract.
+- T047 / PR #92 + T048 / PR #99: relocatable package and external-consumer qualification.
+- T051 / PR #116 + T052 / PR #120: reproducible performance policy and v0.1 developer-preview release gate.
+- T054 / PR #119, T056 / PR #111, T057 / PR #126: application/package/resource helpers.
+- T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
+- T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
+- T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
+- T067 / PR #219: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata.
+- #163 / PR #181: warning-free NativeUI-owned source-tree builds.
+- #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
 
-## T052 v0.1 developer-preview release gate
+## T061 overlay/portal completion state
 
-T052 / issue #52 / PR #120 is complete and merged on `main` as `bc5e38e7e87168d6faf1edcb15f9beb3b725c070`. It qualifies the current infrastructure/package baseline as a developer preview, not as the NativeUI 1.0 product-completeness gate.
+T061 / issue #73 / PR #216 adds one generic retained in-view overlay/portal layer per `UI`, implemented through the existing T058 structural checkpoint rather than a second reconciler.
 
-The gate preserves the low-level installed package contract `NativeUI::Core + nativeui_attach_platform()`, validates relocated external consumers and consumer-scoped macOS Objective-C namespaces, verifies clean-cache pinned dependency acquisition/fail-closed checksum behavior, retains the T051 exact-zero idle invalidation hard gate, and publishes `docs/releases/v0.1.0.md` with developer-preview semantics and current known v1 gaps.
+Delivered contract:
 
-## Widget/layout lane — T034 completion candidate
+- one per-UI creation-ordered overlay stack with monotonically increasing lifetime-safe handles; stale, already-closed and cross-UI handles are deterministic no-ops and IDs are never reused;
+- public Modal/NonModal mode and Normal/Ignore pointer policy; invalid `Modal + Ignore` is rejected;
+- X11-safe placement names `AnchorBelow`, `AnchorAbove`, `AnchorRight`, `AnchorLeft`, `Center`, `Auto` implement the issue's Below/Above/Right/Left/Center/Auto semantics without colliding with Xlib `Above`/`Below` macros;
+- deterministic requested-side/opposite-side fallback, Auto priority Below -> Above -> Right -> Left, requested-side tie retention, finite origin clamping and natural-size preservation with no automatic overlay resize/scroll;
+- creation-order paint/input z-order; Ignore overlays still paint but their entire subtree is pointer-transparent and excluded from ordinary focus traversal;
+- retained full-viewport modal barriers block lower overlays/root while allowing overlays created above the modal to remain pointer-eligible;
+- outside-pointer dismissal consumes the initiating PointerDown with no click-through; Escape honors topmost eligibility and modal ownership;
+- anchors are retained `NodeId`s, reposition after authoritative layout and auto-close when missing, Hidden, Collapsed or when the owning UI deactivates;
+- modal focus uses existing trapping FocusScope semantics; restoration candidates are stored as `NodeId` and re-resolved at restore time, with deterministic fallback for stale targets;
+- a later focusable NonModal overlay may receive pointer input above a modal but cannot move keyboard focus out of the active modal trap; nested/new modal traps can still take focus;
+- showing a new modal cancels any pre-existing lower pointer capture exactly once at a safe platform-bearing checkpoint, including modal creation from the current callback after that callback unwinds;
+- closing a captured overlay routes exactly one PointerCancel while the component/context is valid before T058 teardown;
+- show/close are reentrancy-safe; pre-flush show+close coalesces without mount/unmount; no global overlay registry and no second structural queue exists;
+- root content remains consumer-owned, overlays paint outside ordinary root clipping, and the same generic API is used by standalone and `EmbeddedView` paths;
+- dedicated `examples/features/t061_overlay_portal.cpp` demonstrates popup/modal/pointer-transparent behavior and supplies deterministic `--self-test` coverage.
 
-T032 provides the shared finite numeric-domain and track-axis behavior used by Slider/RangeSlider. T033 adds display-only ProgressBar/Meter widgets. T034 / issue #34 / PR #135 is the active widget/container completion stream and remains built around the existing T012 `ScrollState` as the sole scroll offset/metrics model.
+### Exact source-head evidence before completion docs
 
-Current T034 implementation delivers:
+Exact source head `d028d43c3ad95d229f02ff50e975f49a12f5b9e8` passed:
 
-- change-based wheel scrolling through `ScrollState`, so nested ScrollViews bubble naturally at clamped boundaries;
-- opt-in pointer pan with retained pointer capture and no inertia/timer;
-- retained 8 px overlay scrollbars with 18 px minimum thumb, deterministic thumb drag, handled/no-jump track clicks and both-axis corner shortening;
-- scrollbar input/paint precedence through retained overlay children after content and reverse paint-order pointer hit testing;
-- public `ensure_visible` with Nearest/Start/Center/End plus automatic focused-descendant Nearest reveal;
-- T059 Disabled/Hidden/Collapsed interaction suppression/cancellation while ReadOnly remains scrollable;
-- one existing T012 content clip and no native scrollbar/platform-specific event path;
-- a generic retained `pointer_targetable()` seam, defaulting to historical `focusable()` behavior, so ScrollView/scrollbar overlays can receive pointer input without becoming keyboard Tab stops while inert visual siblings do not mask interactive content.
+- normal CI `34554637275`: Linux X11, macOS, Windows and Linux ASan+UBSan all green;
+- Linux X11 full CTest: 93/93 green, including generic focus, dynamic composition, headless, golden, dedicated T061 acceptance and `nativeui_example_t061_overlay_portal_self_test`;
+- T052 v0.1 Release Gate `34554637335`;
+- T042 Lifecycle Stress `34554637304`;
+- T045 Accessibility Semantics `34554637284`;
+- T060 Application Contract `34554637332`;
+- T065 Dispatcher Contract `34554637322`;
+- T067 Virtual List Contract `34554637270`.
 
-Review `5164075036` found one Important test-quality gap: a legacy overlay-precedence helper intended to represent interactive content did not explicitly opt into pointer targeting. Exact code head `4cac2b82b0cf775c1e691ec412460072f6abaf06` corrects that regression fixture. Follow-up CODE_REVIEW.md review `5164615464` finds no remaining Blocking/Important production finding. On that code head, T042 Lifecycle Stress, T060 Application Contract and T052 Release Gate are green; normal CI is green on Linux ASan+UBSan, Linux X11 and Windows while macOS qualification is completing. This documentation synchronization creates the final completion candidate and therefore requires fresh exact-head validation before merge.
+Final `CODE_REVIEW.md` / anti-rush source review `5174681221` reports no remaining Blocking/Important finding after the modal-focus correction. The review explicitly covers per-instance ownership, globals/statics, threading, lifetime/reentrancy, focus/modality, capture, anchor/geometry, platform parity, warnings, performance gates and test completeness.
 
-## Current dependency frontier
+This completion documentation changes the branch head. Therefore **T061 is not merged yet**: the documentation-complete exact head must rerun the applicable exact-head gates before the issue can be marked Done and PR #216 merged.
 
-```text
-widgets/layout:    T059(done) -> T030(done) -> T031(done)
-                                       |-> T032(done)
-                                       |-> T033(done)
-                                       +-> T034(completion PR #135) -> T036
-                                                                    -> T035 only after T061
+## Other critical lanes
 
-lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
-                   T042(done) -> T051(done) ---------------------> T052(done)
+- UI/accessibility: T067 is complete; T068 remains blocked until every explicit issue #80 dependency is Done.
+- Platform: finish T072, then T064; finish T043, then T066.
+- Styling: T037 is complete; continue T038 -> T039 and T040 when dependencies permit.
+- T044 remains a T071 release dependency but is not on the immediate T068/T069 convergence path.
+- T069/T070/T071 remain dependency-gated; do not freeze the v1 API early.
 
-platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057(done)
-
-platform/event:    T060(done) -> T065(active PR #133) -> T072 -> T064
-```
-
-T034 and then T036 belong to the widget/layout lane. T035 additionally depends on T061 and must remain blocked until that dependency is merged. T065/T072/T064 and other platform hardening are separate streams and must not be duplicated by widget work.
-
-## Build / validation
+## Validation
 
 Normal source-tree Release validation:
 
@@ -101,11 +132,13 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Normal CI validates Linux X11, Windows/MSVC, macOS and Linux ASan+UBSan plus package/relocation contracts and native lifecycle/platform smokes. Code-changing widget candidates also require exact-head T042 Lifecycle Stress and T060 Application Contract when those workflows are registered for the PR; current completion candidates also run the T052 Release Gate.
+The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A code-changing completion candidate must use its exact current head for normal CI plus every relevant dedicated workflow named by the ticket, followed by the mandatory `CODE_REVIEW.md` review. A documentation completion commit still requires exact-head qualification before autonomous merge.
 
 ## Next actions
 
-1. Qualify the final documentation-synchronized T034 / PR #135 head with normal CI, T042 Lifecycle Stress, T060 Application Contract and T052 Release Gate; complete final CODE_REVIEW.md evidence and merge only if current `main` is still its base and every required executed gate is green.
-2. After T034 merges, start/resume T036 / issue #36 in this widget/layout lane using strict TDD; do not duplicate an existing branch/PR if one appears.
-3. Keep T035 blocked until T061 is merged.
-4. Leave T065 / PR #133 and downstream T072/T064 to their independent platform/event lane, and keep later v1 freeze/release work dependency-gated.
+1. Qualify the documentation-complete exact head of T061 / PR #216; merge only if all required executed gates remain green and no new Blocking/Important finding appears.
+2. After T061 merges, immediately advance T035 / issue #35.
+3. Then advance T063 / issue #75 and T062 / issue #74 as their explicit dependencies permit.
+4. Keep T068 blocked until all of its explicit dependencies are genuinely Done.
+5. Continue the independent platform/style lanes without duplicating their active work.
+6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.

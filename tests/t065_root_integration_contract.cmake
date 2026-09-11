@@ -1,0 +1,36 @@
+cmake_minimum_required(VERSION 3.24)
+
+if(NOT DEFINED SOURCE_DIR)
+  message(FATAL_ERROR "SOURCE_DIR is required")
+endif()
+
+file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
+file(READ "${SOURCE_DIR}/tests/t065_platform/CMakeLists.txt" _platform_cmake)
+set(_example "${SOURCE_DIR}/examples/features/t065_ui_dispatcher.cpp")
+
+function(require_text haystack needle description)
+  string(FIND "${haystack}" "${needle}" _index)
+  if(_index EQUAL -1)
+    message(FATAL_ERROR "T065 root integration contract: missing ${description}: ${needle}")
+  endif()
+endfunction()
+
+require_text("${_root_cmake}" "src/dispatcher.cpp" "dispatcher implementation in NativeUI::Core")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_dispatcher_tests tests/dispatcher_tests.cpp)" "dispatcher core test registration")
+require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_dispatcher_edge_tests tests/dispatcher_edge_tests.cpp)" "dispatcher edge test registration")
+require_text("${_root_cmake}" "foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher" "isolated dispatcher public-header compile coverage")
+require_text("${_umbrella}" "#include <nativeui/dispatcher.hpp>" "dispatcher umbrella export")
+
+if(NOT EXISTS "${_example}")
+  message(FATAL_ERROR "T065 root integration contract: missing dedicated feature example: ${_example}")
+endif()
+file(READ "${_example}" _example_source)
+require_text("${_platform_cmake}" "add_executable(nativeui_example_t065_ui_dispatcher" "T065 feature example target")
+require_text("${_platform_cmake}" "NAME nativeui_example_t065_ui_dispatcher_self_test" "T065 feature example self-test registration")
+string(FIND "${_example_source}" "nativeui/detail/" _detail_index)
+if(NOT _detail_index EQUAL -1)
+  message(FATAL_ERROR "T065 feature example must use only the normal public NativeUI API")
+endif()
+
+message(STATUS "T065 root dispatcher integration contract passed")

@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.24)
+project(NativeUIT065Contract LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(NATIVEUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(NATIVEUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NATIVEUI_BUILD_PLATFORM OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../.." nativeui-build)
+target_sources(nativeui_core PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp")
+
+function(t065_add_test target source)
+  add_executable(${target} ${source})
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/..")
+  target_link_libraries(${target} PRIVATE NativeUI::Core)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+enable_testing()
+t065_add_test(t065_dispatcher_contract ../dispatcher_tests.cpp)
+t065_add_test(t065_dispatcher_edge_contract ../dispatcher_edge_tests.cpp)
+t065_add_test(t065_dispatcher_window_header_contract ../dispatcher_window_header_tests.cpp)
