@@ -4,6 +4,7 @@
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
+#include <nativeui/detail/inspector_paint.hpp>
 #include <nativeui/inspector.hpp>
 #endif
 
@@ -166,12 +167,17 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
-        if (overlay_state_->entries.empty()) {
-            tree_.paint(canvas, platform);
+        if (!overlay_state_->entries.empty()) {
+            prepare_overlay_layout();
+            enforce_new_modal_capture_barrier(platform);
+        }
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+        if (inspector_enabled_) {
+            auto snapshot = tree_.paint_with_inspector_snapshot(canvas, platform);
+            detail::paint_inspector_overlay(canvas, snapshot, inspector_selected_node_);
             return;
         }
-        prepare_overlay_layout();
-        enforce_new_modal_capture_barrier(platform);
+#endif
         tree_.paint(canvas, platform);
     }
 
