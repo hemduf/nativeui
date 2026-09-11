@@ -19,9 +19,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-The pre-T043 completion baseline is `main` `fc15cbf4798b5071570aac5c8b0819c14ddd56c9`. It includes completed T061 / PR #216, T067 / PR #219, T045 / PR #210, T037 / PR #151, T058 / PR #154, T036 / PR #155, T065 / PR #133, T034 / PR #135, T060/T042 lifecycle qualification, T052 v0.1 release qualification, the warning-free source-tree baseline, hover correction #212 / PR #213 and Tree paint-ownership correction #152 / PR #153.
+The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea1908541dc6a701c8a`. It includes completed T043 / PR #142, T061 / PR #216, T067 / PR #219, T045 / PR #210, T037 / PR #151, T058 / PR #154, T036 / PR #155, T065 / PR #133, T034 / PR #135, T060/T042 lifecycle qualification, T052 v0.1 release qualification, the warning-free source-tree baseline, hover correction #212 / PR #213 and Tree paint-ownership correction #152 / PR #153.
 
-T043 / issue #43 / PR #142 is now a mergeable completion candidate rebased onto that exact baseline. The current candidate preserves T061 overlay/pointer-leave behavior, restores root CMake registration on the current feature/test set, and adds direct deterministic proofs for the two previously missing acceptance edges: one resulting layout per configure snapshot and one native request with no recursive echo request.
+PR #233 is the T067 post-completion regression closure. The 100k-item example previously put the virtual `ListView` directly in a `Column`; with default `shrink = 0`, the list's full 2.8-million-pixel preferred content height became the initial viewport and almost all rows were materialized before window show. The closure constrains that viewport with `Flex(grow=1, shrink=1)`, adds a startup materialization regression through the real production composition, runs the production `--self-test` in dedicated T067 CI and adds a root-integration guard for that workflow wiring.
 
 Current dependency frontier:
 
@@ -45,13 +45,13 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
 critical platform: T060(done) -> T065(done) -> T072 -> T064
-                   T041(done) -> T043(completion PR #142) -> T066
-                                                   |-------> T068
+                   T041(done) -> T043(done) -> T066
+                                      |-------> T068
 
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 unlocks T066 and is an explicit T068 dependency. T044 remains an explicit T071 dependency and is being reconciled independently rather than hidden inside T043.
+T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is being reconciled independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -94,30 +94,15 @@ T037 / PR #151 provides typed per-UI Theme values and representative control the
 
 ## Milestone 7 — Platform and embedded robustness
 
-Delivered foundations include plug-in host isolation, standalone ownership Decision B, T042 lifecycle stress, T053 Objective-C runtime identity, T060 Application ownership, T065 Dispatcher/timers and T045 accessibility architecture.
+Delivered foundations include plug-in host isolation, standalone ownership Decision B, T042 lifecycle stress, T053 Objective-C runtime identity, T060 Application ownership, T065 Dispatcher/timers, T045 accessibility architecture and T043 resize/scale negotiation.
 
 ### T043 — Resize/scale negotiation
 
-T043 / issue #43 / PR #142 is in its final qualification cycle.
+**Complete in PR #142.** T043 freezes one platform-boundary contract for logical public geometry, physical native/framebuffer geometry and per-view scale state.
 
-Completion-candidate contract:
+Its qualified contract includes per-view finite-positive retained scale, authoritative configure snapshots, exactly one resulting layout per accepted configure, exactly one native request per accepted public logical size request, no recursive request echo, correct fractional input/dirty/drop/text conversion, embedded parent authority, reentrancy/lifetime-safe preferred-size notification and dedicated deterministic/platform smoke coverage.
 
-- public size/layout/preferred/invalidation geometry is logical; native view/framebuffer geometry is physical;
-- scale is per view, initialized to `1.0f`, replaced only by finite strictly-positive observations and never stored globally;
-- invalid platform scale observations retain the exact previous valid scale and produce a bounded diagnostic instead of invalid layout/math;
-- valid logical `set_size` converts exactly once to a covering native extent, emits at most one native request and records a pending request only after native acceptance;
-- native configure is authoritative for the actual viewport, updates physical size plus scale as one snapshot, and dispatches at most one resulting logical layout;
-- configure echoes never recursively call `set_size`; zero/non-finite physical configure extents are transient non-renderable states;
-- fractional input/dirty/text/drop conversion uses the same retained scale exactly once;
-- embedded child resize does not resize its parent, and preferred-size notifications are advisory, epsilon-coalesced and reentrancy/lifetime safe;
-- two-view scale state remains isolated;
-- dedicated deterministic conversion/sequencing tests, embedded platform smoke, registration contract and `t043_resize_scale --self-test` are registered on the current root build.
-
-The final deterministic gap closure adds synthetic resize-only, scale-only and combined configure snapshots with exactly one layout callback per accepted snapshot, plus an instrumented request boundary proving one logical request -> one native request -> authoritative configure with no echo recursion. Invalid/failed requests are also proven not to mutate authoritative geometry incorrectly.
-
-Merge remains gated on exact-head normal CI (Linux X11/macOS/Windows/Linux ASan+UBSan), relevant dedicated lifecycle/release/application/dispatcher/accessibility/virtual-list workflows, the complete issue-to-code/test matrix and a final `CODE_REVIEW.md` review with no Blocking/Important finding. Historical stale-head success is not sufficient.
-
-After T043 completes, T066 / issue #78 becomes the remaining direct window-control successor. T072 / issue #84 independently unlocks T064.
+T066 / issue #78 is now unblocked. T072 / issue #84 independently unlocks T064.
 
 T044 / issue #44 / PR #145 remains a T071 release dependency and requires its own current-main reconciliation, native capture evidence and exact-head qualification.
 
@@ -131,7 +116,9 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T067 — Fixed-height virtualized ListView
 
-**Complete in PR #219.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
+**Complete in PR #219; startup regression closure is carried by PR #233.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
+
+The required 100k-item example in PR #233 enforces viewport-bounded startup composition. It wraps the virtual list in `Flex(grow=1, shrink=1)` so the list viewport is the available window space rather than its full intrinsic content height. A deterministic startup self-test fails if initial row-factory materialization escapes a small bounded count, the dedicated T067 workflow builds and runs `nativeui_example_t067_virtual_list --self-test`, and the root integration contract requires that CI wiring to remain present.
 
 ### T068 convergence
 
@@ -143,7 +130,7 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 T036(done) -> T045(done) -> T067(done) -------------------\
 T058(done) -> T061(done) -> T035/T063 --------------------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
 T065(done) -> T072 -> T064 -------------------------------+
-T043(completion) -----> T066 ------------------------------/
+T043(done) -----------> T066 ------------------------------/
 other explicit T069 dependencies --------------------------/
 ```
 
@@ -151,10 +138,10 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Finish exact-head qualification/review for T043 / PR #142 and merge only at 100% evidenced conformity.
+1. Complete the exact-head qualification/review for T067 regression PR #233 and merge only at 100% evidenced conformity.
 2. Reconcile, qualify and merge T044 / PR #145 independently; do not reuse T043 platform evidence.
 3. Advance T035, then T063, then T062 as dependencies and current active work permit.
-4. Continue T072 -> T064 and, after T043, T066 in the independent platform lane.
+4. Continue T072 -> T064 and T066 in the independent platform lane.
 5. Keep T068 blocked until every explicit issue #80 dependency is Done.
 6. Continue T038 -> T039 and T040 in the style lane as capacity permits.
 7. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.
