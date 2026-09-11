@@ -4,6 +4,31 @@
         return false;
     }
 
+    void notify_focus_within_transition(
+        Node* previous, Node* next, PlatformServices& platform) {
+        const auto dispatcher = detail::dispatcher_for_platform(platform);
+
+        // Only ancestors whose focus-within truth value changes are notified.
+        // Moving focus between two descendants of the same decorator therefore
+        // does not synthesize a false->true cycle or restart delayed policy.
+        for (auto* current = previous; current; current = current->parent) {
+            if (next && is_descendant_or_self(next, current)) continue;
+            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                    current->component.get())) {
+                observer->retained_focus_within_changed(
+                    false, pointer_interaction_active_, dispatcher);
+            }
+        }
+        for (auto* current = next; current; current = current->parent) {
+            if (previous && is_descendant_or_self(previous, current)) continue;
+            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                    current->component.get())) {
+                observer->retained_focus_within_changed(
+                    true, pointer_interaction_active_, dispatcher);
+            }
+        }
+    }
+
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
         if (!node || !node->component->effective_availability().interactive()) return false;
         for (auto* current = node; current; current = current->parent) {
@@ -77,6 +102,7 @@
         old->component->focus_changed(false, context);
         invalidate_node_paint(*old);
         focus_active_ = false;
+        notify_focus_within_transition(old, nullptr, platform);
     }
 
     void move_focus(int direction, PlatformServices& platform) {
@@ -196,8 +222,8 @@
         const auto next_index = static_cast<std::size_t>(std::distance(focusables_.begin(), it));
         if (focus_active_ && next_index == focused_index_) return;
 
-        if (focus_active_ && !focusables_.empty()) {
-            auto* old = focusables_[focused_index_];
+        auto* old = current_focus_node();
+        if (old) {
             FocusContext old_context{
                 old->bounds, platform, paint_invalidator(*old), layout_invalidator(*old)};
             old->component->focus_changed(false, old_context);
@@ -211,6 +237,7 @@
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, new_context);
         invalidate_node_paint(*node);
+        notify_focus_within_transition(old, node, platform);
 
         for (auto* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
             ancestor->component->descendant_focus_changed(Rect{

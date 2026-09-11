@@ -35,6 +35,8 @@ Disabled nodes remain present when meaningful and reject activation/mutation act
 - A T063 modal dialog is the active semantic focus domain while visible; underlying content is not exposed as an actionable focus domain while the modal is active.
 - Tooltip visual overlay is not the semantic source of help text; help/description belongs to the anchor node.
 
+T062 implements that rule through the T045 `Component::semantics()` seam: the role-`None` Tooltip decorator publishes its owned tooltip text as a description, which T068 flattens onto the decorated anchor without reading the rendered overlay. An empty tooltip string contributes no description and never overwrites a description supplied by the decorated child itself.
+
 Semantic bounds are NativeUI logical view-relative `Rect` values. T043 is the sole logical-to-native/screen conversion authority and a platform bridge applies scale/translation exactly once.
 
 Native focus requests dispatch `SemanticAction::Focus`. NativeUI keyboard focus remains authoritative. Native focus notifications are emitted only from resulting NativeUI focus state, preventing request/notification feedback loops.

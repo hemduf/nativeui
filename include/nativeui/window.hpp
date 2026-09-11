@@ -75,7 +75,7 @@ private:
 /// Construction, use and destruction are confined to the platform/UI thread.
 /// The wrapper is intentionally non-movable: its platform implementation keeps
 /// a stable non-owning PlatformServices reference to this exact object.
-class StandaloneWindow final : public PlatformServices {
+class StandaloneWindow final : public PlatformServices, public DispatcherProvider {
 public:
     StandaloneWindow(Application& application, UI& ui, WindowDesc desc = {});
 
@@ -103,7 +103,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
-    [[nodiscard]] Dispatcher dispatcher() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override;
     bool set_size(Size logical_size);
 
     /// Advisory logical preferred-size notification for external owners.
@@ -132,7 +132,7 @@ private:
 /// the host UI/main thread. `poll()` is non-blocking and this wrapper is
 /// intentionally non-movable because the implementation stores a reference to
 /// this PlatformServices object.
-class EmbeddedView final : public PlatformServices {
+class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
     ~EmbeddedView() override;
@@ -150,7 +150,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
-    [[nodiscard]] Dispatcher dispatcher() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override;
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding
