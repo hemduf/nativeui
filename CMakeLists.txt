@@ -318,6 +318,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t036_list_tabs
   t037_theme
   t041_smoke_harness
+  t043_resize_scale
   t057_embedded_resources
   t058_dynamic_composition
   t059_component_state
@@ -366,6 +367,12 @@ if(NATIVEUI_BUILD_TESTS)
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t053_registration_tests.cmake"
   )
   add_test(
+    NAME nativeui_t043_registration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t043_registration_contract.cmake"
+  )
+  add_test(
     NAME nativeui_t047_attach_contract_tests
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -405,6 +412,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
     PROPERTIES LABELS "build;cmake;t053" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t043_registration_contract
+    PROPERTIES LABELS "build;cmake;t043" TIMEOUT 20
   )
   set_tests_properties(
     nativeui_t047_attach_contract_tests
@@ -485,6 +496,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)
   nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
+  nativeui_add_core_test(nativeui_t043_view_geometry_tests tests/t043_view_geometry_tests.cpp)
   nativeui_add_core_test(nativeui_dynamic_composition_tests tests/dynamic_composition_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)

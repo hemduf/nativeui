@@ -9,8 +9,12 @@ public:
              std::function<void()> close_callback = {})
         : ui_(ui),
           services_(services),
-          logical_size_(desc.size),
+          geometry_(desc.size),
           close_callback_(std::move(close_callback)) {
+        if (!detail::valid_logical_size(desc.size)) {
+            throw std::invalid_argument("NativeUI initial logical size must be finite and positive");
+        }
+
         if (shared_world) {
             world_ = shared_world;
         } else {
@@ -36,16 +40,18 @@ public:
             if (status) cleanup_and_throw(status, "puglSetParent failed");
         }
 
-        // NativeUI's public size is logical. Pugl deliberately uses physical
-        // pixel geometry, so convert the initial hint at the window boundary.
-        scale_factor_ = static_cast<float>(puglGetScaleFactor(view_));
-        if (!(scale_factor_ > 0.0f)) scale_factor_ = 1.0f;
-        physical_size_ = Size{
-            std::max(1.0f, desc.size.w * scale_factor_),
-            std::max(1.0f, desc.size.h * scale_factor_)};
+        // NativeUI public geometry is logical. Keep one per-view last-valid
+        // scale and convert the initial request exactly once at the platform
+        // boundary. Native configure remains authoritative for the actual size.
+        record_scale_observation(
+            geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
+        const auto initial_physical = geometry_.physical_request(desc.size);
+        if (!initial_physical) {
+            cleanup_and_throw(PUGL_BAD_PARAMETER, "invalid initial logical size");
+        }
         puglSetSizeHint(view_, PUGL_DEFAULT_SIZE,
-                        to_pugl_span(physical_size_.w),
-                        to_pugl_span(physical_size_.h));
+                        to_pugl_span(initial_physical->w),
+                        to_pugl_span(initial_physical->h));
         puglSetViewHint(view_, PUGL_RESIZABLE, desc.resizable ? PUGL_TRUE : PUGL_FALSE);
         // Request a portable modern baseline. On macOS this maps to the native
         // 3.2 Core profile instead of Pugl's legacy 2.0 default.
@@ -71,9 +77,12 @@ public:
             cleanup_and_throw(PUGL_FAILURE, "native IME bridge initialization failed");
         }
 
-        scale_factor_ = static_cast<float>(puglGetScaleFactor(view_));
-        if (!(scale_factor_ > 0.0f)) scale_factor_ = 1.0f;
-        ui_.resize(logical_size_);
+        record_scale_observation(
+            geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
+        // Initial layout uses the requested logical size so synchronous focus
+        // and IME callbacks during show have valid bounds. Subsequent size
+        // changes are driven only by authoritative configure snapshots.
+        ui_.resize(geometry_.logical_size());
 
         if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
             cleanup_and_throw(status, "puglShow failed");
@@ -82,7 +91,10 @@ public:
         // Attach exposure scheduling only after the native view is visible.
         // The callback replays the already accumulated initial dirty region,
         // so no redundant whole-view redraw request is needed here.
-        ui_.set_invalidation_callback([this](Rect rect) { request_redraw(rect); });
+        ui_.set_invalidation_callback([this](Rect rect) {
+            if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
+            request_redraw(rect);
+        });
     }
 
     ~ViewCore() {
@@ -91,6 +103,8 @@ public:
         // must also be deterministic when a host destroys an active view.
         ui_.deactivate(services_);
         set_text_input(false, {}, 0.0f);
+        preferred_size_callback_ = {};
+        preferred_size_state_.reset();
         ui_.clear_invalidation_callback();
         if (ime_bridge_) {
             nativeuiImeDestroy(ime_bridge_);
@@ -120,13 +134,14 @@ public:
             last_error_ = puglStrerror(status);
             should_close_ = true;
         }
+        if (!should_close_) flush_preferred_size_notification();
         return !should_close_;
     }
 
     void request_close() { should_close_ = true; }
     [[nodiscard]] bool should_close() const noexcept { return should_close_; }
-    [[nodiscard]] Size size() const noexcept { return logical_size_; }
-    [[nodiscard]] float scale_factor() const noexcept { return scale_factor_; }
+    [[nodiscard]] Size size() const noexcept { return geometry_.logical_size(); }
+    [[nodiscard]] float scale_factor() const noexcept { return geometry_.last_valid_scale(); }
     [[nodiscard]] NativeViewHandle native_handle() const noexcept {
         return view_ ? static_cast<NativeViewHandle>(puglGetNativeView(view_)) : 0;
     }
@@ -134,36 +149,43 @@ public:
 
     bool set_size(Size logical) {
         if (!view_) return false;
-        const float scale = static_cast<float>(puglGetScaleFactor(view_));
-        const float safe_scale = scale > 0.0f ? scale : 1.0f;
-        const auto status = puglSetSizeHint(
-            view_,
-            PUGL_CURRENT_SIZE,
-            to_pugl_span(logical.w * safe_scale),
-            to_pugl_span(logical.h * safe_scale));
-        return status == PUGL_SUCCESS;
+        return detail::submit_logical_size_request(
+            geometry_,
+            logical,
+            [this](Size physical) {
+                return puglSetSizeHint(
+                           view_,
+                           PUGL_CURRENT_SIZE,
+                           to_pugl_span(physical.w),
+                           to_pugl_span(physical.h)) == PUGL_SUCCESS;
+            });
+    }
+
+    void set_preferred_size_callback(PreferredSizeCallback callback) {
+        preferred_size_callback_ = std::move(callback);
+        preferred_size_state_.reset();
+        preferred_measure_dirty_ = static_cast<bool>(preferred_size_callback_);
+        flush_preferred_size_notification();
     }
 
     void request_redraw(Rect logical_rect) {
         if (!view_ || logical_rect.empty()) return;
 
-        const float scale = scale_factor_ > 0.0f ? scale_factor_ : 1.0f;
-        const float left = std::floor(logical_rect.x * scale);
-        const float top = std::floor(logical_rect.y * scale);
-        const float right = std::ceil((logical_rect.x + logical_rect.w) * scale);
-        const float bottom = std::ceil((logical_rect.y + logical_rect.h) * scale);
+        const auto physical = detail::logical_to_physical_covering_rect(
+            logical_rect, geometry_.last_valid_scale());
+        if (physical.w <= 0.0f || physical.h <= 0.0f) return;
 
         (void)puglObscureRegion(view_,
-                                static_cast<int>(left),
-                                static_cast<int>(top),
-                                static_cast<unsigned>(std::max(1.0f, right - left)),
-                                static_cast<unsigned>(std::max(1.0f, bottom - top)));
+                                static_cast<int>(physical.x),
+                                static_cast<int>(physical.y),
+                                static_cast<unsigned>(physical.w),
+                                static_cast<unsigned>(physical.h));
     }
 
     void set_text_input(bool active, Rect logical_area, float logical_cursor_offset) {
         if (!view_ || !ime_bridge_) return;
 
-        const float scale = scale_factor_ > 0.0f ? scale_factor_ : 1.0f;
+        const float scale = geometry_.last_valid_scale();
         if (!detail::text_input_boundary_needs_update(
                 text_input_active_,
                 text_input_physical_area_,
@@ -229,13 +251,14 @@ public:
             const char* offered = puglGetClipboardType(view_, PUGL_CLIPBOARD_DRAG, i);
             if (!offered || type != offered) continue;
 
-            const float scale = scale_factor_ > 0.0f ? scale_factor_ : 1.0f;
-            const int x = static_cast<int>(std::floor(logical_region.x * scale));
-            const int y = static_cast<int>(std::floor(logical_region.y * scale));
-            const unsigned width = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.w * scale)));
-            const unsigned height = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.h * scale)));
+            const auto physical = detail::logical_to_physical_covering_rect(
+                logical_region, geometry_.last_valid_scale());
             const auto status = puglAcceptOffer(
-                view_, active_drop_offer_, i, PUGL_DATA_ACTION_COPY, x, y, width, height);
+                view_, active_drop_offer_, i, PUGL_DATA_ACTION_COPY,
+                static_cast<int>(physical.x),
+                static_cast<int>(physical.y),
+                static_cast<unsigned>(std::max(1.0f, physical.w)),
+                static_cast<unsigned>(std::max(1.0f, physical.h)));
             drop_offer_decided_ = status == PUGL_SUCCESS;
             return drop_offer_decided_;
         }
@@ -244,16 +267,40 @@ public:
 
     void reject_drop(Rect logical_region) {
         if (!view_ || !active_drop_offer_ || active_drop_offer_->clipboard != PUGL_CLIPBOARD_DRAG) return;
-        const float scale = scale_factor_ > 0.0f ? scale_factor_ : 1.0f;
-        const int x = static_cast<int>(std::floor(logical_region.x * scale));
-        const int y = static_cast<int>(std::floor(logical_region.y * scale));
-        const unsigned width = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.w * scale)));
-        const unsigned height = static_cast<unsigned>(std::max(1.0f, std::ceil(logical_region.h * scale)));
-        (void)puglRejectOffer(view_, active_drop_offer_, x, y, width, height);
+        const auto physical = detail::logical_to_physical_covering_rect(
+            logical_region, geometry_.last_valid_scale());
+        (void)puglRejectOffer(view_, active_drop_offer_,
+                              static_cast<int>(physical.x),
+                              static_cast<int>(physical.y),
+                              static_cast<unsigned>(std::max(1.0f, physical.w)),
+                              static_cast<unsigned>(std::max(1.0f, physical.h)));
         drop_offer_decided_ = true;
     }
 
 private:
+    void record_scale_observation(bool accepted) {
+        if (!accepted) {
+            last_error_ = "NativeUI ignored invalid platform scale factor";
+        }
+    }
+
+    void queue_preferred_size() {
+        if (!preferred_size_callback_) return;
+        preferred_size_state_.queue(ui_.measure().preferred);
+    }
+
+    void flush_preferred_size_notification() {
+        if (!preferred_size_callback_) return;
+        if (preferred_measure_dirty_) {
+            preferred_measure_dirty_ = false;
+            queue_preferred_size();
+        }
+        (void)preferred_size_state_.dispatch_once([this](Size preferred) {
+            auto callback = preferred_size_callback_;
+            if (callback) callback(preferred);
+        });
+    }
+
     void cleanup_and_throw(PuglStatus status, const char* what) {
         if (ime_bridge_) {
             nativeuiImeDestroy(ime_bridge_);
@@ -316,6 +363,6 @@ private:
     PuglStatus on_event(const PuglEvent* event) {
         switch (event->type) {
         case PUGL_REALIZE:
-            scale_factor_ = static_cast<float>(puglGetScaleFactor(view_));
-            if (!(scale_factor_ > 0.0f)) scale_factor_ = 1.0f;
+            record_scale_observation(
+                geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
             return PUGL_SUCCESS;
