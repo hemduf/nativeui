@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -67,12 +68,73 @@ private:
     std::vector<ui::Spec> children_;
 };
 
+struct CloseFromInputState {
+    std::function<bool()> close;
+    bool close_result{};
+    bool returned_from_input{};
+    bool unmounted_during_input{};
+    bool completion_after_input{};
+    bool completion_after_unmount{};
+    int unmounts{};
+};
+
+class CloseFromInputComponent final : public ui::Component {
+public:
+    explicit CloseFromInputComponent(std::shared_ptr<CloseFromInputState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 40.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+        auto state = state_;
+        state->close_result = state->close();
+        state->unmounted_during_input = state->unmounts != 0;
+        state->returned_from_input = true;
+        return ui::EventResult::Handled;
+    }
+
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<CloseFromInputState> state_;
+};
+
+class CloseFromInputBody {
+public:
+    explicit CloseFromInputBody(std::shared_ptr<CloseFromInputState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<CloseFromInputComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<CloseFromInputState> state_;
+};
+
 ui::DialogSpec dialog_spec() {
     ui::DialogSpec spec;
     spec.title = "Confirm";
     spec.body = ui::make_spec(ui::Spacer{80.0f, 40.0f});
     spec.actions.push_back(ui::DialogAction{
         "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    return spec;
+}
+
+ui::DialogSpec dialog_spec(std::shared_ptr<CloseFromInputState> state) {
+    auto spec = dialog_spec();
+    spec.body = ui::make_spec(CloseFromInputBody{std::move(state)});
     return spec;
 }
 
@@ -236,6 +298,42 @@ void suite() {
                       test::pointer(ui::InputType::PointerDown, 40.0f, 40.0f), platform) ==
                   ui::EventResult::Handled);
         NUI_CHECK(root->pointer_down == 1);
+    }
+
+    // Closing from the dialog subtree must only mark logical completion while
+    // the current input callback is on the stack. T058 teardown happens at the
+    // outer dispatch checkpoint; only then may the application completion run.
+    {
+        test::MockPlatform platform;
+        ui::UI tree{ui::Spacer{200.0f, 120.0f}};
+        tree.resize({200.0f, 120.0f});
+        tree.activate(platform);
+
+        auto state = std::make_shared<CloseFromInputState>();
+        ui::Dialog first{tree};
+        ui::Dialog second{tree};
+        ui::DialogShowResult reentrant_show = ui::DialogShowResult::Unavailable;
+
+        NUI_CHECK(first.show(dialog_spec(state), [&](ui::DialogResult result) {
+            NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+            state->completion_after_input = state->returned_from_input;
+            state->completion_after_unmount = state->unmounts == 1;
+            reentrant_show = second.show(dialog_spec(), [](ui::DialogResult) {});
+        }) == ui::DialogShowResult::Shown);
+        state->close = [&first] { return first.close(); };
+        tree.resize({200.0f, 120.0f});
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 100.0f, 60.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(state->close_result);
+        NUI_CHECK(state->returned_from_input);
+        NUI_CHECK(!state->unmounted_during_input);
+        NUI_CHECK(state->unmounts == 1);
+        NUI_CHECK(state->completion_after_input);
+        NUI_CHECK(state->completion_after_unmount);
+        NUI_CHECK(reentrant_show == ui::DialogShowResult::Shown);
+        NUI_CHECK(second.close());
     }
 }
 
