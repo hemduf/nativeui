@@ -155,6 +155,10 @@ public:
         NSView* view = native_view(window);
         NSWindow* native_window = view ? [view window] : nil;
         if (!native_window) return false;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        [NSApp activateIgnoringOtherApps:YES];
+#pragma clang diagnostic pop
         [native_window makeKeyAndOrderFront:nil];
         return true;
 #elif defined(_WIN32)
@@ -163,7 +167,7 @@ public:
         ShowWindow(native_window, SW_SHOW);
         (void)SetForegroundWindow(native_window);
         (void)SetFocus(native_window);
-        return GetFocus() == native_window;
+        return true;
 #elif defined(__linux__)
         if (!display_) return false;
         const Window native_window = xwindow(window);
@@ -172,6 +176,29 @@ public:
         XSetInputFocus(display_, native_window, RevertToParent, CurrentTime);
         XSync(display_, False);
         return true;
+#else
+        (void)window;
+        return false;
+#endif
+    }
+
+    [[nodiscard]] bool focus_ready(const ui::StandaloneWindow& window) const noexcept {
+#if defined(__APPLE__)
+        NSView* view = native_view(window);
+        NSWindow* native_window = view ? [view window] : nil;
+        return native_window && [NSApp isActive] && [native_window isKeyWindow];
+#elif defined(_WIN32)
+        const HWND native_window = hwnd(window);
+        return native_window && GetForegroundWindow() == native_window && GetFocus() == native_window;
+#elif defined(__linux__)
+        if (!display_) return false;
+        const Window native_window = xwindow(window);
+        if (!native_window) return false;
+        Window focused_window{};
+        int revert_to{};
+        XGetInputFocus(display_, &focused_window, &revert_to);
+        XSync(display_, False);
+        return focused_window == native_window;
 #else
         (void)window;
         return false;
@@ -388,6 +415,18 @@ private:
 #endif
 };
 
+bool focus_and_wait(ui::Application& application,
+                    NativePointerDriver& driver,
+                    ui::StandaloneWindow& window,
+                    std::string_view stage) {
+    for (int attempt = 0; attempt < 12; ++attempt) {
+        if (!step(driver.focus(window), stage, "focus")) return false;
+        if (!pump(application, 2)) return false;
+        if (driver.focus_ready(window)) return true;
+    }
+    return expect(false, stage, "native view never reached active/key focus state");
+}
+
 bool run_outside_sequence(ui::Application& application,
                           NativePointerDriver& driver,
                           ui::StandaloneWindow& window,
@@ -399,7 +438,7 @@ bool run_outside_sequence(ui::Application& application,
     const int up_before = state->up;
     const int cancel_before = state->cancel;
 
-    if (!step(driver.focus(window), stage, "focus") || !pump(application)) return false;
+    if (!focus_and_wait(application, driver, window, stage)) return false;
     if (!step(driver.pointer_down(window), stage, "pointer-down") || !pump(application)) return false;
     if (!expect(state->down == down_before + 1, stage, "pointer down was not delivered")) return false;
     if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) {
@@ -454,10 +493,10 @@ int main() {
 
     const int a_cancel_before = a_state->cancel;
     const int a_up_before = a_state->up;
-    if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
+    if (!focus_and_wait(application, driver, *a, "focus-loss")) return 1;
     if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A") || !pump(application)) return 1;
     if (!expect(driver.capture_owned_by(*a), "focus-loss", "A did not own native capture")) return 1;
-    if (!step(driver.focus(*b), "focus-loss", "focus B") || !pump(application)) return 1;
+    if (!focus_and_wait(application, driver, *b, "focus-loss")) return 1;
     if (!expect(a_state->cancel == a_cancel_before + 1,
                 "focus-loss", "focus loss did not cancel toolkit capture exactly once")) return 1;
     if (!expect(driver.capture_clear(), "focus-loss", "native capture remained after focus loss")) return 1;
@@ -480,7 +519,7 @@ int main() {
         application, *c_ui,
         ui::WindowDesc{.title = "NativeUI T044 C", .size = {220.0f, 150.0f}, .resizable = true});
     if (!c->valid()) return fail("create-c", c->last_error());
-    if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
+    if (!focus_and_wait(application, driver, *c, "destroy-capture")) return 1;
     if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C") || !pump(application)) return 1;
     if (!expect(c_state->down == 1, "destroy-capture", "C did not receive pointer down")) return 1;
     c.reset();
