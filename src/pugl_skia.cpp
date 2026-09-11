@@ -166,9 +166,9 @@ PuglStatus tracked_pugl_update(PuglWorld* world, double timeout_seconds) {
     return ::puglUpdate(world, 0.0);
 }
 
-#  define puglSetEventFunc tracked_pugl_set_event_func
-#  define puglFreeView tracked_pugl_free_view
-#  define puglUpdate tracked_pugl_update
+#  define puglSetEventFunc ::ui::detail::tracked_pugl_set_event_func
+#  define puglFreeView ::ui::detail::tracked_pugl_free_view
+#  define puglUpdate ::ui::detail::tracked_pugl_update
 #endif
 
 #include "detail/pugl_skia_view_a.inc"
