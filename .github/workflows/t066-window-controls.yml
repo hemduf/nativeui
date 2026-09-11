@@ -53,11 +53,20 @@ jobs:
           -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
 
-      - name: Build contract
+      - name: Build contracts
         run: >-
           cmake --build build-t066 --config Release
-          --target nativeui_t066_window_controls_platform_tests
+          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests
           --parallel 2
+
+      - name: Run pure state contract (Unix)
+        if: runner.os != 'Windows'
+        run: ./build-t066/nativeui_t066_window_control_state_tests
+
+      - name: Run pure state contract (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build-t066/Release/nativeui_t066_window_control_state_tests.exe
 
       - name: Run Linux X11 contract
         if: runner.os == 'Linux'
