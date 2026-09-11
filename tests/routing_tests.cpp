@@ -335,6 +335,33 @@ void suite() {
         NUI_CHECK(reentrant_show == ui::DialogShowResult::Shown);
         NUI_CHECK(second.close());
     }
+
+    // Escape completion may run application code before entering Tree::dispatch.
+    // The callback is allowed to destroy the invoking UI; the strong local
+    // DialogState guard in UI::dispatch keeps the escape handler alive until it
+    // returns and the method must not touch the destroyed UI afterward.
+    {
+        test::MockPlatform platform;
+        auto tree = std::make_unique<ui::UI>(ui::Spacer{320.0f, 240.0f});
+        tree->resize({320.0f, 240.0f});
+        tree->activate(platform);
+
+        ui::Dialog dialog{*tree};
+        int completions = 0;
+        NUI_CHECK(dialog.show(dialog_spec(), [&](ui::DialogResult result) {
+            NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+            ++completions;
+            tree.reset();
+        }) == ui::DialogShowResult::Shown);
+        tree->resize({320.0f, 240.0f});
+
+        auto* dispatch_target = tree.get();
+        NUI_CHECK(dispatch_target->dispatch(test::key(ui::Key::Escape), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(!tree);
+        NUI_CHECK(completions == 1);
+        NUI_CHECK(!dialog.active());
+    }
 }
 
 } // namespace
