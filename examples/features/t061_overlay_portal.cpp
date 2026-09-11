@@ -138,6 +138,29 @@ int self_test() {
 
     if (!renderer.render(tree)) return example::fail("initial overlay render failed");
 
+    // Regression #231: example overlay content must paint its own background.
+    // Use an empty label so the center pixel can only change because of the
+    // panel itself, never because of glyph coverage.
+    ui::UI panel_probe{ui::Spacer{96.0f, 64.0f}};
+    ui::HeadlessRenderer panel_renderer{{96.0f, 64.0f}, 1.0f};
+    if (!panel_renderer.render(panel_probe)) {
+        return example::fail("overlay panel baseline render failed");
+    }
+    const auto before_panel = panel_renderer.pixel(48, 32);
+    auto panel_overlay = centered_label("");
+    const auto panel_handle = panel_probe.show_overlay(std::move(panel_overlay));
+    if (!panel_handle.valid() || !panel_renderer.render(panel_probe)) {
+        return example::fail("overlay panel regression render failed");
+    }
+    const auto after_panel = panel_renderer.pixel(48, 32);
+    if (before_panel.r == after_panel.r && before_panel.g == after_panel.g &&
+        before_panel.b == after_panel.b && before_panel.a == after_panel.a) {
+        return example::fail("overlay example panel background is missing");
+    }
+    if (!panel_probe.close_overlay(panel_handle)) {
+        return example::fail("overlay panel regression close failed");
+    }
+
     auto popup = centered_label("Popup");
     popup.dismiss_on_outside_pointer_down = true;
     state.popup = tree.show_overlay(std::move(popup));
