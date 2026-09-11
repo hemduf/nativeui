@@ -15,6 +15,7 @@ on:
       - 'src/detail/application_platform_state.hpp'
       - 'cmake/NativeUILinuxDbus.cmake'
       - 'cmake/NativeUIAttachPlatform.cmake'
+      - 'docs/linux-build.md'
       - 'tests/t072/**'
       - 'tests/t072_linux_dbus_build_contract.cmake'
       - 'CMakeLists.txt'
@@ -44,6 +45,19 @@ jobs:
 
       - name: Static integration contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t072_linux_dbus_build_contract.cmake
+
+      - name: Missing libdbus discovery diagnostic
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty-pkgconfig"
+          if PKG_CONFIG_PATH= PKG_CONFIG_LIBDIR="$RUNNER_TEMP/empty-pkgconfig" \
+             cmake -S tests/t072 -B build-t072-no-dbus -G Ninja -DCMAKE_BUILD_TYPE=Release \
+             > "$RUNNER_TEMP/t072-no-dbus.log" 2>&1; then
+            cat "$RUNNER_TEMP/t072-no-dbus.log"
+            echo "Expected configuration to fail without dbus-1" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/t072-no-dbus.log"
+          grep -F "dbus-1" "$RUNNER_TEMP/t072-no-dbus.log"
 
       - name: Configure isolated contract
         run: cmake -S tests/t072 -B build-t072 -G Ninja -DCMAKE_BUILD_TYPE=Release
