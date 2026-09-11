@@ -96,6 +96,45 @@ private:
     std::shared_ptr<KeySinkState> state_;
 };
 
+ui::InputEvent wheel(float x, float y, float dy) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::PointerWheel;
+    event.position = {x, y};
+    event.delta = {0.0f, dy};
+    return event;
+}
+
+bool pixels_equal_in_region(
+    const std::vector<std::uint8_t>& a,
+    const std::vector<std::uint8_t>& b,
+    int width,
+    int x0,
+    int y0,
+    int x1,
+    int y1) {
+    if (a.size() != b.size()) return false;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const auto index = static_cast<std::size_t>((y * width + x) * 4);
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                if (a[index + channel] != b[index + channel]) return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool pixels_differ_in_region(
+    const std::vector<std::uint8_t>& a,
+    const std::vector<std::uint8_t>& b,
+    int width,
+    int x0,
+    int y0,
+    int x1,
+    int y1) {
+    return !pixels_equal_in_region(a, b, width, x0, y0, x1, y1);
+}
+
 int default_action_contract() {
     example::Platform platform;
     ui::UI tree{ui::Spacer{320.0f, 180.0f}};
@@ -117,7 +156,6 @@ int default_action_contract() {
         return example::fail("T063 Enter did not complete the enabled Default action exactly once");
     }
 
-    // Repeated physical input after logical close must not emit a second result.
     (void)tree.dispatch(example::key(ui::Key::Enter), platform);
     if (results.size() != 1) {
         return example::fail("T063 repeated Enter completed the same dialog more than once");
@@ -203,6 +241,92 @@ int escape_preempts_focused_child_contract() {
     return 0;
 }
 
+int text_editor_enter_contract() {
+    example::Platform platform;
+
+    {
+        ui::State<std::string> value{"single"};
+        int submits = 0;
+        std::vector<ui::DialogResult> results;
+        ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+        tree.resize({420.0f, 260.0f});
+        tree.activate(platform);
+
+        ui::DialogSpec spec;
+        spec.body = ui::make_spec(
+            ui::TextInput{"Name", value}.on_submit([&](const std::string&) { ++submits; }));
+        spec.actions.push_back(ui::DialogAction{
+            "confirm", "Confirm", true, ui::DialogActionRole::Default});
+        ui::Dialog dialog{tree};
+        if (dialog.show(std::move(spec), [&](ui::DialogResult result) {
+                results.push_back(std::move(result));
+            }) != ui::DialogShowResult::Shown) {
+            return example::fail("T063 TextInput Enter setup failed");
+        }
+        tree.resize({420.0f, 260.0f});
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (tree.dispatch(example::key(ui::Key::Enter), platform) != ui::EventResult::Handled ||
+            submits != 1 || !results.empty() || !dialog.active()) {
+            return example::fail("T063 TextInput Enter did not win before Default action");
+        }
+        if (!dialog.close()) return example::fail("T063 TextInput dialog did not close");
+    }
+
+    {
+        ui::State<std::string> value{"multi"};
+        std::vector<ui::DialogResult> results;
+        ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+        tree.resize({420.0f, 260.0f});
+        tree.activate(platform);
+
+        ui::DialogSpec spec;
+        spec.body = ui::make_spec(ui::TextArea{"Notes", value});
+        spec.actions.push_back(ui::DialogAction{
+            "confirm", "Confirm", true, ui::DialogActionRole::Default});
+        ui::Dialog dialog{tree};
+        if (dialog.show(std::move(spec), [&](ui::DialogResult result) {
+                results.push_back(std::move(result));
+            }) != ui::DialogShowResult::Shown) {
+            return example::fail("T063 TextArea Enter setup failed");
+        }
+        tree.resize({420.0f, 260.0f});
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (tree.dispatch(example::key(ui::Key::Enter), platform) != ui::EventResult::Handled ||
+            value.get().find('\n') == std::string::npos || !results.empty() || !dialog.active()) {
+            return example::fail("T063 TextArea Enter did not insert newline before Default action");
+        }
+        if (!dialog.close()) return example::fail("T063 TextArea dialog did not close");
+    }
+
+    return 0;
+}
+
+int reentrant_ui_destruction_contract() {
+    example::Platform platform;
+    auto tree = std::make_unique<ui::UI>(ui::Spacer{320.0f, 180.0f});
+    tree->resize({420.0f, 260.0f});
+    tree->activate(platform);
+
+    ui::Dialog dialog{*tree};
+    int completions = 0;
+    if (dialog.show(confirm_spec(false), [&](ui::DialogResult result) {
+            if (result.kind == ui::DialogResultKind::Action && result.action_id == "confirm") {
+                ++completions;
+            }
+            tree.reset();
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T063 reentrant UI-destruction setup failed");
+    }
+    tree->resize({420.0f, 260.0f});
+
+    auto* dispatch_target = tree.get();
+    const auto result = dispatch_target->dispatch(example::key(ui::Key::Enter), platform);
+    if (result != ui::EventResult::Handled || tree || completions != 1 || dialog.active()) {
+        return example::fail("T063 completion could not safely destroy the invoking UI");
+    }
+    return 0;
+}
+
 int deactivation_suppresses_completion_contract() {
     example::Platform platform;
     ui::UI tree{ui::Spacer{320.0f, 180.0f}};
@@ -240,6 +364,58 @@ bool is_opaque_red(ui::Rgba8 pixel) {
 
 bool near_pixel(int actual, int expected) {
     return actual >= expected - 1 && actual <= expected + 1;
+}
+
+int scroll_and_pointer_action_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{420.0f, 260.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    ui::DialogSpec spec;
+    spec.title = "Fixed title";
+    spec.body = ui::make_spec(ui::Spacer{1000.0f, 1000.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+
+    std::vector<ui::DialogResult> results;
+    ui::Dialog dialog{tree};
+    if (dialog.show(std::move(spec), [&](ui::DialogResult result) {
+            results.push_back(std::move(result));
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T063 ScrollView/action setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+
+    ui::HeadlessRenderer renderer{{420.0f, 260.0f}};
+    if (!renderer.render(tree)) return example::fail("T063 pre-scroll headless render failed");
+    const auto before = renderer.rgba_pixels();
+
+    if (tree.dispatch(wheel(200.0f, 120.0f, 80.0f), platform) != ui::EventResult::Handled) {
+        return example::fail("T063 oversized body did not route wheel through T034 ScrollView");
+    }
+    if (!renderer.render(tree)) return example::fail("T063 post-scroll headless render failed");
+    const auto after = renderer.rgba_pixels();
+
+    const int width = renderer.pixel_width();
+    if (!pixels_equal_in_region(before, after, width, 24, 24, 396, 72) ||
+        !pixels_equal_in_region(before, after, width, 24, 172, 396, 236) ||
+        !pixels_differ_in_region(before, after, width, 44, 80, 376, 168)) {
+        return example::fail("T063 scrolling moved fixed title/actions or failed to move body scrollbar");
+    }
+
+    if (tree.dispatch(
+            example::pointer(ui::InputType::PointerDown, 340.0f, 198.0f), platform) !=
+            ui::EventResult::Handled ||
+        tree.dispatch(
+            example::pointer(ui::InputType::PointerUp, 340.0f, 198.0f), platform) !=
+            ui::EventResult::Handled ||
+        results.size() != 1 || results.front().kind != ui::DialogResultKind::Action ||
+        results.front().action_id != "confirm" || dialog.active()) {
+        return example::fail("T063 fixed action row did not remain pointer-operable after body scroll");
+    }
+
+    return 0;
 }
 
 int headless_sizing_and_backdrop_contract() {
@@ -293,7 +469,10 @@ int self_test() {
     if (const int result = cancel_action_contract(); result != 0) return result;
     if (const int result = escape_dismiss_contract(); result != 0) return result;
     if (const int result = escape_preempts_focused_child_contract(); result != 0) return result;
+    if (const int result = text_editor_enter_contract(); result != 0) return result;
+    if (const int result = reentrant_ui_destruction_contract(); result != 0) return result;
     if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
+    if (const int result = scroll_and_pointer_action_contract(); result != 0) return result;
     if (const int result = headless_sizing_and_backdrop_contract(); result != 0) return result;
     return 0;
 }
