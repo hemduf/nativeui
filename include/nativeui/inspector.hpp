@@ -6,7 +6,11 @@
 #include <string>
 #include <vector>
 
-namespace ui::debug {
+namespace ui {
+
+class UI;
+
+namespace debug {
 
 /// Immutable value snapshot for one retained node. This intentionally contains
 /// no Node*, Component*, callbacks, references, or other runtime ownership.
@@ -40,4 +44,13 @@ struct InspectorSnapshot {
     }
 };
 
-} // namespace ui::debug
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+[[nodiscard]] bool inspector_enabled(const UI& ui) noexcept;
+void set_inspector_enabled(UI& ui, bool enabled);
+[[nodiscard]] NodeId inspector_selected_node(const UI& ui) noexcept;
+void set_inspector_selected_node(UI& ui, NodeId id);
+[[nodiscard]] InspectorSnapshot inspector_snapshot(UI& ui);
+#endif
+
+} // namespace debug
+} // namespace ui
