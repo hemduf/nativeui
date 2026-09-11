@@ -263,13 +263,16 @@ int self_test() {
 
     // A normal non-modal overlay only owns its own region. Pointer input outside
     // it remains eligible for the underlying root when no outside-dismiss policy
-    // consumes the event.
+    // consumes the event. Use fixed-size content so the test point is guaranteed
+    // to remain outside regardless of platform text metrics.
     auto outside_state = std::make_shared<CaptureState>();
     ui::UI outside_tree{CaptureProbe{outside_state}};
     outside_tree.resize({96.0f, 48.0f});
     outside_tree.activate(platform);
-    const auto outside_handle =
-        outside_tree.show_overlay(centered_label("Small non-modal"));
+    ui::OverlaySpec outside_overlay;
+    outside_overlay.placement = ui::OverlayPlacement::Center;
+    outside_overlay.content = ui::make_spec(ui::Spacer{24.0f, 16.0f});
+    const auto outside_handle = outside_tree.show_overlay(std::move(outside_overlay));
     outside_tree.resize({96.0f, 48.0f});
     ui::InputEvent outside_down;
     outside_down.type = ui::InputType::PointerDown;
