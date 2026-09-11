@@ -33,8 +33,11 @@ struct TextAreaStylePatch {
     std::optional<float> line_height;
     std::optional<float> selection_corner_radius;
     std::optional<float> selection_vertical_inset;
+    std::optional<float> newline_selection_width;
     std::optional<float> caret_width;
+    std::optional<float> caret_vertical_inset;
     std::optional<float> composition_underline_width;
+    std::optional<float> composition_underline_inset;
     std::optional<FontWeight> text_weight;
     std::optional<FontSlant> text_slant;
     std::optional<std::string> font_family;
@@ -73,8 +76,11 @@ struct ResolvedTextAreaStyle {
     float line_height{};
     float selection_corner_radius{};
     float selection_vertical_inset{};
+    float newline_selection_width{};
     float caret_width{};
+    float caret_vertical_inset{};
     float composition_underline_width{};
+    float composition_underline_inset{};
     FontWeight text_weight{FontWeight::Regular};
     FontSlant text_slant{FontSlant::Upright};
     std::string font_family;
@@ -107,8 +113,11 @@ inline void apply_text_area_style_patch(ResolvedTextAreaStyle& target,
     if (patch.line_height) target.line_height = *patch.line_height;
     if (patch.selection_corner_radius) target.selection_corner_radius = *patch.selection_corner_radius;
     if (patch.selection_vertical_inset) target.selection_vertical_inset = *patch.selection_vertical_inset;
+    if (patch.newline_selection_width) target.newline_selection_width = *patch.newline_selection_width;
     if (patch.caret_width) target.caret_width = *patch.caret_width;
+    if (patch.caret_vertical_inset) target.caret_vertical_inset = *patch.caret_vertical_inset;
     if (patch.composition_underline_width) target.composition_underline_width = *patch.composition_underline_width;
+    if (patch.composition_underline_inset) target.composition_underline_inset = *patch.composition_underline_inset;
     if (patch.text_weight) target.text_weight = *patch.text_weight;
     if (patch.text_slant) target.text_slant = *patch.text_slant;
     if (patch.font_family) target.font_family = *patch.font_family;
@@ -159,8 +168,11 @@ inline void apply_text_area_interaction_patch(ResolvedTextAreaStyle& target,
     style.base.line_height = 22.0f;
     style.base.selection_corner_radius = 2.0f;
     style.base.selection_vertical_inset = 2.0f;
+    style.base.newline_selection_width = 6.0f;
     style.base.caret_width = 1.5f;
+    style.base.caret_vertical_inset = 2.0f;
     style.base.composition_underline_width = 1.5f;
+    style.base.composition_underline_inset = 3.0f;
     style.base.text_weight = theme.typography.control_weight;
     style.base.text_slant = theme.typography.slant;
     style.base.font_family = theme.typography.family;
