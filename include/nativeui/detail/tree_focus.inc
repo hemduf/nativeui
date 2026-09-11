@@ -178,6 +178,18 @@
 
     void set_focus(Node* node, PlatformServices& platform) {
         if (!node || !focus_target_available(node)) return;
+
+        // Pointer targeting and other direct focus moves must not let an
+        // already-active trapping scope leak focus into an ordinary sibling.
+        // A target that is itself inside another active trapping scope remains
+        // eligible so a newly activated/nested modal can deterministically take
+        // focus from the previous trap.
+        if (auto* current_trap = trapping_scope_for(current_focus_node());
+            current_trap && !is_descendant_or_self(node, current_trap) &&
+            trapping_scope_for(node) == nullptr) {
+            return;
+        }
+
         const auto it = std::find(focusables_.begin(), focusables_.end(), node);
         if (it == focusables_.end()) return;
 
