@@ -112,7 +112,7 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T061 — Generic overlay / portal layer
 
-**Complete in PR #216.** T061 provides one generic retained in-view overlay/portal layer per UI using T058 structural reconciliation. It includes creation-order z-order, modal/non-modal and pointer-transparent policies, deterministic placement, retained anchor tracking, modal focus trapping/restoration, lower-capture cancellation, no-click-through dismissal, reentrant show/close safety, standalone/EmbeddedView parity and the dedicated `t061_overlay_portal` example/self-test.
+**Complete in PR #216.** T061 provides one generic retained in-view overlay/portal layer per UI using T058 structural reconciliation. It includes creation-order z-order, modal/non-modal and pointer-transparent policies, deterministic placement, retained anchor tracking, modal focus trapping/restoration, lower-capture cancellation, no-click-through dismissal, reentrant show/close safety, standalone/EmbeddedView parity and the dedicated `t061_overlay_portal` example/self-test. Regression #231 / PR #232 keeps that API caller-styled while giving the example's popup/modal/pointer-transparent labels an explicit panel background and border, backed by a deterministic headless visual probe.
 
 ### T067 — Fixed-height virtualized ListView
 
