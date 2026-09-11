@@ -89,6 +89,41 @@ void nativeui_header_compile_t038_slider_style(const ui::Theme& theme) {
     (void)resolved;
 }
 
+void nativeui_header_compile_t038_progress_styles(
+    const ui::Theme& theme,
+    ui::State<float>& value) {
+    ui::ProgressBarStyle progress{};
+    progress.base.track = ui::Color{0.1f, 0.1f, 0.1f, 1.0f};
+    progress.base.fill = ui::Color{0.2f, 0.6f, 0.8f, 1.0f};
+    progress.base.border = ui::Color{0.7f, 0.7f, 0.7f, 1.0f};
+    progress.base.text = ui::Color{0.9f, 0.9f, 0.9f, 1.0f};
+    progress.base.border_width = 2.0f;
+    progress.base.corner_radius = 5.0f;
+    progress.base.fill_corner_radius = 4.0f;
+    progress.base.horizontal_size = ui::Size{220.0f, 28.0f};
+    progress.disabled.fill = ui::Color{0.3f, 0.3f, 0.3f, 1.0f};
+    const auto resolved_progress = ui::resolve_progress_bar_style(
+        ui::default_progress_bar_style(theme),
+        progress,
+        ui::VisualState{.enabled = false});
+    (void)resolved_progress;
+    auto progress_spec = ui::make_spec(ui::ProgressBar{value}.style(progress));
+    (void)progress_spec;
+
+    ui::MeterStyle meter{};
+    meter.base.track = ui::Color{0.05f, 0.05f, 0.05f, 1.0f};
+    meter.base.fill = ui::Color{0.2f, 0.8f, 0.3f, 1.0f};
+    meter.base.vertical_size = ui::Size{30.0f, 180.0f};
+    meter.read_only.fill = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    const auto resolved_meter = ui::resolve_meter_style(
+        ui::default_meter_style(theme),
+        meter,
+        ui::VisualState{.enabled = true, .read_only = true});
+    (void)resolved_meter;
+    auto meter_spec = ui::make_spec(ui::Meter{value}.style(meter));
+    (void)meter_spec;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
