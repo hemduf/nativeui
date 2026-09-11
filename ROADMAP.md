@@ -24,6 +24,8 @@ Current `main` includes T035 / PR #225 as squash commit `0412b9245a799fe873908d2
 
 T035 is complete. Its frozen executable candidate `882d29a6f6a4798c36336ed167555e33c6cc594a` passed normal CI run `34606092899`, T042 Lifecycle Stress run `34608497925` and T052 v0.1 Release Gate run `34608497792`. Final `CODE_REVIEW.md` passed with no Blocking/Important finding and issue #35 is closed with `status:done`.
 
+T063 / issue #75 / PR #227 has frozen executable candidate `e907bd3119f59116522b1e672e690703c845f1e6`. Implementation, tests and CI wiring are complete and the mandatory `CODE_REVIEW.md` review reports 0 Blocking, 0 Important and 0 Minor findings. Normal CI run `34618412866` is the exact executable-candidate validation run; Linux X11, Windows and Linux ASan/UBSan are green, with only macOS remaining before Draft -> Ready and final T042/T052 qualification.
+
 Current dependency frontier:
 
 ```text
@@ -32,7 +34,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
 
 dynamic/overlay:   T058(done) -> T061(done)
                                       |-> T035(done) --------------------> T068
-                                      |-> T063 --------------------------> T068
+                                      |-> T063(frozen) ------------------> T068
                                       +-> T062
 
 style:             T037(done) -> T038 -> T039
@@ -52,7 +54,7 @@ critical platform: T060(done) -> T065(done) -> T072 -> T064
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T063 consumes completed T061 plus T034. T062 consumes completed T061 plus T065. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is reconciled independently.
+T063 consumes completed T061 plus T034. T062 consumes completed T061 plus T065 and becomes the next UI convergence item after T063 qualification/merge. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is reconciled independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -126,7 +128,11 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T063 — Dialog
 
-T063 / issue #75 / PR #227 is now the next overlay/UI convergence item. Its existing branch predates T035 and modifies `ui.hpp`; reconcile it onto current `main` first, preserving T035 overlay-command and availability-revalidation behavior. Then continue the missing Dialog presentation/action/focus/sizing/scrolling/teardown/example contracts in bounded TDD slices rather than force-merging stale integration code.
+**Implementation complete and frozen in PR #227 / issue #75.** Frozen executable candidate: `e907bd3119f59116522b1e672e690703c845f1e6`.
+
+T063 is policy over the existing T061 modal stack rather than a second modal/window manager. It delivers one active Dialog slot per UI, validated string action/result IDs, Default/Cancel semantics, styleable backdrop, bounded centered sizing, fixed title/actions, mandatory T034 scrolling for overflowing body content, no-click-through pointer behavior, trapped focus and deterministic restoration, child-first Enter handling, Escape Cancel/Dismissed policy, exact-once completion, safe explicit-controller/UI teardown, per-UI isolation, T058-safe close-before-callback reentrancy and exception-safe acquisition.
+
+The canonical `t063_dialog` example has deterministic `--self-test` coverage for keyboard/pointer/reentrancy/sizing/scroll behavior plus real standalone + EmbeddedView platform smoke wired into Linux X11 and macOS CI. Mandatory `CODE_REVIEW.md` review is clean. Normal CI run `34618412866` is completing on the exact executable candidate; final T042/T052 Ready-only qualification and merge remain.
 
 ### T068 convergence
 
@@ -136,7 +142,7 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 
 ```text
 T036(done) -> T045(done) -> T067(done) -------------------\
-T058(done) -> T061(done) -> T035(done) -> T063 -----------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
+T058(done) -> T061(done) -> T035(done) -> T063(frozen) ---+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
 T065(done) -> T072 -> T064 -------------------------------+
 T043(done) -----------> T066 ------------------------------/
 other explicit T069 dependencies --------------------------/
@@ -146,12 +152,13 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Reconcile T063 / PR #227 onto post-T035 `main`, preserve T035 `ui.hpp` behavior, then continue T063 missing contracts in TDD.
-2. Continue T062 after T063 according to the current UI convergence plan.
-3. Reconcile/qualify T044 / PR #145 independently; do not reuse T043 evidence.
-4. Continue T072 -> T064 and T066 in the independent platform lane.
-5. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
-6. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
+1. Complete normal CI run `34618412866` for T063 candidate `e907bd3`; when macOS is green, transition PR #227 Draft -> Ready without executable changes.
+2. Require T042 Lifecycle Stress and T052 v0.1 Release Gate on the frozen candidate, publish the final issue-to-code/test evidence matrix, then merge/close T063.
+3. Continue T062 as the next UI convergence item.
+4. Reconcile/qualify T044 / PR #145 independently; do not reuse T043 evidence.
+5. Continue T072 -> T064 and T066 in the independent platform lane.
+6. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
+7. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
 
 ## Prioritization rule
 
