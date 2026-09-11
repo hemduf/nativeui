@@ -237,15 +237,8 @@ public:
     static constexpr float kDefaultMaxWidth = 320.0f;
 
     template <class Child>
-    Tooltip(std::string text, Child&& child)
+    Tooltip(Child&& child, std::string text)
         : text_(std::move(text)) {
-        children_.push_back(make_spec(std::forward<Child>(child)));
-    }
-
-    template <class Child>
-    Tooltip(std::string text, std::chrono::milliseconds delay, Child&& child)
-        : text_(std::move(text)),
-          delay_(delay.count() < 0 ? std::chrono::milliseconds{0} : delay) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
