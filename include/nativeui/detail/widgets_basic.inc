@@ -400,7 +400,7 @@ public:
 
         const Rect track{
             b.x + b.w - resolved.trailing_padding - resolved.track_width,
-            b.y + (b.h - resolved.track_height) * 0.5f,
+            b.y + (resolved.control_height - resolved.track_height) * 0.5f,
             resolved.track_width,
             resolved.track_height};
         const float track_radius = resolved.track_height * 0.5f;
