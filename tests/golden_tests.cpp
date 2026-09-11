@@ -24,9 +24,9 @@ CompareOptions label_compare_options() {
     CompareOptions options;
     options.channel_tolerance = 2;
     options.compare_regions = {
-        Region{8, 4, 204, 16}, // background above the fixed Label clip
-        Region{8, 35, 12, 4},  // stripe left of the Label clip
-        Region{200, 35, 12, 4}, // stripe right of the Label clip
+        Region{8, 4, 204, 16},
+        Region{8, 35, 12, 4},
+        Region{200, 35, 12, 4},
     };
     return options;
 }
@@ -35,8 +35,6 @@ void label_mask_self_check() {
     test::golden::Image expected{220, 80, std::vector<std::uint8_t>(220 * 80 * 3, 0)};
     auto actual = expected;
     const auto options = label_compare_options();
-    // The scene clips the Label to this fixed box. System glyphs may change
-    // anywhere inside it, and the framework footer also contains system text.
     for (const auto region : {Region{24, 24, 172, 32}, Region{0, 50, 220, 30}}) {
         for (int y = region.y; y < region.y + region.h; ++y) {
             for (int x = region.x; x < region.x + region.w; ++x) {
@@ -46,8 +44,6 @@ void label_mask_self_check() {
     }
     NUI_CHECK(test::golden::compare(expected, actual, options).matched);
 
-    // Ignoring glyphs must still catch changes to the background and both
-    // ends of the stripe, rather than making this a vacuous comparison.
     for (const auto point : {ui::Point{8, 4}, ui::Point{10, 36}, ui::Point{210, 36}}) {
         auto changed = expected;
         const auto offset = (static_cast<int>(point.y) * changed.width +
@@ -117,8 +113,6 @@ bool verify_canvas(bool update) {
 
     CompareOptions options;
     options.channel_tolerance = 1;
-    // Exclude the framework footer at the bottom; the upper area is pure
-    // geometry and should be bit-stable across platforms.
     options.compare_regions = {Region{4, 4, 56, 24}};
     return test::golden::verify(
         "canvas_solid", test::golden::from_renderer(renderer),
@@ -157,13 +151,10 @@ bool verify_toggle(bool update) {
     if (!renderer.render(tree)) return false;
 
     CompareOptions options;
-    // Only compare geometry interiors, away from anti-aliased rounded edges and
-    // away from text. This is the cross-platform tolerance policy for widgets
-    // that contain platform-shaped glyphs.
     options.channel_tolerance = 3;
     options.compare_regions = {
-        Region{154, 22, 10, 10}, // accent track interior
-        Region{176, 23, 7, 8},   // white knob interior
+        Region{154, 22, 10, 10},
+        Region{176, 23, 7, 8},
     };
     return test::golden::verify(
         "toggle_on", test::golden::from_renderer(renderer),
@@ -194,7 +185,6 @@ bool verify_paths(bool update) {
 
     CompareOptions options;
     options.channel_tolerance = 1;
-    // Compare only solid interiors, away from anti-aliased path edges.
     options.compare_regions = {
         Region{4, 4, 4, 6},
         Region{16, 7, 4, 2},
@@ -208,13 +198,9 @@ bool verify_label(bool update) {
     ui::UI tree{
         ui::Stack{
             ui::Canvas{220.0f, 80.0f, [](ui::CanvasContext2D& g) {
-                // This golden intentionally owns its visual background. The
-                // generic Tree no longer supplies one for every interface.
                 g.fill_rect({0.0f, 0.0f, g.width(), g.height()}, ui::colors::background);
                 g.fill_rect({0.0f, 34.0f, g.width(), 6.0f}, ui::colors::accent);
             }},
-            // A fixed clip keeps even unusually wide/tall fallback glyphs out
-            // of the geometry comparison regions on every platform.
             ui::Padding{24.0f,
                 ui::Clip{ui::Stack{
                     ui::Spacer{172.0f, 32.0f},
@@ -227,20 +213,72 @@ bool verify_label(bool update) {
     ui::HeadlessRenderer renderer{{220.0f, 80.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
-    // Glyph rasterization varies with CoreText/DirectWrite/Fontconfig. The
-    // deterministic stripe and background are compared here while label
-    // measurement/paint consistency is covered by nativeui_label_tests.
     const auto options = label_compare_options();
     return test::golden::verify(
         "label_scene", test::golden::from_renderer(renderer),
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+bool verify_t035_combo_popup(bool update) {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    ui::Theme theme = ui::default_theme();
+    theme.palette.surface = {65.0f / 255.0f, 66.0f / 255.0f, 67.0f / 255.0f, 1.0f};
+    theme.palette.selection = {68.0f / 255.0f, 69.0f / 255.0f, 70.0f / 255.0f, 1.0f};
+    theme.palette.border = theme.palette.surface;
+
+    ui::UI tree{
+        ui::Column{
+            ui::ComboBox<int>{selection,
+                {{1, "One", true}, {2, "Disabled", false}, {3, "Three", true}}},
+            ui::Spacer{1.0f, 120.0f}},
+        theme};
+    tree.resize({120.0f, 180.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{120.0f, 180.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+    const auto closed = renderer.rgba_pixels();
+
+    if (!ui::handled(tree.dispatch(test::key(ui::Key::Down), platform))) return false;
+    ui::InputEvent key_up{};
+    key_up.type = ui::InputType::KeyUp;
+    key_up.key = ui::Key::Down;
+    (void)tree.dispatch(key_up, platform);
+    if (!renderer.render(tree)) return false;
+    const auto open_selected = renderer.rgba_pixels();
+
+    if (!ui::handled(tree.dispatch(test::key(ui::Key::Down), platform))) return false;
+    if (!renderer.render(tree)) return false;
+    const auto open_next = renderer.rgba_pixels();
+
+    auto sample = [](const std::vector<std::uint8_t>& rgba, int x, int y) {
+        const auto offset = static_cast<std::size_t>((y * 120 + x) * 4);
+        return std::vector<std::uint8_t>{rgba[offset], rgba[offset + 1], rgba[offset + 2]};
+    };
+
+    test::golden::Image state{5, 1, {}};
+    const auto append = [&](const std::vector<std::uint8_t>& rgb) {
+        state.rgb.insert(state.rgb.end(), rgb.begin(), rgb.end());
+    };
+    // Column defaults to 24 px padding, leaving x=24..96 for the control.
+    // Sample well inside the anchor/popup surfaces and away from text/borders.
+    append(sample(closed, 80, 40));
+    append(sample(open_selected, 80, 84));
+    // "Disabled" reaches the right-side probe with some platform font metrics;
+    // use the same solid row interior on the left, before the label padding.
+    append(sample(open_selected, 28, 124));
+    append(sample(open_next, 80, 164));
+    append(sample(open_next, 80, 84));
+
+    CompareOptions options;
+    options.channel_tolerance = 1;
+    return test::golden::verify(
+        "t035_combo_popup_state", state,
+        NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
+}
+
 bool verify_overlay_portal(bool update) {
-    // The retained root owns a deliberately small nested clip. T061 overlays
-    // are siblings in the per-UI overlay host, so the lower red surface must
-    // paint outside that ordinary root clip. The later Ignore overlay must
-    // still paint on top even though pointer hit testing ignores its subtree.
     ui::UI tree{
         ui::Padding{3.0f,
             ui::Clip{
@@ -276,9 +314,9 @@ bool verify_overlay_portal(bool update) {
     CompareOptions options;
     options.channel_tolerance = 1;
     options.compare_regions = {
-        Region{0, 0, 1, 1}, // renderer background outside root/overlays
-        Region{1, 2, 1, 1}, // lower overlay visibly escapes root clip
-        Region{3, 3, 2, 2}, // later Ignore overlay still paints topmost
+        Region{0, 0, 1, 1},
+        Region{1, 2, 1, 1},
+        Region{3, 3, 2, 2},
     };
     return test::golden::verify(
         "overlay_portal_stack", test::golden::from_renderer(renderer),
@@ -294,6 +332,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_toggle(update));
     NUI_CHECK(verify_paths(update));
     NUI_CHECK(verify_label(update));
+    NUI_CHECK(verify_t035_combo_popup(update));
     NUI_CHECK(verify_overlay_portal(update));
     return 0;
 }
