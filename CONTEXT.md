@@ -28,9 +28,9 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-Current `main` baseline before T035 merge is `f99f94b9aa029c877e6ef90346d4ad962fff2ee9`. It includes the completed T067 startup regression closure in PR #233, generic feature-example auto-registration in PR #235, and the staged qualification policy in PR #230 on top of the already completed T043/T061/T067/T045/T037/T058/T036/T065/T034/T060 foundations.
+Current `main` includes T035 / PR #225 as squash commit `0412b9245a799fe873908d2659146ec4395f978e`, on top of the completed T067 startup regression closure in PR #233, generic feature-example auto-registration in PR #235, staged qualification policy in PR #230, and the already completed T043/T061/T067/T045/T037/T058/T036/T065/T034/T060 foundations.
 
-T035 / issue #35 / PR #225 is the current completion candidate. Its frozen executable head is `882d29a6f6a4798c36336ed167555e33c6cc594a`. Normal exact-head CI is green on Linux X11, Linux ASan+UBSan, Windows and macOS, including package consumers, macOS Objective-C isolation and the T035 standalone+embedded native smoke. The mandatory `CODE_REVIEW.md` executable-candidate review is PASS with no Blocking/Important finding. The PR has been moved Draft -> Ready and the final-candidate T042/T052 qualification is running. Only project-state documentation may change while those gates run; production source/tests/build/workflows remain frozen.
+T035 is complete. Its frozen executable candidate was `882d29a6f6a4798c36336ed167555e33c6cc594a`; normal CI run `34606092899`, T042 Lifecycle Stress run `34608497925` and T052 v0.1 Release Gate run `34608497792` all passed. The mandatory `CODE_REVIEW.md` review passed with no Blocking/Important finding, and issue #35 is closed with `status:done`.
 
 Current convergence:
 
@@ -39,7 +39,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
                                                    T058(done) ------------^
 
 dynamic/overlay:   T058(done) -> T061(done)
-                                      |-> T035(final qualification) -----> T068
+                                      |-> T035(done) --------------------> T068
                                       |-> T063 --------------------------> T068
                                       +-> T062
 
@@ -53,7 +53,7 @@ critical platform: T065(done) -> T072 -> T064
 release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T035 and T063 consume completed T061 plus already-complete T034. T062 consumes completed T061 plus T065. T043 is complete, unlocks T066 and remains an explicit T068 dependency. T068 stays blocked until every dependency named by issue #80 is Done.
+T063 consumes completed T061 plus T034. T062 consumes completed T061 plus T065. T043 is complete, unlocks T066 and remains an explicit T068 dependency. T068 stays blocked until every dependency named by issue #80 is Done.
 
 ## Completed foundations relevant to v1
 
@@ -61,6 +61,7 @@ T035 and T063 consume completed T061 plus already-complete T034. T062 consumes c
 - #64 / PR #90: standalone PROGRAM-world ownership Decision B.
 - T059 / PR #89: inherited visibility/enabled/read-only state.
 - T030–T034: Button, Checkbox/Radio, Slider/RangeSlider, ProgressBar/Meter and ScrollView baseline.
+- T035 / PR #225: ComboBox + PopupMenu on T061 with immutable open snapshots, exact keyboard/pointer/focus policy, T059 ReadOnly split, close-before-callback reentrancy, deterministic golden coverage and standalone/embedded native smoke.
 - T036 / PR #155: retained non-virtualized ListView + Tabs with stable selection and composite focus.
 - #212 / PR #213: deterministic ListView/Tabs hover presentation and retained pointer-leave lifetime.
 - T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
@@ -78,11 +79,11 @@ T035 and T063 consume completed T061 plus already-complete T034. T062 consumes c
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
 - #234 / PR #235: canonical feature examples are auto-discovered by root CMake with deterministic ordering, `CONFIGURE_DEPENDS` and naming guards.
 
-## T035 completion contract
+## T035 delivered contract
 
-PR #225 implements ComboBox and PopupMenu as policy over the shared T061 in-view overlay stack; it does not introduce native popup windows or a second popup manager.
+PR #225 implements ComboBox and PopupMenu as policy over the shared T061 in-view overlay stack; it introduces neither native popup windows nor a second popup manager.
 
-The final candidate includes:
+Delivered behavior includes:
 
 - immutable per-open ComboBox/PopupMenu snapshots;
 - exact keyboard navigation/open/commit/Escape/Tab semantics with held-opener repeat suppression;
@@ -90,18 +91,16 @@ The final candidate includes:
 - unmatched ComboBox state/placeholder behavior without implicit application-state rewrite;
 - exact close/detach/focus-capture reconciliation before user state/callback invocation;
 - stale-commit availability revalidation after Hidden/Collapsed/Disabled/destruction and T059 ReadOnly transitions;
-- the normative T059 split: ReadOnly ComboBox cannot enter selection, while ReadOnly PopupMenu remains action-capable unless Disabled;
+- ReadOnly ComboBox cannot enter selection, while ReadOnly PopupMenu remains action-capable unless Disabled;
 - per-anchor/per-UI state and two-UI isolation with no mutable global popup registry;
 - reentrant callbacks that may remove their anchor or open another overlay safely;
 - current-Tree theme binding for dynamically inserted T058/T061 subtrees;
 - deterministic T035 golden probes and `t035_combo_popup --self-test`;
 - real standalone + EmbeddedView smoke on the shared implementation.
 
-Normal CI run `34606092899` is green for the frozen executable head. Final merge requires the Ready-triggered T042 Lifecycle Stress and T052 v0.1 Release Gate to be green without any later executable change.
-
 ## Other critical lanes
 
-- T063 / issue #75 / PR #227 is next in the overlay lane after T035. Its existing branch modifies `ui.hpp`, so reconcile it onto post-T035 `main` before continuing instead of developing both conflicting implementations in parallel.
+- T063 / issue #75 / PR #227 is now the next overlay/UI lane. Its existing branch modifies `ui.hpp` and predates T035, so reconcile it onto current `main` first and preserve the delivered T035 overlay-command behavior rather than force stale integration code.
 - T062 follows T063 in the current UI convergence order unless a dependency/status change justifies reordering.
 - T044 / issue #44 / PR #145 remains an independent T071 release dependency and needs current-main reconciliation plus its own exact-head evidence.
 - Platform lane: continue T072, then T064; T066 is independently unblocked by completed T043.
@@ -122,9 +121,8 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 ## Next actions
 
-1. Finish T035 Ready qualification: require T042 + T052 green for executable head `882d29a6...`; merge PR #225 only if both pass and no executable change occurs.
-2. Close issue #35 as Done and record the merge/review evidence in the same completion cycle.
-3. Reconcile T063 / PR #227 onto post-T035 `main`, preserving T035 `ui.hpp` overlay-command behavior, then continue T063 in bounded TDD slices.
-4. Continue T062 after T063 according to the current UI convergence plan.
-5. Keep T068 blocked until all explicit issue #80 dependencies are Done.
-6. Continue the independent T072 -> T064 / T066 platform work and T038 -> T039 / T040 styling work within concurrency limits.
+1. Reconcile T063 / PR #227 onto current post-T035 `main`, preserving T035 `ui.hpp` overlay-command behavior, then continue the missing Dialog policy/tests/example in bounded TDD slices.
+2. Continue T062 after T063 according to the current UI convergence plan.
+3. Keep T068 blocked until all explicit issue #80 dependencies are Done.
+4. Continue the independent T072 -> T064 / T066 platform work and T038 -> T039 / T040 styling work within concurrency limits.
+5. Reconcile/qualify T044 / PR #145 independently; do not reuse T043 evidence.
