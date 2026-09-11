@@ -32,7 +32,13 @@ struct ResolvedScrollbarStyle {
     float minimum_thumb{};
     float corner_radius{};
 
-    [[nodiscard]] constexpr bool operator==(const ResolvedScrollbarStyle&) const noexcept = default;
+    [[nodiscard]] constexpr bool operator==(const ResolvedScrollbarStyle& other) const noexcept {
+        return detail::theme_color_equal(track, other.track) &&
+               detail::theme_color_equal(thumb, other.thumb) &&
+               thickness == other.thickness &&
+               minimum_thumb == other.minimum_thumb &&
+               corner_radius == other.corner_radius;
+    }
 };
 
 namespace detail {
