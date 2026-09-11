@@ -234,12 +234,67 @@ int deactivation_suppresses_completion_contract() {
     return 0;
 }
 
+bool is_opaque_red(ui::Rgba8 pixel) {
+    return pixel.r >= 250 && pixel.g <= 4 && pixel.b <= 4 && pixel.a >= 250;
+}
+
+bool near_pixel(int actual, int expected) {
+    return actual >= expected - 1 && actual <= expected + 1;
+}
+
+int headless_sizing_and_backdrop_contract() {
+    ui::UI tree{ui::Spacer{700.0f, 240.0f}};
+    ui::DialogSpec spec;
+    spec.backdrop_color = ui::Color{1.0f, 0.0f, 0.0f, 1.0f};
+    spec.body = ui::make_spec(ui::Spacer{1000.0f, 1000.0f});
+
+    ui::Dialog dialog{tree};
+    if (dialog.show(std::move(spec), [](ui::DialogResult) {}) !=
+        ui::DialogShowResult::Shown) {
+        return example::fail("T063 headless sizing setup failed");
+    }
+
+    ui::HeadlessRenderer renderer{{700.0f, 240.0f}};
+    if (!renderer.render(tree)) return example::fail("T063 headless render failed");
+    if (!is_opaque_red(renderer.pixel(0, 0))) {
+        return example::fail("T063 styleable backdrop does not cover the viewport");
+    }
+
+    int left = 0;
+    while (left < renderer.pixel_width() && is_opaque_red(renderer.pixel(left, 120))) ++left;
+    int right = renderer.pixel_width() - 1;
+    while (right >= 0 && is_opaque_red(renderer.pixel(right, 120))) --right;
+    int top = 0;
+    while (top < renderer.pixel_height() && is_opaque_red(renderer.pixel(350, top))) ++top;
+    int bottom = renderer.pixel_height() - 1;
+    while (bottom >= 0 && is_opaque_red(renderer.pixel(350, bottom))) --bottom;
+
+    if (!near_pixel(left, 70) || !near_pixel(right, 629) ||
+        !near_pixel(top, 24) || !near_pixel(bottom, 215)) {
+        return example::fail("T063 outer bounds do not honor 560px max width / 24px viewport margins");
+    }
+
+    renderer.resize({320.0f, 240.0f});
+    if (!renderer.render(tree)) return example::fail("T063 compact headless render failed");
+    left = 0;
+    while (left < renderer.pixel_width() && is_opaque_red(renderer.pixel(left, 120))) ++left;
+    right = renderer.pixel_width() - 1;
+    while (right >= 0 && is_opaque_red(renderer.pixel(right, 120))) --right;
+    if (!near_pixel(left, 24) || !near_pixel(right, 295)) {
+        return example::fail("T063 compact outer width does not preserve 24px margins");
+    }
+
+    if (!dialog.close()) return example::fail("T063 headless dialog did not close");
+    return 0;
+}
+
 int self_test() {
     if (const int result = default_action_contract(); result != 0) return result;
     if (const int result = cancel_action_contract(); result != 0) return result;
     if (const int result = escape_dismiss_contract(); result != 0) return result;
     if (const int result = escape_preempts_focused_child_contract(); result != 0) return result;
     if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
+    if (const int result = headless_sizing_and_backdrop_contract(); result != 0) return result;
     return 0;
 }
 
