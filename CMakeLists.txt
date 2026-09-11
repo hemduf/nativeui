@@ -24,6 +24,7 @@ include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/NativeUIConsumerPlatform.cmake)
 include(cmake/NativeUIAttachPlatform.cmake)
+include(cmake/NativeUIFeatureExamples.cmake)
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
@@ -286,41 +287,9 @@ configure_file(cmake/NativeUIEmbedResource.cmake
   COPYONLY
 )
 
-set(NATIVEUI_FEATURE_EXAMPLES
-  t007_constraints
-  t008_alignment
-  t009_flex
-  t010_grid
-  t011_clipping
-  t012_scroll
-  t013_bubbling
-  t014_focus_scopes
-  t015_pointer_capture
-  t016_gestures
-  t017_commands
-  t018_drop
-  t019_transforms
-  t020_paths
-  t021_gradients
-  t022_images
-  t023_svg_icons
-  t024_goldens
-  t025_text_edit_model
-  t026_label
-  t027_fonts
-  t028_text_area
-  t029_ime_composition
-  t030_button
-  t031_checkbox_radio
-  t032_slider
-  t033_progress_meter
-  t034_scroll_view
-  t036_list_tabs
-  t037_theme
-  t041_smoke_harness
-  t057_embedded_resources
-  t058_dynamic_composition
-  t059_component_state
+nativeui_discover_feature_examples(
+  NATIVEUI_FEATURE_EXAMPLES
+  "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 if(NATIVEUI_BUILD_EXAMPLES)
@@ -352,6 +321,12 @@ if(NATIVEUI_BUILD_TESTS)
   enable_testing()
 
   add_test(
+    NAME nativeui_feature_example_discovery_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/feature_example_discovery_contract.cmake"
+  )
+  add_test(
     NAME nativeui_t053_prefix_tests
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -362,6 +337,12 @@ if(NATIVEUI_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t053_registration_tests.cmake"
+  )
+  add_test(
+    NAME nativeui_t043_registration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t043_registration_contract.cmake"
   )
   add_test(
     NAME nativeui_t047_attach_contract_tests
@@ -393,10 +374,24 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t065_root_integration_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t067_root_integration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
+  )
+  set_tests_properties(
+    nativeui_feature_example_discovery_contract
+    PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
+  )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
     PROPERTIES LABELS "build;cmake;t053" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t043_registration_contract
+    PROPERTIES LABELS "build;cmake;t043" TIMEOUT 20
   )
   set_tests_properties(
     nativeui_t047_attach_contract_tests
@@ -411,6 +406,10 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t065_root_integration_contract
     PROPERTIES LABELS "build;cmake;t065" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t067_root_integration_contract
+    PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
   )
 
   function(nativeui_add_core_test name source)
@@ -453,6 +452,7 @@ if(NATIVEUI_BUILD_TESTS)
   )
   nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
+  nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
   nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
@@ -464,8 +464,15 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
   nativeui_add_core_test(nativeui_t034_scroll_view_tests tests/t034_scroll_view_tests.cpp)
   nativeui_add_core_test(nativeui_t036_list_tabs_tests tests/t036_list_tabs_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)
+  nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)
+  nativeui_add_core_test(nativeui_t067_retained_tests tests/t067_retained_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)
+  nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)
   nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
   nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
+  nativeui_add_core_test(nativeui_t043_view_geometry_tests tests/t043_view_geometry_tests.cpp)
   nativeui_add_core_test(nativeui_dynamic_composition_tests tests/dynamic_composition_tests.cpp)
   nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
   nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
@@ -551,7 +558,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout widgets ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

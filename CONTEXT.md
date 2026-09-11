@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-10
+**Updated:** 2026-09-11
 
 ## Mission and invariants
 
@@ -14,8 +14,9 @@ Non-negotiable rules:
 - retained UI state is UI/main-thread confined unless explicitly documented otherwise;
 - dependencies use CMake + CPM; Skia comes from pinned `skia-builder` binaries;
 - macOS Objective-C runtime-visible platform classes are consumer-specific through the T053 identity contract;
-- NativeUI-owned source-tree targets compile with zero unapproved warnings; `NATIVEUI_ALLOWED_WARNINGS` is empty by default and is the only normal explicit CMake opt-in for a temporarily accepted diagnostic;
-- `CODE_REVIEW.md`, exact-head validation, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
+- NativeUI-owned source-tree targets compile with zero unapproved warnings and an empty default `NATIVEUI_ALLOWED_WARNINGS`;
+- behavior changes use RED -> GREEN -> REFACTOR and must not weaken tests or validation policy;
+- `CODE_REVIEW.md`, exact-head validation, a complete issue-to-code/test evidence matrix, `CONTEXT.md` and `ROADMAP.md` are merge gates for code-changing tickets.
 
 ## Pinned dependencies
 
@@ -25,148 +26,88 @@ Non-negotiable rules:
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
 
-## Current baseline
+## Current baseline and critical path
 
-The current `main` baseline is `c83595ea53a9212d9544da36400c2a01d2843f7e` and contains T058 / PR #154, #163 / PR #181 warning-free source-tree builds, T036 / PR #155, T065 / PR #133, T034 / PR #135, the explicit T060 Application/multi-window ownership model, post-T060 T042 lifecycle qualification from #139, the T052 v0.1 developer-preview release gate, and the Tree paint-ownership correction #152 / PR #153. T037 / PR #151 is the active style completion candidate refreshed on top of this baseline.
+The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea1908541dc6a701c8a`. It includes completed T043 / PR #142 on top of T061, T067 / PR #219, T045, T037, T058, T036, T065, T034, T060/T042 lifecycle qualification, the T052 developer-preview release gate, the warning-free source-tree baseline, post-T036 hover correction #212 and Tree paint-ownership correction #152.
 
-Cross-cutting rendering regression #152 / PR #153 removed Tree-owned visual decoration: `Tree::paint()` no longer forces `colors::background` across the viewport and no longer draws the hard-coded keyboard/mouse help line. Generic retained-tree painting is consumer/component-owned. The headless renderer mirrors the GPU renderer's black framebuffer clear, and its regression verifies that an otherwise empty Tree adds no styled background or instructional overlay beyond that renderer-level clear.
+T067 remains architecturally complete from PR #219. PR #233 carries a post-completion example startup regression closure: the 100k-item virtual ListView was inserted directly into a `Column` with the default `shrink = 0`, so its 2.8-million-pixel preferred content height became the initial viewport and almost the full dataset was materialized before the native window was shown. The corrected example constrains the virtual list with `Flex(grow=1, shrink=1)`, adds a production-composition startup materialization regression, executes the example `--self-test` in the dedicated T067 workflow and guards that CI wiring from the root integration contract.
 
-Relevant completed foundations:
+Build regression #234 / PR #235 hardens source-tree feature example registration: root CMake now derives the canonical example set from `examples/features/tNNN_<feature>.cpp` with `CONFIGURE_DEPENDS`, deterministic ordering and a naming guard. This closes the omission that left `t060_multi_window_application` and `t065_ui_dispatcher` out of normal root builds while preserving their dedicated harnesses.
+
+Current convergence:
+
+```text
+critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
+                                                   T058(done) ------------^
+
+style:             T037(done) -> T038 -> T039
+                                +-> T040 with T065(done)
+
+dynamic/overlay:   T058(done) -> T061(done)
+                                      |-> T035 --------------------------> T068
+                                      |-> T063 --------------------------> T068
+                                      +-> T062
+
+critical platform: T065(done) -> T072 -> T064
+                   T041(done) -> T043(done) -> T066
+                                      |-------> T068
+
+release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
+```
+
+T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 is complete and unlocks T066 while remaining an explicit completed T068 dependency.
+
+## Completed foundations relevant to v1
 
 - T053 / PR #88: consumer-scoped macOS Objective-C bridge identity.
 - #64 / PR #90: standalone PROGRAM-world ownership Decision B.
 - T059 / PR #89: inherited visibility/enabled/read-only state.
-- T030 / PR #94: Button.
-- T031 / PR #95: Checkbox + typed RadioGroup/RadioButton.
-- T032 / PR #115: Slider + RangeSlider.
-- T033 / PR #123: ProgressBar + Meter.
-- T034 / PR #135: ScrollView with change-based wheel bubbling, optional pointer pan, retained overlay scrollbars, focus reveal and T059 availability integration.
-- T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable key/value selection, composite focus, keyboard/pointer interaction, ScrollView reveal, Collapsed tab panels, deterministic tests and feature example.
-- T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
-- T048 / PR #99: relocated external consumers and macOS two-consumer isolation.
-- T051 / PR #116: reproducible Release benchmark and regression policy.
-- T052 / PR #120: v0.1 developer-preview release gate with clean-cache bootstrap, exact package consumer, lifecycle, benchmark, idle-invalidation and platform qualification.
-- T054 / PR #119: `nativeui_add_application()` high-level native application package helper.
-- T056 / PR #111: deterministic `nativeui_add_binary_data()` packaging.
-- T057 / PR #126: immutable non-owning `ResourceManager` plus allocating provider adapter.
-- T058 / PR #154: bounded retained dynamic composition with conditional, switch and keyed collection reconciliation plus structural diagnostics.
-- T060 / PR #118: one explicit `ui::Application` owns one standalone `PUGL_PROGRAM` world and multiple independent `StandaloneWindow(Application&, ...)` views.
-- T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration and deterministic timer/fairness semantics.
-- #139 / PR #140: T042 stress qualification of the supported T060 multi-window path while preserving #64 Decision B for the legacy independent-PROGRAM compatibility path.
-- #163 / PR #181: warning-free NativeUI-owned builds, v1 Application ownership in examples/smokes and blocking unapproved compiler diagnostics.
+- T030–T034: standard Button, Checkbox/Radio, Slider/RangeSlider, ProgressBar/Meter and ScrollView baseline.
+- T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable selection and composite focus.
+- #212 / PR #213: deterministic ListView/Tabs hover presentation and retained pointer-leave lifetime.
+- T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
+- T043 / PR #142: resize/scale negotiation with logical public geometry, per-view scale state, authoritative configure snapshots and non-recursive native size requests.
+- T045 / PR #210: accessibility semantic architecture and immutable virtual collection contract.
+- T047 / PR #92 + T048 / PR #99: relocatable package and external-consumer qualification.
+- T051 / PR #116 + T052 / PR #120: reproducible performance policy and v0.1 developer-preview release gate.
+- T054 / PR #119, T056 / PR #111, T057 / PR #126: application/package/resource helpers.
+- T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
+- T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
+- T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
+- #231 / PR #232: T061 example overlays paint an explicit panel background and border so popup/modal text cannot visually collide with underlying example content; the generic overlay API remains caller-styled.
+- T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
+- T067 / PR #219, with startup regression closure in PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
+- #163 / PR #181: warning-free NativeUI-owned source-tree builds.
+- #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
+- #234 / PR #235: canonical feature examples are auto-discovered by root CMake, with reconfigure-on-source-change and a regression contract covering T060/T065 registration.
 
-## T036 UI/accessibility lane — complete
+## T043 resize/scale completion state
 
-T036 / issue #36 / PR #155 is complete on `main`.
+T043 is complete in PR #142. Its platform-boundary contract is:
 
-Delivered behavior:
+- `Size`, component/layout geometry, preferred sizes and invalidation rectangles stay logical; Pugl/native extents and Skia framebuffer extents stay physical;
+- every view owns its own `last_valid_scale`, initialized to `1.0f`; only finite strictly-positive observations replace it;
+- invalid scale reports retain the last valid value and publish the bounded existing platform diagnostic instead of dividing by zero or propagating NaN/Inf;
+- public `set_size()` validates finite strictly-positive logical dimensions, emits at most one native request, records only an accepted pending request and never asserts the authoritative viewport before configure;
+- one authoritative configure snapshot updates physical extent plus scale together and dispatches at most one resulting logical layout; zero/non-finite physical extents are transient non-renderable states;
+- request echoes never call back into `set_size`, so successful resize negotiation has no recursive size-request loop;
+- pointer/drop/text-input/invalidation conversion uses the same retained per-view scale exactly once, including fractional 1.25/1.5 scale;
+- embedded child resizing never resizes the native parent; preferred-size notification remains a one-way advisory from `UI::measure().preferred`;
+- preferred notifications use exact component epsilon `> 0.0001f`, coalesce to the latest safe value, reject recursive same-stack dispatch and keep the in-flight marker independent from owner lifetime;
+- the T061 embedded-overlay smoke behavior is preserved while invalid-size, parent-authority and synchronous preferred-grant coverage remain qualified;
+- `t043_resize_scale --self-test`, `nativeui_t043_view_geometry_tests`, registration checks and the platform smoke surface are wired into the root CMake.
 
-- fully retained, deliberately non-virtualized `ListView<T>` with stable logical keys and application-owned `State<std::optional<T>>` selection;
-- deterministic duplicate-key rejection and missing-selection behavior without mount-time state rewrite;
-- one composite ListView Tab stop; arbitrary focusable row presentation is excluded from global traversal through existing inactive focus-scope semantics;
-- Up/Down/Home/End selection with disabled-item skipping, pointer selection and optional Enter/Space/pointer activation callback;
-- T034 `ensure_visible` integration for both user-driven and application-originated selection changes;
-- fully retained `Tabs<T>` with stable keys, automatic Left/Right/Home/End activation, disabled-tab skipping/wrap and pointer activation;
-- inactive tab panels use T059 `Collapsed` semantics and therefore cannot retain layout, paint, hit testing or focus;
-- T059 ReadOnly remains navigation-capable while Disabled suppresses normal targeting/focus;
-- dedicated T036 tests, non-virtualized O(N) baseline, two-instance coverage, deterministic headless selected-state checks, and `examples/features/t036_list_tabs.cpp --self-test`.
+The dedicated geometry suite includes direct synthetic resize-only, scale-only and combined configure snapshots and verifies exactly one layout dispatch per accepted configure. It also instruments public-request semantics so one logical request produces one native request, configure remains authoritative, an echoed configure emits no second request, invalid requests do not call the native boundary, and failed native requests do not mutate authoritative/pending geometry.
 
-T045 is the next UI/accessibility dependency item. T058 is now complete, so T067 is gated only by T045 before the T067/T068 convergence.
+## Other critical lanes
 
-## T058 dynamic-composition lane — complete
+- UI/accessibility: T061 and T067 are complete; T035/T063/T062 may advance as their dependencies permit, while T068 remains blocked until every explicit issue #80 dependency is Done.
+- Platform: T043 is complete and T066 is unblocked; continue T072, then T064.
+- T044 / issue #44 / PR #145 remains a T071 release dependency and requires its own current-main reconciliation and exact-head evidence before merge.
+- Styling: T037 is complete; continue T038 -> T039 and T040 when dependencies permit.
+- T069/T070/T071 remain dependency-gated; do not freeze the v1 API early.
 
-T058 / issue #58 / PR #154 is complete on `main` as `c83595ea53a9212d9544da36400c2a01d2843f7e`.
-
-Delivered behavior:
-
-- retained `If`, `Switch` and keyed `ForEach` composition seams;
-- bounded deferred reconciliation with deterministic failure diagnostics rather than unbounded reentrant mutation;
-- keyed identity preservation and duplicate-key rejection without partial ambiguous commits;
-- focus/lifecycle handling for removed/replaced retained subtrees, including trapping focus-scope rehome;
-- monotonic NodeId ownership across dynamic removal/replacement;
-- public structural diagnostics plus deterministic tests and `t058_dynamic_composition --self-test`.
-
-T058 now unblocks its side of T067 and the dynamic/overlay chain toward T061/T035/T063/T068.
-
-## T037 style lane — completion candidate
-
-T037 / issue #37 / PR #151 delivers the first typed per-UI theme contract without introducing mutable process-global style state.
-
-Delivered behavior:
-
-- strongly typed `Theme` value covering palette, typography, spacing, radii and shared control metrics;
-- deterministic `default_theme()` and explicit paint-only versus layout-affecting change classification;
-- one Theme owned by each UI/retained tree with public `UI::theme()` and `UI::set_theme()` accessors;
-- internal per-tree theme binding used by representative Button and Slider measurement/painting;
-- deterministic per-UI isolation, invalidation and representative widget regressions;
-- public `theme.hpp` isolated-header coverage, umbrella exposure and `t037_theme --self-test` feature example;
-- Windows header compatibility regressions: theme spacing/radius tokens use `sm` rather than macro-prone `small`, and public geometry uses macro-safe `(std::min)` / `(std::max)` calls so `theme.hpp` remains includable after `windows.h` without requiring consumer-side `NOMINMAX`;
-- T058 coexistence is preserved explicitly: dynamic composition remains in Tree/UI/umbrella/header tests while T037 adds theme ownership and accessors.
-
-The TDD/review stream preserves the established 72x160 default formatted vertical Slider geometry. The branch is refreshed directly onto the T058 + warning-free baseline. Merge remains gated on fresh exact-head workflows and a final `CODE_REVIEW.md` pass. After merge, T038 is the direct style continuation, followed by T039; T040 must reuse T065 rather than creating another scheduler.
-
-## T065 platform/event lane — complete
-
-T065 / issue #77 / PR #133 is complete and merged.
-
-Delivered behavior:
-
-- public weak/copyable `Dispatcher` handles with per-owner FIFO task queues;
-- exact limits of 65,536 pending tasks, 8,192 active timers and 1,024 callbacks per checkpoint snapshot;
-- deterministic zero-delay one-shot and fixed-delay repeating timers with cancellation, queue-saturation retry and no catch-up bursts;
-- injected clock and wake seams, including deterministic fake-time tests;
-- per-window/view logical ownership with no process-global dispatcher/current-window registry;
-- callback and callback-capture destruction outside dispatcher locks, including post rejection, timer cancellation and owner shutdown;
-- callback-driven owner destruction without executing later callbacks from the captured snapshot;
-- explicit-Application standalone windows share one Application-owned low-level wake backend while retaining independent task/timer namespaces;
-- worker-originated standalone wake uses captured native primitives rather than concurrent Pugl calls: CFRunLoop source/wake on macOS, `PostMessageW` on Windows and `XSendEvent`/`XFlush` on X11;
-- positive/indefinite Application waits are bounded by dispatcher timer deadlines and interruptible by worker posts without busy polling;
-- `EmbeddedView` dispatch remains host-driven and non-blocking with no background polling thread;
-- dedicated `examples/features/t065_ui_dispatcher.cpp` provides interactive worker/timer behavior plus deterministic `--self-test`.
-
-The legacy `StandaloneWindow(UI&, ...)` path remains pre-v1 compatibility only and is removed by T069. T065 does not introduce a hidden shared Application or a second supported PROGRAM-world ownership model.
-
-## #163 / PR #181 — warning-free source-tree builds — complete
-
-#163 / PR #181 is merged on `main` as `1d0716a48b2294cc014b2988997eef4e4bb250a9`.
-
-Delivered behavior:
-
-- shared feature examples, the standalone demo, T041 and supported standalone/embedded/macOS drop smokes use the v1 `Application + StandaloneWindow(Application&, UI&, WindowDesc)` ownership path;
-- NativeUI-owned source-tree builds enable strict warning levels and `CMAKE_COMPILE_WARNING_AS_ERROR=ON`;
-- `NATIVEUI_ALLOWED_WARNINGS` is an explicit semicolon-separated CMake cache setting with an empty default; malformed identifiers fail configuration;
-- historical #64 legacy diagnostics are excluded from the strict default build and are available only through explicit diagnostic opt-in;
-- repository review rules classify unapproved NativeUI compiler warnings as Blocking and prohibit local warning suppression as a substitute for the explicit allowlist;
-- existing deprecated-construction, shadowing, subobject-linkage and narrowing diagnostics exposed by the stricter build were fixed instead of whitelisted.
-
-## Current dependency frontier
-
-```text
-critical UI:       T034(done) -> T036(done) -> T045(ready) -> T067 -> T068
-                                                  T058(done) -----------^      ^
-
-style:             T037(PR #151 completion) -> T038 -> T039
-                                               +-> T040 with T065(done)
-
-dynamic/overlay:   T058(done) -> T061 -> T035 ------------------------> T068
-                                      +-> T063 ------------------------> T068
-
-lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
-                   T042(done) -> T051(done) ---------------------> T052(done)
-
-platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057(done)
-
-critical platform: T060(done) -> T065(done) -> T072(active) -> T064
-                   T041(done) -> T043(active PR #142) -> T066
-                                              |-------> T068
-                   T065 + T072 + T043 + other feature deps ------> T068 -> T069
-```
-
-T045 is dependency-unblocked by T036/T058 completion. T072 is active after T065 completion. T064 depends on T065 and T072. T066 depends on T060 and T043. T043 may progress independently. T044 remains a T071 release dependency and its active PR #145 is being evidence-qualified independently.
-
-## Build / validation
+## Validation
 
 Normal source-tree Release validation:
 
@@ -176,21 +117,15 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A temporary approved Clang/GCC exception is explicitly configured, for example:
+The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A code-changing completion candidate must use its exact current head for normal CI plus every relevant dedicated workflow named by the ticket, followed by the mandatory `CODE_REVIEW.md` review. Documentation changes are part of the exact completion head and therefore require requalification before autonomous merge.
 
-```bash
-cmake -S . -B build -DNATIVEUI_ALLOWED_WARNINGS=deprecated-declarations
-```
-
-Do not add an exception when the warning can be fixed in NativeUI-owned code.
-
-A code-changing completion candidate must use its exact current head for normal CI plus every relevant dedicated workflow named by the ticket, followed by the mandatory `CODE_REVIEW.md` pass. T037 requires fresh CI, T042 Lifecycle Stress, T060 Application Contract and T052 Release Gate on its final exact head; T065 dispatcher qualification is also expected because the refreshed baseline includes that lane. Normal CI also re-executes the merged T058 dynamic-composition tests on the combined head.
+For the T067 startup regression closure, the exact completion head must keep normal CI green on Linux X11, Linux ASan+UBSan, macOS and Windows, plus T042, T045, T052, T060 and the dedicated T067 workflow including `nativeui_example_t067_virtual_list --self-test`.
 
 ## Next actions
 
-1. Finish exact-head qualification, final review and merge of T037 / PR #151; then continue T038 in the style lane.
-2. Continue T043 / PR #142 independently and finish it before T066/T068.
-3. Finish the evidence-gated T044 / PR #145 native outside-view capture qualification; add platform code only where the native smoke proves it is required.
-4. Continue T045, then T067 now that T058 is complete; keep active T072/T064 progressing according to their explicit dependencies.
-5. Continue T061, then T035/T063, without duplicating active work.
-6. Keep T069/T070/T071 dependency-gated; do not freeze the v1 API early.
+1. Complete the exact-head requalification after the T067 regression completion-doc update and merge PR #233 only if every gate remains green.
+2. Reconcile and qualify T044 / PR #145 independently; do not reuse T043 evidence.
+3. Continue T035, T063 and T062 now that T061 is complete, respecting their explicit dependency/priority order.
+4. Keep T068 blocked until all of its explicit dependencies are genuinely Done.
+5. Continue T072 -> T064 and T066 in the platform lane.
+6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.

@@ -189,14 +189,42 @@
         return kInvalidNodeId;
     }
 
+    [[nodiscard]] NodeId removed_trapping_scope_restore_target_for_removal(
+        Node* focused,
+        const Node& owner,
+        const std::vector<std::string>& current_keys,
+        const std::vector<std::string>& desired_keys) const noexcept {
+        for (auto* current = focused; current; current = current->parent) {
+            if (!current->component->effective_availability().interactive() ||
+                !current->component->is_focus_scope() ||
+                !current->component->focus_scope_active() ||
+                !current->component->focus_scope_traps() ||
+                !subtree_is_being_removed(current, owner, current_keys, desired_keys)) {
+                continue;
+            }
+
+            const auto restore_id = current->focus_restore;
+            if (restore_id == kInvalidNodeId) continue;
+            const auto* restore = find_node(*root_, restore_id);
+            if (restore &&
+                !subtree_is_being_removed(restore, owner, current_keys, desired_keys)) {
+                return restore_id;
+            }
+        }
+        return kInvalidNodeId;
+    }
+
     void clear_removed_focus_restore_targets(
         Node& node,
         const Node& owner,
         const std::vector<std::string>& current_keys,
         const std::vector<std::string>& desired_keys) noexcept {
-        if (node.focus_restore &&
-            subtree_is_being_removed(node.focus_restore, owner, current_keys, desired_keys)) {
-            node.focus_restore = nullptr;
+        if (node.focus_restore != kInvalidNodeId) {
+            const auto* restore = find_node(*root_, node.focus_restore);
+            if (!restore ||
+                subtree_is_being_removed(restore, owner, current_keys, desired_keys)) {
+                node.focus_restore = kInvalidNodeId;
+            }
         }
         for (auto& child : node.children) {
             clear_removed_focus_restore_targets(
@@ -223,9 +251,18 @@
         const auto current_keys = record->keys;
         const auto teardown_epoch = structural_epoch_;
         bool removed_focus = false;
+        NodeId removed_focus_restore_target{kInvalidNodeId};
         NodeId surviving_focus_scope{kInvalidNodeId};
 
         if (active_ && active_platform_) {
+            if (pointer_hover_target_ &&
+                subtree_is_being_removed(
+                    pointer_hover_target_, owner, current_keys, desired_keys)) {
+                InputEvent leave{};
+                leave.type = InputType::PointerLeave;
+                (void)clear_pointer_hover(leave, *active_platform_);
+            }
+
             if (auto* capture = pointer_capture_owner();
                 subtree_is_being_removed(capture, owner, current_keys, desired_keys)) {
                 (void)cancel_pointer_capture(*active_platform_);
@@ -233,6 +270,9 @@
 
             if (auto* focused = current_focus_node();
                 subtree_is_being_removed(focused, owner, current_keys, desired_keys)) {
+                removed_focus_restore_target =
+                    removed_trapping_scope_restore_target_for_removal(
+                        focused, owner, current_keys, desired_keys);
                 surviving_focus_scope = surviving_trapping_scope_for_removal(
                     focused, owner, current_keys, desired_keys);
                 removed_focus = true;
@@ -366,13 +406,19 @@
             sync_focus_structure(*active_platform_);
             if (removed_focus && !focus_active_) {
                 Node* fallback = nullptr;
-                if (surviving_focus_scope != kInvalidNodeId) {
+                if (removed_focus_restore_target != kInvalidNodeId) {
+                    if (auto* restore =
+                            find_node_mutable(*root_, removed_focus_restore_target);
+                        focus_target_available(restore)) {
+                        fallback = restore;
+                    }
+                }
+                if (!fallback && surviving_focus_scope != kInvalidNodeId) {
                     if (auto* scope = find_node_mutable(*root_, surviving_focus_scope)) {
                         fallback = first_available_focusable(scope);
                     }
-                } else {
-                    fallback = first_available_focusable();
                 }
+                if (!fallback) fallback = first_available_focusable();
                 if (fallback) set_focus(fallback, *active_platform_);
             }
         }

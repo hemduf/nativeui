@@ -1,7 +1,7 @@
 # NativeUI Design — C++20 Retained-Mode UI with Pugl + Skia
 
 **Status:** active architecture baseline  
-**Updated:** September 9, 2026  
+**Updated:** September 10, 2026  
 **Targets:** Windows, macOS, Linux/X11  
 **Language:** C++20  
 **Distribution:** static libraries  
@@ -1268,3 +1268,4 @@ None of these currently justifies reimplementing Win32, Cocoa and X11 windowing 
 - NativeUI mandatory review policy — `CODE_REVIEW.md`
 - NativeUI current recovery context — `CONTEXT.md`
 - NativeUI execution roadmap — `ROADMAP.md`
+- NativeUI accessibility semantics and platform mapping — `docs/accessibility.md`

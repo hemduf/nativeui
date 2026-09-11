@@ -1,11 +1,18 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/semantics.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 void nativeui_header_compile_nativeui() {
     ui::Theme theme = ui::default_theme();
     (void)theme;
+
+    ui::SemanticInfo info;
+    info.role = ui::SemanticRole::Custom;
+    ui::SemanticNodeSnapshot snapshot;
+    snapshot.info = std::move(info);
 }
 
 void nativeui_header_compile_t038_visual_state() {
@@ -209,4 +216,17 @@ void nativeui_header_compile_t058_for_each(
 void nativeui_header_compile_t058_structural_diagnostic(ui::UI& tree) {
     const auto diagnostic = tree.structural_diagnostic();
     (void)diagnostic;
+}
+
+void nativeui_header_compile_t061_overlay(ui::UI& tree) {
+    ui::OverlaySpec overlay;
+    overlay.mode = ui::OverlayMode::NonModal;
+    overlay.pointer_policy = ui::OverlayPointerPolicy::Normal;
+    overlay.placement = ui::OverlayPlacement::Auto;
+    overlay.dismiss_on_escape = true;
+    overlay.dismiss_on_outside_pointer_down = true;
+    overlay.content = ui::make_spec(ui::Spacer{24.0f, 12.0f});
+
+    const ui::OverlayHandle handle = tree.show_overlay(std::move(overlay));
+    (void)tree.close_overlay(handle);
 }
