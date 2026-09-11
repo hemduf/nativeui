@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 
 namespace ui::detail {
@@ -9,6 +10,8 @@ struct DialogState final {
     bool ui_tearing_down{};
     std::uint64_t next_generation{1};
     std::uint64_t active_generation{};
+    std::uint64_t pending_completion_generation{};
+    std::function<void()> pending_completion;
 
     [[nodiscard]] std::uint64_t acquire() noexcept {
         if (ui_tearing_down || active_generation != 0 || next_generation == 0) return 0;
@@ -33,9 +36,19 @@ struct DialogState final {
         return true;
     }
 
+    [[nodiscard]] bool defer_completion(
+        std::uint64_t generation, std::function<void()> completion) {
+        if (!owns(generation) || pending_completion) return false;
+        pending_completion_generation = generation;
+        pending_completion = std::move(completion);
+        return true;
+    }
+
     void begin_ui_teardown() noexcept {
         ui_tearing_down = true;
         active_generation = 0;
+        pending_completion_generation = 0;
+        pending_completion = {};
     }
 };
 

@@ -5,6 +5,7 @@
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -75,6 +76,7 @@ public:
         // costs for the steady-state empty stack.
         if (overlay_state_->entries.empty()) {
             const auto result = tree_.dispatch(event, platform);
+            flush_pending_dialog_completion();
             if (!overlay_state_->entries.empty()) {
                 enforce_new_modal_capture_barrier(platform);
             }
@@ -135,6 +137,12 @@ public:
         }
 
         const auto result = tree_.dispatch(event, platform);
+
+        // Tree::dispatch has now unwound the component callback and consumed
+        // its T058 structural checkpoint. A Dialog self-close can therefore
+        // deliver its application completion without destroying the component
+        // while Component::input is still executing.
+        flush_pending_dialog_completion();
 
         // A callback may have captured the pointer and shown a modal in the
         // same dispatch. T058 mounts that modal only after the callback stack
@@ -203,6 +211,43 @@ private:
 
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.w == b.w && a.y == b.y && a.h == b.h;
+    }
+
+    void finish_dialog_completion(
+        std::uint64_t generation, std::function<void()> completion) {
+        if (!dialog_state_ || !dialog_state_->release(generation)) return;
+        if (completion) completion();
+    }
+
+    void complete_dialog_close(
+        std::uint64_t generation, std::function<void()> completion) {
+        if (!dialog_state_ || !dialog_state_->owns(generation)) return;
+
+        // During Tree::dispatch, destroying the overlay subtree here would
+        // invalidate the currently executing Component::input object. Defer
+        // only the application completion; the logical close has already been
+        // recorded in OverlayState and Tree::dispatch will consume T058 safely
+        // at its outer checkpoint.
+        if (tree_.dispatch_depth_ != 0) {
+            (void)dialog_state_->defer_completion(generation, std::move(completion));
+            return;
+        }
+
+        prepare_overlay_layout();
+        finish_dialog_completion(generation, std::move(completion));
+    }
+
+    void flush_pending_dialog_completion() {
+        if (!dialog_state_ || dialog_state_->ui_tearing_down ||
+            !dialog_state_->pending_completion) {
+            return;
+        }
+
+        const auto generation = dialog_state_->pending_completion_generation;
+        auto completion = std::move(dialog_state_->pending_completion);
+        dialog_state_->pending_completion_generation = 0;
+        dialog_state_->pending_completion = {};
+        finish_dialog_completion(generation, std::move(completion));
     }
 
     [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {

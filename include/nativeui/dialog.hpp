@@ -112,28 +112,33 @@ public:
     }
 
     [[nodiscard]] bool active() const noexcept {
-        return state_ && state_->owns(generation_);
+        return state_ && generation_ != 0 && state_->owns(generation_);
     }
 
     [[nodiscard]] bool close() {
         if (!state_ || !state_->owns(generation_)) return false;
 
-        // First detach the modal logically, then consume the existing T058
-        // structural checkpoint before application code runs. This makes the
-        // close-before-callback contract concrete: the old body has completed
-        // deactivate/unmount/focus/capture teardown when completion observes UI.
-        if (ui_ && overlay_.valid()) {
-            (void)ui_->close_overlay(overlay_);
-            ui_->prepare_overlay_layout();
-        }
-        overlay_ = {};
+        const auto generation = generation_;
+        if (ui_ && overlay_.valid()) (void)ui_->close_overlay(overlay_);
 
-        if (!state_->release(generation_)) return false;
+        // From this point the controller is locally closed and repeat attempts
+        // are idempotent even when the per-UI slot remains reserved until the
+        // outer Tree dispatch checkpoint safely tears down the retained subtree.
         generation_ = 0;
+        overlay_ = {};
         spec_ = {};
         auto completion = std::move(completion_);
         completion_ = {};
-        if (completion) completion(DialogResult{DialogResultKind::Dismissed, {}});
+
+        auto invoke = [completion = std::move(completion)]() mutable {
+            if (completion) {
+                completion(DialogResult{DialogResultKind::Dismissed, {}});
+            }
+        };
+
+        if (ui_) {
+            ui_->complete_dialog_close(generation, std::move(invoke));
+        }
         return true;
     }
 
