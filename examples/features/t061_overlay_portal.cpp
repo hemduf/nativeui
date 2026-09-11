@@ -195,7 +195,7 @@ int self_test() {
     const auto non_modal_handle = a_ui.show_overlay(std::move(non_modal));
     a_ui.resize({96.0f, 48.0f});
     if (!non_modal_handle.valid() ||
-        !ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        !ui::handled(a_ui.dispatch(example::key(ui::Key::Enter), platform)) ||
         a_activations != 1) {
         return example::fail("non-modal overlay stole root keyboard focus");
     }
@@ -209,13 +209,13 @@ int self_test() {
     const auto key_modal_handle = a_ui.show_overlay(std::move(key_modal));
     a_ui.resize({96.0f, 48.0f});
     if (!key_modal_handle.valid() ||
-        !ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+        !ui::handled(a_ui.dispatch(example::key(ui::Key::Enter), platform)) ||
         a_activations != 1) {
         return example::fail("modal overlay allowed lower keyboard activation");
     }
 
     // The modal/focus state of A must not perturb an independent UI B.
-    if (!ui::handled(b_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+    if (!ui::handled(b_ui.dispatch(example::key(ui::Key::Enter), platform)) ||
         b_activations != 1) {
         return example::fail("modal focus leaked across UI instances");
     }
@@ -224,7 +224,7 @@ int self_test() {
         return example::fail("modal keyboard probe close failed");
     }
     a_ui.resize({96.0f, 48.0f});
-    if (!ui::handled(a_ui.dispatch(example::key(ui::Key::Space), platform)) ||
+    if (!ui::handled(a_ui.dispatch(example::key(ui::Key::Enter), platform)) ||
         a_activations != 2 || b_activations != 1) {
         return example::fail("modal focus restoration or UI isolation failed");
     }
