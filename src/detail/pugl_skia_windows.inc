@@ -630,7 +630,7 @@ struct EmbeddedView::Impl final : PlatformServices {
         : core(ui,
                *this,
                PUGL_MODULE,
-               WindowDesc{"NativeUI Embedded", size, true},
+               WindowDesc{"NativeUI Embedded", size, true, std::nullopt, std::nullopt},
                parent),
           dispatcher_owner(std::make_shared<detail::DispatcherOwner>()) {}
 
