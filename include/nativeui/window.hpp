@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/dispatcher.hpp>
 #include <nativeui/ui.hpp>
 
 #include <cstdint>
@@ -91,6 +92,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept;
     bool set_size(Size logical_size);
 
     /// Advisory logical preferred-size notification for external owners.
@@ -137,6 +139,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept;
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding
