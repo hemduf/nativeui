@@ -89,11 +89,22 @@ endforeach()
 # T072 permits the std::once_flag synchronization primitive as the sole
 # intentional mutable process-wide initialization state. The initialization
 # result itself must be immutable after one-time initialization, not a second
-# mutable namespace-scope variable.
+# mutable namespace-scope variable. The libdbus initialization call itself must
+# have exactly one production call site and be guarded by std::call_once.
 string(FIND "${_source_text}" "g_dbus_threads_initialized" _mutable_init_result)
 if(NOT _mutable_init_result EQUAL -1)
   message(FATAL_ERROR
     "T072 process-wide libdbus initialization result must not use a mutable global")
+endif()
+string(FIND "${_source_text}" "std::call_once(g_dbus_threads_once" _call_once_pos)
+if(_call_once_pos EQUAL -1)
+  message(FATAL_ERROR "T072 libdbus thread initialization must use std::call_once")
+endif()
+string(REGEX MATCHALL "dbus_threads_init_default\\(\\)" _thread_init_calls "${_source_text}")
+list(LENGTH _thread_init_calls _thread_init_call_count)
+if(NOT _thread_init_call_count EQUAL 1)
+  message(FATAL_ERROR
+    "T072 must contain exactly one dbus_threads_init_default() production call site; found ${_thread_init_call_count}")
 endif()
 
 # Installed/build-tree Linux consumers must invoke the same private transport
