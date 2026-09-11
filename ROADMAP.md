@@ -23,6 +23,8 @@ The pre-T043 completion baseline is `main` `fc15cbf4798b5071570aac5c8b0819c14ddd
 
 T043 / issue #43 / PR #142 is now a mergeable completion candidate rebased onto that exact baseline. The current candidate preserves T061 overlay/pointer-leave behavior, restores root CMake registration on the current feature/test set, and adds direct deterministic proofs for the two previously missing acceptance edges: one resulting layout per configure snapshot and one native request with no recursive echo request.
 
+Build regression #234 / PR #235 removes the manually maintained feature-example list. Root CMake now discovers canonical `examples/features/tNNN_<feature>.cpp` sources deterministically with `CONFIGURE_DEPENDS`, so feature examples such as T060 and T065 cannot silently exist without their normal root targets/compile-only coverage.
+
 Current dependency frontier:
 
 ```text
@@ -124,6 +126,10 @@ T044 / issue #44 / PR #145 remains a T071 release dependency and requires its ow
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
 Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView and the T045 semantic architecture it consumes.
+
+### Build/example registration hardening
+
+**Complete in PR #235 / issue #234.** Canonical feature example sources are auto-discovered from `examples/features/tNNN_<feature>.cpp`; the root build no longer maintains a parallel manual list. Discovery is deterministic, source additions/removals trigger CMake reconfiguration, malformed ticket-style example filenames fail configuration, and a dedicated CMake contract ensures the previously omitted T060/T065 examples remain part of normal root target and compile-only coverage.
 
 ### T061 — Generic overlay / portal layer
 
