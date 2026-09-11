@@ -186,18 +186,46 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
             });
     }
 
-    void complete_file(DesktopRequestId id, FileDialogResult result) {
+    void deliver_file(DesktopRequestId id, FileDialogResult result) {
         auto request = take(id);
         if (!request || request->kind == RequestKind::OpenUrl) return;
         auto callback = std::get<FileDialogCallback>(std::move(request->callback));
-        post_file(std::move(callback), normalize_file_result(request->kind, std::move(result)));
+        if (!callback_gate->load(std::memory_order_acquire)) return;
+        callback(normalize_file_result(request->kind, std::move(result)));
     }
 
-    void complete_status(DesktopRequestId id, DesktopServiceStatus status) {
+    void deliver_status(DesktopRequestId id, DesktopServiceStatus status) {
         auto request = take(id);
         if (!request || request->kind != RequestKind::OpenUrl) return;
         auto callback = std::get<StatusCallback>(std::move(request->callback));
-        post_status(std::move(callback), status);
+        if (!callback_gate->load(std::memory_order_acquire)) return;
+        callback(status);
+    }
+
+    void queue_file_completion(DesktopRequestId id, FileDialogResult result) {
+        const std::weak_ptr<Impl> weak = this->shared_from_this();
+        const bool posted = dispatcher.post(
+            [weak, id, result = std::move(result)]() mutable {
+                if (const auto self = weak.lock()) {
+                    self->deliver_file(id, std::move(result));
+                }
+            });
+        if (!posted) {
+            // Dispatcher rejection is terminal. Release capacity without ever
+            // falling back to invoking application code on the backend thread.
+            (void)take(id);
+        }
+    }
+
+    void queue_status_completion(DesktopRequestId id, DesktopServiceStatus status) {
+        const std::weak_ptr<Impl> weak = this->shared_from_this();
+        const bool posted = dispatcher.post(
+            [weak, id, status]() {
+                if (const auto self = weak.lock()) self->deliver_status(id, status);
+            });
+        if (!posted) {
+            (void)take(id);
+        }
     }
 
     template <typename Options, typename Starter>
@@ -225,7 +253,7 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
 
         if (!backend) {
             post_file(std::move(callback),
-                        immediate_file_result(DesktopServiceStatus::Unsupported));
+                      immediate_file_result(DesktopServiceStatus::Unsupported));
             return kInvalidDesktopRequestId;
         }
 
@@ -237,7 +265,7 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
                 id = allocate_locked();
                 active.emplace(
                     id, std::make_unique<ActiveRequest>(
-                         ActiveRequest{kind, std::move(callback)}));
+                            ActiveRequest{kind, std::move(callback)}));
             }
         }
         if (id == kInvalidDesktopRequestId) {
@@ -252,7 +280,7 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
                 *backend, id, options,
                 [weak, id](FileDialogResult result) mutable {
                     if (const auto self = weak.lock()) {
-                        self->complete_file(id, std::move(result));
+                        self->queue_file_completion(id, std::move(result));
                     }
                 });
         } catch (...) {
@@ -279,7 +307,6 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
     std::unordered_map<DesktopRequestId, std::unique_ptr<ActiveRequest>> active;
     DesktopRequestId next_request_id{1};
     bool closing{};
-
 };
 
 DesktopServices::DesktopServices(Dispatcher dispatcher,
@@ -395,7 +422,7 @@ DesktopRequestId DesktopServices::open_url(std::string url,
         start_status = state->backend->start_open_url(
             id, std::move(url),
             [weak, id](DesktopServiceStatus status) {
-                if (const auto self = weak.lock()) self->complete_status(id, status);
+                if (const auto self = weak.lock()) self->queue_status_completion(id, status);
             });
     } catch (...) {
         start_status = DesktopServiceStatus::Error;
