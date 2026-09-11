@@ -52,9 +52,11 @@ function(nativeui_add_linux_dbus_transport)
   foreach(_nativeui_required IN ITEMS
       "${_nativeui_source_root}/src/linux_dbus.cpp"
       "${_nativeui_source_root}/src/linux_dbus_codec.cpp"
+      "${_nativeui_source_root}/src/linux_dbus_client_operations.cpp"
       "${_nativeui_source_root}/src/linux_application_backend.cpp"
       "${_nativeui_source_root}/src/detail/linux_dbus.hpp"
       "${_nativeui_source_root}/src/detail/linux_dbus_codec.hpp"
+      "${_nativeui_source_root}/src/detail/linux_dbus_client_operations.hpp"
       "${_nativeui_source_root}/src/detail/linux_dbus_application_transport_owner.hpp"
       "${_nativeui_source_root}/src/detail/application_platform_state.hpp")
     if(NOT EXISTS "${_nativeui_required}")
@@ -70,6 +72,7 @@ function(nativeui_add_linux_dbus_transport)
   set(_nativeui_linux_dbus_sources
     "${_nativeui_source_root}/src/linux_dbus.cpp"
     "${_nativeui_source_root}/src/linux_dbus_codec.cpp"
+    "${_nativeui_source_root}/src/linux_dbus_client_operations.cpp"
   )
   if(NOT NUI_TRANSPORT_ONLY)
     list(APPEND _nativeui_linux_dbus_sources
@@ -114,6 +117,7 @@ if(EXISTS "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus.cpp")
     install(FILES
       "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus.cpp"
       "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus_codec.cpp"
+      "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus_client_operations.cpp"
       "${_nativeui_linux_dbus_module_source_root}/src/linux_application_backend.cpp"
       DESTINATION "${NATIVEUI_INSTALL_SOURCE_DIR}/src"
     )

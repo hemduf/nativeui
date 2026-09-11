@@ -7,9 +7,11 @@ endif()
 set(_module "${SOURCE_DIR}/cmake/NativeUILinuxDbus.cmake")
 set(_attach_module "${SOURCE_DIR}/cmake/NativeUIAttachPlatform.cmake")
 set(_header "${SOURCE_DIR}/src/detail/linux_dbus.hpp")
+set(_client_operations_header "${SOURCE_DIR}/src/detail/linux_dbus_client_operations.hpp")
 set(_owner_header "${SOURCE_DIR}/src/detail/linux_dbus_application_transport_owner.hpp")
 set(_platform_state_header "${SOURCE_DIR}/src/detail/application_platform_state.hpp")
 set(_application_backend_source "${SOURCE_DIR}/src/linux_application_backend.cpp")
+set(_client_operations_source "${SOURCE_DIR}/src/linux_dbus_client_operations.cpp")
 set(_platform_source "${SOURCE_DIR}/src/pugl_skia.cpp")
 set(_window_header "${SOURCE_DIR}/include/nativeui/window.hpp")
 set(_source "${SOURCE_DIR}/src/linux_dbus.cpp")
@@ -20,9 +22,11 @@ foreach(_required IN ITEMS
     "${_module}"
     "${_attach_module}"
     "${_header}"
+    "${_client_operations_header}"
     "${_owner_header}"
     "${_platform_state_header}"
     "${_application_backend_source}"
+    "${_client_operations_source}"
     "${_platform_source}"
     "${_window_header}"
     "${_source}"
@@ -38,6 +42,9 @@ file(READ "${_module}" _dbus_module)
 file(READ "${_attach_module}" _attach_module_text)
 file(READ "${_platform_state_header}" _platform_state_text)
 file(READ "${_application_backend_source}" _application_backend_text)
+file(READ "${_client_operations_header}" _client_operations_header_text)
+file(READ "${_client_operations_source}" _client_operations_source_text)
+file(READ "${_owner_header}" _owner_header_text)
 file(READ "${_platform_source}" _platform_source_text)
 file(READ "${_window_header}" _window_header_text)
 file(READ "${_source}" _source_text)
@@ -59,7 +66,9 @@ foreach(_needle IN ITEMS
     "nativeui_linux_dbus"
     "src/linux_dbus.cpp"
     "src/linux_dbus_codec.cpp"
+    "src/linux_dbus_client_operations.cpp"
     "src/linux_application_backend.cpp"
+    "src/detail/linux_dbus_client_operations.hpp"
     "dbus-1"
     "PkgConfig"
     "Threads::Threads"
@@ -69,6 +78,34 @@ foreach(_needle IN ITEMS
   string(FIND "${_dbus_module}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 contract missing Linux D-Bus module token: ${_needle}")
+  endif()
+endforeach()
+
+# The typed client-facing layer is the only production seam for T064/T068. It
+# must preserve ResourceLimit/InvalidArgument/Shutdown rather than reducing
+# synchronous rejection to an invalid ID or boolean.
+foreach(_needle IN ITEMS
+    "LinuxDbusImmediateResult"
+    "LinuxDbusErrorCode code"
+    "LinuxDbusRequestStartResult"
+    "LinuxDbusSubscriptionResult"
+    "LinuxDbusObjectPathResult"
+    "LinuxDbusClientOperations")
+  string(FIND "${_client_operations_header_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 typed client operation contract missing token: ${_needle}")
+  endif()
+endforeach()
+foreach(_needle IN ITEMS
+    "LinuxDbusErrorCode::ResourceLimit"
+    "LinuxDbusErrorCode::InvalidArgument"
+    "LinuxDbusErrorCode::Shutdown"
+    "kLinuxDbusMaxPendingCalls"
+    "kLinuxDbusMaxSubscriptions"
+    "kLinuxDbusMaxObjectPaths")
+  string(FIND "${_client_operations_source_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 typed immediate failure implementation missing token: ${_needle}")
   endif()
 endforeach()
 
@@ -168,7 +205,8 @@ endif()
 
 foreach(_needle IN ITEMS
     "LinuxDbusApplicationTransportOwner linux_dbus_transport"
-    "ApplicationBackendAccess")
+    "ApplicationBackendAccess"
+    "LinuxDbusClientOperations* linux_dbus_operations_if_started")
   string(FIND "${_platform_state_text}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 source-private Application state missing token: ${_needle}")
@@ -176,11 +214,23 @@ foreach(_needle IN ITEMS
 endforeach()
 
 foreach(_needle IN ITEMS
+    "std::unique_ptr<LinuxDbusClientOperations> operations_"
+    "operations_if_started()"
+    "operations_->register_client()")
+  string(FIND "${_owner_header_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 Application transport owner missing typed operation seam: ${_needle}")
+  endif()
+endforeach()
+
+foreach(_needle IN ITEMS
     "ApplicationBackendAccess::register_linux_dbus_client"
     "ApplicationBackendAccess::release_linux_dbus_client"
+    "ApplicationBackendAccess::linux_dbus_operations_if_started"
     "ApplicationBackendAccess::linux_dbus_transport_if_started"
     "application.platform_state_->linux_dbus_transport.register_client()"
     "application.platform_state_->linux_dbus_transport.release_client(client)"
+    "application.platform_state_->linux_dbus_transport.operations_if_started()"
     "application.platform_state_->linux_dbus_transport.transport_if_started()")
   string(FIND "${_application_backend_text}" "${_needle}" _found)
   if(_found EQUAL -1)
@@ -205,6 +255,7 @@ foreach(_public_header IN LISTS _public_headers)
   endif()
   foreach(_forbidden IN ITEMS
       "LinuxDbusTransport"
+      "LinuxDbusClientOperations"
       "LinuxDbusClientId"
       "LinuxDbusRequestId"
       "LinuxDbusValue")

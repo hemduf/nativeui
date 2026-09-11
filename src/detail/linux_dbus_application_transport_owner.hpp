@@ -1,6 +1,6 @@
 #pragma once
 
-#include "linux_dbus.hpp"
+#include "linux_dbus_client_operations.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -9,13 +9,12 @@
 
 namespace ui::detail {
 
-/// Application-owned Linux D-Bus transport lifetime seam.
+/// Application-owned Linux D-Bus client/transport lifetime seam.
 ///
 /// Ownership mutation is confined to the owning Application/UI thread. The
-/// contained LinuxDbusTransport remains the thread-safe boundary for request,
-/// subscription and object-path operations after a client has been registered.
-/// The first successful client registration creates and starts exactly one
-/// transport; subsequent clients reuse it. Releasing the last client keeps the
+/// first successful client registration creates exactly one typed client
+/// operation surface, which in turn owns exactly one LinuxDbusTransport.
+/// Subsequent clients reuse it. Releasing the last client keeps the surface and
 /// transport alive until Application shutdown so later clients cannot create an
 /// overflow/replacement connection for the same Application lifetime.
 class LinuxDbusApplicationTransportOwner final {
@@ -36,49 +35,49 @@ public:
             return kInvalidLinuxDbusClientId;
         }
 
-        if (transport_) {
-            const auto client = transport_->register_client();
-            if (client == kInvalidLinuxDbusClientId) {
-                return client;
-            }
-            try {
-                clients_.push_back(client);
-            } catch (...) {
-                transport_->release_client(client);
+        if (operations_) {
+            const auto result = operations_->register_client();
+            if (!result.ok()) {
                 return kInvalidLinuxDbusClientId;
             }
-            return client;
+            try {
+                clients_.push_back(result.id);
+            } catch (...) {
+                (void)operations_->release_client(result.id);
+                return kInvalidLinuxDbusClientId;
+            }
+            return result.id;
         }
 
         try {
-            auto candidate = std::make_unique<LinuxDbusTransport>();
+            auto candidate = std::make_unique<LinuxDbusClientOperations>();
             if (candidate->start() != LinuxDbusErrorCode::None) {
                 return kInvalidLinuxDbusClientId;
             }
 
-            const auto client = candidate->register_client();
-            if (client == kInvalidLinuxDbusClientId) {
+            const auto result = candidate->register_client();
+            if (!result.ok()) {
                 candidate->stop();
                 return kInvalidLinuxDbusClientId;
             }
 
             try {
-                clients_.push_back(client);
+                clients_.push_back(result.id);
             } catch (...) {
-                candidate->release_client(client);
+                (void)candidate->release_client(result.id);
                 candidate->stop();
                 return kInvalidLinuxDbusClientId;
             }
 
-            transport_ = std::move(candidate);
-            return client;
+            operations_ = std::move(candidate);
+            return result.id;
         } catch (...) {
             return kInvalidLinuxDbusClientId;
         }
     }
 
     void release_client(LinuxDbusClientId client) noexcept {
-        if (closing_ || !transport_ || client == kInvalidLinuxDbusClientId) {
+        if (closing_ || !operations_ || client == kInvalidLinuxDbusClientId) {
             return;
         }
 
@@ -87,7 +86,7 @@ public:
             return;
         }
 
-        transport_->release_client(client);
+        (void)operations_->release_client(client);
         clients_.erase(found);
     }
 
@@ -95,12 +94,23 @@ public:
         return clients_.size();
     }
 
+    /// Canonical operation surface for T064/T068 clients. It preserves typed
+    /// immediate failures such as ResourceLimit/InvalidArgument/Shutdown.
+    [[nodiscard]] LinuxDbusClientOperations* operations_if_started() noexcept {
+        return operations_.get();
+    }
+
+    [[nodiscard]] const LinuxDbusClientOperations* operations_if_started() const noexcept {
+        return operations_.get();
+    }
+
+    /// Low-level validation seam retained for existing T072 transport tests.
     [[nodiscard]] LinuxDbusTransport* transport_if_started() noexcept {
-        return transport_.get();
+        return operations_ ? &operations_->transport_for_testing() : nullptr;
     }
 
     [[nodiscard]] const LinuxDbusTransport* transport_if_started() const noexcept {
-        return transport_.get();
+        return operations_ ? &operations_->transport_for_testing() : nullptr;
     }
 
     void shutdown() noexcept {
@@ -109,16 +119,16 @@ public:
         }
 
         closing_ = true;
-        auto transport = std::move(transport_);
-        if (transport) {
-            // Application teardown must close logical clients first so their
-            // pending Dispatcher completions and subscriptions are invalidated
+        auto operations = std::move(operations_);
+        if (operations) {
+            // Application teardown closes logical clients first so their
+            // pending Dispatcher completions/subscriptions are invalidated
             // before the shared transport begins stop/join/connection teardown.
             for (const auto client : clients_) {
-                transport->release_client(client);
+                (void)operations->release_client(client);
             }
             clients_.clear();
-            transport->stop();
+            operations->stop();
         } else {
             clients_.clear();
         }
@@ -126,7 +136,7 @@ public:
 
 private:
     bool closing_{};
-    std::unique_ptr<LinuxDbusTransport> transport_;
+    std::unique_ptr<LinuxDbusClientOperations> operations_;
     std::vector<LinuxDbusClientId> clients_;
 };
 
