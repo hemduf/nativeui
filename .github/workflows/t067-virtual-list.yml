@@ -2,11 +2,35 @@ name: T067 Virtual List Contract
 
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - 'include/nativeui/virtual_list.hpp'
+      - 'include/nativeui/detail/virtual_list_*'
+      - 'include/nativeui/semantics.hpp'
+      - 'tests/t067/**'
+      - 'tests/t067_retained/**'
+      - 'tests/t067_*'
+      - 'examples/features/t067_*'
+      - '.github/workflows/t067-virtual-list.yml'
   push:
     branches: [main]
+    paths:
+      - 'include/nativeui/virtual_list.hpp'
+      - 'include/nativeui/detail/virtual_list_*'
+      - 'include/nativeui/semantics.hpp'
+      - 'tests/t067/**'
+      - 'tests/t067_retained/**'
+      - 'tests/t067_*'
+      - 'examples/features/t067_*'
+      - '.github/workflows/t067-virtual-list.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   root-integration-contract:
