@@ -81,7 +81,7 @@ jobs:
           # Chrome index must not turn a NativeUI clean-bootstrap gate red.
           grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
       - name: Configure clean Unix bootstrap
         if: runner.os != 'Windows'

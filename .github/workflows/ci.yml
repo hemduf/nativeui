@@ -109,7 +109,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -287,7 +287,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libfontconfig1-dev
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libfontconfig1-dev
 
       - name: Configure
         run: >-
