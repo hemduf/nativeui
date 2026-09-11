@@ -31,6 +31,14 @@ void ApplicationBackendAccess::release_linux_dbus_client(
     application.platform_state_->linux_dbus_transport.release_client(client);
 }
 
+LinuxDbusClientOperations* ApplicationBackendAccess::linux_dbus_operations_if_started(
+    Application& application) noexcept {
+    if (!application.platform_state_) {
+        return nullptr;
+    }
+    return application.platform_state_->linux_dbus_transport.operations_if_started();
+}
+
 LinuxDbusTransport* ApplicationBackendAccess::linux_dbus_transport_if_started(
     Application& application) noexcept {
     if (!application.platform_state_) {

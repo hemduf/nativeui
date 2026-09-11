@@ -28,6 +28,13 @@ struct ApplicationBackendAccess final {
     [[nodiscard]] static LinuxDbusClientId register_linux_dbus_client(Application& application);
     static void release_linux_dbus_client(Application& application,
                                           LinuxDbusClientId client) noexcept;
+
+    /// Canonical typed client-facing surface for Portal/accessibility work.
+    [[nodiscard]] static LinuxDbusClientOperations* linux_dbus_operations_if_started(
+        Application& application) noexcept;
+
+    /// Low-level T072 validation seam. New platform clients should use the typed
+    /// operation surface above rather than collapsing immediate failure codes.
     [[nodiscard]] static LinuxDbusTransport* linux_dbus_transport_if_started(
         Application& application) noexcept;
 #endif
