@@ -61,8 +61,10 @@ ui::UI make_ui(DemoState& state) {
             ui::Label{
                 "100,000 logical items · fixed 28 px rows · 2-row overscan · immutable semantics"
             }.size(12.0f).color(ui::colors::textMuted),
-            std::move(ui::ListView<int>{state.list})
-                .on_activate([&state](const int& key) { state.last_activated = key; }),
+            ui::Flex{
+                std::move(ui::ListView<int>{state.list})
+                    .on_activate([&state](const int& key) { state.last_activated = key; })
+            }.grow(1.0f).shrink(1.0f),
             ui::Label{"↑ ↓ navigate  ·  Home / End  ·  Enter activates  ·  wheel scrolls"}
                 .size(11.0f)
                 .color(ui::colors::textMuted)
