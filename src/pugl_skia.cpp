@@ -45,6 +45,35 @@ std::unordered_map<PuglView*, X11FocusRecord>& x11_focus_records() {
     return records;
 }
 
+thread_local PuglView* x11_callback_view = nullptr;
+
+class X11CallbackScope final {
+public:
+    explicit X11CallbackScope(PuglView* view) noexcept
+        : previous_(x11_callback_view) {
+        x11_callback_view = view;
+    }
+
+    X11CallbackScope(const X11CallbackScope&) = delete;
+    X11CallbackScope& operator=(const X11CallbackScope&) = delete;
+
+    ~X11CallbackScope() { x11_callback_view = previous_; }
+
+private:
+    PuglView* previous_{};
+};
+
+PuglView* current_x11_callback_view() noexcept {
+    return x11_callback_view;
+}
+
+PuglStatus invoke_x11_callback(
+    PuglView* view, PuglEventFunc callback, const PuglEvent* event) noexcept {
+    if (!callback) return PUGL_SUCCESS;
+    X11CallbackScope scope{view};
+    return callback(view, event);
+}
+
 PuglStatus dispatch_x11_focus_transition(PuglView* view, bool focused) noexcept {
     auto& records = x11_focus_records();
     const auto found = records.find(view);
@@ -65,12 +94,11 @@ PuglStatus dispatch_x11_focus_transition(PuglView* view, bool focused) noexcept 
     const auto callback = record.callback;
     record.known = true;
     record.focused = focused;
-    if (!callback) return PUGL_SUCCESS;
 
     PuglEvent event{};
     event.focus.type = focused ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT;
     event.focus.mode = PUGL_CROSSING_NORMAL;
-    return callback(view, &event);
+    return invoke_x11_callback(view, callback, &event);
 }
 
 PuglStatus x11_event_proxy(PuglView* view, const PuglEvent* event) noexcept {
@@ -87,7 +115,7 @@ PuglStatus x11_event_proxy(PuglView* view, const PuglEvent* event) noexcept {
         found->second.known = true;
         found->second.focused = focused;
     }
-    return callback(view, event);
+    return invoke_x11_callback(view, callback, event);
 }
 
 PuglStatus tracked_pugl_set_event_func(PuglView* view, PuglEventFunc callback) {
@@ -99,8 +127,11 @@ PuglStatus tracked_pugl_set_event_func(PuglView* view, PuglEventFunc callback) {
 }
 
 void tracked_pugl_free_view(PuglView* view) {
-    x11_focus_records().erase(view);
+    // Keep the proxy record alive while Pugl performs its implicit unrealize:
+    // PUGL_UNREALIZE must still reach the NativeUI callback on cleanup paths
+    // that call puglFreeView() without an explicit preceding unrealize.
     ::puglFreeView(view);
+    x11_focus_records().erase(view);
 }
 
 bool x11_focus_sync_needed(PuglWorld* world) {
@@ -176,7 +207,49 @@ PuglStatus tracked_pugl_update(PuglWorld* world, double timeout_seconds) {
 
 using ViewCore = detail::ViewCore;
 
-#if defined(_WIN32)
+#if defined(__linux__)
+// X11 creates an implicit active pointer grab for a ButtonPress. A normal
+// ButtonRelease ends it automatically, but retained cancellation can happen
+// first (focus loss, destruction, modal/lifecycle cancellation). Record only
+// the native view whose callback established this retained owner, then release
+// that same client connection when the retained owner ends.
+class X11PointerCapturePlatformServices : public PlatformServices {
+public:
+    void begin_pointer_capture() noexcept override {
+        auto* view = current_x11_callback_view();
+        if (!view) return;
+
+        auto* world = puglGetWorld(view);
+        auto* display = world ? static_cast<Display*>(puglGetNativeWorld(world)) : nullptr;
+        const auto window = static_cast<Window>(puglGetNativeView(view));
+        if (!display || !window) return;
+
+        captured_display_ = display;
+        captured_window_ = window;
+    }
+
+    void end_pointer_capture() noexcept override {
+        auto* display = captured_display_;
+        const auto window = captured_window_;
+        captured_display_ = nullptr;
+        captured_window_ = 0;
+        if (!display || !window) return;
+
+        // XUngrabPointer only affects an active grab owned by this X client.
+        // Each PlatformServices instance records its own view at the retained
+        // none->owner transition, so sibling views cannot clear each other's
+        // retained bookkeeping; repeated release is an X11 no-op.
+        XUngrabPointer(display, CurrentTime);
+        XFlush(display);
+    }
+
+private:
+    Display* captured_display_{};
+    Window captured_window_{};
+};
+
+#  define PlatformServices X11PointerCapturePlatformServices
+#elif defined(_WIN32)
 // Pugl already acquires HWND capture before dispatching a button press and
 // releases it on the matching button release. T044 needs the retained tree's
 // cancellation path (focus loss/deactivation/destruction) to mirror that
@@ -205,7 +278,7 @@ private:
 
 #include "detail/pugl_skia_windows.inc"
 
-#if defined(_WIN32)
+#if defined(__linux__) || defined(_WIN32)
 #  undef PlatformServices
 #endif
 
