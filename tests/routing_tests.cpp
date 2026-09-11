@@ -295,8 +295,11 @@ void suite() {
         NUI_CHECK(observed->focus_out == 0);
         NUI_CHECK(observed->focus_dispatcher_valid);
 
+        // Column's default 24 px padding means the retained child starts at
+        // (24,24). Keep the probe points inside the actual first/second child
+        // bounds so this test validates hover routing rather than padding.
         NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform) ==
+                      test::pointer(ui::InputType::PointerMove, 40.0f, 40.0f), platform) ==
                   ui::EventResult::Handled);
         NUI_CHECK(observed->hover_in == 1);
         NUI_CHECK(observed->hover_out == 0);
@@ -304,11 +307,11 @@ void suite() {
 
         // Remaining inside the same retained route must not re-notify/restart.
         (void)tree.dispatch(
-            test::pointer(ui::InputType::PointerMove, 22.0f, 22.0f), platform);
+            test::pointer(ui::InputType::PointerMove, 42.0f, 42.0f), platform);
         NUI_CHECK(observed->hover_in == 1);
 
         (void)tree.dispatch(
-            test::pointer(ui::InputType::PointerMove, 20.0f, 80.0f), platform);
+            test::pointer(ui::InputType::PointerMove, 40.0f, 90.0f), platform);
         NUI_CHECK(observed->hover_out == 1);
 
         NUI_CHECK(tree.dispatch(test::key(ui::Key::Tab), platform) == ui::EventResult::Handled);
