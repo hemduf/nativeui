@@ -149,17 +149,16 @@ public:
 
     bool set_size(Size logical) {
         if (!view_) return false;
-        const auto physical = geometry_.physical_request(logical);
-        if (!physical) return false;
-
-        const auto status = puglSetSizeHint(
-            view_,
-            PUGL_CURRENT_SIZE,
-            to_pugl_span(physical->w),
-            to_pugl_span(physical->h));
-        if (status != PUGL_SUCCESS) return false;
-        geometry_.record_successful_request(logical);
-        return true;
+        return detail::submit_logical_size_request(
+            geometry_,
+            logical,
+            [this](Size physical) {
+                return puglSetSizeHint(
+                           view_,
+                           PUGL_CURRENT_SIZE,
+                           to_pugl_span(physical.w),
+                           to_pugl_span(physical.h)) == PUGL_SUCCESS;
+            });
     }
 
     void set_preferred_size_callback(PreferredSizeCallback callback) {
