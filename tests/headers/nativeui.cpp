@@ -153,6 +153,40 @@ void nativeui_header_compile_t038_toggle_style(const ui::Theme& theme,
     (void)spec;
 }
 
+void nativeui_header_compile_t038_text_edit_styles(const ui::Theme& theme,
+                                                    ui::State<std::string>& value) {
+    ui::TextInputStyle input{};
+    input.base.field_fill = ui::Color{0.1f, 0.1f, 0.1f, 1.0f};
+    input.base.border = ui::Color{0.3f, 0.3f, 0.3f, 1.0f};
+    input.base.text = ui::Color{0.9f, 0.9f, 0.9f, 1.0f};
+    input.base.placeholder = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    input.base.selection = ui::Color{0.2f, 0.5f, 0.8f, 0.4f};
+    input.base.caret = ui::Color{0.9f, 0.8f, 0.6f, 1.0f};
+    input.hovered.border = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    input.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    input.read_only.text = ui::Color{0.6f, 0.6f, 0.6f, 1.0f};
+    input.focused.border_width = 2.0f;
+    const auto resolved_input = ui::resolve_text_input_style(
+        ui::default_text_input_style(theme),
+        input,
+        ui::VisualState{.enabled = true, .focused = true});
+    (void)resolved_input;
+    auto input_spec = ui::make_spec(ui::TextInput{"Name", value}.style(input));
+    (void)input_spec;
+
+    ui::TextAreaStyle area{};
+    area.base.line_height = 22.0f;
+    area.base.vertical_padding = 8.0f;
+    area.focused.border = ui::Color{0.9f, 0.7f, 0.2f, 1.0f};
+    const auto resolved_area = ui::resolve_text_area_style(
+        ui::default_text_area_style(theme),
+        area,
+        ui::VisualState{.enabled = true, .read_only = true, .focused = true});
+    (void)resolved_area;
+    auto area_spec = ui::make_spec(ui::TextArea{"Notes", value}.style(area));
+    (void)area_spec;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
