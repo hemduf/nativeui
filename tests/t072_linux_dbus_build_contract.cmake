@@ -107,6 +107,29 @@ if(NOT _thread_init_call_count EQUAL 1)
     "T072 must contain exactly one dbus_threads_init_default() production call site; found ${_thread_init_call_count}")
 endif()
 
+# Every function pointer handed to libdbus is a foreign-C ABI boundary. These
+# thunks must be explicitly noexcept so a future allocation/error-path change
+# cannot silently permit a C++ exception to cross libdbus. Production code must
+# additionally catch any throwing work inside the non-trivial notify/filter
+# thunks before returning to C.
+foreach(_needle IN ITEMS
+    "static void free_notify_context(void* data) noexcept"
+    "static void pending_notify(DBusPendingCall* pending, void* data) noexcept"
+    "static DBusHandlerResult signal_filter(DBusConnection*, DBusMessage* message, void* data) noexcept"
+    "static void object_path_unregistered(DBusConnection*, void* data) noexcept")
+  string(FIND "${_source_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 libdbus callback must be an explicit noexcept boundary: ${_needle}")
+  endif()
+endforeach()
+string(REGEX MATCH
+  "static DBusHandlerResult object_path_message\\([^)]*void\\* data\\) noexcept"
+  _object_path_noexcept "${_source_text}")
+if(NOT _object_path_noexcept)
+  message(FATAL_ERROR
+    "T072 libdbus object-path callback must be an explicit noexcept boundary")
+endif()
+
 # Installed/build-tree Linux consumers must invoke the same private transport
 # module after their platform target exists. macOS/Windows remain outside the
 # UNIX-and-not-APPLE branch and therefore never discover libdbus.
