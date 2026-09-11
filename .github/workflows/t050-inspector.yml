@@ -1,0 +1,44 @@
+name: T050 Inspector Contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  inspector-build-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        inspector: [OFF, ON]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install headless inspector dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev
+      - name: Configure inspector ${{ matrix.inspector }}
+        run: >-
+          cmake -S . -B build-t050-${{ matrix.inspector }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_ENABLE_INSPECTOR=${{ matrix.inspector }}
+      - name: Build inspector contract
+        shell: bash
+        run: |
+          targets="nativeui_t050_inspector_model_tests nativeui_header_inspector_compile nativeui_header_ui_compile"
+          if [[ "${{ matrix.inspector }}" == "ON" ]]; then
+            targets="$targets nativeui_t050_inspector_runtime_tests"
+          fi
+          cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel 2
+      - name: Run inspector tests
+        run: >-
+          ctest --test-dir build-t050-${{ matrix.inspector }}
+          --output-on-failure
+          -R "^nativeui_t050_inspector_"
