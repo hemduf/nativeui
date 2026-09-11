@@ -323,6 +323,7 @@ set(NATIVEUI_FEATURE_EXAMPLES
   t058_dynamic_composition
   t059_component_state
   t061_overlay_portal
+  t066_window_controls
   t067_virtual_list
 )
 
@@ -457,6 +458,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
   nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
   nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
+  nativeui_add_core_test(nativeui_t066_window_control_state_tests tests/t066_window_control_state_tests.cpp)
   nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
   nativeui_add_core_test(nativeui_gradient_golden_tests tests/gradient_golden_tests.cpp)
   target_compile_definitions(nativeui_golden_tests PRIVATE
