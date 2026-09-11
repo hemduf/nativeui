@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -37,7 +38,9 @@ int main() {
             }.padding(12.0f).gap(8.0f)};
 
         stage = "construct-parent-window";
+        ui::Application application;
         ui::StandaloneWindow parent{
+            application,
             parent_ui,
             ui::WindowDesc{.title = "NativeUI embedded smoke parent",
                            .size = {420.0f, 280.0f},
@@ -50,6 +53,15 @@ int main() {
                 ui::Header{"Embedded child"},
                 ui::Toggle{"Child enabled", child_enabled},
             }.padding(10.0f).gap(8.0f)};
+
+        stage = "prepare-embedded-overlay";
+        ui::OverlaySpec child_overlay;
+        child_overlay.placement = ui::OverlayPlacement::Center;
+        child_overlay.content = ui::make_spec(ui::Spacer{24.0f, 16.0f});
+        const auto child_overlay_handle = child_ui.show_overlay(std::move(child_overlay));
+        if (!child_overlay_handle.valid()) {
+            return fail(stage, "show_overlay rejected a valid embedded overlay");
+        }
 
         stage = "construct-embedded-view";
         ui::EmbeddedView child{child_ui, parent.native_handle(), {260.0f, 140.0f}};
@@ -102,7 +114,7 @@ int main() {
         stage = "embedded-nonblocking-poll";
         const auto start = std::chrono::steady_clock::now();
         for (int i = 0; i < 64 && !child.should_close(); ++i) {
-            (void)parent.poll(0.0);
+            (void)application.poll(0.0);
             (void)child.poll();
         }
         const auto elapsed = std::chrono::steady_clock::now() - start;
@@ -120,10 +132,20 @@ int main() {
             return fail(stage, "child scale became invalid after configure");
         }
 
+        stage = "embedded-overlay";
+        if (!child_ui.close_overlay(child_overlay_handle) || child_overlay_handle.valid()) {
+            return fail(stage, "embedded overlay close/stale-handle contract failed");
+        }
+        for (int i = 0; i < 4; ++i) {
+            (void)application.poll(0.0);
+            (void)child.poll();
+        }
+        if (!child.last_error().empty()) return fail(stage, child.last_error());
+
         stage = "embedded-resize";
         if (!child.set_size({300.0f, 160.0f})) return fail(stage, "child set_size failed");
         for (int i = 0; i < 4; ++i) {
-            (void)parent.poll(0.0);
+            (void)application.poll(0.0);
             (void)child.poll();
         }
         if (!parent.last_error().empty()) return fail(stage, parent.last_error());
