@@ -38,6 +38,7 @@ file(READ "${_platform_state_header}" _platform_state_text)
 file(READ "${_application_backend_source}" _application_backend_text)
 file(READ "${_platform_source}" _platform_source_text)
 file(READ "${_window_header}" _window_header_text)
+file(READ "${_source}" _source_text)
 
 # The root owns only the Linux platform gate and module invocation; the module
 # owns the private target/source/package details so they do not leak into
@@ -67,6 +68,16 @@ foreach(_needle IN ITEMS
     message(FATAL_ERROR "T072 contract missing Linux D-Bus module token: ${_needle}")
   endif()
 endforeach()
+
+# T072 permits the std::once_flag synchronization primitive as the sole
+# intentional mutable process-wide initialization state. The initialization
+# result itself must be immutable after one-time initialization, not a second
+# mutable namespace-scope variable.
+string(FIND "${_source_text}" "g_dbus_threads_initialized" _mutable_init_result)
+if(NOT _mutable_init_result EQUAL -1)
+  message(FATAL_ERROR
+    "T072 process-wide libdbus initialization result must not use a mutable global")
+endif()
 
 # Installed/build-tree Linux consumers must invoke the same private transport
 # module after their platform target exists. macOS/Windows remain outside the
