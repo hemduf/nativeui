@@ -5,6 +5,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -310,10 +311,98 @@ int self_test() {
     return 0;
 }
 
+int platform_smoke() {
+    const char* stage = "application";
+    try {
+        ui::Application application;
+        if (!application.valid()) {
+            return example::fail(application.last_error().empty()
+                                     ? "T062 platform application is invalid"
+                                     : application.last_error());
+        }
+
+        stage = "standalone";
+        auto standalone_anchor = std::make_shared<ProbeState>();
+        ui::UI standalone_ui{SlotRoot{
+            {ui::make_spec(ui::Tooltip{"Standalone help", Probe{true, standalone_anchor}})}}};
+        ui::StandaloneWindow standalone{
+            application,
+            standalone_ui,
+            ui::WindowDesc{
+                .title = "NativeUI T062 platform smoke",
+                .size = {420.0f, 220.0f},
+                .resizable = true}};
+        if (!standalone.valid() || !standalone.native_handle()) {
+            return example::fail(standalone.last_error().empty()
+                                     ? "T062 standalone window is invalid"
+                                     : standalone.last_error());
+        }
+
+        // Arm the tooltip through the real standalone PlatformServices object,
+        // then let the native event loop wait for the T065 timer to fire.
+        standalone_ui.activate(standalone);
+        (void)standalone_ui.dispatch(
+            example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), standalone);
+        for (int i = 0; i < 10 && standalone_ui.overlay_entries().empty(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{60});
+            (void)application.poll(0.0);
+        }
+        if (standalone_ui.overlay_entries().size() != 1) {
+            return example::fail("standalone tooltip did not appear through the native dispatcher");
+        }
+        if (standalone_ui.overlay_entries().front().pointer_policy !=
+            ui::OverlayPointerPolicy::Ignore) {
+            return example::fail("standalone tooltip is not non-hit-test");
+        }
+
+        // Real native paint cycles must keep the surface and window valid.
+        for (int i = 0; i < 4; ++i) (void)application.poll(0.0);
+        if (!standalone.last_error().empty()) return example::fail(standalone.last_error());
+
+        // PointerDown on the anchor dismisses through the native platform path.
+        (void)standalone_ui.dispatch(
+            example::pointer(ui::InputType::PointerDown, 80.0f, 36.0f), standalone);
+        if (!standalone_ui.overlay_entries().empty()) {
+            return example::fail("PointerDown did not dismiss the native tooltip");
+        }
+
+        stage = "embedded";
+        auto embedded_anchor = std::make_shared<ProbeState>();
+        ui::UI embedded_ui{SlotRoot{
+            {ui::make_spec(ui::Tooltip{"Embedded help", Probe{true, embedded_anchor}})}}};
+        ui::EmbeddedView embedded{
+            embedded_ui, standalone.native_handle(), {420.0f, 220.0f}};
+        if (!embedded.native_handle()) {
+            return example::fail(embedded.last_error().empty()
+                                     ? "T062 embedded view is invalid"
+                                     : embedded.last_error());
+        }
+
+        embedded_ui.activate(embedded);
+        (void)embedded_ui.dispatch(
+            example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), embedded);
+        for (int i = 0; i < 40 && embedded_ui.overlay_entries().empty(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            (void)embedded.poll();
+        }
+        if (embedded_ui.overlay_entries().size() != 1) {
+            return example::fail("embedded tooltip did not appear through the native dispatcher");
+        }
+        for (int i = 0; i < 4; ++i) (void)embedded.poll();
+        if (!embedded.last_error().empty()) return example::fail(embedded.last_error());
+        return 0;
+    } catch (const std::exception& error) {
+        return example::fail(std::string{"T062 platform smoke "} + stage + ": " + error.what());
+    } catch (...) {
+        return example::fail(std::string{"T062 platform smoke "} + stage + ": unknown exception");
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
+    if (argc == 2 && std::string_view{argv[1]} == "--platform-smoke") return platform_smoke();
 
     DemoState state;
     ui::UI ui = make_demo_ui(state);
