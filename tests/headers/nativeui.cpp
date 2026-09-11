@@ -1,6 +1,7 @@
 #include <nativeui/nativeui.hpp>
 #include <nativeui/semantics.hpp>
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
@@ -61,6 +62,22 @@ void nativeui_header_compile_t061_overlay(ui::UI& tree) {
 
     const ui::OverlayHandle handle = tree.show_overlay(std::move(overlay));
     (void)tree.close_overlay(handle);
+}
+
+void nativeui_header_compile_t062_tooltip() {
+    // T062's public contract is text-first: help text, then the decorated child.
+    // Delay customization stays fluent so the v1 surface has one construction
+    // shape rather than an extra positional-duration overload.
+    auto ticket_shape = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}}
+            .delay(std::chrono::milliseconds{500}));
+    auto default_delay = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}});
+    ui::Tooltip lvalue{"Lvalue delay", ui::Spacer{24.0f, 12.0f}};
+    lvalue.delay(std::chrono::milliseconds{100});
+    (void)ticket_shape;
+    (void)default_delay;
+    (void)lvalue;
 }
 
 void nativeui_header_compile_t063_dialog(ui::UI& tree) {

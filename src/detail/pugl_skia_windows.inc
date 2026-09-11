@@ -440,16 +440,25 @@ QuitPolicy Application::quit_policy() const noexcept {
     return impl_ ? impl_->quit_policy : QuitPolicy::OnLastWindowClosed;
 }
 
-struct StandaloneWindow::Impl final : PlatformServices {
+struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     explicit Impl(std::shared_ptr<detail::DispatcherWakeBackend> wake_backend = {})
         : dispatcher_owner(
               std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))) {}
 
+    // Declared before `core` so ViewCore (which may discover this impl's
+    // dispatcher while deactivating its UI) is destroyed before the owner.
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     std::unique_ptr<ViewCore> core;
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
-    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+
+    // ViewCore receives this Impl (not the public StandaloneWindow wrapper) as
+    // its PlatformServices object, so retained policies such as Tooltip must be
+    // able to discover the per-window T065 dispatcher through it.
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
+    }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -625,17 +634,24 @@ void StandaloneWindow::reject_drop(Rect region) {
     if (impl_ && impl_->core) impl_->core->reject_drop(region);
 }
 
-struct EmbeddedView::Impl final : PlatformServices {
+struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     Impl(UI& ui, NativeParentHandle parent, Size size)
-        : core(ui,
+        : dispatcher_owner(std::make_shared<detail::DispatcherOwner>()),
+          core(ui,
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true},
-               parent),
-          dispatcher_owner(std::make_shared<detail::DispatcherOwner>()) {}
+               parent) {}
 
     ~Impl() override {
         if (dispatcher_owner) dispatcher_owner->shutdown();
+    }
+
+    // ViewCore receives this Impl as its PlatformServices object, so embedded
+    // retained policies discover the per-view T065 dispatcher here. The owner
+    // is declared first so ViewCore teardown can still query it.
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
     }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
@@ -648,8 +664,8 @@ struct EmbeddedView::Impl final : PlatformServices {
     }
     void reject_drop(Rect region) override { core.reject_drop(region); }
 
-    ViewCore core;
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    ViewCore core;
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
