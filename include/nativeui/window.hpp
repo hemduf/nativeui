@@ -20,8 +20,8 @@ struct WindowDesc {
     std::string title{"NativeUI"};
     Size size{720.0f, 520.0f};
     bool resizable{true};
-    std::optional<Size> min_size;
-    std::optional<Size> max_size;
+    std::optional<Size> min_size{};
+    std::optional<Size> max_size{};
 };
 
 enum class QuitPolicy {
