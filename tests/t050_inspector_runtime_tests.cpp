@@ -80,6 +80,12 @@ void query_reports_layout_dirty_and_exact_dirty_regions() {
     ui::UI ui{ui::Label{"Dirty"}};
     ui.resize({120.0f, 80.0f});
 
+    // resize() consumes layout immediately through the UI overlay-layout path.
+    // Create a real pending-layout state and verify that a diagnostic query
+    // observes it without consuming it.
+    ui.invalidate_layout();
+    NUI_CHECK(ui.layout_dirty());
+
     const auto pending = ui::debug::inspector_snapshot(ui);
     NUI_CHECK(!pending.nodes.empty());
     bool saw_layout_dirty = false;
@@ -87,6 +93,7 @@ void query_reports_layout_dirty_and_exact_dirty_regions() {
         saw_layout_dirty = saw_layout_dirty || node.layout_dirty;
     }
     NUI_CHECK(saw_layout_dirty);
+    NUI_CHECK(ui.layout_dirty());
     NUI_CHECK(pending.find(999999) == nullptr);
 
     ui::HeadlessRenderer renderer{{120.0f, 80.0f}};
