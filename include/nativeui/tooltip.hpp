@@ -242,6 +242,13 @@ public:
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+    template <class Child>
+    Tooltip(std::string text, std::chrono::milliseconds delay, Child&& child)
+        : text_(std::move(text)),
+          delay_(delay.count() < 0 ? std::chrono::milliseconds{0} : delay) {
+        children_.push_back(make_spec(std::forward<Child>(child)));
+    }
+
     Tooltip&& delay(std::chrono::milliseconds value) && noexcept {
         delay_ = value.count() < 0 ? std::chrono::milliseconds{0} : value;
         return std::move(*this);
