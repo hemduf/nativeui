@@ -20,9 +20,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` before T035 merge is `f99f94b9aa029c877e6ef90346d4ad962fff2ee9`. The recent baseline includes T067 startup regression closure PR #233, feature-example auto-registration PR #235 and staged CI qualification policy PR #230 on top of the completed T043/T061/T067/T045/T037/T058/T036/T065/T034/T060 foundations.
+Current `main` includes T035 / PR #225 as squash commit `0412b9245a799fe873908d2659146ec4395f978e`, plus the T067 startup regression closure PR #233, feature-example auto-registration PR #235 and staged CI qualification policy PR #230 on top of the completed T043/T061/T067/T045/T037/T058/T036/T065/T034/T060 foundations.
 
-T035 / issue #35 / PR #225 is the active final completion candidate. Production source/tests/build/workflows are frozen at executable head `882d29a6f6a4798c36336ed167555e33c6cc594a`. Normal CI run `34606092899` is green on Linux X11, Linux ASan+UBSan, Windows and macOS, including package contracts, Objective-C isolation and the T035 native standalone+embedded smoke. Final `CODE_REVIEW.md` is PASS with no Blocking/Important finding. The PR is Ready and only T042/T052 final-candidate qualification remains before merge.
+T035 is complete. Its frozen executable candidate `882d29a6f6a4798c36336ed167555e33c6cc594a` passed normal CI run `34606092899`, T042 Lifecycle Stress run `34608497925` and T052 v0.1 Release Gate run `34608497792`. Final `CODE_REVIEW.md` passed with no Blocking/Important finding and issue #35 is closed with `status:done`.
 
 Current dependency frontier:
 
@@ -31,7 +31,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
                                                    T058(done) ------------^
 
 dynamic/overlay:   T058(done) -> T061(done)
-                                      |-> T035(final qualification) -----> T068
+                                      |-> T035(done) --------------------> T068
                                       |-> T063 --------------------------> T068
                                       +-> T062
 
@@ -52,7 +52,7 @@ critical platform: T060(done) -> T065(done) -> T072 -> T064
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T035 and T063 consume completed T061 plus T034. T062 consumes completed T061 plus T065. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is reconciled independently.
+T063 consumes completed T061 plus T034. T062 consumes completed T061 plus T065. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is reconciled independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -76,17 +76,15 @@ T035 and T063 consume completed T061 plus T034. T062 consumes completed T061 plu
 
 ## Milestone 5 — Standard widget set
 
-**T030–T034 and T036 complete; T035 is in final qualification in PR #225.**
+**Complete for the v1 standard-widget scope.**
 
 - T030 Button — PR #94.
 - T031 Checkbox/Radio — PR #95.
 - T032 Slider/RangeSlider — PR #115.
 - T033 ProgressBar/Meter — PR #123.
 - T034 ScrollView — PR #135.
+- T035 ComboBox/PopupMenu — PR #225; implemented entirely on the generic T061 overlay stack with immutable open snapshots, exact keyboard/pointer/focus policy, T059 ReadOnly split, close-before-callback reentrancy, deterministic golden coverage and standalone/embedded native smoke.
 - T036 ListView/Tabs — PR #155; #212 / PR #213 adds deterministic paint-only hover behavior.
-- T035 ComboBox/PopupMenu — PR #225 completion candidate; implemented entirely on the generic T061 overlay stack with immutable open snapshots, exact keyboard/pointer/focus policy, T059 ReadOnly split, close-before-callback reentrancy, deterministic golden coverage and standalone/embedded native smoke. Normal exact-head CI and final code review are green; merge is gated only by Ready-triggered T042/T052 qualification.
-
-When PR #225 merges, Milestone 5 is complete for the v1 standard-widget scope defined by these tickets.
 
 ## Milestone 6 — Styling, theme and animation
 
@@ -94,7 +92,7 @@ When PR #225 merges, Milestone 5 is complete for the v1 standard-widget scope de
 
 T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 owns typed widget variants, T039 scoped style inheritance, and T040 animation must reuse T065 instead of introducing another scheduler.
 
-T035 also closes a dynamic-composition theme integration gap: retained nodes inserted after initial Tree mount now bind the owning Tree theme before lifecycle/paint, preventing T058/T061 popup subtrees from silently falling back to `default_theme()`.
+T035 also closed a dynamic-composition theme integration gap: retained nodes inserted after initial Tree mount bind the owning Tree theme before lifecycle/paint, preventing T058/T061 popup subtrees from silently falling back to `default_theme()`.
 
 ## Milestone 7 — Platform and embedded robustness
 
@@ -124,9 +122,11 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T035 — ComboBox and PopupMenu
 
-**Completion candidate in PR #225; final executable qualification in progress.** The delivered scope is selection/action policy over T061 only: no native popup window and no second popup registry. The candidate covers immutable snapshots, keyboard/pointer contracts, exact-once commit/action, no click-through, focus/source teardown, T059 ReadOnly semantics, reentrant callback safety, per-view isolation, dynamic theme inheritance, golden states and standalone/embedded native smoke.
+**Complete in PR #225 / issue #35.** The delivered scope is selection/action policy over T061 only: no native popup window and no second popup registry. It includes immutable snapshots, keyboard/pointer contracts, exact-once commit/action, no click-through, focus/source teardown, T059 ReadOnly semantics, reentrant callback safety, per-view isolation, dynamic theme inheritance, golden states and standalone/embedded native smoke. Normal CI, T042, T052 and final `CODE_REVIEW.md` all passed on the frozen executable candidate.
 
-After T035 merge, reconcile T063 / PR #227 onto the new main before continuing because both branches touch `ui.hpp`; do not preserve stale/conflicting T063 integration code by force. Then continue T063 in bounded TDD slices and T062 according to the current UI convergence order.
+### T063 — Dialog
+
+T063 / issue #75 / PR #227 is now the next overlay/UI convergence item. Its existing branch predates T035 and modifies `ui.hpp`; reconcile it onto current `main` first, preserving T035 overlay-command and availability-revalidation behavior. Then continue the missing Dialog presentation/action/focus/sizing/scrolling/teardown/example contracts in bounded TDD slices rather than force-merging stale integration code.
 
 ### T068 convergence
 
@@ -136,7 +136,7 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 
 ```text
 T036(done) -> T045(done) -> T067(done) -------------------\
-T058(done) -> T061(done) -> T035/T063 --------------------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
+T058(done) -> T061(done) -> T035(done) -> T063 -----------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
 T065(done) -> T072 -> T064 -------------------------------+
 T043(done) -----------> T066 ------------------------------/
 other explicit T069 dependencies --------------------------/
@@ -146,14 +146,12 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Finish T035 Ready qualification: require T042 + T052 green for executable head `882d29a6...`, then squash-merge PR #225 if no executable change occurred.
-2. Close/update issue #35 and mark `status:done` in the same completion cycle.
-3. Reconcile T063 / PR #227 onto post-T035 main, preserving the T035 overlay-command integration, then continue its missing Dialog policy/tests/example in TDD.
-4. Continue T062 after T063 according to the current UI convergence plan.
-5. Reconcile/qualify T044 / PR #145 independently; do not reuse T043 evidence.
-6. Continue T072 -> T064 and T066 in the independent platform lane.
-7. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
-8. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
+1. Reconcile T063 / PR #227 onto post-T035 `main`, preserve T035 `ui.hpp` behavior, then continue T063 missing contracts in TDD.
+2. Continue T062 after T063 according to the current UI convergence plan.
+3. Reconcile/qualify T044 / PR #145 independently; do not reuse T043 evidence.
+4. Continue T072 -> T064 and T066 in the independent platform lane.
+5. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
+6. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
 
 ## Prioritization rule
 
