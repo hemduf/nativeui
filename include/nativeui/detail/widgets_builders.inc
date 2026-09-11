@@ -271,15 +271,22 @@ public:
         return std::move(*this);
     }
 
+    TextArea&& style(TextAreaStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto placeholder = std::move(placeholder_);
+        auto style = std::move(style_);
         auto* state = state_;
         const auto max_length = max_length_;
         return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
-                     max_length]() mutable {
+                     max_length, style = std::move(style)]() mutable {
                         return std::make_unique<TextAreaComponent>(
-                            std::move(label), *state, std::move(placeholder), max_length);
+                            std::move(label), *state, std::move(placeholder), max_length,
+                            std::move(style));
                     },
                     {}};
     }
@@ -289,6 +296,7 @@ private:
     State<std::string>* state_{};
     std::string placeholder_;
     std::size_t max_length_{};
+    TextAreaStyle style_;
 };
 
 
