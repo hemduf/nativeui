@@ -65,13 +65,19 @@ public:
         enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
-        // Focus-out/platform deactivation abandons the active T063 Dialog
-        // without an application completion. This is reversible: unlike whole
-        // UI destruction it does not poison DialogState, so the same controller
-        // can show another dialog after the view is activated again.
-        if (dialog_state_ && dialog_state_->handle_deactivate()) {
-            prepare_overlay_layout();
+        // T063 deactivation suppresses the application callback and must not
+        // restore focus into a UI whose platform focus is already leaving. A
+        // live Dialog is therefore the one case where focus deactivation must
+        // precede overlay removal. Keep the historical T061/T035 order when no
+        // Dialog is active so unrelated anchored-overlay behavior is unchanged.
+        const bool active_dialog = dialog_state_ && dialog_state_->active_generation != 0;
+        if (active_dialog) {
+            tree_.deactivate_focus(platform);
+            if (dialog_state_->handle_deactivate()) prepare_overlay_layout();
+            close_anchored_overlays();
+            return;
         }
+
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
@@ -95,12 +101,18 @@ public:
         if (overlay_state_->entries.empty()) {
             const auto command_source = overlay_command_source(event);
             const auto result = tree_.dispatch(event, platform);
-            flush_pending_dialog_completion();
-            process_component_overlay_command(command_source, platform);
-            if (!overlay_state_->entries.empty()) {
-                prepare_overlay_layout();
-                enforce_new_modal_capture_barrier(platform);
+            const bool completing_dialog = has_pending_dialog_completion();
+            if (!completing_dialog) {
+                process_component_overlay_command(command_source, platform);
+                if (!overlay_state_->entries.empty()) {
+                    prepare_overlay_layout();
+                    enforce_new_modal_capture_barrier(platform);
+                }
             }
+            // T063 application completion is intentionally the final operation
+            // of this dispatch. The callback may replace or destroy this UI;
+            // after it runs, return using only the local result value.
+            if (completing_dialog) flush_pending_dialog_completion();
             return result;
         }
 
@@ -179,8 +191,10 @@ public:
 
         const auto command_source = overlay_command_source(event);
         const auto result = tree_.dispatch(event, platform);
-        flush_pending_dialog_completion();
-        process_component_overlay_command(command_source, platform);
+        const bool completing_dialog = has_pending_dialog_completion();
+        if (!completing_dialog) {
+            process_component_overlay_command(command_source, platform);
+        }
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
         // open. Resolve that source transition in the same outer dispatch, not
@@ -192,6 +206,11 @@ public:
         // unwinds; cancel the now-lower capture here, after Tree::dispatch has
         // reached that safe checkpoint, never reentrantly inside PointerDown.
         enforce_new_modal_capture_barrier(platform);
+
+        // Keep the application callback last for the same lifetime reason as
+        // the no-overlay path above. flush_pending_dialog_completion() first
+        // performs the retained detach and releases the per-UI Dialog slot.
+        if (completing_dialog) flush_pending_dialog_completion();
         return result;
     }
     EventResult cancel_pointer(PlatformServices& platform) {
@@ -383,6 +402,11 @@ private:
         // its anchor or open another T061 overlay directly.
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
+    }
+
+    [[nodiscard]] bool has_pending_dialog_completion() const noexcept {
+        return dialog_state_ && !dialog_state_->ui_tearing_down &&
+               static_cast<bool>(dialog_state_->pending_completion);
     }
 
     void finish_dialog_completion(
