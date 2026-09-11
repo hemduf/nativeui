@@ -3,25 +3,13 @@
 #include <nativeui/headless.hpp>
 #include <nativeui/inspector.hpp>
 #include <nativeui/ui.hpp>
-
-#include <memory>
+#include <nativeui/widgets.hpp>
 
 namespace {
 
-class FixedComponent final : public ui::Component {
-public:
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {80.0f, 40.0f};
-    }
-};
-
-ui::Spec fixed_spec() {
-    return ui::Spec{[] { return std::make_unique<FixedComponent>(); }, {}};
-}
-
 void state_is_per_ui_and_snapshot_is_value_based() {
-    ui::UI first{fixed_spec()};
-    ui::UI second{fixed_spec()};
+    ui::UI first{ui::Label{"First"}};
+    ui::UI second{ui::Label{"Second"}};
     first.resize({160.0f, 100.0f});
     second.resize({160.0f, 100.0f});
 
@@ -49,7 +37,7 @@ void state_is_per_ui_and_snapshot_is_value_based() {
 }
 
 void enable_and_selection_changes_request_only_one_repaint_each() {
-    ui::UI ui{fixed_spec()};
+    ui::UI ui{ui::Label{"Inspector"}};
     ui.resize({160.0f, 100.0f});
     ui::HeadlessRenderer renderer{{160.0f, 100.0f}};
     NUI_CHECK(renderer.render(ui));
@@ -77,7 +65,7 @@ void enable_and_selection_changes_request_only_one_repaint_each() {
 }
 
 void query_reports_pending_layout_and_stale_ids_are_absent() {
-    ui::UI ui{fixed_spec()};
+    ui::UI ui{ui::Label{"Dirty"}};
     ui.resize({120.0f, 80.0f});
 
     const auto dirty = ui::debug::inspector_snapshot(ui);
