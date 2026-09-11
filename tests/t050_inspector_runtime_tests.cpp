@@ -53,7 +53,9 @@ void state_is_per_ui_and_snapshot_is_value_based() {
 void destroyed_node_ids_disappear_without_stale_access() {
     ui::State<bool> present{true};
     ui::UI ui{ui::If{present, ui::Label{"Transient"}}};
+    test::MockPlatform platform;
     ui.resize({120.0f, 80.0f});
+    ui.activate(platform);
 
     const auto before = ui::debug::inspector_snapshot(ui);
     ui::NodeId transient_id = ui::kInvalidNodeId;
@@ -67,9 +69,10 @@ void destroyed_node_ids_disappear_without_stale_access() {
     NUI_CHECK(before.find(transient_id) != nullptr);
 
     present.set(false);
-    // T058 coalesces dynamic mutations until the next retained-tree boundary.
-    // Drive that documented reconciliation before querying the post-destruction
-    // diagnostic snapshot; the inspector itself must not invent lifecycle work.
+    // T058 installs dynamic structure observers at mount/activation and
+    // coalesces the resulting mutation until the next retained-tree boundary.
+    // Drive the documented activate -> state change -> resize sequence before
+    // querying the post-destruction snapshot.
     ui.resize({120.0f, 80.0f});
     const auto after = ui::debug::inspector_snapshot(ui);
     NUI_CHECK(after.find(transient_id) == nullptr);
@@ -77,6 +80,7 @@ void destroyed_node_ids_disappear_without_stale_access() {
     // The old value snapshot remains self-contained and safe to inspect after
     // the retained node has been destroyed.
     NUI_CHECK(before.find(transient_id) != nullptr);
+    ui.deactivate(platform);
 }
 
 void enable_and_selection_changes_request_only_one_repaint_each() {
