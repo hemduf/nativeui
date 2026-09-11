@@ -67,6 +67,10 @@ void destroyed_node_ids_disappear_without_stale_access() {
     NUI_CHECK(before.find(transient_id) != nullptr);
 
     present.set(false);
+    // T058 coalesces dynamic mutations until the next retained-tree boundary.
+    // Drive that documented reconciliation before querying the post-destruction
+    // diagnostic snapshot; the inspector itself must not invent lifecycle work.
+    ui.resize({120.0f, 80.0f});
     const auto after = ui::debug::inspector_snapshot(ui);
     NUI_CHECK(after.find(transient_id) == nullptr);
 
