@@ -305,8 +305,8 @@ void suite() {
     // outer dispatch checkpoint; only then may the application completion run.
     {
         test::MockPlatform platform;
-        ui::UI tree{ui::Spacer{200.0f, 120.0f}};
-        tree.resize({200.0f, 120.0f});
+        ui::UI tree{ui::Spacer{320.0f, 240.0f}};
+        tree.resize({320.0f, 240.0f});
         tree.activate(platform);
 
         auto state = std::make_shared<CloseFromInputState>();
@@ -321,10 +321,10 @@ void suite() {
             reentrant_show = second.show(dialog_spec(), [](ui::DialogResult) {});
         }) == ui::DialogShowResult::Shown);
         state->close = [&first] { return first.close(); };
-        tree.resize({200.0f, 120.0f});
+        tree.resize({320.0f, 240.0f});
 
         NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerDown, 100.0f, 60.0f), platform) ==
+                      test::pointer(ui::InputType::PointerDown, 160.0f, 120.0f), platform) ==
                   ui::EventResult::Handled);
         NUI_CHECK(state->close_result);
         NUI_CHECK(state->returned_from_input);
