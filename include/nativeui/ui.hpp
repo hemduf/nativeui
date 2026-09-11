@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/dialog_state.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 
@@ -12,6 +13,8 @@
 #include <vector>
 
 namespace ui {
+
+class Dialog;
 
 /// One retained NativeUI component tree.
 ///
@@ -28,11 +31,20 @@ public:
 
     template <class Root>
     UI(Root&& root, Theme theme)
-        : overlay_state_(std::make_shared<detail::OverlayState>()),
+        : dialog_state_(std::make_shared<detail::DialogState>()),
+          overlay_state_(std::make_shared<detail::OverlayState>()),
           tree_(compile(detail::make_overlay_host_spec(
               make_spec(std::forward<Root>(root)), overlay_state_))) {
         tree_.set_theme(std::move(theme));
         tree_.mount();
+    }
+
+    ~UI() {
+        // T063 distinguishes whole-UI teardown from explicit Dialog controller
+        // destruction. Publish that terminal state before Tree/overlay members
+        // begin reverse-order destruction so a controller that outlives this UI
+        // becomes inert and never invokes an application completion callback.
+        if (dialog_state_) dialog_state_->begin_ui_teardown();
     }
 
     [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
@@ -187,8 +199,10 @@ public:
     }
 
 private:
+    friend class Dialog;
+
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
-        return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+        return a.x == b.x && a.w == b.w && a.y == b.y && a.h == b.h;
     }
 
     [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {
@@ -262,8 +276,10 @@ private:
         for (const auto id : anchored) (void)overlay_state_->close_id(id);
     }
 
-    // State must outlive Tree because the retained OverlayHost clears its T058
-    // structural invalidator during tree teardown.
+    // Dialog and overlay state must outlive Tree because controllers/retained
+    // OverlayHost components can retain weak/shared lifetime seams through
+    // teardown. No process-global policy state is introduced.
+    std::shared_ptr<detail::DialogState> dialog_state_;
     std::shared_ptr<detail::OverlayState> overlay_state_;
     Tree tree_;
     Size viewport_{};
