@@ -67,6 +67,15 @@ private:
     std::vector<ui::Spec> children_;
 };
 
+ui::DialogSpec dialog_spec() {
+    ui::DialogSpec spec;
+    spec.title = "Confirm";
+    spec.body = ui::make_spec(ui::Spacer{80.0f, 40.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    return spec;
+}
+
 void suite() {
     // Existing result and tree-owned Tab semantics.
     {
@@ -196,6 +205,37 @@ void suite() {
                   ui::EventResult::Handled);
         NUI_CHECK(child->pointer_move == 1);
         NUI_CHECK(parent->pointer_move == 1);
+    }
+
+    // T063 is policy over T061: while active, the modal barrier owns pointer
+    // input outside the centered dialog and underlying content cannot observe
+    // it. Programmatic close removes that barrier and root input resumes.
+    {
+        auto child = std::make_shared<test::ProbeState>();
+        child->input_result = ui::EventResult::Ignored;
+        auto root = std::make_shared<RouteState>();
+        root->result = ui::EventResult::Handled;
+        ui::UI tree{RouteContainer{root, test::Probe{child}}};
+        test::MockPlatform platform;
+        tree.resize({200.0f, 120.0f});
+        tree.activate(platform);
+
+        ui::Dialog dialog{tree};
+        NUI_CHECK(dialog.show(dialog_spec(), [](ui::DialogResult) {}) ==
+                  ui::DialogShowResult::Shown);
+        tree.resize({200.0f, 120.0f});
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 4.0f, 4.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(root->pointer_down == 0);
+
+        NUI_CHECK(dialog.close());
+        tree.resize({200.0f, 120.0f});
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 40.0f, 40.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(root->pointer_down == 1);
     }
 }
 
