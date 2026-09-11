@@ -14,6 +14,7 @@ set(_platform_source "${SOURCE_DIR}/src/pugl_skia.cpp")
 set(_window_header "${SOURCE_DIR}/include/nativeui/window.hpp")
 set(_source "${SOURCE_DIR}/src/linux_dbus.cpp")
 set(_codec_source "${SOURCE_DIR}/src/linux_dbus_codec.cpp")
+set(_linux_build_doc "${SOURCE_DIR}/docs/linux-build.md")
 
 foreach(_required IN ITEMS
     "${_module}"
@@ -25,7 +26,8 @@ foreach(_required IN ITEMS
     "${_platform_source}"
     "${_window_header}"
     "${_source}"
-    "${_codec_source}")
+    "${_codec_source}"
+    "${_linux_build_doc}")
   if(NOT EXISTS "${_required}")
     message(FATAL_ERROR "T072 RED: missing required internal Linux D-Bus transport file: ${_required}")
   endif()
@@ -39,6 +41,7 @@ file(READ "${_application_backend_source}" _application_backend_text)
 file(READ "${_platform_source}" _platform_source_text)
 file(READ "${_window_header}" _window_header_text)
 file(READ "${_source}" _source_text)
+file(READ "${_linux_build_doc}" _linux_build_doc_text)
 
 # The root owns only the Linux platform gate and module invocation; the module
 # owns the private target/source/package details so they do not leak into
@@ -66,6 +69,20 @@ foreach(_needle IN ITEMS
   string(FIND "${_dbus_module}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 contract missing Linux D-Bus module token: ${_needle}")
+  endif()
+endforeach()
+
+# The Linux build/validation documentation must state the concrete system
+# prerequisite and the pkg-config module expected by package consumers.
+foreach(_needle IN ITEMS
+    "libdbus-1"
+    "libdbus-1-dev"
+    "pkg-config"
+    "dbus-1"
+    "macOS and Windows")
+  string(FIND "${_linux_build_doc_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T072 Linux prerequisite documentation missing token: ${_needle}")
   endif()
 endforeach()
 

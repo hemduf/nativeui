@@ -30,10 +30,34 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    for (std::size_t i = 0; i < kLinuxDbusMaxObjectPaths; ++i) {
+        const auto id = transport->register_object_path(
+            client_a,
+            "/org/nativeui/T072/ApplicationCapacity/Path" + std::to_string(i),
+            [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            });
+        if (id == kInvalidLinuxDbusObjectRegistrationId) {
+            return EXIT_FAILURE;
+        }
+    }
+    if (transport->object_path_count() != kLinuxDbusMaxObjectPaths ||
+        transport->register_object_path(
+            client_b,
+            "/org/nativeui/T072/ApplicationCapacity/Overflow",
+            [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            }) != kInvalidLinuxDbusObjectRegistrationId ||
+        owner.transport_if_started() != transport || transport->unique_name() != first_unique_name ||
+        owner.client_count() != 2) {
+        return EXIT_FAILURE;
+    }
+
     owner.release_client(client_a);
     owner.release_client(client_a);
     if (owner.transport_if_started() != transport || !transport->running() ||
-        owner.client_count() != 1 || transport->client_count() != 1) {
+        owner.client_count() != 1 || transport->client_count() != 1 ||
+        transport->object_path_count() != 0 || transport->unique_name() != first_unique_name) {
         return EXIT_FAILURE;
     }
 
