@@ -43,3 +43,14 @@ target_include_directories(t064_owner_isolation_contract PRIVATE
 )
 t064_enable_warnings(t064_owner_isolation_contract)
 add_test(NAME t064.owner_isolation_contract COMMAND t064_owner_isolation_contract)
+
+add_executable(t064_inline_backend_contract
+  inline_backend_contract.cpp
+  "${CMAKE_CURRENT_LIST_DIR}/../../src/desktop_services.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp"
+)
+target_include_directories(t064_inline_backend_contract PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/../../include"
+)
+t064_enable_warnings(t064_inline_backend_contract)
+add_test(NAME t064.inline_backend_contract COMMAND t064_inline_backend_contract)
