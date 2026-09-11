@@ -6,17 +6,49 @@ if(NOT DEFINED OUTER_BUILD OR NOT IS_DIRECTORY "${OUTER_BUILD}")
   message(FATAL_ERROR "NativeUI two-consumer Objective-C check: invalid OUTER_BUILD: ${OUTER_BUILD}")
 endif()
 
-set(_pugl_source "${OUTER_BUILD}/_deps/pugl_src-src")
-if(NOT EXISTS "${_pugl_source}/include/pugl/pugl.h")
+# CPM normally materializes dependencies below the build tree. When
+# CPM_SOURCE_CACHE is enabled, however, DOWNLOAD_ONLY packages live under the
+# shared cache instead. Resolve either layout so this runtime-isolation check
+# validates the configured dependency instead of assuming one CPM storage mode.
+function(nativeui_find_dependency_root out_var build_candidate cache_package)
+  set(_candidates "${build_candidate}")
+  if(DEFINED ENV{CPM_SOURCE_CACHE} AND NOT "$ENV{CPM_SOURCE_CACHE}" STREQUAL "")
+    file(GLOB _cache_candidates LIST_DIRECTORIES true
+      "$ENV{CPM_SOURCE_CACHE}/${cache_package}/*")
+    list(APPEND _candidates ${_cache_candidates})
+  endif()
+
+  foreach(_candidate IN LISTS _candidates)
+    foreach(_marker ${ARGN})
+      if(EXISTS "${_candidate}/${_marker}")
+        set(${out_var} "${_candidate}" PARENT_SCOPE)
+        return()
+      endif()
+    endforeach()
+  endforeach()
+
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+nativeui_find_dependency_root(
+  _pugl_source
+  "${OUTER_BUILD}/_deps/pugl_src-src"
+  pugl_src
+  "include/pugl/pugl.h")
+if(NOT _pugl_source)
   message(FATAL_ERROR
-    "NativeUI two-consumer Objective-C check: configured Pugl source not found at ${_pugl_source}")
+    "NativeUI two-consumer Objective-C check: configured Pugl source not found in build tree or CPM_SOURCE_CACHE")
 endif()
 
-set(_skia_root "${OUTER_BUILD}/_deps/skia_prebuilt-src")
-if(NOT EXISTS "${_skia_root}/include/include/core/SkCanvas.h"
-   AND NOT EXISTS "${_skia_root}/build/include/include/core/SkCanvas.h")
+nativeui_find_dependency_root(
+  _skia_root
+  "${OUTER_BUILD}/_deps/skia_prebuilt-src"
+  skia_prebuilt
+  "include/include/core/SkCanvas.h"
+  "build/include/include/core/SkCanvas.h")
+if(NOT _skia_root)
   message(FATAL_ERROR
-    "NativeUI two-consumer Objective-C check: configured Skia package not found at ${_skia_root}")
+    "NativeUI two-consumer Objective-C check: configured Skia package not found in build tree or CPM_SOURCE_CACHE")
 endif()
 
 find_program(_nm NAMES nm REQUIRED)
