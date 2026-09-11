@@ -136,6 +136,9 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    void handle_native_close_request();
+    void schedule_close_completion();
+    void complete_close();
     void mark_application_window_closed() noexcept;
     void unregister_from_application() noexcept;
 
