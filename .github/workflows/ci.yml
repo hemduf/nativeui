@@ -122,7 +122,22 @@ jobs:
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
           sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone'
 
+      # Some feature-example self-tests initialize the native Pugl world even
+      # when they do not show a window. Keep the whole Linux/X11 test suite on
+      # a virtual display so every current and future example has the same
+      # display contract as the renderer smoke above.
+      - name: Test Linux X11
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ctest --test-dir build --output-on-failure -C Release
+
       - name: Test
+        if: runner.os != 'Linux'
         run: ctest --test-dir build --output-on-failure -C Release
 
       - name: T047 external package contract
