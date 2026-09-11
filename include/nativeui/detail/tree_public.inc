@@ -11,6 +11,12 @@
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         focus_structure_dirty_ = true;
+        pointer_passthrough_dynamic_root_ =
+            dynamic_source(*root_) != nullptr &&
+            !root_->component->pointer_targetable() &&
+            !root_->component->focusable() &&
+            !root_->component->clips_children() &&
+            !root_->component->is_focus_scope();
         initialize_availability(*root_);
         availability_structure_dirty_ = false;
         mount_node(*root_);
@@ -218,6 +224,16 @@
             return result;
         };
 
+        // A dynamic structural root that is non-interactive, non-clipping and
+        // not a focus boundary contributes no pointer target of its own. When it
+        // currently retains exactly one child (the ordinary no-overlay UI case),
+        // start pointer hit testing at that child. Routing still bubbles through
+        // the parent, so structural callbacks/ownership semantics are unchanged.
+        Node& pointer_hit_root =
+            pointer_passthrough_dynamic_root_ && root_->children.size() == 1
+                ? *root_->children.front()
+                : *root_;
+
         // Pointer targeting is intentionally independent from keyboard focus.
         // Reverse child order matches paint stacking: later/overlay children are
         // input-frontmost. Inert visual/layout nodes retain the historic behavior
@@ -304,7 +320,7 @@
             if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
 
             auto* target = hit_test_pointer(
-                hit_test_pointer, *root_, event.position, viewport_rect());
+                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
             (void)update_pointer_hover_target(target, event, platform);
             if (target) {
                 focus_nearest_ancestor(target);
@@ -315,7 +331,7 @@
 
         if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
             auto* target = hit_test_pointer(
-                hit_test_pointer, *root_, event.position, viewport_rect());
+                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
             (void)update_pointer_hover_target(target, event, platform);
             if (auto* owner = pointer_capture_owner()) {
                 return finish(route_from(*owner, event, platform));
@@ -328,7 +344,7 @@
 
         if (event.type == InputType::PointerUp) {
             auto* target = hit_test_pointer(
-                hit_test_pointer, *root_, event.position, viewport_rect());
+                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
             (void)update_pointer_hover_target(target, event, platform);
             if (auto* owner = pointer_capture_owner()) {
                 const auto result = route_from(*owner, event, platform);
