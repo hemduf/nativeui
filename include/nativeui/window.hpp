@@ -116,7 +116,8 @@ public:
 
     /// Called for native/user close requests only. An empty callback is
     /// equivalent to accepting the close. Programmatic request_close() never
-    /// calls this function.
+    /// calls this function. Native requests are evaluated at the next safe
+    /// Dispatcher checkpoint after the OS callback has unwound.
     void on_close_request(std::function<CloseDecision()> callback);
 
     /// Called exactly once after an accepted close completes while this C++
@@ -137,6 +138,7 @@ public:
 
 private:
     void handle_native_close_request();
+    void process_native_close_request();
     void schedule_close_completion();
     void complete_close();
     void mark_application_window_closed() noexcept;
