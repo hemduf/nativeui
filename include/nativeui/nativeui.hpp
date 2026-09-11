@@ -7,6 +7,7 @@
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/dispatcher.hpp>
+#include <nativeui/semantics.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>
 #include <nativeui/theme.hpp>
@@ -25,9 +26,11 @@
 #include <nativeui/component.hpp>
 #include <nativeui/component_state.hpp>
 #include <nativeui/dynamic.hpp>
+#include <nativeui/overlay.hpp>
 #include <nativeui/command.hpp>
 #include <nativeui/focus.hpp>
 #include <nativeui/layout.hpp>
+#include <nativeui/virtual_list.hpp>
 #include <nativeui/widgets.hpp>
 #include <nativeui/ui.hpp>
 #include <nativeui/headless.hpp>

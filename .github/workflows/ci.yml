@@ -3,16 +3,35 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CODE_REVIEW.md'
+      - 'CONTEXT.md'
+      - 'ROADMAP.md'
+      - 'VALIDATION.md'
+      - 'DESIGN.md'
+      - 'THIRD_PARTY.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CODE_REVIEW.md'
+      - 'CONTEXT.md'
+      - 'ROADMAP.md'
+      - 'VALIDATION.md'
+      - 'DESIGN.md'
+      - 'THIRD_PARTY.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
 
 jobs:
   build:
@@ -37,6 +56,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-
+
+      - name: CI workflow policy contract
+        if: runner.os == 'Linux'
+        run: python3 tests/ci_policy_contract.py
 
       - name: T047 public attachment contract
         run: >-
@@ -122,7 +153,22 @@ jobs:
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
           sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone'
 
+      # Some feature-example self-tests initialize the native Pugl world even
+      # when they do not show a window. Keep the whole Linux/X11 test suite on
+      # a virtual display so every current and future example has the same
+      # display contract as the renderer smoke above.
+      - name: Test Linux X11
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ctest --test-dir build --output-on-failure -C Release
+
       - name: Test
+        if: runner.os != 'Linux'
         run: ctest --test-dir build --output-on-failure -C Release
 
       - name: T047 external package contract
@@ -189,6 +235,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-
 
       - name: T047 public attachment contract
         run: >-

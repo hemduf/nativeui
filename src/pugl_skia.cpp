@@ -35,3 +35,5 @@ using ViewCore = detail::ViewCore;
 #include "detail/pugl_skia_windows.inc"
 
 } // namespace ui
+
+#include "detail/pugl_skia_t043.inc"

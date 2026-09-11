@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <sstream>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef NATIVEUI_GOLDEN_BASELINE_DIR
@@ -235,6 +236,55 @@ bool verify_label(bool update) {
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+bool verify_overlay_portal(bool update) {
+    // The retained root owns a deliberately small nested clip. T061 overlays
+    // are siblings in the per-UI overlay host, so the lower red surface must
+    // paint outside that ordinary root clip. The later Ignore overlay must
+    // still paint on top even though pointer hit testing ignores its subtree.
+    ui::UI tree{
+        ui::Padding{3.0f,
+            ui::Clip{
+                ui::Canvas{8.0f, 8.0f, [](ui::CanvasContext2D& g) {
+                    g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
+                                {0.0f, 0.0f, 1.0f, 1.0f});
+                }}}}
+    };
+
+    ui::OverlaySpec lower;
+    lower.placement = ui::OverlayPlacement::Center;
+    lower.content = ui::make_spec(
+        ui::Canvas{6.0f, 4.0f, [](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
+                        {1.0f, 0.0f, 0.0f, 1.0f});
+        }});
+    const auto lower_handle = tree.show_overlay(std::move(lower));
+
+    ui::OverlaySpec upper;
+    upper.placement = ui::OverlayPlacement::Center;
+    upper.pointer_policy = ui::OverlayPointerPolicy::Ignore;
+    upper.content = ui::make_spec(
+        ui::Canvas{2.0f, 2.0f, [](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, g.width(), g.height()},
+                        {0.0f, 1.0f, 0.0f, 1.0f});
+        }});
+    const auto upper_handle = tree.show_overlay(std::move(upper));
+    if (!lower_handle.valid() || !upper_handle.valid()) return false;
+
+    ui::HeadlessRenderer renderer{{8.0f, 8.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    CompareOptions options;
+    options.channel_tolerance = 1;
+    options.compare_regions = {
+        Region{0, 0, 1, 1}, // renderer background outside root/overlays
+        Region{1, 2, 1, 1}, // lower overlay visibly escapes root clip
+        Region{3, 3, 2, 2}, // later Ignore overlay still paints topmost
+    };
+    return test::golden::verify(
+        "overlay_portal_stack", test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
+}
+
 int run_suite(bool update) {
     comparator_self_check();
     failure_artifact_self_check();
@@ -244,6 +294,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_toggle(update));
     NUI_CHECK(verify_paths(update));
     NUI_CHECK(verify_label(update));
+    NUI_CHECK(verify_overlay_portal(update));
     return 0;
 }
 
