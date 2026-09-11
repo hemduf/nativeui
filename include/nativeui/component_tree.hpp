@@ -3,6 +3,7 @@
 #include <nativeui/component_base.hpp>
 #include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/focus_group.hpp>
+#include <nativeui/detail/interaction_observer.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/theme.hpp>
 
