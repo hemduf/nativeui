@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 
@@ -57,13 +58,16 @@ public:
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         // Keep the no-overlay path as close as possible to the pre-T061 UI
-        // dispatch contract. A root callback may still show an overlay while
-        // Tree::dispatch is active, so re-check afterwards and enforce a newly
-        // created modal capture barrier without paying overlay layout/policy
-        // costs for the steady-state empty stack.
+        // dispatch contract. T035 component requests are drained only after
+        // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
+        // the source identity before dispatch because application providers may
+        // change availability/focus while the source component is still alive.
         if (overlay_state_->entries.empty()) {
+            const auto command_source = overlay_command_source(event);
             const auto result = tree_.dispatch(event, platform);
+            process_component_overlay_command(command_source, platform);
             if (!overlay_state_->entries.empty()) {
+                prepare_overlay_layout();
                 enforce_new_modal_capture_barrier(platform);
             }
             return result;
@@ -80,8 +84,9 @@ public:
         // delivery: an outside-dismiss PointerDown is consumed and must never
         // click through to lower content in the same event, while Escape is
         // owned by the topmost eligible overlay before a focused root control
-        // can consume it. Logical close invalidates the handle immediately;
-        // retained destruction remains deferred through the T058 queue.
+        // can consume it. T035 widget overlays resolve retained teardown here so
+        // focus restoration is complete before returning; generic T061 overlays
+        // retain their pre-T035 deferred dismissal timing.
         if (event.type == InputType::PointerDown) {
             for (auto it = overlay_state_->entries.rbegin();
                  it != overlay_state_->entries.rend(); ++it) {
@@ -94,8 +99,11 @@ public:
                 }
 
                 if (it->spec.dismiss_on_outside_pointer_down) {
+                    const bool resolve_widget_teardown = it->spec.anchor &&
+                        anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
                     (void)overlay_state_->close_id(id);
+                    if (resolve_widget_teardown) prepare_overlay_layout();
                     return EventResult::Handled;
                 }
 
@@ -107,8 +115,11 @@ public:
             for (auto it = overlay_state_->entries.rbegin();
                  it != overlay_state_->entries.rend(); ++it) {
                 if (it->spec.dismiss_on_escape) {
+                    const bool resolve_widget_teardown = it->spec.anchor &&
+                        anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
                     (void)overlay_state_->close_id(id);
+                    if (resolve_widget_teardown) prepare_overlay_layout();
                     return EventResult::Handled;
                 }
 
@@ -120,9 +131,30 @@ public:
                     return EventResult::Handled;
                 }
             }
+        } else if (event.type == InputType::KeyDown && event.key == Key::Tab) {
+            // T035 popups close on Tab before the tree performs ordinary focus
+            // traversal. The policy is anchored-component metadata rather than
+            // a second popup stack or a T061-wide behavior change.
+            for (auto it = overlay_state_->entries.rbegin();
+                 it != overlay_state_->entries.rend(); ++it) {
+                if (it->spec.anchor && anchor_dismisses_on_tab(*it->spec.anchor)) {
+                    const auto id = it->id;
+                    (void)overlay_state_->close_id(id);
+                    prepare_overlay_layout();
+                    break;
+                }
+                if (it->spec.mode == OverlayMode::Modal) break;
+            }
         }
 
+        const auto command_source = overlay_command_source(event);
         const auto result = tree_.dispatch(event, platform);
+        process_component_overlay_command(command_source, platform);
+
+        // Tree::dispatch may have removed/disabled an anchor while a popup was
+        // open. Resolve that source transition in the same outer dispatch, not
+        // on a later paint/input event.
+        if (!overlay_state_->entries.empty()) prepare_overlay_layout();
 
         // A callback may have captured the pointer and shown a modal in the
         // same dispatch. T058 mounts that modal only after the callback stack
@@ -191,6 +223,135 @@ private:
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
     }
 
+    [[nodiscard]] static Node* find_node(Node& node, NodeId id) noexcept {
+        if (node.id == id) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = find_node(*child, id)) return found;
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] bool anchor_dismisses_on_tab(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->dismiss_overlay_on_tab();
+    }
+
+    [[nodiscard]] bool anchor_dismisses_when_disabled(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->dismiss_overlay_when_disabled();
+    }
+
+    [[nodiscard]] bool anchor_dismisses_when_read_only(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->dismiss_overlay_when_read_only();
+    }
+
+    [[nodiscard]] static bool event_may_queue_overlay_command(const InputEvent& event) noexcept {
+        // T035 requests can only be produced by activation/navigation keys or a
+        // completed pointer press. Keeping the ordinary PointerMove/Right-key
+        // path entirely free of component discovery preserves the T051 dispatch
+        // budget while command ownership stays per-view and UI-thread confined.
+        if (event.type == InputType::PointerUp) return true;
+        if (event.type == InputType::KeyUp) return event.key == Key::Space;
+        if (event.type != InputType::KeyDown) return false;
+        return event.key == Key::Down || event.key == Key::Enter || event.key == Key::Space;
+    }
+
+    [[nodiscard]] Node* focused_node() noexcept {
+        if (!tree_.focus_active_ || tree_.focusables_.empty() ||
+            tree_.focused_index_ >= tree_.focusables_.size()) {
+            return nullptr;
+        }
+        return tree_.focusables_[tree_.focused_index_];
+    }
+
+    [[nodiscard]] NodeId overlay_command_source(const InputEvent& event) noexcept {
+        if (!event_may_queue_overlay_command(event)) return kInvalidNodeId;
+        auto* node = focused_node();
+        return node ? node->id : kInvalidNodeId;
+    }
+
+    [[nodiscard]] std::optional<detail::OverlayComponentCommand>
+    take_overlay_command(NodeId source_id) {
+        if (source_id == kInvalidNodeId || !tree_.root_) return std::nullopt;
+        auto* node = find_node(*tree_.root_, source_id);
+        if (!node) return std::nullopt;
+        auto* source = dynamic_cast<detail::OverlayCommandSource*>(node->component.get());
+        if (!source) return std::nullopt;
+        return source->take_overlay_command();
+    }
+
+    [[nodiscard]] bool node_is_focused(NodeId id) noexcept {
+        const auto* node = focused_node();
+        return node && node->id == id;
+    }
+
+    [[nodiscard]] bool guarded_anchor_allows_commit(
+        NodeId id, bool suppress_when_read_only) const noexcept {
+        if (id == kInvalidNodeId) return true;
+        const auto availability = tree_.component_availability(id);
+        if (!availability || availability->visibility != VisibilityMode::Visible ||
+            !availability->enabled) {
+            return false;
+        }
+        return !suppress_when_read_only || !availability->read_only;
+    }
+
+    void process_component_overlay_command(
+        NodeId source_id, PlatformServices& platform) {
+        auto command = take_overlay_command(source_id);
+        if (!command) return;
+
+        if (command->kind == detail::OverlayComponentCommandKind::Show) {
+            auto on_shown = std::move(command->on_shown);
+            const bool suppress_when_read_only = anchor_dismisses_when_read_only(source_id);
+            const bool source_still_valid = node_is_focused(source_id) &&
+                guarded_anchor_allows_commit(source_id, suppress_when_read_only);
+            if (!source_still_valid) {
+                // Application-supplied option/item providers may mutate retained
+                // availability or focus while the opening event is still being
+                // dispatched. Consume the already-taken request, report an
+                // invalid handle so the anchor clears opener suppression, and
+                // never resurrect a stale popup after focus later returns.
+                if (on_shown) on_shown({});
+                return;
+            }
+
+            const auto handle = show_overlay(std::move(command->overlay));
+            if (on_shown) on_shown(handle);
+            prepare_overlay_layout();
+            enforce_new_modal_capture_barrier(platform);
+            return;
+        }
+
+        const auto guard_anchor = command->guard_anchor;
+        const bool suppress_when_read_only = command->suppress_when_anchor_read_only;
+        auto callback = std::move(command->after_close);
+
+        // This is the T035 commit/reentrancy checkpoint: logical close,
+        // retained detach and focus/capture reconciliation all complete before
+        // application state/callback code is invoked.
+        (void)close_overlay(command->handle);
+        prepare_overlay_layout();
+        const bool allowed = guarded_anchor_allows_commit(
+            guard_anchor, suppress_when_read_only);
+        if (allowed && callback) callback();
+
+        // The application callback may invalidate dynamic composition, remove
+        // its anchor or open another T061 overlay directly.
+        prepare_overlay_layout();
+        enforce_new_modal_capture_barrier(platform);
+    }
+
     [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {
         for (auto it = overlay_state_->entries.rbegin();
              it != overlay_state_->entries.rend(); ++it) {
@@ -222,7 +383,11 @@ private:
             const auto availability = tree_.component_availability(*entry.spec.anchor);
             const auto bounds = tree_.overlay_anchor_bounds(*entry.spec.anchor);
             if (!availability || !bounds ||
-                availability->visibility != VisibilityMode::Visible) {
+                availability->visibility != VisibilityMode::Visible ||
+                (!availability->enabled &&
+                 anchor_dismisses_when_disabled(*entry.spec.anchor)) ||
+                (availability->read_only &&
+                 anchor_dismisses_when_read_only(*entry.spec.anchor))) {
                 stale.push_back(entry.id);
                 continue;
             }
