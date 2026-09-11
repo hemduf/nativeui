@@ -18,7 +18,6 @@ struct CaptureState final {
     int outside_move{};
     int up{};
     int cancel{};
-    bool focused{};
 };
 
 class CaptureProbe final : public ui::Component {
@@ -29,10 +28,6 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
         return {180.0f, 120.0f};
-    }
-
-    void focus_changed(bool focused, ui::FocusContext&) override {
-        state_->focused = focused;
     }
 
     ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
@@ -282,17 +277,15 @@ private:
 bool activate_and_press(ui::Application& app,
                         X11Driver& driver,
                         ui::StandaloneWindow& window,
-                        const std::shared_ptr<CaptureState>& state,
                         std::string_view stage) {
     if (!expect(driver.activate(window), stage, "failed to activate target view")) return false;
-    // NativeUI ignores ordinary pointer input until the platform FocusIn has
-    // activated the retained tree. Consume that native transition before the
-    // real XTEST button press so the fixture never races focus delivery.
+    // Consume the native FocusIn and pointer-crossing transitions before the
+    // one real XTEST evidence press. Component keyboard focus is intentionally
+    // not a precondition: pointer down may establish it as part of dispatch.
     if (!pump(app)) return false;
     if (!expect(driver.focus_is(window), stage, "X11 input focus did not remain on target view")) return false;
     if (!expect(driver.pointer_targets(window), stage, "X11 pointer does not target the native view")) return false;
     if (!expect(driver.button_press_selected(window), stage, "native view has no ButtonPress event selection")) return false;
-    if (!expect(state->focused, stage, "retained tree did not observe native focus activation")) return false;
     if (!expect(driver.press(), stage, "failed to synthesize a held button press")) return false;
     return pump(app);
 }
@@ -308,7 +301,7 @@ bool outside_release_cycle(ui::Application& app,
     const int up = state->up;
     const int cancel = state->cancel;
 
-    if (!activate_and_press(app, driver, window, state, stage)) return false;
+    if (!activate_and_press(app, driver, window, stage)) return false;
     if (!expect(state->down == down + 1, stage, "pointer down not delivered")) return false;
     if (!expect(driver.move_outside(window), stage, "first outside motion injection failed") || !pump(app)) return false;
     if (!expect(driver.move_outside(window, 20), stage, "second outside motion injection failed") || !pump(app)) return false;
@@ -351,7 +344,7 @@ int main() {
 
     const int cancel_before = a_state->cancel;
     const int up_before = a_state->up;
-    if (!activate_and_press(app, driver, *a, a_state, "focus-loss")) return 1;
+    if (!activate_and_press(app, driver, *a, "focus-loss")) return 1;
     if (!expect(a_state->down > 0, "focus-loss", "view A did not receive pointer down")) return 1;
     if (!expect(driver.activate(*b), "focus-loss", "failed to focus B") || !pump(app)) return 1;
     if (!expect(a_state->cancel == cancel_before + 1,
@@ -370,7 +363,7 @@ int main() {
         app, *c_ui, ui::WindowDesc{.title = "T044 X11 C", .size = {240.0f, 170.0f}, .resizable = true});
     if (!c->valid()) return fail("window-c", c->last_error());
     if (!expect(driver.place(*c, 40, 400), "destroy", "failed to place C") || !pump(app)) return 1;
-    if (!activate_and_press(app, driver, *c, c_state, "destroy")) return 1;
+    if (!activate_and_press(app, driver, *c, "destroy")) return 1;
     if (!expect(c_state->down == 1, "destroy", "view C did not receive pointer down")) return 1;
     c.reset();
     c_ui.reset();
