@@ -1,3 +1,4 @@
+#include <nativeui/detail/semantic_snapshot.hpp>
 #include <nativeui/semantics.hpp>
 
 #include <cstdint>
@@ -140,6 +141,77 @@ void semantic_tree_generation_contract() {
     T045_CHECK(tree.nodes.size() == 1);
 }
 
+ui::SemanticTreeSnapshot make_diff_snapshot() {
+    ui::SemanticTreeSnapshot tree;
+    tree.generation = 3;
+    tree.root = 1;
+
+    ui::SemanticNodeSnapshot root;
+    root.id = 1;
+    root.parent = ui::kInvalidSemanticId;
+    root.bounds = {0.0f, 0.0f, 100.0f, 40.0f};
+    root.info.role = ui::SemanticRole::Button;
+    root.info.name = "Apply";
+    root.info.enabled = true;
+    root.info.focusable = true;
+    root.info.actions = {ui::SemanticAction::Activate, ui::SemanticAction::Focus};
+    tree.nodes.push_back(std::move(root));
+    return tree;
+}
+
+void semantic_snapshot_diff_ignores_generation_only_changes() {
+    auto before = make_diff_snapshot();
+    auto after = before;
+    after.generation = 99;
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    T045_CHECK(changes.empty());
+}
+
+void semantic_snapshot_diff_classifies_exposed_changes_once() {
+    const auto before = make_diff_snapshot();
+    auto after = before;
+
+    ui::SemanticNodeSnapshot child;
+    child.id = 2;
+    child.parent = 1;
+    child.bounds = {0.0f, 20.0f, 100.0f, 20.0f};
+    child.info.role = ui::SemanticRole::Text;
+    child.info.name = "Status";
+    after.nodes.push_back(child);
+    after.nodes[0].children.push_back(2);
+
+    after.nodes[0].info.focused = true;
+    after.nodes[0].info.selected = true;
+    after.nodes[0].info.name = "Apply now";
+    after.nodes[0].bounds.x = 4.0f;
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    const std::vector<ui::SemanticChange> expected{
+        ui::SemanticChange::StructureChanged,
+        ui::SemanticChange::FocusChanged,
+        ui::SemanticChange::SelectionChanged,
+        ui::SemanticChange::ValueChanged,
+        ui::SemanticChange::BoundsChanged,
+    };
+    T045_CHECK(changes == expected);
+}
+
+void semantic_snapshot_diff_coalesces_multiple_value_fields() {
+    const auto before = make_diff_snapshot();
+    auto after = before;
+    after.nodes[0].info.enabled = false;
+    after.nodes[0].info.read_only = true;
+    after.nodes[0].info.description = "Unavailable while processing";
+    after.nodes[0].info.numeric_value = 0.5;
+    after.nodes[0].info.checked = ui::SemanticCheckedState::Mixed;
+    after.nodes[0].info.expanded = ui::SemanticExpandedState::Expanded;
+    after.nodes[0].info.actions = {ui::SemanticAction::Focus};
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    T045_CHECK(changes == std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
+}
+
 } // namespace
 
 int main() {
@@ -150,6 +222,9 @@ int main() {
         virtual_metadata_is_immutable_after_publication();
         virtual_tokens_and_tristate_contract();
         semantic_tree_generation_contract();
+        semantic_snapshot_diff_ignores_generation_only_changes();
+        semantic_snapshot_diff_classifies_exposed_changes_once();
+        semantic_snapshot_diff_coalesces_multiple_value_fields();
         std::cout << "PASS t045 semantics\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
