@@ -59,10 +59,13 @@ public:
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         // Keep the no-overlay path as close as possible to the pre-T061 UI
         // dispatch contract. T035 component requests are drained only after
-        // Tree::dispatch reaches its T058 structural safe checkpoint.
+        // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
+        // the source identity before dispatch because application providers may
+        // change availability/focus while the source component is still alive.
         if (overlay_state_->entries.empty()) {
+            const auto command_source = overlay_command_source(event);
             const auto result = tree_.dispatch(event, platform);
-            process_component_overlay_command(event, platform);
+            process_component_overlay_command(command_source, platform);
             if (!overlay_state_->entries.empty()) {
                 prepare_overlay_layout();
                 enforce_new_modal_capture_barrier(platform);
@@ -144,8 +147,9 @@ public:
             }
         }
 
+        const auto command_source = overlay_command_source(event);
         const auto result = tree_.dispatch(event, platform);
-        process_component_overlay_command(event, platform);
+        process_component_overlay_command(command_source, platform);
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
         // open. Resolve that source transition in the same outer dispatch, not
@@ -270,14 +274,25 @@ private:
         return tree_.focusables_[tree_.focused_index_];
     }
 
-    [[nodiscard]] std::optional<detail::OverlayComponentCommand>
-    take_focused_overlay_command(const InputEvent& event) {
-        if (!event_may_queue_overlay_command(event)) return std::nullopt;
+    [[nodiscard]] NodeId overlay_command_source(const InputEvent& event) noexcept {
+        if (!event_may_queue_overlay_command(event)) return kInvalidNodeId;
         auto* node = focused_node();
+        return node ? node->id : kInvalidNodeId;
+    }
+
+    [[nodiscard]] std::optional<detail::OverlayComponentCommand>
+    take_overlay_command(NodeId source_id) {
+        if (source_id == kInvalidNodeId || !tree_.root_) return std::nullopt;
+        auto* node = find_node(*tree_.root_, source_id);
         if (!node) return std::nullopt;
         auto* source = dynamic_cast<detail::OverlayCommandSource*>(node->component.get());
         if (!source) return std::nullopt;
         return source->take_overlay_command();
+    }
+
+    [[nodiscard]] bool node_is_focused(NodeId id) noexcept {
+        const auto* node = focused_node();
+        return node && node->id == id;
     }
 
     [[nodiscard]] bool guarded_anchor_allows_commit(
@@ -292,12 +307,25 @@ private:
     }
 
     void process_component_overlay_command(
-        const InputEvent& event, PlatformServices& platform) {
-        auto command = take_focused_overlay_command(event);
+        NodeId source_id, PlatformServices& platform) {
+        auto command = take_overlay_command(source_id);
         if (!command) return;
 
         if (command->kind == detail::OverlayComponentCommandKind::Show) {
             auto on_shown = std::move(command->on_shown);
+            const bool suppress_when_read_only = anchor_dismisses_when_read_only(source_id);
+            const bool source_still_valid = node_is_focused(source_id) &&
+                guarded_anchor_allows_commit(source_id, suppress_when_read_only);
+            if (!source_still_valid) {
+                // Application-supplied option/item providers may mutate retained
+                // availability or focus while the opening event is still being
+                // dispatched. Consume the already-taken request, report an
+                // invalid handle so the anchor clears opener suppression, and
+                // never resurrect a stale popup after focus later returns.
+                if (on_shown) on_shown({});
+                return;
+            }
+
             const auto handle = show_overlay(std::move(command->overlay));
             if (on_shown) on_shown(handle);
             prepare_overlay_layout();
