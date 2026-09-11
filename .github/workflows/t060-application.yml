@@ -1,17 +1,33 @@
 name: T060 Application Contract
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - 'include/nativeui/window.hpp'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/pugl_skia_*.inc'
+      - 'tests/t060/**'
+      - 'tests/t060_application_tests.cpp'
+      - 'examples/features/t060_multi_window_application.cpp'
+      - '.github/workflows/t060-application.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'include/nativeui/window.hpp'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/pugl_skia_*.inc'
+      - 'tests/t060/**'
+      - 'tests/t060_application_tests.cpp'
+      - 'examples/features/t060_multi_window_application.cpp'
+      - '.github/workflows/t060-application.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: t060-application-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

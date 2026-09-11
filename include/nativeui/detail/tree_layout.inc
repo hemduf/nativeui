@@ -320,6 +320,9 @@
     }
 
     void mount_node(Node& node) {
+        if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
+            binding->bind_theme(theme_);
+        }
         if (dynamic_source(node)) register_dynamic_node(node);
         MountContext context{
             node.id,

@@ -236,6 +236,65 @@ bool verify_label(bool update) {
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+bool verify_t035_combo_popup(bool update) {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    ui::Theme theme = ui::default_theme();
+    theme.palette.surface = {65.0f / 255.0f, 66.0f / 255.0f, 67.0f / 255.0f, 1.0f};
+    theme.palette.selection = {68.0f / 255.0f, 69.0f / 255.0f, 70.0f / 255.0f, 1.0f};
+    theme.palette.border = theme.palette.surface;
+
+    ui::UI tree{
+        ui::Column{
+            ui::ComboBox<int>{selection,
+                {{1, "One", true}, {2, "Disabled", false}, {3, "Three", true}}},
+            ui::Spacer{1.0f, 120.0f}},
+        theme};
+    tree.resize({120.0f, 180.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{120.0f, 180.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+    const auto closed = renderer.rgba_pixels();
+
+    if (!ui::handled(tree.dispatch(test::key(ui::Key::Down), platform))) return false;
+    ui::InputEvent key_up{};
+    key_up.type = ui::InputType::KeyUp;
+    key_up.key = ui::Key::Down;
+    (void)tree.dispatch(key_up, platform);
+    if (!renderer.render(tree)) return false;
+    const auto open_selected = renderer.rgba_pixels();
+
+    if (!ui::handled(tree.dispatch(test::key(ui::Key::Down), platform))) return false;
+    if (!renderer.render(tree)) return false;
+    const auto open_next = renderer.rgba_pixels();
+
+    auto sample = [](const std::vector<std::uint8_t>& rgba, int x, int y) {
+        const auto offset = static_cast<std::size_t>((y * 120 + x) * 4);
+        return std::vector<std::uint8_t>{rgba[offset], rgba[offset + 1], rgba[offset + 2]};
+    };
+
+    test::golden::Image state{5, 1, {}};
+    const auto append = [&](const std::vector<std::uint8_t>& rgb) {
+        state.rgb.insert(state.rgb.end(), rgb.begin(), rgb.end());
+    };
+    // Column defaults to 24 px padding, leaving x=24..96 for the control.
+    // Sample well inside the anchor/popup surfaces and away from text/borders.
+    append(sample(closed, 80, 40));
+    append(sample(open_selected, 80, 84));
+    // "Disabled" reaches the right-side probe with some platform font metrics;
+    // use the same solid row interior on the left, before the label padding.
+    append(sample(open_selected, 28, 124));
+    append(sample(open_next, 80, 164));
+    append(sample(open_next, 80, 84));
+
+    CompareOptions options;
+    options.channel_tolerance = 1;
+    return test::golden::verify(
+        "t035_combo_popup_state", state,
+        NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
+}
+
 bool verify_overlay_portal(bool update) {
     // The retained root owns a deliberately small nested clip. T061 overlays
     // are siblings in the per-UI overlay host, so the lower red surface must
@@ -294,6 +353,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_toggle(update));
     NUI_CHECK(verify_paths(update));
     NUI_CHECK(verify_label(update));
+    NUI_CHECK(verify_t035_combo_popup(update));
     NUI_CHECK(verify_overlay_portal(update));
     return 0;
 }
