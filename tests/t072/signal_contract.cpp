@@ -3,13 +3,17 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <new>
 #include <thread>
 #include <vector>
 
 namespace {
+
+thread_local std::ptrdiff_t g_fail_allocation_after = -1;
 
 bool drain_until(ui::detail::DispatcherOwner& owner,
                  const std::function<bool()>& done,
@@ -27,7 +31,74 @@ void stage(const char* name) {
     std::cerr << "T072 signal stage: " << name << '\n';
 }
 
+bool signal_setup_allocation_failures_are_atomic(
+    ui::detail::LinuxDbusTransport& transport,
+    ui::Dispatcher dispatcher,
+    ui::detail::LinuxDbusClientId client,
+    const ui::detail::LinuxDbusSignalMatch& match) {
+    using namespace ui::detail;
+
+    bool observed_failure = false;
+    for (std::ptrdiff_t fail_after = 0; fail_after < 64; ++fail_after) {
+        g_fail_allocation_after = fail_after;
+        const auto id = transport.subscribe_signal(
+            client, dispatcher, match, [](LinuxDbusSignal) {});
+        g_fail_allocation_after = -1;
+
+        if (id == kInvalidLinuxDbusSubscriptionId) {
+            observed_failure = true;
+            if (transport.subscription_count() != 0) {
+                return false;
+            }
+            continue;
+        }
+
+        if (!observed_failure || transport.subscription_count() != 1 ||
+            !transport.unsubscribe_signal(client, id) ||
+            transport.subscription_count() != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    g_fail_allocation_after = -1;
+    return false;
+}
+
 } // namespace
+
+void* operator new(std::size_t size) {
+    if (g_fail_allocation_after == 0) {
+        throw std::bad_alloc{};
+    }
+    if (g_fail_allocation_after > 0) {
+        --g_fail_allocation_after;
+    }
+    if (void* memory = std::malloc(size)) {
+        return memory;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size) {
+    return ::operator new(size);
+}
+
+void operator delete(void* memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete[](void* memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete(void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
+
+void operator delete[](void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
 
 int main() {
     using namespace std::chrono_literals;
@@ -55,6 +126,12 @@ int main() {
     match.path = "/org/freedesktop/DBus";
     match.interface = "org.freedesktop.DBus";
     match.member = "NameOwnerChanged";
+
+    if (!signal_setup_allocation_failures_are_atomic(
+            transport, dispatcher, client, match)) {
+        return EXIT_FAILURE;
+    }
+    stage("allocation-failure-rollback-ok");
 
     const auto subscription = transport.subscribe_signal(client, dispatcher, match,
         [&](LinuxDbusSignal signal) {
