@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <utility>
 
 namespace ui::detail {
 
@@ -12,6 +13,7 @@ struct DialogState final {
     std::uint64_t active_generation{};
     std::uint64_t pending_completion_generation{};
     std::function<void()> pending_completion;
+    std::function<void()> active_overlay_close;
 
     [[nodiscard]] std::uint64_t acquire() noexcept {
         if (ui_tearing_down || active_generation != 0 || next_generation == 0) return 0;
@@ -30,9 +32,17 @@ struct DialogState final {
         return !ui_tearing_down && generation != 0 && active_generation == generation;
     }
 
+    [[nodiscard]] bool set_active_overlay_close(
+        std::uint64_t generation, std::function<void()> close) {
+        if (!owns(generation) || !close) return false;
+        active_overlay_close = std::move(close);
+        return true;
+    }
+
     [[nodiscard]] bool release(std::uint64_t generation) noexcept {
         if (!owns(generation)) return false;
         active_generation = 0;
+        active_overlay_close = {};
         return true;
     }
 
@@ -44,11 +54,20 @@ struct DialogState final {
         return true;
     }
 
-    void begin_ui_teardown() noexcept {
-        ui_tearing_down = true;
+    /// Abandon the active Dialog because the owning UI is leaving its active
+    /// platform lifetime. No application completion may escape this boundary.
+    /// The returned closure only tears down the retained T061 overlay and must
+    /// be executed while the UI/overlay state is still alive.
+    [[nodiscard]] std::function<void()> abandon_active() noexcept {
         active_generation = 0;
         pending_completion_generation = 0;
         pending_completion = {};
+        return std::exchange(active_overlay_close, {});
+    }
+
+    [[nodiscard]] std::function<void()> begin_ui_teardown() noexcept {
+        ui_tearing_down = true;
+        return abandon_active();
     }
 };
 
