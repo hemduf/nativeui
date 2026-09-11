@@ -11,6 +11,7 @@
 #include <nativeui/text.hpp>
 #include <nativeui/theme.hpp>
 #include <nativeui/style.hpp>
+#include <nativeui/slider_style.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/resource.hpp>
 #include <nativeui/embedded_resource.hpp>
