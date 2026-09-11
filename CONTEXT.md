@@ -72,6 +72,7 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
 - T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
+- #231 / PR #232: T061 example overlays paint an explicit panel background and border so popup/modal text cannot visually collide with underlying example content; the generic overlay API remains caller-styled.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
 - T067 / PR #219, with startup regression closure in PR #233: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata; the required 100k example is constrained to the real viewport at startup and its production `--self-test` runs in dedicated CI.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
