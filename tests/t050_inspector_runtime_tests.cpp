@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <nativeui/detail/inspector_paint.hpp>
 #include <nativeui/dynamic.hpp>
 #include <nativeui/headless.hpp>
 #include <nativeui/inspector.hpp>
@@ -42,6 +43,7 @@ void state_is_per_ui_and_snapshot_is_value_based() {
 
     auto snapshot = ui::debug::inspector_snapshot(first);
     NUI_CHECK(!snapshot.nodes.empty());
+    for (const auto& node : snapshot.nodes) NUI_CHECK(!node.debug_name.empty());
     const auto original_count = snapshot.nodes.size();
 
     first.invalidate_layout();
@@ -198,6 +200,40 @@ void snapshot_reports_focus_capture_and_effective_clip() {
     (void)captured.cancel_pointer(capture_platform);
 }
 
+void overlay_draws_focus_and_capture_markers() {
+    const auto info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(static_cast<bool>(surface));
+    auto* canvas = surface->getCanvas();
+    NUI_CHECK(canvas != nullptr);
+    canvas->clear(SK_ColorBLACK);
+
+    ui::debug::InspectorSnapshot snapshot;
+    snapshot.nodes.push_back(ui::debug::InspectorNode{
+        .id = 7,
+        .parent_id = ui::kInvalidNodeId,
+        .debug_name = {},
+        .bounds = {10.0f, 10.0f, 40.0f, 30.0f},
+        .clip_bounds = {10.0f, 10.0f, 40.0f, 30.0f},
+        .focusable = true,
+        .focused = true,
+        .pointer_capture_owner = true});
+
+    ui::detail::paint_inspector_overlay(*canvas, snapshot, ui::kInvalidNodeId);
+
+    SkPixmap pixmap;
+    NUI_CHECK(surface->peekPixels(&pixmap));
+    const auto focus = pixmap.getColor(11, 30);
+    const auto capture = pixmap.getColor(45, 15);
+    NUI_CHECK(SkColorGetR(focus) > 180);
+    NUI_CHECK(SkColorGetB(focus) > 180);
+    NUI_CHECK(SkColorGetG(focus) < 150);
+    NUI_CHECK(SkColorGetR(capture) > 220);
+    NUI_CHECK(SkColorGetG(capture) > 80);
+    NUI_CHECK(SkColorGetG(capture) < 180);
+    NUI_CHECK(SkColorGetB(capture) < 80);
+}
+
 void inspector_changes_headless_pixels_without_persistent_redraw() {
     ui::UI ui{ui::Label{"Pixels"}};
     ui::HeadlessRenderer renderer{{160.0f, 90.0f}};
@@ -264,6 +300,7 @@ void suite() {
     enable_and_selection_changes_request_only_one_repaint_each();
     query_reports_layout_dirty_and_exact_dirty_regions();
     snapshot_reports_focus_capture_and_effective_clip();
+    overlay_draws_focus_and_capture_markers();
     inspector_changes_headless_pixels_without_persistent_redraw();
     inspector_does_not_intercept_focus_or_keyboard_input();
     inspector_post_paint_preserves_incoming_canvas_state();
