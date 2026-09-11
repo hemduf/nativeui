@@ -346,6 +346,32 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    {
+        LinuxDbusTransport teardown_transport;
+        if (teardown_transport.start() != LinuxDbusErrorCode::None) {
+            return EXIT_FAILURE;
+        }
+        const auto teardown_client = teardown_transport.register_client();
+        const auto teardown_path = teardown_transport.register_object_path(
+            teardown_client,
+            "/org/nativeui/T072/AllocationFreeTeardown",
+            [](const LinuxDbusMethodRequest&) {
+                return LinuxDbusMethodReply::method_return({});
+            });
+        if (teardown_client == kInvalidLinuxDbusClientId ||
+            teardown_path == kInvalidLinuxDbusObjectRegistrationId ||
+            teardown_transport.object_path_count() != 1) {
+            return EXIT_FAILURE;
+        }
+
+        g_fail_allocation_after = 0;
+        teardown_transport.stop();
+        g_fail_allocation_after = -1;
+        if (teardown_transport.object_path_count() != 0) {
+            return EXIT_FAILURE;
+        }
+    }
+
     transport.release_client(client_a);
     transport.release_client(client_b);
     transport.stop();
