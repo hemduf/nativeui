@@ -32,6 +32,8 @@ The pre-T043 completion baseline is `main` `fc15cbf4798b5071570aac5c8b0819c14ddd
 
 T043 / issue #43 / PR #142 is now a mergeable completion candidate on top of that exact baseline. Its stale-base conflicts with T061 were reconciled without dropping overlay/pointer-leave behavior, and the previously missing direct proofs for configure sequencing and request/echo non-recursion are now part of the dedicated T043 geometry test surface.
 
+Build regression #234 / PR #235 hardens source-tree feature example registration: root CMake now derives the canonical example set from `examples/features/tNNN_<feature>.cpp` with `CONFIGURE_DEPENDS`, deterministic ordering and a naming guard. This closes the omission that left `t060_multi_window_application` and `t065_ui_dispatcher` out of normal root builds while preserving their dedicated harnesses.
+
 Current convergence:
 
 ```text
@@ -75,6 +77,7 @@ T035 and T063 require completed T061 plus already-complete T034. T062 requires c
 - T067 / PR #219: fixed-height virtualized ListView with bounded visual materialization and immutable virtual semantic metadata.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
+- #234 / PR #235: canonical feature examples are auto-discovered by root CMake, with reconfigure-on-source-change and a regression contract covering T060/T065 registration.
 
 ## T043 resize/scale completion state
 
