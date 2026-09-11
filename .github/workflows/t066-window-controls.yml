@@ -1,0 +1,79 @@
+name: T066 Window Controls
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t066-window-controls-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-window-controls:
+    name: T066 ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+          - name: Linux X11
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S tests/t066 -B build-t066 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S tests/t066 -B build-t066 -A x64
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build contract
+        run: >-
+          cmake --build build-t066 --config Release
+          --target nativeui_t066_window_controls_platform_tests
+          --parallel 2
+
+      - name: Run Linux X11 contract
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ./build-t066/nativeui_t066_window_controls_platform_tests
+
+      - name: Run macOS contract
+        if: runner.os == 'macOS'
+        run: ./build-t066/nativeui_t066_window_controls_platform_tests
+
+      - name: Run Windows contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
