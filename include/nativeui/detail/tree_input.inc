@@ -130,6 +130,7 @@
     std::size_t focused_index_{};
     PointerCaptureState pointer_capture_{};
     Node* pointer_hover_target_{};
+    detail::OverlayService* overlay_service_{};
     bool cancelling_pointer_capture_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};

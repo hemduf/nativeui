@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/detail/dialog_state.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
+#include <nativeui/detail/overlay_service.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 
@@ -35,8 +36,10 @@ public:
     UI(Root&& root, Theme theme)
         : dialog_state_(std::make_shared<detail::DialogState>()),
           overlay_state_(std::make_shared<detail::OverlayState>()),
+          overlay_presenter_(overlay_state_),
           tree_(compile(detail::make_overlay_host_spec(
               make_spec(std::forward<Root>(root)), overlay_state_))) {
+        tree_.set_overlay_service(&overlay_presenter_);
         tree_.set_theme(std::move(theme));
         tree_.mount();
     }
@@ -65,6 +68,10 @@ public:
         enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
+        // Transient presentations such as a pending/visible Tooltip are
+        // cancelled at the view lifecycle boundary before focus/hover teardown
+        // so their T065 timers cannot fire into an inactive UI.
+        tree_.dismiss_transient_presentations();
         // T063 deactivation suppresses the application callback and must not
         // restore focus into a UI whose platform focus is already leaving. A
         // live Dialog is therefore the one case where focus deactivation must
@@ -94,6 +101,16 @@ public:
             if (dialog_state && dialog_state->handle_escape()) {
                 return EventResult::Handled;
             }
+        }
+
+        // PointerDown anywhere and Escape are global dismissal gestures for
+        // transient presentations such as a pending/visible Tooltip. This is
+        // deliberately independent from T061 overlay pointer policy: a
+        // non-hit-test tooltip must still be cancelled without consuming the
+        // event that passes through to the control underneath it.
+        if (event.type == InputType::PointerDown ||
+            (event.type == InputType::KeyDown && event.key == Key::Escape)) {
+            tree_.dismiss_transient_presentations();
         }
 
         // Keep the no-overlay path as close as possible to the pre-T061 UI
@@ -235,6 +252,31 @@ public:
         NodeId id) const noexcept {
         return tree_.component_availability(id);
     }
+    /// Read-only T045 semantic projection for one retained node. T068 replaces
+    /// this diagnostic read with immutable per-view semantic snapshots.
+    [[nodiscard]] std::optional<SemanticInfo> component_semantics(
+        NodeId id) const noexcept {
+        return tree_.component_semantics(id);
+    }
+    /// Read-only diagnostic snapshot of the current T061 overlay stack in
+    /// creation order. Exposes only overlay policy/resolved geometry; it never
+    /// returns content components or platform objects.
+    [[nodiscard]] std::vector<OverlayEntryInfo> overlay_entries() const {
+        std::vector<OverlayEntryInfo> entries;
+        entries.reserve(overlay_state_->entries.size());
+        for (const auto& entry : overlay_state_->entries) {
+            OverlayEntryInfo info;
+            info.id = entry.id;
+            info.mode = entry.spec.mode;
+            info.pointer_policy = entry.spec.pointer_policy;
+            info.anchor = entry.spec.anchor;
+            info.placement = entry.spec.placement;
+            info.resolved = entry.resolved;
+            info.bounds = entry.resolved_bounds;
+            entries.push_back(info);
+        }
+        return entries;
+    }
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }
@@ -260,7 +302,13 @@ public:
     /// Queue one in-view overlay through the same T058 structural checkpoint
     /// used by explicit dynamic containers. show/close never splice retained
     /// nodes synchronously on the caller's callback stack.
+    ///
+    /// Opening a T061 overlay is a global dismissal event for transient
+    /// presentations (pending/visible Tooltip) in the same UI. The Tooltip's
+    /// own non-hit-test presentation uses OverlayService directly and is
+    /// therefore not self-dismissing.
     [[nodiscard]] OverlayHandle show_overlay(OverlaySpec overlay) {
+        tree_.dismiss_transient_presentations();
         return overlay_state_->show(std::move(overlay));
     }
 
@@ -523,10 +571,33 @@ private:
         for (const auto id : anchored) (void)overlay_state_->close_id(id);
     }
 
+    // Retained components may present anchor-tracking overlays from a T065
+    // timer checkpoint through this borrowed seam. It deliberately bypasses
+    // show_overlay()'s transient-dismissal policy because a Tooltip presenting
+    // itself must not immediately cancel itself; all application/widget overlay
+    // requests still flow through show_overlay()/OverlayCommandSource.
+    struct OverlayPresenter final : detail::OverlayService {
+        explicit OverlayPresenter(std::shared_ptr<detail::OverlayState> state)
+            : state_(std::move(state)) {}
+
+        [[nodiscard]] OverlayHandle present(OverlaySpec overlay) override {
+            return state_->show(std::move(overlay));
+        }
+
+        bool dismiss(OverlayHandle handle) override {
+            return state_->close(std::move(handle));
+        }
+
+        std::shared_ptr<detail::OverlayState> state_;
+    };
+
     // Shared dialog/overlay state must outlive Tree because controllers and the
     // retained OverlayHost can keep lifetime seams until Tree teardown ends.
+    // Declaration order also keeps the borrowed presenter valid while Tree
+    // unmounts components that may still close their overlay during teardown.
     std::shared_ptr<detail::DialogState> dialog_state_;
     std::shared_ptr<detail::OverlayState> overlay_state_;
+    OverlayPresenter overlay_presenter_;
     Tree tree_;
     Size viewport_{};
     std::uint64_t last_modal_capture_barrier_id_{};
