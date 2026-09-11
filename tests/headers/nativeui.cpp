@@ -89,9 +89,7 @@ void nativeui_header_compile_t038_slider_style(const ui::Theme& theme) {
     (void)resolved;
 }
 
-void nativeui_header_compile_t038_progress_styles(
-    const ui::Theme& theme,
-    ui::State<float>& value) {
+void nativeui_header_compile_t038_progress_styles(const ui::Theme& theme) {
     ui::ProgressBarStyle progress{};
     progress.base.track = ui::Color{0.1f, 0.1f, 0.1f, 1.0f};
     progress.base.fill = ui::Color{0.2f, 0.6f, 0.8f, 1.0f};
@@ -107,8 +105,6 @@ void nativeui_header_compile_t038_progress_styles(
         progress,
         ui::VisualState{.enabled = false});
     (void)resolved_progress;
-    auto progress_spec = ui::make_spec(ui::ProgressBar{value}.style(progress));
-    (void)progress_spec;
 
     ui::MeterStyle meter{};
     meter.base.track = ui::Color{0.05f, 0.05f, 0.05f, 1.0f};
@@ -120,8 +116,6 @@ void nativeui_header_compile_t038_progress_styles(
         meter,
         ui::VisualState{.enabled = true, .read_only = true});
     (void)resolved_meter;
-    auto meter_spec = ui::make_spec(ui::Meter{value}.style(meter));
-    (void)meter_spec;
 }
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
