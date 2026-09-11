@@ -3,9 +3,21 @@ if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
 endif()
 
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _nativeui_root_cmake)
+set(_feature_example_helper "${SOURCE_DIR}/cmake/NativeUIFeatureExamples.cmake")
+
+if(NOT EXISTS "${_feature_example_helper}")
+  message(FATAL_ERROR
+    "T043 completion artifact is not wired into the root build: missing feature example discovery helper")
+endif()
+include("${_feature_example_helper}")
+nativeui_discover_feature_examples(_feature_examples "${SOURCE_DIR}")
+if(NOT "t043_resize_scale" IN_LIST _feature_examples)
+  message(FATAL_ERROR
+    "T043 completion artifact is not wired into the root build: t043_resize_scale")
+endif()
 
 foreach(_required IN ITEMS
-    "t043_resize_scale"
+    "nativeui_discover_feature_examples("
     "nativeui_add_core_test(nativeui_t043_view_geometry_tests tests/t043_view_geometry_tests.cpp)")
   string(FIND "${_nativeui_root_cmake}" "${_required}" _found)
   if(_found EQUAL -1)
