@@ -65,11 +65,28 @@ public:
         enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
+        // Focus-out/platform deactivation abandons the active T063 Dialog
+        // without an application completion. This is reversible: unlike whole
+        // UI destruction it does not poison DialogState, so the same controller
+        // can show another dialog after the view is activated again.
+        if (dialog_state_ && dialog_state_->handle_deactivate()) {
+            prepare_overlay_layout();
+        }
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // T063 Escape is dialog policy, not focused-child policy. Resolve it
+        // before ordinary retained routing so a focused TextInput/custom body
+        // cannot consume Escape ahead of the enabled Cancel action/Dismissed
+        // fallback. Dialog completion performs retained teardown before the app
+        // callback and therefore leaves no stale modal route behind.
+        if (event.type == InputType::KeyDown && event.key == Key::Escape &&
+            dialog_state_ && dialog_state_->handle_escape()) {
+            return EventResult::Handled;
+        }
+
         // Keep the no-overlay path as close as possible to the pre-T061 UI
         // dispatch contract. T035 component requests are drained only after
         // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
@@ -137,13 +154,12 @@ public:
                     return EventResult::Handled;
                 }
 
-                // A non-auto-dismissable modal still owns Escape, but its
-                // focused descendant/ancestor policy must get the first chance
-                // to interpret it (T063 uses this for Cancel vs Dismissed).
-                // Break the overlay scan so no lower overlay can dismiss; the
-                // active modal focus trap and OverlayEntry consume Escape if its
-                // content leaves it unhandled.
-                if (it->spec.mode == OverlayMode::Modal) break;
+                // Preserve the generic T061 contract: the topmost modal owns
+                // Escape even when it is not auto-dismissable. T063 has already
+                // handled its dedicated Cancel/Dismissed policy above.
+                if (it->spec.mode == OverlayMode::Modal) {
+                    return EventResult::Handled;
+                }
             }
         } else if (event.type == InputType::KeyDown && event.key == Key::Tab) {
             // T035 popups close on Tab before the tree performs ordinary focus
