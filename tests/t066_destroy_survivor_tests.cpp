@@ -46,11 +46,15 @@ int main() {
     if (app.quit_requested()) return fail("destroying A requested quit while B remained live");
     if (!b->native_handle()) return fail("surviving B lost its native handle");
     if (b->should_close()) return fail("surviving B became closing after destroying A");
-    if (!b->set_title("T066 direct-destroy B survives")) {
-        return fail("surviving B title update failed");
-    }
+
+    // Keep resize as the first native mutation after sibling destruction. This
+    // matches the T060 regression sequence exactly and prevents an unrelated
+    // synchronous title update from masking a stale native-window condition.
     if (!b->set_size({380.0f, 190.0f})) {
         return fail("surviving B resize failed");
+    }
+    if (!b->set_title("T066 direct-destroy B survives")) {
+        return fail("surviving B title update failed");
     }
     if (!pump(app, 4)) return fail("Application stopped while B remained live");
 
