@@ -1,5 +1,3 @@
-#define NATIVEUI_ENABLE_INSPECTOR 1
-
 #include "test_support.hpp"
 
 #include <nativeui/headless.hpp>
