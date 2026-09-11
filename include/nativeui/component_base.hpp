@@ -5,6 +5,7 @@
 #include <nativeui/input.hpp>
 #include <nativeui/invalidation.hpp>
 #include <nativeui/paint.hpp>
+#include <nativeui/semantics.hpp>
 #include <nativeui/svg.hpp>
 
 #include <algorithm>
@@ -400,6 +401,8 @@ public:
     [[nodiscard]] bool effective_read_only() const noexcept {
         return effective_availability_.read_only;
     }
+
+    [[nodiscard]] virtual SemanticInfo semantics() const { return {}; }
 
     /// Focus-scope metadata used by the tree focus manager. Normal components
     /// are not scopes and therefore remain unaffected by scope state.
