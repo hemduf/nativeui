@@ -440,7 +440,7 @@ QuitPolicy Application::quit_policy() const noexcept {
     return impl_ ? impl_->quit_policy : QuitPolicy::OnLastWindowClosed;
 }
 
-struct StandaloneWindow::Impl final : PlatformServices {
+struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     explicit Impl(std::shared_ptr<detail::DispatcherWakeBackend> wake_backend = {})
         : dispatcher_owner(
               std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))) {}
@@ -450,6 +450,13 @@ struct StandaloneWindow::Impl final : PlatformServices {
     std::uint64_t registration_id{};
     std::string construction_error;
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+
+    // ViewCore receives this Impl (not the public StandaloneWindow wrapper) as
+    // its PlatformServices object, so retained policies such as Tooltip must be
+    // able to discover the per-window T065 dispatcher through it.
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
+    }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -625,7 +632,7 @@ void StandaloneWindow::reject_drop(Rect region) {
     if (impl_ && impl_->core) impl_->core->reject_drop(region);
 }
 
-struct EmbeddedView::Impl final : PlatformServices {
+struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     Impl(UI& ui, NativeParentHandle parent, Size size)
         : core(ui,
                *this,
@@ -636,6 +643,12 @@ struct EmbeddedView::Impl final : PlatformServices {
 
     ~Impl() override {
         if (dispatcher_owner) dispatcher_owner->shutdown();
+    }
+
+    // ViewCore receives this Impl as its PlatformServices object, so embedded
+    // retained policies discover the per-view T065 dispatcher here.
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
     }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
