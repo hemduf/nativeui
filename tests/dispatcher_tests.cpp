@@ -359,6 +359,61 @@ void suite() {
         NUI_CHECK(!tooltip.visible());
         NUI_CHECK(hidden == 1);
     }
+
+    // Independent tooltip controllers deliberately have no shared warm-up
+    // state. Switching from A after partial elapsed time to B starts B's full
+    // configured delay from the B eligibility transition.
+    {
+        auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner{{}, clock};
+        int shown_a = 0;
+        int shown_b = 0;
+        ui::detail::TooltipController tooltip_a{
+            owner.dispatcher(), 500ms, [&] { ++shown_a; }, [] {}};
+        ui::detail::TooltipController tooltip_b{
+            owner.dispatcher(), 500ms, [&] { ++shown_b; }, [] {}};
+
+        tooltip_a.set_hovered(true);
+        clock->advance(400ms);
+        NUI_CHECK(owner.checkpoint() == 0);
+        tooltip_a.set_hovered(false);
+        tooltip_b.set_hovered(true);
+
+        clock->advance(499ms);
+        NUI_CHECK(owner.checkpoint() == 0);
+        NUI_CHECK(shown_a == 0);
+        NUI_CHECK(shown_b == 0);
+        clock->advance(1ms);
+        NUI_CHECK(owner.checkpoint() == 1);
+        NUI_CHECK(shown_b == 1);
+    }
+
+    // Two UI dispatcher owners never share tooltip timers or eligibility. One
+    // owner's checkpoint cannot make the sibling tooltip visible even when both
+    // clocks advance to the same logical deadline.
+    {
+        auto clock_a = std::make_shared<ui::detail::ManualDispatcherClock>();
+        auto clock_b = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner_a{{}, clock_a};
+        ui::detail::DispatcherOwner owner_b{{}, clock_b};
+        int shown_a = 0;
+        int shown_b = 0;
+        ui::detail::TooltipController tooltip_a{
+            owner_a.dispatcher(), 500ms, [&] { ++shown_a; }, [] {}};
+        ui::detail::TooltipController tooltip_b{
+            owner_b.dispatcher(), 500ms, [&] { ++shown_b; }, [] {}};
+
+        tooltip_a.set_focused(true);
+        tooltip_b.set_focused(true);
+        clock_a->advance(500ms);
+        clock_b->advance(500ms);
+
+        NUI_CHECK(owner_a.checkpoint() == 1);
+        NUI_CHECK(shown_a == 1);
+        NUI_CHECK(shown_b == 0);
+        NUI_CHECK(owner_b.checkpoint() == 1);
+        NUI_CHECK(shown_b == 1);
+    }
 }
 
 } // namespace
