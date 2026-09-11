@@ -1,6 +1,5 @@
     [[nodiscard]] debug::InspectorSnapshot inspector_snapshot() {
         flush_dynamic_mutations();
-        ensure_layout();
 
         debug::InspectorSnapshot snapshot;
         snapshot.dirty_regions = paint_dirty_.rects();
@@ -30,9 +29,9 @@
             out.parent_id = parent_id;
             out.debug_name = "Component";
             out.bounds = node.bounds;
-            out.clip_bounds = intersect(inherited_clip, node.bounds);
+            out.clip_bounds = inherited_clip;
             out.layout_dirty = node.layout_dirty;
-            out.paint_dirty = paint_intersects_dirty(out.clip_bounds);
+            out.paint_dirty = paint_intersects_dirty(node.bounds);
             out.focusable = node.component->focusable();
             out.focused = focused == &node;
             out.pointer_capture_owner = capture_owner == node.id;
