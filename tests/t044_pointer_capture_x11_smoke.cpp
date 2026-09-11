@@ -136,7 +136,18 @@ public:
         XSetInputFocus(display_, target, RevertToParent, CurrentTime);
         XWarpPointer(display_, 0, target, 0, 0, 0, 0, 24, 24);
         XSync(display_, False);
-        return pointer_is_inside(target);
+        return focused(window) && pointer_is_inside(target);
+    }
+
+    [[nodiscard]] bool focused(const ui::StandaloneWindow& window) const {
+        if (!display_) return false;
+        const Window target = native_window(window);
+        if (!target) return false;
+        Window focused_window{};
+        int revert_to{};
+        XGetInputFocus(display_, &focused_window, &revert_to);
+        XSync(display_, False);
+        return focused_window == target;
     }
 
     bool press() {
@@ -242,11 +253,17 @@ bool activate_and_press(ui::Application& app,
                         X11Driver& driver,
                         ui::StandaloneWindow& window,
                         std::string_view stage) {
-    if (!expect(driver.activate(window), stage, "failed to activate target view")) return false;
-    // NativeUI ignores ordinary pointer input until the platform FocusIn has
-    // activated the retained tree. Consume that native transition before the
-    // real XTEST button press so the fixture never races focus delivery.
-    if (!pump(app)) return false;
+    bool ready = false;
+    for (int attempt = 0; attempt < 8 && !ready; ++attempt) {
+        if (!driver.activate(window)) continue;
+        if (!pump(app, 2)) return false;
+        ready = driver.focused(window);
+    }
+    if (!expect(ready, stage, "target view never acquired X11 input focus")) return false;
+
+    // The actual evidence press occurs exactly once. Retrying the click itself
+    // could hide lost/duplicated input, so only the focus precondition above is
+    // retried before the real XTEST button transition.
     if (!expect(driver.press(), stage, "failed to synthesize a held button press")) return false;
     return pump(app);
 }
