@@ -3,12 +3,17 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
+#include <functional>
+#include <new>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace {
+
+thread_local std::ptrdiff_t g_fail_allocation_after = -1;
 
 bool drain_until(ui::detail::DispatcherOwner& owner,
                  const std::function<bool()>& done,
@@ -22,7 +27,76 @@ bool drain_until(ui::detail::DispatcherOwner& owner,
     return done();
 }
 
+bool object_path_registration_allocation_failures_are_atomic(
+    ui::detail::LinuxDbusTransport& transport,
+    ui::detail::LinuxDbusClientId client) {
+    using namespace ui::detail;
+
+    const LinuxDbusObjectPathHandler handler = [](const LinuxDbusMethodRequest&) {
+        return LinuxDbusMethodReply::method_return({});
+    };
+
+    bool observed_failure = false;
+    for (std::ptrdiff_t fail_after = 0; fail_after < 96; ++fail_after) {
+        std::string path = "/org/nativeui/T072/AtomicRegistration";
+        g_fail_allocation_after = fail_after;
+        const auto id = transport.register_object_path(client, std::move(path), handler);
+        g_fail_allocation_after = -1;
+
+        if (id == kInvalidLinuxDbusObjectRegistrationId) {
+            observed_failure = true;
+            if (transport.object_path_count() != 0) {
+                return false;
+            }
+            continue;
+        }
+
+        if (!observed_failure || transport.object_path_count() != 1 ||
+            !transport.unregister_object_path(client, id) ||
+            transport.object_path_count() != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    g_fail_allocation_after = -1;
+    return false;
+}
+
 } // namespace
+
+void* operator new(std::size_t size) {
+    if (g_fail_allocation_after == 0) {
+        throw std::bad_alloc{};
+    }
+    if (g_fail_allocation_after > 0) {
+        --g_fail_allocation_after;
+    }
+    if (void* memory = std::malloc(size)) {
+        return memory;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size) {
+    return ::operator new(size);
+}
+
+void operator delete(void* memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete[](void* memory) noexcept {
+    std::free(memory);
+}
+
+void operator delete(void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
+
+void operator delete[](void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
 
 int main() {
     using namespace std::chrono_literals;
@@ -39,6 +113,11 @@ int main() {
         client_b == kInvalidLinuxDbusClientId || client_a == client_b) {
         return EXIT_FAILURE;
     }
+
+    if (!object_path_registration_allocation_failures_are_atomic(transport, client_a)) {
+        return EXIT_FAILURE;
+    }
+
     const auto main_thread = std::this_thread::get_id();
     std::thread::id handler_thread;
 
