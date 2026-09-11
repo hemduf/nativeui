@@ -17,7 +17,6 @@ namespace ui::detail {
 namespace {
 
 std::once_flag g_dbus_threads_once;
-bool g_dbus_threads_initialized = false;
 
 [[nodiscard]] bool is_path_element_char(char c) noexcept {
     return (c >= 'A' && c <= 'Z') ||
@@ -137,10 +136,14 @@ template <typename Map>
 } // namespace
 
 bool linux_dbus_initialize_threads() noexcept {
-    std::call_once(g_dbus_threads_once, [] {
-        g_dbus_threads_initialized = dbus_threads_init_default() != FALSE;
-    });
-    return g_dbus_threads_initialized;
+    static const bool initialized = []() noexcept {
+        bool result = false;
+        std::call_once(g_dbus_threads_once, [&result] {
+            result = dbus_threads_init_default() != FALSE;
+        });
+        return result;
+    }();
+    return initialized;
 }
 
 bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept {
@@ -387,8 +390,11 @@ void LinuxDbusPendingCallSet::discard_client(LinuxDbusClientId client) noexcept 
         {
             std::lock_guard lock{impl_->mutex};
             const auto gate = impl_->client_gates.find(client);
-            if (gate != impl_->client_gates.end() && gate->second) {
-                gate->second->store(false, std::memory_order_release);
+            if (gate != impl_->client_gates.end()) {
+                if (gate->second) {
+                    gate->second->store(false, std::memory_order_release);
+                }
+                impl_->client_gates.erase(gate);
             }
         }
 
@@ -1754,10 +1760,23 @@ LinuxDbusObjectRegistrationId LinuxDbusTransport::register_object_path(
             return kInvalidLinuxDbusObjectRegistrationId;
         }
 
+        bool inserted_entry = false;
+        bool inserted_path = false;
         try {
-            impl_->object_paths.emplace(id, entry);
-            impl_->object_path_ids.emplace(std::move(path), id);
+            inserted_entry = impl_->object_paths.emplace(id, entry).second;
+            if (inserted_entry) {
+                inserted_path = impl_->object_path_ids.emplace(entry->path, id).second;
+            }
         } catch (...) {
+            inserted_path = false;
+        }
+        if (!inserted_entry || !inserted_path) {
+            if (inserted_path) {
+                impl_->object_path_ids.erase(entry->path);
+            }
+            if (inserted_entry) {
+                impl_->object_paths.erase(id);
+            }
             (void)dbus_connection_unregister_object_path(
                 impl_->connection, entry->path.c_str());
             (void)impl_->ledger.release_object_path(client, id);
