@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/virtual_list.hpp>
 #include <nativeui/detail/widgets_basic.inc>
 #include <nativeui/detail/widgets_text_input.inc>
 #include <nativeui/detail/widgets_text_area.inc>

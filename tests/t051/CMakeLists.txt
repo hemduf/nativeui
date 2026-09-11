@@ -52,6 +52,11 @@ add_executable(nativeui_t051_workload_contract_tests
 )
 nativeui_configure_t051_target(nativeui_t051_workload_contract_tests)
 
+add_executable(nativeui_t067_benchmark_contract
+  "${NATIVEUI_SOURCE_DIR}/tests/t051/t067_virtual_list_benchmarks.cpp"
+)
+nativeui_configure_t051_target(nativeui_t067_benchmark_contract)
+
 add_executable(nativeui_t052_benchmark_gate
   "${NATIVEUI_SOURCE_DIR}/tests/t052_benchmark_gate.cpp"
 )
@@ -60,3 +65,5 @@ set_target_properties(nativeui_t052_benchmark_gate PROPERTIES OUTPUT_NAME "t052-
 
 enable_testing()
 add_test(NAME t051.workload_contract COMMAND nativeui_t051_workload_contract_tests)
+add_test(NAME t051.t067_virtual_list COMMAND nativeui_t067_benchmark_contract)
+set_tests_properties(t051.t067_virtual_list PROPERTIES LABELS "benchmark;release-gate;component")
