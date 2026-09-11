@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/detail/slider_value.hpp>
 #include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/slider_style.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -133,25 +134,33 @@ public:
         float maximum,
         float step,
         SliderOrientation orientation,
-        Formatter formatter)
+        Formatter formatter,
+        SliderStyle style)
         : state_(state),
           domain_(minimum, maximum, step),
           orientation_(orientation),
-          formatter_(std::move(formatter)) {}
+          formatter_(std::move(formatter)),
+          style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto& theme = current_theme();
-        const float compact_cross_axis = theme.controls.minimum_hit_target;
+        const auto resolved = resolved_style(false);
+        const float styled_cross_axis =
+            resolved.thumb_diameter + resolved.focus_ring_width * 2.0f;
+        const float compact_cross_axis =
+            std::max(theme.controls.minimum_hit_target, styled_cross_axis);
         if (orientation_ == SliderOrientation::Horizontal) {
             const float height = formatter_
-                ? theme.controls.control_height + theme.spacing.sm
+                ? std::max(theme.controls.control_height + theme.spacing.sm,
+                           compact_cross_axis)
                 : compact_cross_axis;
             return Size{160.0f, height};
         }
         const float width = formatter_
-            ? theme.controls.control_height + theme.spacing.large * 2.0f
+            ? std::max(theme.controls.control_height + theme.spacing.large * 2.0f,
+                       compact_cross_axis)
             : compact_cross_axis;
         return Size{width, 160.0f};
     }
@@ -219,17 +228,13 @@ public:
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
         const float fraction = domain_.fraction(state_.get());
-        const auto state = visual_state(context.focused());
-        const auto& theme = current_theme();
-        const Color track = theme.palette.control_background;
-        const Color active = slider_active_color(state, theme.palette);
-        const bool focused = state == SliderVisualState::Focused;
+        const auto resolved = resolved_style(context.focused());
         const auto axis = slider_track_axis(
             bounds, orientation_, static_cast<bool>(formatter_));
-        const float track_thickness = theme.controls.track_thickness;
+        const float track_thickness = resolved.track_thickness;
         const float half_track = track_thickness * 0.5f;
-        const float thumb_radius = theme.controls.thumb_diameter * 0.5f;
-        const float focus_radius = thumb_radius + theme.controls.focus_ring_width;
+        const float thumb_radius = resolved.thumb_diameter * 0.5f;
+        const float focus_radius = thumb_radius + resolved.focus_ring_width;
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
@@ -239,18 +244,22 @@ public:
             const float x1 = axis.end;
             const float thumb_x = axis.position(fraction);
             painter.fill_rounded_rect(
-                Rect{x0, y - half_track, x1 - x0, track_thickness}, half_track, track);
+                Rect{x0, y - half_track, x1 - x0, track_thickness}, half_track, resolved.track);
             painter.fill_rounded_rect(
-                Rect{x0, y - half_track, thumb_x - x0, track_thickness}, half_track, active);
-            if (focused) painter.circle(Point{thumb_x, y}, focus_radius, theme.palette.focus);
-            painter.circle(Point{thumb_x, y}, thumb_radius, active);
+                Rect{x0, y - half_track, thumb_x - x0, track_thickness},
+                half_track,
+                resolved.active);
+            if (context.focused()) {
+                painter.circle(Point{thumb_x, y}, focus_radius, resolved.focus_ring);
+            }
+            painter.circle(Point{thumb_x, y}, thumb_radius, resolved.thumb);
             if (formatter_) {
                 const auto text = formatter_(domain_.effective_external(state_.get()));
                 painter.text(
                     Point{bounds.x + bounds.w * 0.5f, bounds.y + bounds.h - 7.0f},
                     text,
                     11.0f,
-                    theme.palette.muted_text,
+                    resolved.formatter_text,
                     TextAlign::Center);
             }
         } else {
@@ -259,24 +268,43 @@ public:
             const float y1 = axis.end;
             const float thumb_y = axis.position(fraction);
             painter.fill_rounded_rect(
-                Rect{x - half_track, y0, track_thickness, y1 - y0}, half_track, track);
+                Rect{x - half_track, y0, track_thickness, y1 - y0}, half_track, resolved.track);
             painter.fill_rounded_rect(
-                Rect{x - half_track, thumb_y, track_thickness, y1 - thumb_y}, half_track, active);
-            if (focused) painter.circle(Point{x, thumb_y}, focus_radius, theme.palette.focus);
-            painter.circle(Point{x, thumb_y}, thumb_radius, active);
+                Rect{x - half_track, thumb_y, track_thickness, y1 - thumb_y},
+                half_track,
+                resolved.active);
+            if (context.focused()) {
+                painter.circle(Point{x, thumb_y}, focus_radius, resolved.focus_ring);
+            }
+            painter.circle(Point{x, thumb_y}, thumb_radius, resolved.thumb);
             if (formatter_) {
                 const auto text = formatter_(domain_.effective_external(state_.get()));
                 painter.text(
                     Point{bounds.x + bounds.w * 0.5f, bounds.y + bounds.h - 7.0f},
                     text,
                     11.0f,
-                    theme.palette.muted_text,
+                    resolved.formatter_text,
                     TextAlign::Center);
             }
         }
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = hovered_,
+            .pressed = dragging_,
+            .focused = focused,
+        };
+    }
+
+    [[nodiscard]] ResolvedSliderStyle resolved_style(bool focused) const {
+        return resolve_slider_style(
+            default_slider_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     [[nodiscard]] bool mutating_input(const InputEvent& event) const noexcept {
         if (event.type == InputType::PointerDown) return true;
         if (event.type == InputType::PointerMove || event.type == InputType::PointerUp) {
@@ -369,6 +397,7 @@ private:
     SliderDomain domain_;
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     Formatter formatter_;
+    SliderStyle style_;
     State<float>::Subscription subscription_;
     bool dragging_{};
     bool hovered_{};
@@ -403,6 +432,11 @@ public:
         return std::move(*this);
     }
 
+    Slider&& style(SliderStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;
@@ -410,10 +444,18 @@ public:
         const float step = step_;
         const auto orientation = orientation_;
         auto formatter = std::move(formatter_);
+        auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, step, orientation, formatter = std::move(formatter)]() mutable {
+            [state, minimum, maximum, step, orientation,
+             formatter = std::move(formatter), style = std::move(style)]() mutable {
                 return std::make_unique<detail::SliderComponent>(
-                    *state, minimum, maximum, step, orientation, std::move(formatter));
+                    *state,
+                    minimum,
+                    maximum,
+                    step,
+                    orientation,
+                    std::move(formatter),
+                    std::move(style));
             },
             {}};
     }
@@ -425,6 +467,7 @@ private:
     float step_{};
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     Formatter formatter_;
+    SliderStyle style_;
 };
 
 } // namespace ui

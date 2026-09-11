@@ -2,6 +2,8 @@
 
 #include <nativeui/component.hpp>
 #include <nativeui/detail/slider_value.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/slider_style.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -25,24 +27,32 @@ enum class RangeSliderThumb {
     Upper,
 };
 
-class RangeSliderComponent final : public Component {
+class RangeSliderComponent final : public Component, public ThemeBinding {
 public:
     RangeSliderComponent(
         State<RangeValue>& state,
         float minimum,
         float maximum,
         float step,
-        SliderOrientation orientation)
+        SliderOrientation orientation,
+        SliderStyle style)
         : state_(state),
           domain_(minimum, maximum, step),
-          orientation_(orientation) {}
+          orientation_(orientation),
+          style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        const auto& theme = current_theme();
+        const auto resolved = resolved_style(false);
+        const float styled_cross_axis =
+            resolved.thumb_diameter + resolved.focus_ring_width * 2.0f;
+        const float compact_cross_axis =
+            std::max(theme.controls.minimum_hit_target, styled_cross_axis);
         return orientation_ == SliderOrientation::Horizontal
-            ? Size{160.0f, 32.0f}
-            : Size{32.0f, 160.0f};
+            ? Size{160.0f, compact_cross_axis}
+            : Size{compact_cross_axis, 160.0f};
     }
 
     void mount(MountContext& context) override {
@@ -110,11 +120,12 @@ public:
         const auto effective = effective_range(state_.get());
         const float low_fraction = domain_.fraction(effective.low);
         const float high_fraction = domain_.fraction(effective.high);
-        const auto state = visual_state(context.focused());
-        const Color track = colors::input;
-        const Color active = slider_active_color(state);
-        const bool focused = state == SliderVisualState::Focused;
+        const auto resolved = resolved_style(context.focused());
         const auto axis = slider_track_axis(bounds, orientation_);
+        const float track_thickness = resolved.track_thickness;
+        const float half_track = track_thickness * 0.5f;
+        const float thumb_radius = resolved.thumb_diameter * 0.5f;
+        const float focus_radius = thumb_radius + resolved.focus_ring_width;
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
@@ -123,38 +134,61 @@ public:
             const float x1 = axis.end;
             const float low_x = axis.position(low_fraction);
             const float high_x = axis.position(high_fraction);
-            painter.fill_rounded_rect(Rect{x0, y - 2.0f, x1 - x0, 4.0f}, 2.0f, track);
             painter.fill_rounded_rect(
-                Rect{low_x, y - 2.0f, std::max(0.0f, high_x - low_x), 4.0f},
-                2.0f,
-                active);
-            if (focused) {
-                painter.circle(Point{low_x, y}, 9.0f, colors::borderFocus);
-                painter.circle(Point{high_x, y}, 9.0f, colors::borderFocus);
+                Rect{x0, y - half_track, x1 - x0, track_thickness},
+                half_track,
+                resolved.track);
+            painter.fill_rounded_rect(
+                Rect{low_x, y - half_track,
+                     std::max(0.0f, high_x - low_x), track_thickness},
+                half_track,
+                resolved.active);
+            if (context.focused()) {
+                painter.circle(Point{low_x, y}, focus_radius, resolved.focus_ring);
+                painter.circle(Point{high_x, y}, focus_radius, resolved.focus_ring);
             }
-            painter.circle(Point{low_x, y}, 7.0f, active);
-            painter.circle(Point{high_x, y}, 7.0f, active);
+            painter.circle(Point{low_x, y}, thumb_radius, resolved.thumb);
+            painter.circle(Point{high_x, y}, thumb_radius, resolved.thumb);
         } else {
             const float x = bounds.x + bounds.w * 0.5f;
             const float y0 = axis.start;
             const float y1 = axis.end;
             const float low_y = axis.position(low_fraction);
             const float high_y = axis.position(high_fraction);
-            painter.fill_rounded_rect(Rect{x - 2.0f, y0, 4.0f, y1 - y0}, 2.0f, track);
             painter.fill_rounded_rect(
-                Rect{x - 2.0f, high_y, 4.0f, std::max(0.0f, low_y - high_y)},
-                2.0f,
-                active);
-            if (focused) {
-                painter.circle(Point{x, low_y}, 9.0f, colors::borderFocus);
-                painter.circle(Point{x, high_y}, 9.0f, colors::borderFocus);
+                Rect{x - half_track, y0, track_thickness, y1 - y0},
+                half_track,
+                resolved.track);
+            painter.fill_rounded_rect(
+                Rect{x - half_track, high_y, track_thickness,
+                     std::max(0.0f, low_y - high_y)},
+                half_track,
+                resolved.active);
+            if (context.focused()) {
+                painter.circle(Point{x, low_y}, focus_radius, resolved.focus_ring);
+                painter.circle(Point{x, high_y}, focus_radius, resolved.focus_ring);
             }
-            painter.circle(Point{x, low_y}, 7.0f, active);
-            painter.circle(Point{x, high_y}, 7.0f, active);
+            painter.circle(Point{x, low_y}, thumb_radius, resolved.thumb);
+            painter.circle(Point{x, high_y}, thumb_radius, resolved.thumb);
         }
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = hovered_,
+            .pressed = dragging_,
+            .focused = focused,
+        };
+    }
+
+    [[nodiscard]] ResolvedSliderStyle resolved_style(bool focused) const {
+        return resolve_slider_style(
+            default_slider_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     [[nodiscard]] bool mutating_input(const InputEvent& event) const noexcept {
         if (event.type == InputType::PointerDown) return true;
         if (event.type == InputType::PointerMove || event.type == InputType::PointerUp) {
@@ -302,6 +336,7 @@ private:
     State<RangeValue>& state_;
     SliderDomain domain_;
     SliderOrientation orientation_{SliderOrientation::Horizontal};
+    SliderStyle style_;
     State<RangeValue>::Subscription subscription_;
     RangeSliderThumb active_thumb_{RangeSliderThumb::Lower};
     bool has_active_thumb_{};
@@ -331,16 +366,22 @@ public:
         return std::move(*this);
     }
 
+    RangeSlider&& style(SliderStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;
         const float maximum = maximum_;
         const float step = step_;
         const auto orientation = orientation_;
+        auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, step, orientation] {
+            [state, minimum, maximum, step, orientation, style = std::move(style)]() mutable {
                 return std::make_unique<detail::RangeSliderComponent>(
-                    *state, minimum, maximum, step, orientation);
+                    *state, minimum, maximum, step, orientation, std::move(style));
             },
             {}};
     }
@@ -351,6 +392,7 @@ private:
     float maximum_{1.0f};
     float step_{};
     SliderOrientation orientation_{SliderOrientation::Horizontal};
+    SliderStyle style_;
 };
 
 } // namespace ui
