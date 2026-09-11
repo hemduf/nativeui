@@ -120,7 +120,6 @@ private:
 };
 } // namespace
 
-
 int main() {
     ui::detail::DispatcherOwner owner;
     auto backend = std::make_shared<FakeBackend>();
@@ -235,9 +234,9 @@ int main() {
     const auto inline_id = services.open_files({}, [&](ui::FileDialogResult result) {
         inline_result = result.status == ui::DesktopServiceStatus::Accepted && result.paths.size() == 2;
     });
-    if (inline_id != ui::kInvalidDesktopRequestId || inline_result) return fail();
+    if (inline_id == ui::kInvalidDesktopRequestId || inline_result) return fail();
     drain(owner);
-    if (!inline_result) return fail();
+    if (!inline_result || services.cancel(inline_id)) return fail();
 
     bool unsupported = false;
     {
