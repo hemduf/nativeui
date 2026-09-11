@@ -61,12 +61,14 @@ void destroyed_node_ids_disappear_without_stale_access() {
 
     const auto before = ui::debug::inspector_snapshot(ui);
     ui::NodeId transient_id = ui::kInvalidNodeId;
+    std::size_t transient_depth = 0;
     for (const auto& node : before.nodes) {
-        if (node.parent_id != ui::kInvalidNodeId) {
+        if (node.depth > transient_depth) {
+            transient_depth = node.depth;
             transient_id = node.id;
-            break;
         }
     }
+    NUI_CHECK(transient_depth > 0);
     NUI_CHECK(transient_id != ui::kInvalidNodeId);
     NUI_CHECK(before.find(transient_id) != nullptr);
 
@@ -74,9 +76,11 @@ void destroyed_node_ids_disappear_without_stale_access() {
     // T058 installs dynamic structure observers at mount/activation and
     // coalesces the resulting mutation until the next retained-tree boundary.
     // Drive the documented activate -> state change -> resize sequence before
-    // querying the post-destruction snapshot.
+    // querying the post-destruction snapshot. The deepest active descendant is
+    // the branch payload, while the shallower If wrapper remains retained.
     ui.resize({120.0f, 80.0f});
     const auto after = ui::debug::inspector_snapshot(ui);
+    NUI_CHECK(after.nodes.size() < before.nodes.size());
     NUI_CHECK(after.find(transient_id) == nullptr);
 
     // The old value snapshot remains self-contained and safe to inspect after
