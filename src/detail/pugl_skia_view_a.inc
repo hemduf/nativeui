@@ -90,6 +90,7 @@ public:
         if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
             cleanup_and_throw(status, "puglShow failed");
         }
+        visible_ = true;
 
         // Attach exposure scheduling only after the native view is visible.
         // The callback replays the already accumulated initial dirty region,
@@ -139,11 +140,19 @@ public:
     }
 
     bool show() {
-        return native_view_open() && puglShow(view_, PUGL_SHOW_RAISE) == PUGL_SUCCESS;
+        if (!native_view_open()) return false;
+        if (visible_) return true;
+        if (puglShow(view_, PUGL_SHOW_RAISE) != PUGL_SUCCESS) return false;
+        visible_ = true;
+        return true;
     }
 
     bool hide() {
-        return native_view_open() && puglHide(view_) == PUGL_SUCCESS;
+        if (!native_view_open()) return false;
+        if (!visible_) return true;
+        if (puglHide(view_) != PUGL_SUCCESS) return false;
+        visible_ = false;
+        return true;
     }
 
     bool set_size(Size logical) {
@@ -173,6 +182,7 @@ public:
     bool close_native_view() {
         if (!view_) {
             should_close_ = true;
+            visible_ = false;
             return false;
         }
 
@@ -195,6 +205,7 @@ public:
         (void)puglUnrealize(view_);
         puglFreeView(view_);
         view_ = nullptr;
+        visible_ = false;
         should_close_ = true;
         return true;
     }
@@ -339,7 +350,7 @@ private:
             : Size{1.0f, 1.0f};
         const Size max_physical = max_logical
             ? detail::logical_to_physical_size(*max_logical, scale)
-            : Size{10000.0f, 10000.0f};
+            : Size{static_cast<float>(INT16_MAX), static_cast<float>(INT16_MAX)};
 
         const auto min_status = puglSetSizeHint(
             view_, PUGL_MIN_SIZE, to_pugl_span(min_physical.w), to_pugl_span(min_physical.h));
