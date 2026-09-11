@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
-project(NativeUIT066WindowControls LANGUAGES C CXX)
+if(APPLE)
+  project(NativeUIT066WindowControls LANGUAGES C CXX OBJC)
+else()
+  project(NativeUIT066WindowControls LANGUAGES C CXX)
+endif()
 
 if(NOT DEFINED NATIVEUI_SOURCE_DIR OR NATIVEUI_SOURCE_DIR STREQUAL "")
   get_filename_component(NATIVEUI_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
