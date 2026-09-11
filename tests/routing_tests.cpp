@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+
 #include <memory>
 #include <utility>
 #include <vector>
@@ -64,6 +66,73 @@ public:
 
 private:
     std::shared_ptr<RouteState> state_;
+    std::vector<ui::Spec> children_;
+};
+
+struct InteractionState {
+    int hover_in{};
+    int hover_out{};
+    int focus_in{};
+    int focus_out{};
+    bool hover_dispatcher_valid{};
+    bool focus_dispatcher_valid{};
+};
+
+class InteractionObserverComponent final : public ui::Component {
+public:
+    explicit InteractionObserverComponent(std::shared_ptr<InteractionState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] ui::Constraints child_constraints(
+        const ui::Constraints& constraints, std::size_t, std::size_t) const override {
+        return constraints;
+    }
+
+    void layout_children(ui::Rect bounds,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void pointer_hover_changed(bool hovered, ui::InputContext& context) override {
+        hovered ? ++state_->hover_in : ++state_->hover_out;
+        state_->hover_dispatcher_valid = context.dispatcher().valid();
+    }
+
+    void focus_within_changed(bool focused, ui::FocusContext& context) override {
+        focused ? ++state_->focus_in : ++state_->focus_out;
+        state_->focus_dispatcher_valid = context.dispatcher().valid();
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<InteractionState> state_;
+};
+
+class InteractionObserver {
+public:
+    template <class Child>
+    InteractionObserver(std::shared_ptr<InteractionState> state, Child&& child)
+        : state_(std::move(state)) {
+        children_.push_back(ui::make_spec(std::forward<Child>(child)));
+    }
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<InteractionObserverComponent>(state);
+            },
+            std::move(children_)};
+    }
+
+private:
+    std::shared_ptr<InteractionState> state_;
     std::vector<ui::Spec> children_;
 };
 
@@ -196,6 +265,51 @@ void suite() {
                   ui::EventResult::Handled);
         NUI_CHECK(child->pointer_move == 1);
         NUI_CHECK(parent->pointer_move == 1);
+    }
+
+    // T062 needs retained hover/focus observation, not event bubbling. A child
+    // may consume PointerMove/keyboard input while its decorator still observes
+    // route entry/exit and focus-within transitions. Both hooks also receive the
+    // owning platform Dispatcher used for the exact tooltip delay contract.
+    {
+        ui::detail::DispatcherOwner dispatcher_owner;
+        test::MockPlatform platform;
+        platform.dispatcher_value = dispatcher_owner.dispatcher();
+
+        auto observed = std::make_shared<InteractionState>();
+        auto first = std::make_shared<test::ProbeState>();
+        auto second = std::make_shared<test::ProbeState>();
+        first->input_result = ui::EventResult::Handled;
+
+        ui::UI tree{ui::Column{
+            InteractionObserver{observed, test::Probe{first}},
+            test::Probe{second},
+        }};
+        tree.resize({160.0f, 100.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(observed->focus_in == 1);
+        NUI_CHECK(observed->focus_out == 0);
+        NUI_CHECK(observed->focus_dispatcher_valid);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(observed->hover_in == 1);
+        NUI_CHECK(observed->hover_out == 0);
+        NUI_CHECK(observed->hover_dispatcher_valid);
+
+        // Remaining inside the same retained route must not re-notify/restart.
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 22.0f, 22.0f), platform);
+        NUI_CHECK(observed->hover_in == 1);
+
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 80.0f), platform);
+        NUI_CHECK(observed->hover_out == 1);
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Tab), platform) == ui::EventResult::Handled);
+        NUI_CHECK(observed->focus_out == 1);
     }
 }
 
