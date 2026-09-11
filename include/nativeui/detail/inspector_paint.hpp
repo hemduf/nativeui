@@ -3,6 +3,7 @@
 #include <nativeui/inspector.hpp>
 #include <nativeui/paint.hpp>
 
+#include <algorithm>
 #include <string>
 
 namespace ui::detail {
@@ -17,6 +18,8 @@ inline void paint_inspector_overlay(SkCanvas& canvas,
     constexpr Color kClipColor{0.94f, 0.73f, 0.18f, 0.72f};
     constexpr Color kDirtyColor{1.0f, 0.25f, 0.28f, 0.82f};
     constexpr Color kSelectedColor{0.50f, 1.0f, 0.38f, 1.0f};
+    constexpr Color kFocusColor{0.96f, 0.35f, 1.0f, 1.0f};
+    constexpr Color kCaptureColor{1.0f, 0.48f, 0.12f, 1.0f};
     constexpr Color kLabelColor{1.0f, 1.0f, 1.0f, 0.96f};
 
     for (const auto& dirty : snapshot.dirty_regions) {
@@ -36,6 +39,24 @@ inline void paint_inspector_overlay(SkCanvas& canvas,
               node.clip_bounds.w == node.bounds.w &&
               node.clip_bounds.h == node.bounds.h)) {
             painter.stroke_rounded_rect(node.clip_bounds, 0.0f, 1.0f, kClipColor);
+        }
+
+        if (node.focused) {
+            const Rect focus_rect{
+                node.bounds.x + 1.0f,
+                node.bounds.y + 1.0f,
+                std::max(0.0f, node.bounds.w - 2.0f),
+                std::max(0.0f, node.bounds.h - 2.0f)};
+            if (!focus_rect.empty()) {
+                painter.stroke_rounded_rect(focus_rect, 0.0f, 2.0f, kFocusColor);
+            }
+        }
+
+        if (node.pointer_capture_owner) {
+            const Point marker{
+                node.bounds.x + std::max(3.0f, node.bounds.w - 5.0f),
+                node.bounds.y + std::min(5.0f, std::max(3.0f, node.bounds.h * 0.5f))};
+            painter.circle(marker, 3.0f, kCaptureColor);
         }
 
         std::string label = "#" + std::to_string(node.id);
