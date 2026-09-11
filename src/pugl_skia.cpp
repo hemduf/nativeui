@@ -216,7 +216,7 @@ using ViewCore = detail::ViewCore;
 class X11PointerCapturePlatformServices : public PlatformServices {
 public:
     void begin_pointer_capture() noexcept override {
-        auto* view = current_x11_callback_view();
+        auto* view = ::ui::detail::current_x11_callback_view();
         if (!view) return;
 
         auto* world = puglGetWorld(view);
