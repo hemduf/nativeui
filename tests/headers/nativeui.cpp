@@ -65,10 +65,17 @@ void nativeui_header_compile_t061_overlay(ui::UI& tree) {
 }
 
 void nativeui_header_compile_t062_tooltip() {
-    auto spec = ui::make_spec(
+    auto default_delay = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}});
+    auto explicit_delay = ui::make_spec(
+        ui::Tooltip{"Reset to default", std::chrono::milliseconds{500},
+                    ui::Spacer{24.0f, 12.0f}});
+    auto fluent_delay = ui::make_spec(
         ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}}
-            .delay(std::chrono::milliseconds{500}));
-    (void)spec;
+            .delay(std::chrono::milliseconds{250}));
+    (void)default_delay;
+    (void)explicit_delay;
+    (void)fluent_delay;
 }
 
 void nativeui_header_compile_t063_dialog(ui::UI& tree) {
