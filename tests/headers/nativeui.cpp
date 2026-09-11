@@ -1,6 +1,7 @@
 #include <nativeui/nativeui.hpp>
 #include <nativeui/semantics.hpp>
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
@@ -61,4 +62,11 @@ void nativeui_header_compile_t061_overlay(ui::UI& tree) {
 
     const ui::OverlayHandle handle = tree.show_overlay(std::move(overlay));
     (void)tree.close_overlay(handle);
+}
+
+void nativeui_header_compile_t062_tooltip() {
+    auto spec = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}}
+            .delay(std::chrono::milliseconds{500}));
+    (void)spec;
 }
