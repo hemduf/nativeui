@@ -118,12 +118,14 @@ public:
     [[nodiscard]] bool close() {
         if (!state_ || !state_->owns(generation_)) return false;
 
-        // Logical overlay close happens before the per-UI active slot is
-        // released and before application code runs. T058 owns the retained
-        // structural checkpoint; the later T063 completion unit tightens the
-        // callback to run only after that checkpoint when close originates from
-        // inside an input callback.
-        if (ui_ && overlay_.valid()) (void)ui_->close_overlay(overlay_);
+        // First detach the modal logically, then consume the existing T058
+        // structural checkpoint before application code runs. This makes the
+        // close-before-callback contract concrete: the old body has completed
+        // deactivate/unmount/focus/capture teardown when completion observes UI.
+        if (ui_ && overlay_.valid()) {
+            (void)ui_->close_overlay(overlay_);
+            ui_->prepare_overlay_layout();
+        }
         overlay_ = {};
 
         if (!state_->release(generation_)) return false;
