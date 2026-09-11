@@ -7,9 +7,15 @@ if(NOT DEFINED OUTER_BUILD OR NOT IS_DIRECTORY "${OUTER_BUILD}")
 endif()
 
 # CPM normally materializes dependencies below the build tree. When
-# CPM_SOURCE_CACHE is enabled, however, DOWNLOAD_ONLY packages live under the
-# shared cache instead. Resolve either layout so this runtime-isolation check
-# validates the configured dependency instead of assuming one CPM storage mode.
+# CPM_SOURCE_CACHE is enabled, DOWNLOAD_ONLY packages live under the shared
+# cache instead. A restore-key cache can contain more than one historical
+# package hash, so prefer the candidate referenced by the configured outer
+# Ninja build and use marker-only discovery solely as a local/recovery fallback.
+set(_outer_build_description "")
+if(EXISTS "${OUTER_BUILD}/build.ninja")
+  file(READ "${OUTER_BUILD}/build.ninja" _outer_build_description)
+endif()
+
 function(nativeui_find_dependency_root out_var build_candidate cache_package)
   set(_candidates "${build_candidate}")
   if(DEFINED ENV{CPM_SOURCE_CACHE} AND NOT "$ENV{CPM_SOURCE_CACHE}" STREQUAL "")
@@ -18,16 +24,33 @@ function(nativeui_find_dependency_root out_var build_candidate cache_package)
     list(APPEND _candidates ${_cache_candidates})
   endif()
 
+  set(_fallback "")
   foreach(_candidate IN LISTS _candidates)
+    set(_valid false)
     foreach(_marker ${ARGN})
       if(EXISTS "${_candidate}/${_marker}")
+        set(_valid true)
+        break()
+      endif()
+    endforeach()
+    if(NOT _valid)
+      continue()
+    endif()
+
+    if(NOT _fallback)
+      set(_fallback "${_candidate}")
+    endif()
+
+    if(_outer_build_description)
+      string(FIND "${_outer_build_description}" "${_candidate}/" _candidate_used)
+      if(NOT _candidate_used EQUAL -1)
         set(${out_var} "${_candidate}" PARENT_SCOPE)
         return()
       endif()
-    endforeach()
+    endif()
   endforeach()
 
-  set(${out_var} "" PARENT_SCOPE)
+  set(${out_var} "${_fallback}" PARENT_SCOPE)
 endfunction()
 
 nativeui_find_dependency_root(
