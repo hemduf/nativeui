@@ -29,6 +29,12 @@ add_library(NativeUI::Core ALIAS nativeui_core_stub)
 function(_nativeui_attach_consumer_platform)
   cmake_parse_arguments(PARSE_ARGV 0 NUI "" "TARGET;CONSUMER_ID;OUT_BRIDGE" "")
 endfunction()
+# T054 validates only the public application-helper argument grammar. T072 owns
+# the real Linux D-Bus discovery/package contract, and this fixture deliberately
+# runs before CI installs Linux platform prerequisites. Keep that independent
+# service behind the same no-op seam used by the T047 attachment contract.
+function(nativeui_add_linux_dbus_transport)
+endfunction()
 include("@SOURCE_DIR_CMAKE@/cmake/NativeUIAttachPlatform.cmake")
 include("@SOURCE_DIR_CMAKE@/cmake/NativeUIApplication.cmake")
 nativeui_add_application(App
