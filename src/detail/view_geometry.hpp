@@ -132,6 +132,34 @@ private:
     std::optional<Size> pending_request_;
 };
 
+/// Submit one public logical-size request at the native boundary. The native
+/// request callback is invoked at most once, and authoritative logical size is
+/// deliberately left unchanged until a configure snapshot is received.
+template <class NativeRequest>
+[[nodiscard]] bool submit_logical_size_request(ViewGeometryState& geometry,
+                                               Size logical,
+                                               NativeRequest&& native_request) {
+    const auto physical = geometry.physical_request(logical);
+    if (!physical) return false;
+    if (!std::forward<NativeRequest>(native_request)(*physical)) return false;
+    geometry.record_successful_request(logical);
+    return true;
+}
+
+/// Apply one authoritative native configure snapshot and dispatch at most one
+/// layout resize for it. Native request submission is intentionally absent
+/// from this path so a request echo cannot recurse back into the platform.
+template <class Resize>
+[[nodiscard]] std::optional<Size> apply_authoritative_configure(ViewGeometryState& geometry,
+                                                                 Size physical,
+                                                                 float reported_scale,
+                                                                 Resize&& resize) {
+    auto logical = geometry.configure(physical, reported_scale);
+    if (!logical) return std::nullopt;
+    std::forward<Resize>(resize)(*logical);
+    return logical;
+}
+
 class PreferredSizeState final {
 public:
     void queue(Size preferred) noexcept {
