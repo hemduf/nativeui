@@ -61,8 +61,11 @@ require_text("${_root_cmake}"
   "include(cmake/NativeUIFeatureExamples.cmake)"
   "root discovery helper include")
 require_text("${_root_cmake}"
-  "nativeui_discover_feature_examples(NATIVEUI_FEATURE_EXAMPLES"
+  "nativeui_discover_feature_examples("
   "root automatic discovery call")
+require_text("${_root_cmake}"
+  "NATIVEUI_FEATURE_EXAMPLES"
+  "root discovered example output")
 require_text("${_helper_source}"
   "CONFIGURE_DEPENDS"
   "automatic CMake reconfigure when feature sources change")
