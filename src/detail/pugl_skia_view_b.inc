@@ -291,6 +291,7 @@
     PreferredSizeCallback preferred_size_callback_;
     bool preferred_measure_dirty_{};
     bool should_close_{};
+    bool visible_{};
     bool text_input_active_{};
     Rect text_input_logical_area_{};
     float text_input_logical_cursor_offset_{};
