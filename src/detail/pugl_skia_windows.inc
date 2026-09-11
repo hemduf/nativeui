@@ -1,4 +1,4 @@
-namespace {
+namespace platform_detail {
 
 class PuglDispatcherWakeBackend final : public detail::DispatcherWakeBackend {
 public:
@@ -262,17 +262,17 @@ struct ApplicationWindowRecord final {
     return result;
 }
 
-} // namespace
+} // namespace platform_detail
 
 struct Application::Impl final {
     PuglWorld* world{};
-    std::shared_ptr<PuglDispatcherWakeBackend> wake_backend;
+    std::shared_ptr<platform_detail::PuglDispatcherWakeBackend> wake_backend;
     QuitPolicy quit_policy{QuitPolicy::OnLastWindowClosed};
     bool quit_requested{};
     bool terminal_error{};
     std::uint64_t next_window_id{1};
     std::size_t open_window_count{};
-    std::unordered_map<std::uint64_t, ApplicationWindowRecord> windows;
+    std::unordered_map<std::uint64_t, platform_detail::ApplicationWindowRecord> windows;
     std::string last_error;
 
     Impl() {
@@ -286,7 +286,7 @@ struct Application::Impl final {
             return;
         }
         puglSetWorldString(world, PUGL_CLASS_NAME, "NativeUI");
-        wake_backend = std::make_shared<PuglDispatcherWakeBackend>(world);
+        wake_backend = std::make_shared<platform_detail::PuglDispatcherWakeBackend>(world);
     }
 
     ~Impl() {
@@ -342,7 +342,9 @@ struct Application::Impl final {
         }
 
         const auto id = next_window_id++;
-        windows.emplace(id, ApplicationWindowRecord{true, dispatcher_owner});
+        windows.emplace(
+            id,
+            platform_detail::ApplicationWindowRecord{true, dispatcher_owner});
         ++open_window_count;
         return id;
     }
@@ -384,7 +386,8 @@ struct Application::Impl final {
 
         const auto owners = dispatcher_snapshot();
         const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
-        const double pugl_timeout = bound_dispatch_timeout(requested, owners);
+        const double pugl_timeout =
+            platform_detail::bound_dispatch_timeout(requested, owners);
         const auto status = wake_backend
             ? wake_backend->update_world(pugl_timeout)
             : puglUpdate(world, pugl_timeout);
@@ -562,7 +565,8 @@ bool StandaloneWindow::poll(double timeout_seconds) {
     std::vector<std::shared_ptr<detail::DispatcherOwner>> owners;
     if (owner) owners.push_back(owner);
     const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
-    const double pugl_timeout = bound_dispatch_timeout(requested, owners);
+    const double pugl_timeout =
+        platform_detail::bound_dispatch_timeout(requested, owners);
     const bool alive = impl_->core->poll(pugl_timeout);
     if (owner) (void)owner->checkpoint();
     return alive;

@@ -97,9 +97,10 @@ void suite() {
     @autoreleasepool {
         DropState host_state;
         ui::UI host_ui{target(host_state)};
-        ui::StandaloneWindow host{host_ui,
+        ui::Application application;
+        ui::StandaloneWindow host{application, host_ui,
             {.title = "NativeUI macOS background drop regression", .size = {320.0f, 180.0f}}};
-        (void)host.poll(0.0);
+        (void)application.poll(0.0);
         NUI_CHECK(host.last_error().empty());
 
         NSView* const host_wrapper = (__bridge NSView*)reinterpret_cast<void*>(host.native_handle());
