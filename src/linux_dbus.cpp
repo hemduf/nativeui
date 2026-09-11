@@ -1507,6 +1507,8 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
         }
 
         bool installed_filter_now = false;
+        bool inserted_signal = false;
+        bool remove_filter_after_insert_failure = false;
         {
             std::lock_guard signal_lock{impl_->signal_mutex};
             if (!impl_->signal_filter_installed) {
@@ -1521,13 +1523,22 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
 
             try {
                 impl_->signals.emplace(id, entry);
+                inserted_signal = true;
             } catch (...) {
-                if (installed_filter_now && impl_->signals.empty()) {
+                if (installed_filter_now && impl_->signals.empty() &&
+                    impl_->signal_filter_installed) {
                     impl_->signal_filter_installed = false;
+                    remove_filter_after_insert_failure = true;
                 }
-                (void)impl_->ledger.release_subscription(client, id);
-                return kInvalidLinuxDbusSubscriptionId;
             }
+        }
+        if (!inserted_signal) {
+            if (remove_filter_after_insert_failure) {
+                dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                              impl_.get());
+            }
+            (void)impl_->ledger.release_subscription(client, id);
+            return kInvalidLinuxDbusSubscriptionId;
         }
 
         bool setup_success = false;
@@ -1537,10 +1548,34 @@ LinuxDbusSubscriptionId LinuxDbusTransport::subscribe_signal(
                 entry->active->store(true, std::memory_order_release);
             }
         } else {
-            {
+            bool setup_enqueued = false;
+            try {
                 std::lock_guard control_lock{impl_->control_mutex};
                 impl_->signal_setup_commands.push_back(setup);
+                setup_enqueued = true;
+            } catch (...) {
+                setup_enqueued = false;
             }
+
+            if (!setup_enqueued) {
+                bool remove_filter = false;
+                {
+                    std::lock_guard signal_lock{impl_->signal_mutex};
+                    impl_->signals.erase(id);
+                    if (installed_filter_now && impl_->signals.empty() &&
+                        impl_->signal_filter_installed) {
+                        impl_->signal_filter_installed = false;
+                        remove_filter = true;
+                    }
+                }
+                if (remove_filter) {
+                    dbus_connection_remove_filter(impl_->connection, &Impl::signal_filter,
+                                                  impl_.get());
+                }
+                (void)impl_->ledger.release_subscription(client, id);
+                return kInvalidLinuxDbusSubscriptionId;
+            }
+
             impl_->wake_io();
 
             std::unique_lock setup_lock{setup->mutex};
