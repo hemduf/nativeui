@@ -79,11 +79,41 @@ private:
     std::shared_ptr<CaptureState> state_;
 };
 
+class OverlayPanelComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] ui::Size minimum_size(
+        const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().minimum;
+    }
+
+    void layout_children(
+        ui::Rect bounds,
+        const std::vector<ui::ChildMetrics>&,
+        std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        const auto bounds = context.bounds();
+        auto& painter = context.painter();
+        painter.fill_rounded_rect(bounds, 10.0f, ui::colors::panel);
+        painter.stroke_rounded_rect(bounds, 10.0f, 1.0f, ui::colors::border);
+    }
+};
+
 ui::OverlaySpec centered_label(std::string text) {
     ui::OverlaySpec overlay;
     overlay.placement = ui::OverlayPlacement::Center;
-    overlay.content = ui::make_spec(
+    auto content = ui::make_spec(
         ui::Padding{16.0f, ui::Label{std::move(text)}});
+    overlay.content = ui::Spec{
+        [] { return std::make_unique<OverlayPanelComponent>(); },
+        {std::move(content)}};
     return overlay;
 }
 
@@ -137,6 +167,29 @@ int self_test() {
     ui::HeadlessRenderer renderer{{760.0f, 280.0f}, 1.0f};
 
     if (!renderer.render(tree)) return example::fail("initial overlay render failed");
+
+    // Regression #231: example overlay content must paint its own background.
+    // Use an empty label so the center pixel can only change because of the
+    // panel itself, never because of glyph coverage.
+    ui::UI panel_probe{ui::Spacer{96.0f, 64.0f}};
+    ui::HeadlessRenderer panel_renderer{{96.0f, 64.0f}, 1.0f};
+    if (!panel_renderer.render(panel_probe)) {
+        return example::fail("overlay panel baseline render failed");
+    }
+    const auto before_panel = panel_renderer.pixel(48, 32);
+    auto panel_overlay = centered_label("");
+    const auto panel_handle = panel_probe.show_overlay(std::move(panel_overlay));
+    if (!panel_handle.valid() || !panel_renderer.render(panel_probe)) {
+        return example::fail("overlay panel regression render failed");
+    }
+    const auto after_panel = panel_renderer.pixel(48, 32);
+    if (before_panel.r == after_panel.r && before_panel.g == after_panel.g &&
+        before_panel.b == after_panel.b && before_panel.a == after_panel.a) {
+        return example::fail("overlay example panel background is missing");
+    }
+    if (!panel_probe.close_overlay(panel_handle)) {
+        return example::fail("overlay panel regression close failed");
+    }
 
     auto popup = centered_label("Popup");
     popup.dismiss_on_outside_pointer_down = true;

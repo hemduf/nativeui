@@ -1,15 +1,17 @@
 name: T052 v0.1 Release Gate
 
+# This is a heavyweight final-candidate gate, not an every-commit PR check.
 on:
   pull_request:
     branches: [main]
+    types: [ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: t052-release-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

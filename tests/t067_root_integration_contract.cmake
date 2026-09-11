@@ -7,7 +7,9 @@ endif()
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
 file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
 file(READ "${SOURCE_DIR}/tests/t051/CMakeLists.txt" _t051_cmake)
+set(_feature_example_helper "${SOURCE_DIR}/cmake/NativeUIFeatureExamples.cmake")
 set(_example "${SOURCE_DIR}/examples/features/t067_virtual_list.cpp")
+set(_workflow "${SOURCE_DIR}/.github/workflows/t067-virtual-list.yml")
 set(_t051_benchmark "${SOURCE_DIR}/tests/t051/t067_virtual_list_benchmarks.cpp")
 
 function(require_text haystack needle description)
@@ -17,7 +19,18 @@ function(require_text haystack needle description)
   endif()
 endfunction()
 
-require_text("${_root_cmake}" "  t067_virtual_list\n" "feature example registration")
+if(NOT EXISTS "${_feature_example_helper}")
+  message(FATAL_ERROR
+    "T067 root integration contract: missing feature example discovery helper: ${_feature_example_helper}")
+endif()
+include("${_feature_example_helper}")
+nativeui_discover_feature_examples(_feature_examples "${SOURCE_DIR}")
+if(NOT "t067_virtual_list" IN_LIST _feature_examples)
+  message(FATAL_ERROR
+    "T067 root integration contract: t067_virtual_list is not discovered as a feature example")
+endif()
+
+require_text("${_root_cmake}" "nativeui_discover_feature_examples(" "automatic feature example registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)" "model contract registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)" "materialization-window contract registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_retained_tests tests/t067_retained_tests.cpp)" "retained runtime test registration")
@@ -32,6 +45,9 @@ require_text("${_t051_cmake}" "t051.t067_virtual_list" "T051 virtual-list benchm
 if(NOT EXISTS "${_example}")
   message(FATAL_ERROR "T067 root integration contract: missing dedicated feature example: ${_example}")
 endif()
+if(NOT EXISTS "${_workflow}")
+  message(FATAL_ERROR "T067 root integration contract: missing dedicated workflow: ${_workflow}")
+endif()
 if(NOT EXISTS "${_t051_benchmark}")
   message(FATAL_ERROR "T067 root integration contract: missing T051 virtual-list benchmark: ${_t051_benchmark}")
 endif()
@@ -40,5 +56,10 @@ string(FIND "${_example_source}" "nativeui/detail/" _detail_index)
 if(NOT _detail_index EQUAL -1)
   message(FATAL_ERROR "T067 feature example must use only the normal public NativeUI API")
 endif()
+file(READ "${_workflow}" _workflow_source)
+require_text(
+  "${_workflow_source}"
+  "nativeui_example_t067_virtual_list --self-test"
+  "dedicated example self-test execution")
 
 message(STATUS "T067 root integration contract passed")

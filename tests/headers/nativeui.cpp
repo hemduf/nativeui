@@ -70,3 +70,21 @@ void nativeui_header_compile_t062_tooltip() {
             .delay(std::chrono::milliseconds{500}));
     (void)spec;
 }
+
+void nativeui_header_compile_t063_dialog(ui::UI& tree) {
+    ui::Dialog dialog{tree};
+
+    ui::DialogSpec spec;
+    spec.title = "Confirm";
+    spec.body = ui::make_spec(ui::Spacer{120.0f, 80.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    spec.actions.push_back(ui::DialogAction{
+        "cancel", "Cancel", true, ui::DialogActionRole::Cancel});
+
+    const ui::DialogShowResult shown = dialog.show(
+        std::move(spec), [](ui::DialogResult result) { (void)result; });
+    (void)shown;
+    (void)dialog.active();
+    (void)dialog.close();
+}
