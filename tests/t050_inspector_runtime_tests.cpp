@@ -17,6 +17,10 @@
 
 namespace {
 
+bool same_rect(ui::Rect a, ui::Rect b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
 void state_is_per_ui_and_snapshot_is_value_based() {
     ui::UI first{ui::Label{"First"}};
     ui::UI second{ui::Label{"Second"}};
@@ -38,8 +42,6 @@ void state_is_per_ui_and_snapshot_is_value_based() {
     NUI_CHECK(!snapshot.nodes.empty());
     const auto original_count = snapshot.nodes.size();
 
-    // A retained-tree mutation or later snapshot cannot invalidate copied
-    // diagnostic values because the snapshot owns all of its data.
     first.invalidate_layout();
     const auto later = ui::debug::inspector_snapshot(first);
     NUI_CHECK(later.nodes.size() == original_count);
@@ -74,23 +76,84 @@ void enable_and_selection_changes_request_only_one_repaint_each() {
     NUI_CHECK(invalidations == 2);
 }
 
-void query_reports_pending_layout_and_stale_ids_are_absent() {
+void query_reports_layout_dirty_and_exact_dirty_regions() {
     ui::UI ui{ui::Label{"Dirty"}};
     ui.resize({120.0f, 80.0f});
 
-    const auto dirty = ui::debug::inspector_snapshot(ui);
-    NUI_CHECK(!dirty.nodes.empty());
+    const auto pending = ui::debug::inspector_snapshot(ui);
+    NUI_CHECK(!pending.nodes.empty());
     bool saw_layout_dirty = false;
-    for (const auto& node : dirty.nodes) {
+    for (const auto& node : pending.nodes) {
         saw_layout_dirty = saw_layout_dirty || node.layout_dirty;
     }
     NUI_CHECK(saw_layout_dirty);
-    NUI_CHECK(dirty.find(999999) == nullptr);
+    NUI_CHECK(pending.find(999999) == nullptr);
 
     ui::HeadlessRenderer renderer{{120.0f, 80.0f}};
     NUI_CHECK(renderer.render(ui));
+    ui.invalidate({7.0f, 9.0f, 13.0f, 11.0f});
+
+    const auto normal_dirty = ui.dirty_regions();
+    const auto snapshot = ui::debug::inspector_snapshot(ui);
+    NUI_CHECK(snapshot.dirty_regions.size() == normal_dirty.size());
+    for (std::size_t index = 0; index < normal_dirty.size(); ++index) {
+        NUI_CHECK(same_rect(snapshot.dirty_regions[index], normal_dirty[index]));
+    }
+
+    NUI_CHECK(renderer.render(ui));
     const auto clean = ui::debug::inspector_snapshot(ui);
     for (const auto& node : clean.nodes) NUI_CHECK(!node.layout_dirty);
+}
+
+void snapshot_reports_focus_capture_and_effective_clip() {
+    ui::State<bool> toggled{false};
+    ui::UI focused{ui::Toggle{"Focus", toggled}};
+    test::MockPlatform focus_platform;
+    focused.resize({140.0f, 70.0f});
+    focused.activate(focus_platform);
+
+    const auto focus_snapshot = ui::debug::inspector_snapshot(focused);
+    int focused_nodes = 0;
+    bool saw_inherited_clip = false;
+    for (const auto& node : focus_snapshot.nodes) {
+        if (node.focused) {
+            ++focused_nodes;
+            NUI_CHECK(node.focusable);
+        }
+        NUI_CHECK(node.clip_bounds.x >= 0.0f);
+        NUI_CHECK(node.clip_bounds.y >= 0.0f);
+        NUI_CHECK(node.clip_bounds.x + node.clip_bounds.w <= 140.0f);
+        NUI_CHECK(node.clip_bounds.y + node.clip_bounds.h <= 70.0f);
+        saw_inherited_clip = saw_inherited_clip || !same_rect(node.clip_bounds, node.bounds);
+    }
+    NUI_CHECK(focused_nodes == 1);
+    NUI_CHECK(saw_inherited_clip);
+
+    int capture_requests = 0;
+    ui::UI captured{
+        ui::Canvas{40.0f, 30.0f, [](ui::CanvasContext2D&) {}}
+            .on_input([&](const ui::InputEvent& event, ui::CanvasInputContext& context) {
+                if (event.type != ui::InputType::PointerDown) {
+                    return ui::EventResult::Ignored;
+                }
+                ++capture_requests;
+                context.capture_pointer();
+                return ui::EventResult::Handled;
+            })};
+    test::MockPlatform capture_platform;
+    captured.resize({80.0f, 60.0f});
+    captured.activate(capture_platform);
+    NUI_CHECK(captured.dispatch(test::pointer(ui::InputType::PointerDown, 5.0f, 5.0f),
+                                capture_platform) == ui::EventResult::Handled);
+    NUI_CHECK(capture_requests == 1);
+
+    const auto capture_snapshot = ui::debug::inspector_snapshot(captured);
+    int capture_owners = 0;
+    for (const auto& node : capture_snapshot.nodes) {
+        if (node.pointer_capture_owner) ++capture_owners;
+    }
+    NUI_CHECK(capture_owners == 1);
+    (void)captured.cancel_pointer(capture_platform);
 }
 
 void inspector_changes_headless_pixels_without_persistent_redraw() {
@@ -141,8 +204,6 @@ void inspector_post_paint_preserves_incoming_canvas_state() {
     ui.paint(*canvas, platform);
     NUI_CHECK(canvas->getSaveCount() == save_count);
 
-    // Draw after the inspector pass. If it leaked transform/clip state, this
-    // marker would move back to the origin or disappear behind a narrowed clip.
     SkPaint marker;
     marker.setColor(SK_ColorRED);
     canvas->drawRect(SkRect::MakeXYWH(0.0f, 0.0f, 3.0f, 3.0f), marker);
@@ -158,7 +219,8 @@ void inspector_post_paint_preserves_incoming_canvas_state() {
 void suite() {
     state_is_per_ui_and_snapshot_is_value_based();
     enable_and_selection_changes_request_only_one_repaint_each();
-    query_reports_pending_layout_and_stale_ids_are_absent();
+    query_reports_layout_dirty_and_exact_dirty_regions();
+    snapshot_reports_focus_capture_and_effective_clip();
     inspector_changes_headless_pixels_without_persistent_redraw();
     inspector_does_not_intercept_focus_or_keyboard_input();
     inspector_post_paint_preserves_incoming_canvas_state();
