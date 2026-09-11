@@ -137,13 +137,13 @@ public:
                     return EventResult::Handled;
                 }
 
-                // The topmost modal owns keyboard activation below it. If it
-                // is not itself Escape-dismissable, lower overlays/root must
-                // not observe this Escape; overlays created above it have
-                // already had their eligibility checked by this reverse scan.
-                if (it->spec.mode == OverlayMode::Modal) {
-                    return EventResult::Handled;
-                }
+                // A non-auto-dismissable modal still owns Escape, but its
+                // focused descendant/ancestor policy must get the first chance
+                // to interpret it (T063 uses this for Cancel vs Dismissed).
+                // Break the overlay scan so no lower overlay can dismiss; the
+                // active modal focus trap and OverlayEntry consume Escape if its
+                // content leaves it unhandled.
+                if (it->spec.mode == OverlayMode::Modal) break;
             }
         } else if (event.type == InputType::KeyDown && event.key == Key::Tab) {
             // T035 popups close on Tab before the tree performs ordinary focus
