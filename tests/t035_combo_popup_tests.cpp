@@ -186,6 +186,78 @@ void immutable_open_snapshot_contract() {
     NUI_CHECK(selection.get() == 7);
 }
 
+void provider_availability_reentrancy_contract() {
+    {
+        test::MockPlatform platform;
+        ui::State<int> selection{1};
+        ui::State<bool> enabled{true};
+        auto after = std::make_shared<test::ProbeState>();
+        after->input_result = ui::EventResult::Handled;
+        int provider_calls = 0;
+
+        ui::UI tree{ui::Column{
+            ui::Enabled{
+                enabled,
+                ui::ComboBox<int>{selection, [&] {
+                    ++provider_calls;
+                    if (provider_calls == 2) enabled.set(false);
+                    return std::vector<ui::ComboBoxOption<int>>{
+                        {1, "One", true}, {2, "Two", true}};
+                }}},
+            test::Probe{after},
+        }};
+        tree.resize({240.0f, 180.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(provider_calls == 1);
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+        NUI_CHECK(provider_calls == 2);
+        NUI_CHECK(!enabled.get());
+        NUI_CHECK(selection.get() == 1);
+        NUI_CHECK(after->focus_in >= 1);
+
+        after->key_events = 0;
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+        NUI_CHECK(after->key_events == 1);
+        NUI_CHECK(selection.get() == 1);
+
+        enabled.set(true);
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Tab, true), platform)));
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+        NUI_CHECK(provider_calls == 3);
+        NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Down), platform)));
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+        NUI_CHECK(selection.get() == 2);
+    }
+
+    {
+        test::MockPlatform platform;
+        ui::State<int> selection{1};
+        ui::State<bool> read_only{false};
+        int provider_calls = 0;
+
+        ui::UI tree{ui::ReadOnly{
+            read_only,
+            ui::ComboBox<int>{selection, [&] {
+                ++provider_calls;
+                if (provider_calls == 2) read_only.set(true);
+                return std::vector<ui::ComboBoxOption<int>>{
+                    {1, "One", true}, {2, "Two", true}};
+            }}}};
+        tree.resize({240.0f, 180.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(provider_calls == 1);
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+        NUI_CHECK(provider_calls == 2);
+        NUI_CHECK(read_only.get());
+        NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Down), platform)));
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Escape), platform) == ui::EventResult::Ignored);
+        NUI_CHECK(selection.get() == 1);
+    }
+}
+
 void tab_escape_and_read_only_contract() {
     test::MockPlatform platform;
     ui::State<int> selection{1};
@@ -582,6 +654,7 @@ void suite() {
     combo_keyboard_commit_contract();
     no_match_home_end_contract();
     immutable_open_snapshot_contract();
+    provider_availability_reentrancy_contract();
     tab_escape_and_read_only_contract();
     disabled_and_destroyed_anchor_close_contract();
     hidden_and_collapsed_anchor_close_contract();
