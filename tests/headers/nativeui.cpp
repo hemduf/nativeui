@@ -118,6 +118,16 @@ void nativeui_header_compile_t038_progress_styles(const ui::Theme& theme) {
     (void)resolved_meter;
 }
 
+void nativeui_header_compile_t038_progress_widget_styles(ui::State<float>& value) {
+    ui::ProgressBarStyle progress{};
+    auto progress_spec = ui::make_spec(ui::ProgressBar{value}.style(progress));
+    (void)progress_spec;
+
+    ui::MeterStyle meter{};
+    auto meter_spec = ui::make_spec(ui::Meter{value}.style(meter));
+    (void)meter_spec;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
