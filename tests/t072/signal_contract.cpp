@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
-#include <iostream>
 #include <new>
 #include <thread>
 #include <vector>
@@ -25,10 +24,6 @@ bool drain_until(ui::detail::DispatcherOwner& owner,
     }
     (void)owner.checkpoint();
     return done();
-}
-
-void stage(const char* name) {
-    std::cerr << "T072 signal stage: " << name << '\n';
 }
 
 bool signal_setup_allocation_failures_are_atomic(
@@ -104,7 +99,6 @@ int main() {
     using namespace std::chrono_literals;
     using namespace ui::detail;
 
-    stage("start");
     LinuxDbusTransport transport;
     if (transport.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
 
@@ -131,7 +125,6 @@ int main() {
             transport, dispatcher, client, match)) {
         return EXIT_FAILURE;
     }
-    stage("allocation-failure-rollback-ok");
 
     const auto subscription = transport.subscribe_signal(client, dispatcher, match,
         [&](LinuxDbusSignal signal) {
@@ -142,7 +135,6 @@ int main() {
     if (subscription == kInvalidLinuxDbusSubscriptionId ||
         transport.subscription_count() != 1 ||
         transport.unsubscribe_signal(sibling_client, subscription)) return EXIT_FAILURE;
-    stage("first-subscription-ok");
 
     LinuxDbusTransport peer;
     if (peer.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
@@ -157,12 +149,10 @@ int main() {
         received.arguments[0].text != peer_name ||
         received.arguments[1].kind != LinuxDbusValueKind::String ||
         received.arguments[2].kind != LinuxDbusValueKind::String) return EXIT_FAILURE;
-    stage("first-delivery-ok");
 
     if (!transport.unsubscribe_signal(client, subscription) ||
         transport.subscription_count() != 0 ||
         transport.unsubscribe_signal(client, subscription)) return EXIT_FAILURE;
-    stage("first-unsubscribe-ok");
 
     LinuxDbusTransport later_peer;
     if (later_peer.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
@@ -172,7 +162,6 @@ int main() {
         std::this_thread::sleep_for(1ms);
     }
     if (callback_count != 1) return EXIT_FAILURE;
-    stage("post-unsubscribe-quiet-ok");
 
     LinuxDbusSignalMatch invalid = match;
     invalid.path = "not/a/path";
@@ -184,28 +173,22 @@ int main() {
     never_emitted.member = "NeverEmitted";
     std::vector<LinuxDbusSubscriptionId> capacity_subscriptions;
     capacity_subscriptions.reserve(kLinuxDbusMaxSubscriptions);
-    stage("capacity-subscribe-begin");
     for (std::size_t i = 0; i < kLinuxDbusMaxSubscriptions; ++i) {
         const auto id = transport.subscribe_signal(client, dispatcher, never_emitted,
                                                    [](LinuxDbusSignal) {});
         if (id == kInvalidLinuxDbusSubscriptionId) {
-            std::cerr << "T072 signal capacity subscribe failed at index=" << i << '\n';
             return EXIT_FAILURE;
         }
         capacity_subscriptions.push_back(id);
     }
-    stage("capacity-subscribe-complete");
     if (transport.subscription_count() != kLinuxDbusMaxSubscriptions ||
         transport.subscribe_signal(client, dispatcher, never_emitted, [](LinuxDbusSignal) {}) !=
             kInvalidLinuxDbusSubscriptionId) return EXIT_FAILURE;
-    stage("capacity-overflow-ok");
-    for (std::size_t i = 0; i < capacity_subscriptions.size(); ++i) {
-        if (!transport.unsubscribe_signal(client, capacity_subscriptions[i])) {
-            std::cerr << "T072 signal capacity unsubscribe failed at index=" << i << '\n';
+    for (const auto id : capacity_subscriptions) {
+        if (!transport.unsubscribe_signal(client, id)) {
             return EXIT_FAILURE;
         }
     }
-    stage("capacity-unsubscribe-complete");
     if (transport.subscription_count() != 0) return EXIT_FAILURE;
 
     std::size_t emitted_callback_count = 0;
@@ -235,7 +218,6 @@ int main() {
         transport.send_signal("/org/nativeui/T072/Signal", "not an interface", "Changed", {}) ||
         transport.send_signal("/org/nativeui/T072/Signal", "org.nativeui.T072.Test", "bad.member", {}))
         return EXIT_FAILURE;
-    stage("emitted-signal-ok");
     if (!peer.unsubscribe_signal(peer_client, emitted_subscription)) return EXIT_FAILURE;
 
     transport.release_client(client);
@@ -244,6 +226,5 @@ int main() {
     later_peer.stop();
     peer.stop();
     transport.stop();
-    stage("complete");
     return EXIT_SUCCESS;
 }

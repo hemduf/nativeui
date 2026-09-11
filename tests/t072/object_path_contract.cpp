@@ -4,8 +4,10 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <new>
 #include <string>
 #include <thread>
@@ -14,6 +16,11 @@
 namespace {
 
 thread_local std::ptrdiff_t g_fail_allocation_after = -1;
+
+struct ImmutableSemanticSnapshot final {
+    std::string label;
+    std::uint64_t generation{};
+};
 
 bool drain_until(ui::detail::DispatcherOwner& owner,
                  const std::function<bool()>& done,
@@ -177,6 +184,92 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    const auto immutable_snapshot = std::make_shared<const ImmutableSemanticSnapshot>(
+        ImmutableSemanticSnapshot{"semantic-label", 17});
+    const auto mutation_dispatcher = owner.dispatcher();
+    std::thread::id semantic_provider_thread;
+    std::thread::id mutation_thread;
+    bool mutation_done = false;
+    const auto semantic_registration = transport.register_object_path(
+        client_a,
+        "/org/nativeui/T072/SemanticProvider",
+        [immutable_snapshot, mutation_dispatcher, &semantic_provider_thread,
+         &mutation_thread, &mutation_done](const LinuxDbusMethodRequest& request) {
+            semantic_provider_thread = std::this_thread::get_id();
+            if (request.member == "ReadSnapshot") {
+                return LinuxDbusMethodReply::method_return({
+                    LinuxDbusValue::string(immutable_snapshot->label),
+                    LinuxDbusValue::uint64(immutable_snapshot->generation),
+                });
+            }
+            if (request.member == "Mutate") {
+                if (!mutation_dispatcher.post([&mutation_thread, &mutation_done] {
+                        mutation_thread = std::this_thread::get_id();
+                        mutation_done = true;
+                    })) {
+                    return LinuxDbusMethodReply::error(
+                        "org.nativeui.T072.DispatchRejected", "mutation dispatch rejected");
+                }
+                return LinuxDbusMethodReply::method_return({LinuxDbusValue::boolean(true)});
+            }
+            return LinuxDbusMethodReply::error(
+                "org.nativeui.T072.UnknownMethod", "unknown synthetic semantic method");
+        });
+    if (semantic_registration == kInvalidLinuxDbusObjectRegistrationId ||
+        transport.object_path_count() != 2) {
+        return EXIT_FAILURE;
+    }
+
+    bool semantic_read_done = false;
+    LinuxDbusCompletion semantic_read;
+    const auto semantic_read_id = transport.call_method(
+        client_b, owner.dispatcher(),
+        LinuxDbusMethodCall{
+            transport.unique_name(),
+            "/org/nativeui/T072/SemanticProvider",
+            "org.nativeui.T072.Semantic",
+            "ReadSnapshot",
+            2s,
+        },
+        [&](LinuxDbusCompletion result) {
+            semantic_read = std::move(result);
+            semantic_read_done = true;
+        });
+    if (semantic_read_id == kInvalidLinuxDbusRequestId ||
+        !drain_until(owner, [&] { return semantic_read_done; }, 2s) ||
+        semantic_read.code != LinuxDbusErrorCode::None ||
+        semantic_read.values.size() != 2 ||
+        semantic_read.values[0] != LinuxDbusValue::string("semantic-label") ||
+        semantic_read.values[1] != LinuxDbusValue::uint64(17) ||
+        semantic_provider_thread == std::thread::id{} ||
+        semantic_provider_thread == main_thread || mutation_done) {
+        return EXIT_FAILURE;
+    }
+
+    bool semantic_mutation_reply_done = false;
+    LinuxDbusCompletion semantic_mutation_reply;
+    const auto semantic_mutation_id = transport.call_method(
+        client_b, owner.dispatcher(),
+        LinuxDbusMethodCall{
+            transport.unique_name(),
+            "/org/nativeui/T072/SemanticProvider",
+            "org.nativeui.T072.Semantic",
+            "Mutate",
+            2s,
+        },
+        [&](LinuxDbusCompletion result) {
+            semantic_mutation_reply = std::move(result);
+            semantic_mutation_reply_done = true;
+        });
+    if (semantic_mutation_id == kInvalidLinuxDbusRequestId ||
+        !drain_until(owner, [&] { return semantic_mutation_reply_done && mutation_done; }, 2s) ||
+        semantic_mutation_reply.code != LinuxDbusErrorCode::None ||
+        semantic_mutation_reply.values.size() != 1 ||
+        semantic_mutation_reply.values.front() != LinuxDbusValue::boolean(true) ||
+        semantic_provider_thread == main_thread || mutation_thread != main_thread) {
+        return EXIT_FAILURE;
+    }
+
     const auto error_registration = transport.register_object_path(
         client_b,
         "/org/nativeui/T072/Error",
@@ -185,7 +278,7 @@ int main() {
                 "org.nativeui.T072.Expected", "expected failure");
         });
     if (error_registration == kInvalidLinuxDbusObjectRegistrationId ||
-        transport.object_path_count() != 2) {
+        transport.object_path_count() != 3) {
         return EXIT_FAILURE;
     }
 
@@ -216,6 +309,7 @@ int main() {
     if (transport.unregister_object_path(client_b, echo_registration) ||
         !transport.unregister_object_path(client_a, echo_registration) ||
         transport.unregister_object_path(client_a, echo_registration) ||
+        !transport.unregister_object_path(client_a, semantic_registration) ||
         !transport.unregister_object_path(client_b, error_registration) ||
         transport.object_path_count() != 0) {
         return EXIT_FAILURE;

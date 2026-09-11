@@ -3,7 +3,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <functional>
-#include <iostream>
 #include <thread>
 
 namespace {
@@ -18,7 +17,6 @@ bool drain_until(ui::detail::DispatcherOwner& owner,
     (void)owner.checkpoint();
     return done();
 }
-void stage(const char* name) { std::cerr << "T072 client_lifetime stage: " << name << '\n'; }
 }
 
 int main() {
@@ -27,7 +25,6 @@ int main() {
     constexpr LinuxDbusClientId pending_client_a = 1;
     constexpr LinuxDbusClientId pending_client_b = 2;
 
-    stage("pending-callback-begin");
     {
         LinuxDbusResourceLedger ledger;
         LinuxDbusPendingCallSet calls{ledger};
@@ -46,7 +43,6 @@ int main() {
         if (client_a_callbacks != 0 || client_b_callbacks != 1 || calls.pending_count() != 0 ||
             ledger.pending_request_count() != 0) return EXIT_FAILURE;
     }
-    stage("pending-callback-ok");
 
     LinuxDbusTransport transport;
     if (transport.start() != LinuxDbusErrorCode::None) return EXIT_FAILURE;
@@ -65,33 +61,26 @@ int main() {
         [](const LinuxDbusMethodRequest&) {
             return LinuxDbusMethodReply::method_return({LinuxDbusValue::string("b")});
         });
-    stage("paths-registered");
 
     const LinuxDbusSignalMatch match{"org.freedesktop.DBus", "/org/freedesktop/DBus",
                                      "org.freedesktop.DBus", "NameOwnerChanged"};
     const auto signal_a = transport.subscribe_signal(client_a, owner_a.dispatcher(), match,
                                                       [](LinuxDbusSignal) {});
-    stage("signal-a-registered");
     const auto signal_b = transport.subscribe_signal(client_b, owner_b.dispatcher(), match,
                                                       [](LinuxDbusSignal) {});
-    stage("signal-b-registered");
     if (path_a == kInvalidLinuxDbusObjectRegistrationId ||
         path_b == kInvalidLinuxDbusObjectRegistrationId ||
         signal_a == kInvalidLinuxDbusSubscriptionId || signal_b == kInvalidLinuxDbusSubscriptionId ||
         transport.object_path_count() != 2 || transport.subscription_count() != 2) return EXIT_FAILURE;
 
-    stage("release-a-begin");
     transport.release_client(client_a);
-    stage("release-a-complete");
     transport.release_client(client_a);
-    stage("release-a-idempotent-complete");
     if (transport.object_path_count() != 1 || transport.subscription_count() != 1 ||
         transport.unregister_object_path(client_a, path_b) ||
         transport.unsubscribe_signal(client_a, signal_b)) return EXIT_FAILURE;
 
     bool reply_done = false;
     LinuxDbusCompletion reply;
-    stage("sibling-call-begin");
     const auto request = transport.call_method(
         client_b, owner_b.dispatcher(),
         LinuxDbusMethodCall{transport.unique_name(), "/org/nativeui/T072/ClientB",
@@ -101,16 +90,12 @@ int main() {
         !drain_until(owner_b, [&] { return reply_done; }, 2s) ||
         reply.code != LinuxDbusErrorCode::None || reply.values.size() != 1 ||
         reply.values.front() != LinuxDbusValue::string("b")) return EXIT_FAILURE;
-    stage("sibling-call-ok");
 
-    stage("final-unregister-begin");
     if (!transport.unregister_object_path(client_b, path_b) ||
         !transport.unsubscribe_signal(client_b, signal_b) ||
         transport.object_path_count() != 0 || transport.subscription_count() != 0) return EXIT_FAILURE;
-    stage("final-unregister-ok");
 
     transport.release_client(client_b);
     transport.stop();
-    stage("complete");
     return EXIT_SUCCESS;
 }

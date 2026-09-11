@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <functional>
-#include <iostream>
 #include <string>
 #include <thread>
 
@@ -23,17 +22,12 @@ bool drain_until(ui::detail::DispatcherOwner& owner,
     return done();
 }
 
-void stage(const char* name) {
-    std::cerr << "T072 method_call stage: " << name << '\n';
-}
-
 } // namespace
 
 int main() {
     using namespace std::chrono_literals;
     using namespace ui::detail;
 
-    stage("start");
     LinuxDbusTransport transport;
     if (transport.start() != LinuxDbusErrorCode::None) {
         return EXIT_FAILURE;
@@ -61,10 +55,8 @@ int main() {
         success.code != LinuxDbusErrorCode::None ||
         transport.pending_request_count() != 0 ||
         transport.cancel_request(client, success_id)) {
-        stage("basic-call-failed");
         return EXIT_FAILURE;
     }
-    stage("basic-call-ok");
 
     LinuxDbusMethodCall argument_call{"org.freedesktop.DBus", "/org/freedesktop/DBus",
                                       "org.freedesktop.DBus", "GetNameOwner", 2s};
@@ -84,10 +76,8 @@ int main() {
         argument_result.values.front().kind != LinuxDbusValueKind::String ||
         argument_result.values.front().text.empty() ||
         transport.pending_request_count() != 0) {
-        stage("argument-call-failed");
         return EXIT_FAILURE;
     }
-    stage("argument-call-ok");
 
     bool error_done = false;
     LinuxDbusCompletion remote_error;
@@ -103,10 +93,8 @@ int main() {
         !drain_until(owner, [&] { return error_done; }, 2s) ||
         remote_error.code != LinuxDbusErrorCode::RemoteError ||
         remote_error.remote_error_name.empty() || transport.pending_request_count() != 0) {
-        stage("remote-error-failed");
         return EXIT_FAILURE;
     }
-    stage("remote-error-ok");
 
     bool cancelled_done = false;
     LinuxDbusCompletion cancelled;
@@ -123,19 +111,15 @@ int main() {
         !drain_until(owner, [&] { return cancelled_done; }, 2s) ||
         cancelled.code != LinuxDbusErrorCode::Cancelled ||
         transport.pending_request_count() != 0) {
-        stage("cancel-failed");
         return EXIT_FAILURE;
     }
-    stage("cancel-ok");
 
     LinuxDbusTransport slow_peer;
     if (slow_peer.start() != LinuxDbusErrorCode::None) {
-        stage("slow-peer-start-failed");
         return EXIT_FAILURE;
     }
     const auto slow_peer_client = slow_peer.register_client();
     if (slow_peer_client == kInvalidLinuxDbusClientId) {
-        stage("slow-peer-client-failed");
         return EXIT_FAILURE;
     }
     const auto slow_path = slow_peer.register_object_path(
@@ -145,10 +129,8 @@ int main() {
             return LinuxDbusMethodReply::method_return({LinuxDbusValue::string("late")});
         });
     if (slow_path == kInvalidLinuxDbusObjectRegistrationId) {
-        stage("slow-path-register-failed");
         return EXIT_FAILURE;
     }
-    stage("slow-path-ok");
 
     std::size_t timeout_callbacks = 0;
     LinuxDbusCompletion timeout_result;
@@ -160,29 +142,19 @@ int main() {
             timeout_result = std::move(result);
             ++timeout_callbacks;
         });
-    const bool timeout_observed =
-        timeout_id != kInvalidLinuxDbusRequestId &&
-        drain_until(owner, [&] { return timeout_callbacks == 1; }, 2s);
-    std::cerr << "T072 method_call timeout: observed=" << timeout_observed
-              << " callbacks=" << timeout_callbacks
-              << " code=" << static_cast<int>(timeout_result.code)
-              << " pending=" << transport.pending_request_count() << '\n';
-    if (!timeout_observed || timeout_result.code != LinuxDbusErrorCode::Timeout ||
+    if (timeout_id == kInvalidLinuxDbusRequestId ||
+        !drain_until(owner, [&] { return timeout_callbacks == 1; }, 2s) ||
+        timeout_result.code != LinuxDbusErrorCode::Timeout ||
         transport.pending_request_count() != 0 ||
         transport.cancel_request(client, timeout_id)) {
-        stage("timeout-contract-failed");
         return EXIT_FAILURE;
     }
 
     std::this_thread::sleep_for(150ms);
     (void)owner.checkpoint();
-    if (timeout_callbacks != 1 ||
-        !slow_peer.unregister_object_path(slow_peer_client, slow_path)) {
-        stage("timeout-cleanup-failed");
+    if (timeout_callbacks != 1) {
         return EXIT_FAILURE;
     }
-    slow_peer.stop();
-    stage("timeout-ok");
 
     if (transport.call_method(client, dispatcher,
             LinuxDbusMethodCall{"not a bus name", "/", "org.example.Valid", "Ping", 2s},
@@ -196,12 +168,40 @@ int main() {
         transport.call_method(client, dispatcher,
             LinuxDbusMethodCall{"org.freedesktop.DBus", "/", "org.example.Valid", "not a member", 2s},
             [](LinuxDbusCompletion) {}) != kInvalidLinuxDbusRequestId) {
-        stage("invalid-input-failed");
         return EXIT_FAILURE;
     }
 
-    transport.release_client(client);
+    std::size_t shutdown_callbacks = 0;
+    LinuxDbusCompletion shutdown_result;
+    const auto shutdown_id = transport.call_method(
+        client, dispatcher,
+        LinuxDbusMethodCall{slow_peer.unique_name(), "/org/nativeui/T072/Slow",
+                            "org.nativeui.T072.Test", "Wait", 2s},
+        [&](LinuxDbusCompletion result) {
+            shutdown_result = std::move(result);
+            ++shutdown_callbacks;
+        });
+    if (shutdown_id == kInvalidLinuxDbusRequestId ||
+        transport.pending_request_count() != 1) {
+        return EXIT_FAILURE;
+    }
+
     transport.stop();
-    stage("complete");
+    if (!drain_until(owner, [&] { return shutdown_callbacks == 1; }, 2s) ||
+        shutdown_result.code != LinuxDbusErrorCode::Shutdown ||
+        transport.pending_request_count() != 0) {
+        return EXIT_FAILURE;
+    }
+
+    std::this_thread::sleep_for(150ms);
+    (void)owner.checkpoint();
+    if (shutdown_callbacks != 1 ||
+        !slow_peer.unregister_object_path(slow_peer_client, slow_path)) {
+        return EXIT_FAILURE;
+    }
+
+    slow_peer.release_client(slow_peer_client);
+    slow_peer.stop();
+    transport.stop();
     return EXIT_SUCCESS;
 }
