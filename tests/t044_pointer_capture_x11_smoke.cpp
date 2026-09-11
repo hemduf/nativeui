@@ -14,6 +14,7 @@ namespace {
 
 struct CaptureState final {
     int down{};
+    int routed_move{};
     int move{};
     int outside_move{};
     int up{};
@@ -38,6 +39,7 @@ public:
             context.capture_pointer();
             return ui::EventResult::Handled;
         case ui::InputType::PointerMove:
+            ++state_->routed_move;
             if (dragging_) {
                 ++state_->move;
                 if (!context.bounds().contains(event.position)) ++state_->outside_move;
@@ -197,11 +199,11 @@ public:
         return true;
     }
 
-    bool move_inside(const ui::StandaloneWindow& window) {
+    bool move_inside(const ui::StandaloneWindow& window, int x = 24, int y = 24) {
         if (!display_) return false;
         const Window target = native_window(window);
         if (!target) return false;
-        XWarpPointer(display_, 0, target, 0, 0, 0, 0, 24, 24);
+        XWarpPointer(display_, 0, target, 0, 0, 0, 0, x, y);
         XSync(display_, False);
         return pointer_is_inside(target);
     }
@@ -349,10 +351,10 @@ int main() {
     if (!expect(driver.activate(*b), "focus-loss", "failed to focus B") || !pump(app)) return 1;
     if (!expect(a_state->cancel == cancel_before + 1,
                 "focus-loss", "focus loss did not cancel retained capture")) return 1;
-    const int b_move_before = b_state->move;
-    if (!expect(driver.move_inside(*b), "focus-loss", "failed to move into B") || !pump(app)) return 1;
-    if (!expect(b_state->move > b_move_before,
-                "focus-loss", "X11 grab remained owned by A after retained cancellation")) return 1;
+    const int b_routed_move_before = b_state->routed_move;
+    if (!expect(driver.move_inside(*b, 48, 48), "focus-loss", "failed to move into B") || !pump(app)) return 1;
+    if (!expect(b_state->routed_move > b_routed_move_before,
+                "focus-loss", "B did not receive motion after A capture cancellation")) return 1;
     if (!expect(driver.release(), "focus-loss", "failed to release held button") || !pump(app)) return 1;
     if (!expect(a_state->up == up_before,
                 "focus-loss", "cancelled capture received a duplicate release")) return 1;
@@ -368,10 +370,10 @@ int main() {
     c.reset();
     c_ui.reset();
     if (!pump(app)) return 1;
-    const int after_destroy = b_state->move;
-    if (!expect(driver.move_inside(*b), "destroy", "failed to move into B") || !pump(app)) return 1;
-    if (!expect(b_state->move > after_destroy,
-                "destroy", "destroyed X11 view retained pointer grab")) return 1;
+    const int after_destroy = b_state->routed_move;
+    if (!expect(driver.move_inside(*b, 72, 72), "destroy", "failed to move into B") || !pump(app)) return 1;
+    if (!expect(b_state->routed_move > after_destroy,
+                "destroy", "B did not receive motion after captured view destruction")) return 1;
     if (!expect(driver.release(), "destroy", "failed to release held button after destroy") || !pump(app)) return 1;
 
     for (int i = 0; i < 32; ++i) {
