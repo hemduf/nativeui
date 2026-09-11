@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <nativeui/detail/dispatcher_owner.hpp>
+#include <nativeui/detail/interaction_observer.hpp>
 
 #include <memory>
 #include <utility>
@@ -78,7 +79,9 @@ struct InteractionState {
     bool focus_dispatcher_valid{};
 };
 
-class InteractionObserverComponent final : public ui::Component {
+class InteractionObserverComponent final
+    : public ui::Component,
+      public ui::detail::RetainedInteractionObserver {
 public:
     explicit InteractionObserverComponent(std::shared_ptr<InteractionState> state)
         : state_(std::move(state)) {}
@@ -98,14 +101,14 @@ public:
         if (!placements.empty()) placements.front().bounds = bounds;
     }
 
-    void pointer_hover_changed(bool hovered, ui::InputContext& context) override {
+    void retained_pointer_hover_changed(bool hovered, ui::Dispatcher dispatcher) override {
         hovered ? ++state_->hover_in : ++state_->hover_out;
-        state_->hover_dispatcher_valid = context.dispatcher().valid();
+        state_->hover_dispatcher_valid = dispatcher.valid();
     }
 
-    void focus_within_changed(bool focused, ui::FocusContext& context) override {
+    void retained_focus_within_changed(bool focused, ui::Dispatcher dispatcher) override {
         focused ? ++state_->focus_in : ++state_->focus_out;
-        state_->focus_dispatcher_valid = context.dispatcher().valid();
+        state_->focus_dispatcher_valid = dispatcher.valid();
     }
 
     void paint(ui::PaintContext&) const override {}
