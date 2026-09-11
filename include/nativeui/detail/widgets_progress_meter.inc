@@ -1,6 +1,8 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/progress_style.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -67,7 +69,7 @@ private:
     float maximum_{};
 };
 
-class BoundedDisplayComponent final : public Component {
+class BoundedDisplayComponent final : public Component, public ThemeBinding {
 public:
     using Formatter = std::function<std::string(float)>;
 
@@ -77,20 +79,35 @@ public:
         float maximum,
         ProgressOrientation orientation,
         Formatter formatter,
-        bool meter)
+        ProgressBarStyle style)
         : state_(state),
           domain_(minimum, maximum),
           orientation_(orientation),
           formatter_(std::move(formatter)),
-          meter_(meter) {}
+          progress_style_(std::move(style)) {}
+
+    BoundedDisplayComponent(
+        State<float>& state,
+        float minimum,
+        float maximum,
+        ProgressOrientation orientation,
+        Formatter formatter,
+        MeterStyle style)
+        : state_(state),
+          domain_(minimum, maximum),
+          orientation_(orientation),
+          formatter_(std::move(formatter)),
+          meter_style_(std::move(style)),
+          meter_(true) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return false; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        const auto resolved = resolved_style();
         if (orientation_ == ProgressOrientation::Vertical) {
-            return Size{formatter_ ? 64.0f : 24.0f, 144.0f};
+            return formatter_ ? resolved.vertical_formatted_size : resolved.vertical_size;
         }
-        return Size{176.0f, formatter_ ? 40.0f : 24.0f};
+        return formatter_ ? resolved.horizontal_formatted_size : resolved.horizontal_size;
     }
 
     void mount(MountContext& context) override {
@@ -107,33 +124,55 @@ public:
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
+        const auto resolved = resolved_style();
         auto& painter = context.painter();
         const float effective = domain_.effective(state_.get());
         const auto fill = domain_.fill_rect(bounds, effective, orientation_);
 
-        painter.fill_rounded_rect(bounds, 6.0f, colors::input);
+        painter.fill_rounded_rect(bounds, resolved.corner_radius, resolved.track);
         if (fill.w > 0.0f && fill.h > 0.0f) {
-            painter.fill_rounded_rect(fill, meter_ ? 3.0f : 6.0f, colors::accent);
+            painter.fill_rounded_rect(fill, resolved.fill_corner_radius, resolved.fill);
         }
-        painter.stroke_rounded_rect(bounds, 6.0f, 1.0f, colors::border);
+        painter.stroke_rounded_rect(
+            bounds, resolved.corner_radius, resolved.border_width, resolved.border);
 
         if (formatter_) {
             const auto text = formatter_(effective);
             painter.text(
                 Point{bounds.x + bounds.w * 0.5f, bounds.y + bounds.h * 0.5f},
                 text,
-                11.0f,
-                colors::text,
+                resolved.text_size,
+                resolved.text,
                 TextAlign::Center);
         }
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state() const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+        };
+    }
+
+    [[nodiscard]] ResolvedProgressStyle resolved_style() const {
+        if (meter_) {
+            return resolve_meter_style(
+                default_meter_style(current_theme()), meter_style_, current_visual_state());
+        }
+        return resolve_progress_bar_style(
+            default_progress_bar_style(current_theme()),
+            progress_style_,
+            current_visual_state());
+    }
+
     State<float>& state_;
     BoundedDisplayDomain domain_;
     ProgressOrientation orientation_{ProgressOrientation::Horizontal};
     Formatter formatter_;
     State<float>::Subscription subscription_;
+    ProgressBarStyle progress_style_;
+    MeterStyle meter_style_;
     bool meter_{};
 };
 
@@ -156,21 +195,28 @@ public:
         return std::move(*this);
     }
 
+    ProgressBar&& style(ProgressBarStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;
         const float maximum = maximum_;
         const auto orientation = orientation_;
         auto formatter = std::move(formatter_);
+        auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, orientation, formatter = std::move(formatter)]() mutable {
+            [state, minimum, maximum, orientation, formatter = std::move(formatter),
+             style = std::move(style)]() mutable {
                 return std::make_unique<detail::BoundedDisplayComponent>(
                     *state,
                     minimum,
                     maximum,
                     orientation,
                     std::move(formatter),
-                    false);
+                    std::move(style));
             },
             {}};
     }
@@ -181,6 +227,7 @@ private:
     float maximum_{1.0f};
     ProgressOrientation orientation_{ProgressOrientation::Horizontal};
     Formatter formatter_;
+    ProgressBarStyle style_;
 };
 
 class Meter {
@@ -200,21 +247,28 @@ public:
         return std::move(*this);
     }
 
+    Meter&& style(MeterStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;
         const float maximum = maximum_;
         const auto orientation = orientation_;
         auto formatter = std::move(formatter_);
+        auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, orientation, formatter = std::move(formatter)]() mutable {
+            [state, minimum, maximum, orientation, formatter = std::move(formatter),
+             style = std::move(style)]() mutable {
                 return std::make_unique<detail::BoundedDisplayComponent>(
                     *state,
                     minimum,
                     maximum,
                     orientation,
                     std::move(formatter),
-                    true);
+                    std::move(style));
             },
             {}};
     }
@@ -225,6 +279,7 @@ private:
     float maximum_{1.0f};
     ProgressOrientation orientation_{ProgressOrientation::Horizontal};
     Formatter formatter_;
+    MeterStyle style_;
 };
 
 } // namespace ui
