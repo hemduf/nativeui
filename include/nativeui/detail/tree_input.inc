@@ -110,6 +110,7 @@
     PointerCaptureState pointer_capture_{};
     Node* pointer_hover_target_{};
     bool cancelling_pointer_capture_{};
+    bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};
     bool focus_active_{};
