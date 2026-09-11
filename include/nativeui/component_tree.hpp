@@ -5,6 +5,9 @@
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/theme.hpp>
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+#include <nativeui/inspector.hpp>
+#endif
 
 #include <limits>
 #include <optional>
@@ -21,6 +24,9 @@ class UI;
 class Tree {
 public:
 #include <nativeui/detail/tree_public.inc>
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+#include <nativeui/detail/tree_inspector_public.inc>
+#endif
 #include <nativeui/detail/tree_theme_public.inc>
 private:
     friend class UI;
