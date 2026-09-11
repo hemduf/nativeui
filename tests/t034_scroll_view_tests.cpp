@@ -420,6 +420,49 @@ void headless_scrollbar_golden_states() {
     }
 }
 
+void t038_typed_scrollbar_style_contract() {
+    ui::ScrollbarStyle style{};
+    style.base.track = ui::Color{1.0f, 0.0f, 0.0f, 1.0f};
+    style.base.thumb = ui::Color{0.0f, 1.0f, 0.0f, 1.0f};
+    style.base.thickness = 12.0f;
+    style.base.minimum_thumb = 24.0f;
+    style.base.corner_radius = 1.0f;
+    style.hovered.thumb = ui::Color{0.0f, 0.0f, 1.0f, 1.0f};
+    style.pressed.thumb = ui::Color{1.0f, 1.0f, 0.0f, 1.0f};
+    style.hovered.thickness = 16.0f;
+
+    ui::ScrollState state{ui::ScrollAxis::Vertical};
+    ui::UI tree{
+        ui::ScrollView{state, ui::Spacer{100.0f, 400.0f}}.style(style)};
+    test::MockPlatform platform;
+    ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+    tree.resize({100.0f, 100.0f});
+    tree.activate(platform);
+    state.set_offset({0.0f, 100.0f});
+    NUI_CHECK(renderer.render(tree));
+
+    const auto thumb = renderer.pixel(94, 30);
+    const auto track = renderer.pixel(94, 60);
+    NUI_CHECK(thumb.r == 0 && thumb.g == 255 && thumb.b == 0 && thumb.a == 255);
+    NUI_CHECK(track.r == 255 && track.g == 0 && track.b == 0 && track.a == 255);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 94.0f, 30.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(tree.layout_dirty());
+    NUI_CHECK(renderer.render(tree));
+    const auto hovered = renderer.pixel(94, 30);
+    NUI_CHECK(hovered.r == 0 && hovered.g == 0 && hovered.b == 255 && hovered.a == 255);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 90.0f, 30.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(renderer.render(tree));
+    const auto pressed = renderer.pixel(94, 30);
+    NUI_CHECK(pressed.r == 255 && pressed.g == 255 && pressed.b == 0 && pressed.a == 255);
+    NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
+}
+
 void suite() {
     wheel_consumption_uses_scroll_state();
     nested_wheel_bubbles_at_boundary();
@@ -431,6 +474,7 @@ void suite() {
     inert_overlay_does_not_block_pointer_target();
     idle_scroll_view_schedules_no_activity();
     headless_scrollbar_golden_states();
+    t038_typed_scrollbar_style_contract();
 }
 
 } // namespace
