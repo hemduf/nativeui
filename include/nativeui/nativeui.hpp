@@ -28,5 +28,6 @@
 #include <nativeui/virtual_list.hpp>
 #include <nativeui/widgets.hpp>
 #include <nativeui/ui.hpp>
+#include <nativeui/dialog.hpp>
 #include <nativeui/headless.hpp>
 #include <nativeui/window.hpp>
