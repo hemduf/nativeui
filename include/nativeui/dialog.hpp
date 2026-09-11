@@ -3,6 +3,7 @@
 #include <nativeui/ui.hpp>
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -45,13 +46,14 @@ enum class DialogShowResult {
     Shown,
     Busy,
     InvalidSpec,
+    Unavailable,
 };
 
 class Dialog final {
 public:
     using Completion = std::function<void(DialogResult)>;
 
-    explicit Dialog(UI& ui) noexcept : ui_(&ui) {}
+    explicit Dialog(UI& ui) noexcept : state_(ui.dialog_state_) {}
 
     Dialog(const Dialog&) = delete;
     Dialog& operator=(const Dialog&) = delete;
@@ -59,25 +61,48 @@ public:
     Dialog& operator=(Dialog&&) = delete;
 
     ~Dialog() {
-        if (active_) (void)close();
+        if (active()) {
+            (void)close();
+        } else {
+            // The owning UI may already have begun teardown. In that case the
+            // shared state made this controller inert and the application
+            // callback is deliberately discarded rather than emitted from a
+            // destructor after the UI lifetime ended.
+            completion_ = {};
+            spec_ = {};
+            generation_ = 0;
+        }
     }
 
     [[nodiscard]] DialogShowResult show(DialogSpec spec, Completion completion) {
-        if (active_) return DialogShowResult::Busy;
+        if (!state_ || state_->ui_tearing_down) return DialogShowResult::Unavailable;
+        if (state_->active_generation != 0) return DialogShowResult::Busy;
         if (!valid_spec(spec)) return DialogShowResult::InvalidSpec;
+
+        const auto generation = state_->acquire();
+        if (generation == 0) {
+            return state_->ui_tearing_down
+                ? DialogShowResult::Unavailable
+                : DialogShowResult::Busy;
+        }
 
         spec_ = std::move(spec);
         completion_ = std::move(completion);
-        active_ = true;
+        generation_ = generation;
         return DialogShowResult::Shown;
     }
 
-    [[nodiscard]] bool active() const noexcept { return active_; }
+    [[nodiscard]] bool active() const noexcept {
+        return state_ && state_->owns(generation_);
+    }
 
     [[nodiscard]] bool close() {
-        if (!active_) return false;
+        if (!state_ || !state_->release(generation_)) return false;
 
-        active_ = false;
+        // Release the per-UI active slot before any application code runs.
+        // A reentrant completion callback may therefore construct/show the next
+        // Dialog without observing the old controller as live.
+        generation_ = 0;
         spec_ = {};
         auto completion = std::move(completion_);
         completion_ = {};
@@ -105,8 +130,8 @@ private:
         return true;
     }
 
-    UI* ui_{};
-    bool active_{};
+    std::shared_ptr<detail::DialogState> state_;
+    std::uint64_t generation_{};
     DialogSpec spec_;
     Completion completion_;
 };
