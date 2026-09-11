@@ -1,6 +1,7 @@
 #include "example_support.hpp"
 
 #include <exception>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -11,6 +12,7 @@ namespace {
 ui::DialogSpec confirm_spec(bool with_cancel = true) {
     ui::DialogSpec spec;
     spec.title = "Confirm operation";
+    spec.backdrop_color = ui::Color{0.0f, 0.0f, 0.0f, 0.52f};
     spec.body = ui::make_spec(ui::Column{
         ui::Label{"This body is arbitrary retained NativeUI content."}.size(13.0f),
         ui::Label{"Enter confirms; Escape cancels."}.size(12.0f).color(ui::colors::textMuted),
@@ -50,6 +52,49 @@ ui::UI make_ui(DemoState& state) {
             ui::Label{state.last_result}.size(12.0f),
         }.gap(12.0f).padding(16.0f)};
 }
+
+struct KeySinkState {
+    int key_down_count{};
+};
+
+class KeySinkComponent final : public ui::Component {
+public:
+    explicit KeySinkComponent(std::shared_ptr<KeySinkState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {180.0f, 48.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::KeyDown) ++state_->key_down_count;
+        return ui::EventResult::Handled;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<KeySinkState> state_;
+};
+
+class KeySink {
+public:
+    explicit KeySink(std::shared_ptr<KeySinkState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)]() mutable {
+                return std::make_unique<KeySinkComponent>(std::move(state));
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<KeySinkState> state_;
+};
 
 int default_action_contract() {
     example::Platform platform;
@@ -126,10 +171,75 @@ int escape_dismiss_contract() {
     return 0;
 }
 
+int escape_preempts_focused_child_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    auto sink = std::make_shared<KeySinkState>();
+    ui::DialogSpec spec;
+    spec.title = "Escape contract";
+    spec.backdrop_color = ui::Color{0.0f, 0.0f, 0.0f, 0.4f};
+    spec.body = ui::make_spec(KeySink{sink});
+    spec.actions.push_back(ui::DialogAction{
+        "cancel", "Cancel", true, ui::DialogActionRole::Cancel});
+
+    ui::Dialog dialog{tree};
+    std::vector<ui::DialogResult> results;
+    if (dialog.show(std::move(spec), [&](ui::DialogResult result) {
+            results.push_back(std::move(result));
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T063 Escape-preemption setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+
+    if (tree.dispatch(example::key(ui::Key::Escape), platform) != ui::EventResult::Handled ||
+        sink->key_down_count != 0 || results.size() != 1 ||
+        results.front().kind != ui::DialogResultKind::Action ||
+        results.front().action_id != "cancel" || dialog.active()) {
+        return example::fail("T063 Escape leaked to focused body before Dialog Cancel");
+    }
+    return 0;
+}
+
+int deactivation_suppresses_completion_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    ui::Dialog dialog{tree};
+    int completions = 0;
+    if (dialog.show(confirm_spec(), [&](ui::DialogResult) { ++completions; }) !=
+        ui::DialogShowResult::Shown) {
+        return example::fail("T063 deactivation setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+    tree.deactivate(platform);
+
+    if (completions != 0 || dialog.active()) {
+        return example::fail("T063 UI deactivation did not suppress and abandon the active Dialog");
+    }
+
+    tree.activate(platform);
+    if (dialog.show(confirm_spec(), [&](ui::DialogResult) { ++completions; }) !=
+        ui::DialogShowResult::Shown) {
+        return example::fail("T063 Dialog controller was not reusable after UI reactivation");
+    }
+    tree.resize({420.0f, 260.0f});
+    if (!dialog.close() || completions != 1) {
+        return example::fail("T063 post-reactivation explicit close did not complete once");
+    }
+    return 0;
+}
+
 int self_test() {
     if (const int result = default_action_contract(); result != 0) return result;
     if (const int result = cancel_action_contract(); result != 0) return result;
     if (const int result = escape_dismiss_contract(); result != 0) return result;
+    if (const int result = escape_preempts_focused_child_contract(); result != 0) return result;
+    if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
     return 0;
 }
 
