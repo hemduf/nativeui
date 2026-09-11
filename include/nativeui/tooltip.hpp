@@ -37,6 +37,24 @@ public:
     void set_hovered(bool hovered) { set_trigger(Trigger::Hover, hovered); }
     void set_focused(bool focused) { set_trigger(Trigger::Focus, focused); }
 
+    /// Hidden/Collapsed/Disabled anchors cannot present a tooltip. Losing
+    /// availability cancels both pending and visible work and suppresses
+    /// stationary eligibility until the retained hover/focus state actually
+    /// becomes false and then true again. Availability restoration alone is
+    /// therefore never treated as a synthetic hover/focus trigger.
+    void set_anchor_available(bool available) {
+        if (!state_ || state_->shutting_down || state_->anchor_available == available) {
+            return;
+        }
+
+        state_->anchor_available = available;
+        if (!available) {
+            state_->suppressed = true;
+            cancel_pending(*state_);
+            hide_visible(*state_);
+        }
+    }
+
     /// PointerDown is a terminal dismissal for the current continuous
     /// eligibility interval. Remaining hovered/focused does not silently arm a
     /// new timer; at least one complete ineligible -> eligible transition is
@@ -85,7 +103,10 @@ private:
               show(std::move(show_value)),
               hide(std::move(hide_value)) {}
 
-        [[nodiscard]] bool eligible() const noexcept { return hovered || focused; }
+        [[nodiscard]] bool triggered() const noexcept { return hovered || focused; }
+        [[nodiscard]] bool eligible() const noexcept {
+            return anchor_available && triggered();
+        }
 
         Dispatcher dispatcher;
         DispatcherDuration delay{};
@@ -94,6 +115,7 @@ private:
         TimerHandle timer;
         bool hovered{};
         bool focused{};
+        bool anchor_available{true};
         bool visible{};
         bool suppressed{};
         bool shutting_down{};
@@ -149,9 +171,10 @@ private:
         if (!is_eligible) {
             cancel_pending(*state_);
             hide_visible(*state_);
-            // Reaching an actually ineligible state satisfies the suppression
-            // half of the required false -> true transition.
-            state_->suppressed = false;
+            // Only the retained hover/focus state reaching false clears
+            // suppression. Availability restoration itself is deliberately not
+            // a new presentation trigger.
+            if (!state_->triggered()) state_->suppressed = false;
             return;
         }
 
