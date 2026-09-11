@@ -214,6 +214,38 @@ int self_test() {
         return example::fail("modal overlay allowed lower keyboard activation");
     }
 
+    // A later NonModal overlay may receive pointer input above the modal, but
+    // that pointer interaction must not move keyboard focus out of the active
+    // modal trap. Otherwise Tab can wrap into root content under the modal.
+    int above_modal_activations = 0;
+    ui::OverlaySpec above_modal;
+    above_modal.placement = ui::OverlayPlacement::Center;
+    above_modal.content = ui::make_spec(
+        ui::Button{"Above modal", [&] { ++above_modal_activations; }});
+    const auto above_modal_handle = a_ui.show_overlay(std::move(above_modal));
+    a_ui.resize({96.0f, 48.0f});
+
+    ui::InputEvent above_down;
+    above_down.type = ui::InputType::PointerDown;
+    above_down.position = {48.0f, 24.0f};
+    ui::InputEvent above_up = above_down;
+    above_up.type = ui::InputType::PointerUp;
+    if (!above_modal_handle.valid() ||
+        !ui::handled(a_ui.dispatch(above_down, platform)) ||
+        !ui::handled(a_ui.dispatch(above_up, platform)) ||
+        above_modal_activations != 1) {
+        return example::fail("above-modal non-modal pointer input failed");
+    }
+    (void)a_ui.dispatch(example::key(ui::Key::Tab), platform);
+    (void)a_ui.dispatch(example::key(ui::Key::Enter), platform);
+    if (a_activations != 1) {
+        return example::fail("above-modal pointer focus escaped modal trap");
+    }
+    if (!a_ui.close_overlay(above_modal_handle)) {
+        return example::fail("above-modal non-modal close failed");
+    }
+    a_ui.resize({96.0f, 48.0f});
+
     // The modal/focus state of A must not perturb an independent UI B.
     if (!ui::handled(b_ui.dispatch(example::key(ui::Key::Enter), platform)) ||
         b_activations != 1) {
