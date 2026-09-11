@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <nativeui/detail/theme_binding.hpp>
+
 #include <memory>
 #include <utility>
 #include <vector>
@@ -43,6 +45,48 @@ public:
 
 private:
     std::vector<ui::Spec> children_;
+};
+
+struct ThemeProbeState {
+    float mounted_control_height{-1.0f};
+};
+
+class ThemeProbeComponent final : public ui::Component,
+                                  public ui::detail::ThemeBinding {
+public:
+    explicit ThemeProbeComponent(std::shared_ptr<ThemeProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {10.0f, 10.0f};
+    }
+
+    void mount(ui::MountContext&) override {
+        state_->mounted_control_height = current_theme().controls.control_height;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<ThemeProbeState> state_;
+};
+
+class ThemeProbe {
+public:
+    explicit ThemeProbe(std::shared_ptr<ThemeProbeState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)]() mutable {
+                return std::make_unique<ThemeProbeComponent>(std::move(state));
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<ThemeProbeState> state_;
 };
 
 void combo_keyboard_commit_contract() {
@@ -276,6 +320,57 @@ void popup_menu_contract() {
     NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
 }
 
+void popup_menu_pointer_non_action_contract() {
+    test::MockPlatform platform;
+    int disabled_actions = 0;
+    int enabled_actions = 0;
+
+    ui::Theme theme = ui::default_theme();
+    theme.controls.control_height = 40.0f;
+    theme.controls.minimum_width = 120.0f;
+    theme.spacing.sm = 10.0f;
+
+    ui::UI tree{
+        ui::Column{
+            ui::PopupMenu{
+                "Actions",
+                {
+                    ui::PopupMenuItem::action("Disabled", [&] { ++disabled_actions; }, false),
+                    ui::PopupMenuItem::separator(),
+                    ui::PopupMenuItem::action("Run", [&] { ++enabled_actions; }),
+                }},
+            ui::Spacer{1.0f, 120.0f}},
+        theme};
+    tree.resize({240.0f, 220.0f});
+    tree.activate(platform);
+
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Enter), platform)));
+
+    // Column padding places the 40 px anchor at y=24, so the popup starts at
+    // y=64: disabled action [64,104), separator [104,114), enabled [114,154).
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerDown, 30.0f, 80.0f), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerUp, 30.0f, 80.0f), platform)));
+    NUI_CHECK(disabled_actions == 0);
+    NUI_CHECK(enabled_actions == 0);
+
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerDown, 30.0f, 108.0f), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerUp, 30.0f, 108.0f), platform)));
+    NUI_CHECK(disabled_actions == 0);
+    NUI_CHECK(enabled_actions == 0);
+
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerDown, 30.0f, 130.0f), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(
+        test::pointer(ui::InputType::PointerUp, 30.0f, 130.0f), platform)));
+    NUI_CHECK(disabled_actions == 0);
+    NUI_CHECK(enabled_actions == 1);
+}
+
 void pointer_commit_and_no_click_through_contract() {
     test::MockPlatform platform;
     ui::State<int> selection{1};
@@ -350,6 +445,24 @@ void reentrant_menu_callback_contract() {
     NUI_CHECK(replacement.valid());
 }
 
+void dynamic_theme_inheritance_contract() {
+    test::MockPlatform platform;
+    ui::State<bool> present{false};
+    auto probe = std::make_shared<ThemeProbeState>();
+
+    ui::Theme theme = ui::default_theme();
+    theme.controls.control_height = 73.0f;
+
+    ui::UI tree{ui::If{present, ThemeProbe{probe}}, theme};
+    tree.resize({240.0f, 180.0f});
+    tree.activate(platform);
+    NUI_CHECK(probe->mounted_control_height < 0.0f);
+
+    present.set(true);
+    tree.resize({240.0f, 180.0f});
+    NUI_CHECK(probe->mounted_control_height == 73.0f);
+}
+
 void headless_open_highlight_contract() {
     test::MockPlatform platform;
     ui::State<int> selection{1};
@@ -407,8 +520,10 @@ void suite() {
     disabled_and_destroyed_anchor_close_contract();
     popup_menu_empty_callback_is_not_actionable_contract();
     popup_menu_contract();
+    popup_menu_pointer_non_action_contract();
     pointer_commit_and_no_click_through_contract();
     reentrant_menu_callback_contract();
+    dynamic_theme_inheritance_contract();
     headless_open_highlight_contract();
     independent_views_contract();
 }
