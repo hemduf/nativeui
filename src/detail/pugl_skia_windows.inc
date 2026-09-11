@@ -40,6 +40,8 @@ public:
         CFRunLoopSourceContext context{};
         context.info = this;
         context.perform = [](void*) {
+            // Break only the innermost blocking run-loop wait. Application
+            // immediately re-enters its next pump after dispatcher draining.
             CFRunLoopStop(CFRunLoopGetCurrent());
         };
         wake_source_ = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &context);
@@ -94,6 +96,11 @@ public:
     void request_wake() noexcept override {
         std::lock_guard lock{mutex_};
         if (closing_ || !view_) return;
+
+        // Worker threads must not call Pugl APIs: PUGL_WORLD_THREADS only makes
+        // the Xlib connection thread-aware and does not make Pugl world/view
+        // state itself concurrently accessible. Use only platform primitives
+        // whose native handles were captured on the UI thread at realization.
 #if defined(__APPLE__)
         if (wake_source_ && run_loop_) {
             CFRunLoopSourceSignal(wake_source_);
@@ -134,6 +141,12 @@ public:
 
         if (timeout_seconds == 0.0) return puglUpdate(world, 0.0);
 
+        // Do not use a Pugl repeating timer as a one-shot wait deadline here.
+        // X11 timers are optional (XSync-dependent), and Cocoa's NSEvent wait
+        // is not interrupted merely because an NSTimer/CF source fired. Wait on
+        // each platform's native event primitive, which the worker wake path
+        // above can interrupt, then let one non-blocking Pugl update own all
+        // actual Pugl world/view dispatch on the UI thread.
 #if defined(__APPLE__)
         constexpr double kIndefiniteRunLoopSliceSeconds = 24.0 * 60.0 * 60.0;
         const double wait_seconds =
@@ -153,6 +166,11 @@ public:
         return puglUpdate(world, 0.0);
 #elif defined(__linux__)
         if (!display) return PUGL_FAILURE;
+
+        // Xlib can already own decoded events even when the connection fd is
+        // no longer readable, so only block in poll() when its local queue is
+        // empty. PUGL_WORLD_THREADS initializes Xlib for the worker XSendEvent
+        // wake used by request_wake().
         if (XPending(display) == 0) {
             const int connection = ConnectionNumber(display);
             if (connection < 0) return PUGL_FAILURE;
@@ -258,6 +276,9 @@ struct Application::Impl final {
     std::string last_error;
 
     Impl() {
+        // Dispatcher worker posts use the platform wake primitive captured by
+        // PuglDispatcherWakeBackend. X11 requires XInitThreads before any other
+        // Xlib call, which Pugl performs for this PROGRAM world flag.
         world = puglNewWorld(PUGL_PROGRAM, PUGL_WORLD_THREADS);
         if (!world) {
             terminal_error = true;
@@ -269,7 +290,15 @@ struct Application::Impl final {
     }
 
     ~Impl() {
+        // Application must outlive every explicitly attached StandaloneWindow.
+        // Terminating here is deliberate: freeing the PROGRAM world while a
+        // borrowed view is still alive would turn a clear lifetime violation
+        // into a platform UAF during later window teardown.
         if (!windows.empty()) std::terminate();
+
+        // Stop worker-originated wakes first, process a final non-blocking
+        // native checkpoint, then detach the wake source/window before freeing
+        // the shared PROGRAM world.
         if (wake_backend) wake_backend->begin_shutdown();
         if (world) (void)puglUpdate(world, 0.0);
         if (wake_backend) {
@@ -369,6 +398,10 @@ struct Application::Impl final {
             return false;
         }
 
+        // Snapshot after native dispatch: a native close may have destroyed a
+        // logical owner, while another callback may have created a new one.
+        // DispatcherOwner::checkpoint itself is reentrancy-safe if a callback
+        // destroys its own window or a sibling.
         drain_dispatchers();
         return !quit_requested;
     }
@@ -423,7 +456,7 @@ struct StandaloneWindow::Impl final : PlatformServices {
     std::function<void()> closed_callback;
     std::shared_ptr<int> lifetime_token;
     bool close_completion_posted{};
-    bool in_native_close_request{};
+    bool close_request_callback_active{};
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -513,7 +546,24 @@ StandaloneWindow::~StandaloneWindow() {
 void StandaloneWindow::handle_native_close_request() {
     if (!impl_ || !impl_->core || !impl_->close_state.begin_user_request()) return;
 
-    impl_->in_native_close_request = true;
+    const auto dispatcher = impl_->dispatcher_owner
+        ? impl_->dispatcher_owner->dispatcher()
+        : Dispatcher{};
+    const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+    auto* self = this;
+    if (!dispatcher.post([lifetime, self] {
+            if (lifetime.expired()) return;
+            self->process_native_close_request();
+        })) {
+        if (lifetime.expired()) return;
+        impl_->close_state.finish_user_request(false);
+    }
+}
+
+void StandaloneWindow::process_native_close_request() {
+    if (!impl_ || !impl_->core || !impl_->close_state.requesting()) return;
+
+    impl_->close_request_callback_active = true;
     const std::weak_ptr<int> lifetime = impl_->lifetime_token;
     const auto callback = impl_->close_request_callback;
     CloseDecision decision = CloseDecision::Accept;
@@ -525,8 +575,11 @@ void StandaloneWindow::handle_native_close_request() {
         }
     }
 
+    // A callback is allowed to destroy this window. The weak token is local and
+    // remains valid to inspect after destruction, so do not touch `this` again
+    // when the object lifetime ended inside user code.
     if (lifetime.expired()) return;
-    impl_->in_native_close_request = false;
+    impl_->close_request_callback_active = false;
     impl_->close_state.finish_user_request(decision == CloseDecision::Accept);
     if (impl_->close_state.pending()) schedule_close_completion();
 }
@@ -537,7 +590,7 @@ void StandaloneWindow::schedule_close_completion() {
         return;
     }
 
-    if (!impl_->application && !impl_->in_native_close_request) {
+    if (!impl_->application && !impl_->close_request_callback_active) {
         complete_close();
         return;
     }
@@ -553,7 +606,7 @@ void StandaloneWindow::schedule_close_completion() {
             self->complete_close();
         })) {
         impl_->close_completion_posted = false;
-        if (!impl_->in_native_close_request) complete_close();
+        if (!impl_->close_request_callback_active) complete_close();
     }
 }
 
