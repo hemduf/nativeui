@@ -53,7 +53,8 @@ class Dialog final {
 public:
     using Completion = std::function<void(DialogResult)>;
 
-    explicit Dialog(UI& ui) noexcept : state_(ui.dialog_state_) {}
+    explicit Dialog(UI& ui) noexcept
+        : ui_(&ui), state_(ui.dialog_state_) {}
 
     Dialog(const Dialog&) = delete;
     Dialog& operator=(const Dialog&) = delete;
@@ -70,12 +71,15 @@ public:
             // destructor after the UI lifetime ended.
             completion_ = {};
             spec_ = {};
+            overlay_ = {};
             generation_ = 0;
         }
     }
 
     [[nodiscard]] DialogShowResult show(DialogSpec spec, Completion completion) {
-        if (!state_ || state_->ui_tearing_down) return DialogShowResult::Unavailable;
+        if (!state_ || state_->ui_tearing_down || !ui_) {
+            return DialogShowResult::Unavailable;
+        }
         if (state_->active_generation != 0) return DialogShowResult::Busy;
         if (!valid_spec(spec)) return DialogShowResult::InvalidSpec;
 
@@ -86,9 +90,24 @@ public:
                 : DialogShowResult::Busy;
         }
 
+        OverlaySpec overlay;
+        overlay.mode = OverlayMode::Modal;
+        overlay.pointer_policy = OverlayPointerPolicy::Normal;
+        overlay.placement = OverlayPlacement::Center;
+        overlay.dismiss_on_escape = false;
+        overlay.dismiss_on_outside_pointer_down = false;
+        overlay.content = std::move(spec.body);
+
+        auto handle = ui_->show_overlay(std::move(overlay));
+        if (!handle.valid()) {
+            (void)state_->release(generation);
+            return DialogShowResult::Unavailable;
+        }
+
         spec_ = std::move(spec);
         completion_ = std::move(completion);
         generation_ = generation;
+        overlay_ = std::move(handle);
         return DialogShowResult::Shown;
     }
 
@@ -97,11 +116,17 @@ public:
     }
 
     [[nodiscard]] bool close() {
-        if (!state_ || !state_->release(generation_)) return false;
+        if (!state_ || !state_->owns(generation_)) return false;
 
-        // Release the per-UI active slot before any application code runs.
-        // A reentrant completion callback may therefore construct/show the next
-        // Dialog without observing the old controller as live.
+        // Logical overlay close happens before the per-UI active slot is
+        // released and before application code runs. T058 owns the retained
+        // structural checkpoint; the later T063 completion unit tightens the
+        // callback to run only after that checkpoint when close originates from
+        // inside an input callback.
+        if (ui_ && overlay_.valid()) (void)ui_->close_overlay(overlay_);
+        overlay_ = {};
+
+        if (!state_->release(generation_)) return false;
         generation_ = 0;
         spec_ = {};
         auto completion = std::move(completion_);
@@ -130,8 +155,10 @@ private:
         return true;
     }
 
+    UI* ui_{};
     std::shared_ptr<detail::DialogState> state_;
     std::uint64_t generation_{};
+    OverlayHandle overlay_;
     DialogSpec spec_;
     Completion completion_;
 };
