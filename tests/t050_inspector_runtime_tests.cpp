@@ -2,6 +2,7 @@
 
 #include <nativeui/headless.hpp>
 #include <nativeui/inspector.hpp>
+#include <nativeui/layout.hpp>
 #include <nativeui/ui.hpp>
 #include <nativeui/widgets.hpp>
 
@@ -114,7 +115,7 @@ void query_reports_layout_dirty_and_exact_dirty_regions() {
 
 void snapshot_reports_focus_capture_and_effective_clip() {
     ui::State<bool> toggled{false};
-    ui::UI focused{ui::Toggle{"Focus", toggled}};
+    ui::UI focused{ui::Padding{8.0f, ui::Toggle{"Focus", toggled}}};
     test::MockPlatform focus_platform;
     focused.resize({140.0f, 70.0f});
     focused.activate(focus_platform);
