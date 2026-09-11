@@ -133,6 +133,18 @@ function(_nativeui_attach_platform_impl target consumer_id)
   )
 endfunction()
 
+# Keep Linux D-Bus module resolution in a function defined by this module. A
+# public attachment must remain a macro so enable_language() runs at caller file
+# scope, but CMAKE_CURRENT_LIST_DIR inside a macro refers to that caller. Using
+# CMAKE_CURRENT_FUNCTION_LIST_DIR here keeps source-tree and installed-package
+# lookup anchored to the NativeUI module that defines this helper.
+function(_nativeui_attach_linux_dbus_transport)
+  if(NOT COMMAND nativeui_add_linux_dbus_transport)
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/NativeUILinuxDbus.cmake")
+  endif()
+  nativeui_add_linux_dbus_transport()
+endfunction()
+
 # This must remain a macro rather than a function. Platform attachment can add C
 # and, on macOS, Objective-C sources to an otherwise CXX-only consumer project.
 # CMake 3.24-4.4 requires enable_language() to execute at file scope in the
@@ -151,6 +163,15 @@ macro(nativeui_attach_platform)
 
   _nativeui_attach_platform_impl(
     "${_nativeui_attach_target}" "${_nativeui_attach_consumer_id}")
+
+  # Linux standalone consumers need the single private T072 implementation that
+  # backs Application-owned Portal/accessibility clients. This remains below
+  # the public API: macOS/Windows never discover libdbus and no D-Bus type leaks
+  # through nativeui_attach_platform().
+  if(UNIX AND NOT APPLE)
+    _nativeui_attach_linux_dbus_transport()
+  endif()
+
   unset(_nativeui_attach_target)
   unset(_nativeui_attach_consumer_id)
 endmacro()

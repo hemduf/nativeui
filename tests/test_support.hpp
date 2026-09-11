@@ -122,6 +122,7 @@ struct ProbeState {
     int focus_in{};
     int focus_out{};
     int key_events{};
+    bool focused{};
     ui::EventResult input_result{ui::EventResult::Ignored};
     std::vector<ui::Rect> focus_bounds;
 };
@@ -136,6 +137,7 @@ public:
     }
 
     void focus_changed(bool focused, ui::FocusContext& context) override {
+        state_->focused = focused;
         focused ? ++state_->focus_in : ++state_->focus_out;
         state_->focus_bounds.push_back(context.bounds());
     }

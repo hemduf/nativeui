@@ -24,6 +24,7 @@ include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/NativeUIConsumerPlatform.cmake)
 include(cmake/NativeUIAttachPlatform.cmake)
+include(cmake/NativeUIFeatureExamples.cmake)
 
 # T023 consumes the SVG module shipped beside the pinned skia-builder archive.
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
@@ -286,44 +287,9 @@ configure_file(cmake/NativeUIEmbedResource.cmake
   COPYONLY
 )
 
-set(NATIVEUI_FEATURE_EXAMPLES
-  t007_constraints
-  t008_alignment
-  t009_flex
-  t010_grid
-  t011_clipping
-  t012_scroll
-  t013_bubbling
-  t014_focus_scopes
-  t015_pointer_capture
-  t016_gestures
-  t017_commands
-  t018_drop
-  t019_transforms
-  t020_paths
-  t021_gradients
-  t022_images
-  t023_svg_icons
-  t024_goldens
-  t025_text_edit_model
-  t026_label
-  t027_fonts
-  t028_text_area
-  t029_ime_composition
-  t030_button
-  t031_checkbox_radio
-  t032_slider
-  t033_progress_meter
-  t034_scroll_view
-  t036_list_tabs
-  t037_theme
-  t041_smoke_harness
-  t043_resize_scale
-  t057_embedded_resources
-  t058_dynamic_composition
-  t059_component_state
-  t061_overlay_portal
-  t067_virtual_list
+nativeui_discover_feature_examples(
+  NATIVEUI_FEATURE_EXAMPLES
+  "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 if(NATIVEUI_BUILD_EXAMPLES)
@@ -354,6 +320,12 @@ endif()
 if(NATIVEUI_BUILD_TESTS)
   enable_testing()
 
+  add_test(
+    NAME nativeui_feature_example_discovery_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/feature_example_discovery_contract.cmake"
+  )
   add_test(
     NAME nativeui_t053_prefix_tests
     COMMAND ${CMAKE_COMMAND}
@@ -407,6 +379,10 @@ if(NATIVEUI_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
+  )
+  set_tests_properties(
+    nativeui_feature_example_discovery_contract
+    PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
   )
   set_tests_properties(
     nativeui_t053_prefix_tests
@@ -487,6 +463,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_clipping_tests tests/clipping_tests.cpp)
   nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
   nativeui_add_core_test(nativeui_t034_scroll_view_tests tests/t034_scroll_view_tests.cpp)
+  nativeui_add_core_test(nativeui_t035_combo_popup_tests tests/t035_combo_popup_tests.cpp)
   nativeui_add_core_test(nativeui_t036_list_tabs_tests tests/t036_list_tabs_tests.cpp)
   nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)
   nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)
@@ -611,4 +588,11 @@ if(NATIVEUI_BUILD_TESTS)
   target_link_libraries(nativeui_demo_consumer_compile PRIVATE NativeUI::Core)
   nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
   nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
+endif()
+
+# T072 is Linux/X11-only infrastructure. macOS and Windows never discover or
+# link libdbus-1; Linux platform builds require the system development package.
+if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE)
+  include(cmake/NativeUILinuxDbus.cmake)
+  nativeui_add_linux_dbus_transport()
 endif()
