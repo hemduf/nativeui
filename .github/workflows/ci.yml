@@ -229,7 +229,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libfontconfig1-dev
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libfontconfig1-dev
 
       - name: Configure
         run: >-
