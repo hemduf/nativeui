@@ -42,6 +42,47 @@
         if (active_platform_) active_platform_->end_pointer_capture();
     }
 
+    [[nodiscard]] bool update_pointer_hover_target(
+        Node* target, const InputEvent& source_event, PlatformServices& platform) {
+        auto* const previous = pointer_hover_target_;
+        if (previous == target) return false;
+
+        // Publish the new authoritative target before callbacks run so any
+        // re-entrant input sees a coherent per-Tree hover route. T058 owns
+        // future structural removal and must clear this pointer before node
+        // destruction just as it does for capture/focus ownership.
+        pointer_hover_target_ = target;
+        if (!previous) return false;
+
+        InputEvent leave = source_event;
+        leave.type = InputType::PointerLeave;
+        leave.delta = {};
+
+        // PointerLeave is route state, not a consumable gesture. Every node on
+        // the previous authoritative route must observe it even if a descendant
+        // chooses to return Handled, otherwise an ancestor could retain stale
+        // hover presentation when the pointer moves to another subtree.
+        for (Node* node = previous; node; node = node->parent) {
+            (void)send_to(*node, leave, platform);
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool clear_pointer_hover(
+        const InputEvent& source_event, PlatformServices& platform) {
+        auto* const previous = pointer_hover_target_;
+        if (!previous) return false;
+        pointer_hover_target_ = nullptr;
+
+        InputEvent leave = source_event;
+        leave.type = InputType::PointerLeave;
+        leave.delta = {};
+        for (Node* node = previous; node; node = node->parent) {
+            (void)send_to(*node, leave, platform);
+        }
+        return true;
+    }
+
     [[nodiscard]] EventResult cancel_pointer_capture(
         PlatformServices& platform, InputEvent event = InputEvent{}) {
         auto* owner = pointer_capture_owner();
@@ -73,7 +114,9 @@
     std::vector<Node*> focusables_;
     std::size_t focused_index_{};
     PointerCaptureState pointer_capture_{};
+    Node* pointer_hover_target_{};
     bool cancelling_pointer_capture_{};
+    bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};
     bool focus_active_{};

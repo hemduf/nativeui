@@ -2,6 +2,7 @@
 
 #include <nativeui/component.hpp>
 #include <nativeui/detail/slider_value.hpp>
+#include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -60,6 +61,24 @@ namespace detail {
     return colors::accent;
 }
 
+[[nodiscard]] constexpr Color slider_active_color(
+    SliderVisualState state, const ThemePalette& palette) noexcept {
+    switch (state) {
+        case SliderVisualState::Hover:
+            return palette.active_highlight;
+        case SliderVisualState::Pressed:
+            return palette.text;
+        case SliderVisualState::Disabled:
+            return palette.disabled;
+        case SliderVisualState::ReadOnly:
+            return palette.track;
+        case SliderVisualState::Normal:
+        case SliderVisualState::Focused:
+            return palette.accent;
+    }
+    return palette.accent;
+}
+
 // The visual thumb travel is also the pointer-editing domain. Keeping both
 // directions in one helper prevents paint and hit/value mapping from drifting
 // when track insets or reserved formatter space change.
@@ -104,7 +123,7 @@ struct SliderTrackAxis final {
     return SliderTrackAxis{start, end, true};
 }
 
-class SliderComponent final : public Component {
+class SliderComponent final : public Component, public ThemeBinding {
 public:
     using Formatter = std::function<std::string(float)>;
 
@@ -123,10 +142,18 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        const auto& theme = current_theme();
+        const float compact_cross_axis = theme.controls.minimum_hit_target;
         if (orientation_ == SliderOrientation::Horizontal) {
-            return Size{160.0f, formatter_ ? 48.0f : 32.0f};
+            const float height = formatter_
+                ? theme.controls.control_height + theme.spacing.sm
+                : compact_cross_axis;
+            return Size{160.0f, height};
         }
-        return Size{formatter_ ? 72.0f : 32.0f, 160.0f};
+        const float width = formatter_
+            ? theme.controls.control_height + theme.spacing.large * 2.0f
+            : compact_cross_axis;
+        return Size{width, 160.0f};
     }
 
     void mount(MountContext& context) override {
@@ -193,11 +220,16 @@ public:
         const auto bounds = context.bounds();
         const float fraction = domain_.fraction(state_.get());
         const auto state = visual_state(context.focused());
-        const Color track = colors::input;
-        const Color active = slider_active_color(state);
+        const auto& theme = current_theme();
+        const Color track = theme.palette.control_background;
+        const Color active = slider_active_color(state, theme.palette);
         const bool focused = state == SliderVisualState::Focused;
         const auto axis = slider_track_axis(
             bounds, orientation_, static_cast<bool>(formatter_));
+        const float track_thickness = theme.controls.track_thickness;
+        const float half_track = track_thickness * 0.5f;
+        const float thumb_radius = theme.controls.thumb_diameter * 0.5f;
+        const float focus_radius = thumb_radius + theme.controls.focus_ring_width;
 
         auto& painter = context.painter();
         if (orientation_ == SliderOrientation::Horizontal) {
@@ -206,17 +238,19 @@ public:
             const float x0 = axis.start;
             const float x1 = axis.end;
             const float thumb_x = axis.position(fraction);
-            painter.fill_rounded_rect(Rect{x0, y - 2.0f, x1 - x0, 4.0f}, 2.0f, track);
-            painter.fill_rounded_rect(Rect{x0, y - 2.0f, thumb_x - x0, 4.0f}, 2.0f, active);
-            if (focused) painter.circle(Point{thumb_x, y}, 9.0f, colors::borderFocus);
-            painter.circle(Point{thumb_x, y}, 7.0f, active);
+            painter.fill_rounded_rect(
+                Rect{x0, y - half_track, x1 - x0, track_thickness}, half_track, track);
+            painter.fill_rounded_rect(
+                Rect{x0, y - half_track, thumb_x - x0, track_thickness}, half_track, active);
+            if (focused) painter.circle(Point{thumb_x, y}, focus_radius, theme.palette.focus);
+            painter.circle(Point{thumb_x, y}, thumb_radius, active);
             if (formatter_) {
                 const auto text = formatter_(domain_.effective_external(state_.get()));
                 painter.text(
                     Point{bounds.x + bounds.w * 0.5f, bounds.y + bounds.h - 7.0f},
                     text,
                     11.0f,
-                    colors::textMuted,
+                    theme.palette.muted_text,
                     TextAlign::Center);
             }
         } else {
@@ -224,17 +258,19 @@ public:
             const float y0 = axis.start;
             const float y1 = axis.end;
             const float thumb_y = axis.position(fraction);
-            painter.fill_rounded_rect(Rect{x - 2.0f, y0, 4.0f, y1 - y0}, 2.0f, track);
-            painter.fill_rounded_rect(Rect{x - 2.0f, thumb_y, 4.0f, y1 - thumb_y}, 2.0f, active);
-            if (focused) painter.circle(Point{x, thumb_y}, 9.0f, colors::borderFocus);
-            painter.circle(Point{x, thumb_y}, 7.0f, active);
+            painter.fill_rounded_rect(
+                Rect{x - half_track, y0, track_thickness, y1 - y0}, half_track, track);
+            painter.fill_rounded_rect(
+                Rect{x - half_track, thumb_y, track_thickness, y1 - thumb_y}, half_track, active);
+            if (focused) painter.circle(Point{x, thumb_y}, focus_radius, theme.palette.focus);
+            painter.circle(Point{x, thumb_y}, thumb_radius, active);
             if (formatter_) {
                 const auto text = formatter_(domain_.effective_external(state_.get()));
                 painter.text(
                     Point{bounds.x + bounds.w * 0.5f, bounds.y + bounds.h - 7.0f},
                     text,
                     11.0f,
-                    colors::textMuted,
+                    theme.palette.muted_text,
                     TextAlign::Center);
             }
         }

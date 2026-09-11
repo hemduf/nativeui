@@ -40,10 +40,13 @@ struct Rect {
 };
 
 [[nodiscard]] inline Rect intersect(Rect a, Rect b) noexcept {
-    const float left = std::max(a.x, b.x);
-    const float top = std::max(a.y, b.y);
-    const float right = std::min(a.x + a.w, b.x + b.w);
-    const float bottom = std::min(a.y + a.h, b.y + b.h);
+    // Keep public geometry usable even when a consumer included windows.h
+    // without NOMINMAX before NativeUI. Parenthesized std::min/std::max names
+    // cannot be captured by the Win32 function-like macros.
+    const float left = (std::max)(a.x, b.x);
+    const float top = (std::max)(a.y, b.y);
+    const float right = (std::min)(a.x + a.w, b.x + b.w);
+    const float bottom = (std::min)(a.y + a.h, b.y + b.h);
     return right > left && bottom > top
         ? Rect{left, top, right - left, bottom - top}
         : Rect{};
@@ -52,10 +55,10 @@ struct Rect {
 [[nodiscard]] inline Rect unite(Rect a, Rect b) noexcept {
     if (a.empty()) return b;
     if (b.empty()) return a;
-    const float left = std::min(a.x, b.x);
-    const float top = std::min(a.y, b.y);
-    const float right = std::max(a.x + a.w, b.x + b.w);
-    const float bottom = std::max(a.y + a.h, b.y + b.h);
+    const float left = (std::min)(a.x, b.x);
+    const float top = (std::min)(a.y, b.y);
+    const float right = (std::max)(a.x + a.w, b.x + b.w);
+    const float bottom = (std::max)(a.y + a.h, b.y + b.h);
     return Rect{left, top, right - left, bottom - top};
 }
 

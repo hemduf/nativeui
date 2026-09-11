@@ -1,0 +1,25 @@
+name: T045 Accessibility Semantics
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  semantics-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure isolated semantics contract
+        run: cmake -S tests/t045 -B build-t045 -DCMAKE_BUILD_TYPE=Release
+      - name: Build isolated semantics contract
+        run: cmake --build build-t045 --config Release --parallel
+      - name: Run isolated semantics contract
+        run: ctest --test-dir build-t045 -C Release --output-on-failure
