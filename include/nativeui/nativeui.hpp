@@ -17,6 +17,7 @@
 #include <nativeui/toggle_style.hpp>
 #include <nativeui/text_input_style.hpp>
 #include <nativeui/text_area_style.hpp>
+#include <nativeui/scrollbar_style.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/resource.hpp>
 #include <nativeui/embedded_resource.hpp>
