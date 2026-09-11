@@ -365,6 +365,10 @@ void explicit_styles_control_checkbox_and_radio_presentation_and_measurement() {
     const ui::Color radio_outer{0.24f, 0.36f, 0.54f, 1.0f};
     const ui::Color radio_selected{0.70f, 0.28f, 0.18f, 1.0f};
     radio_style.base.outer_fill = radio_outer;
+    radio_style.base.outer_radius = 12.0f;
+    radio_style.base.inner_radius = 5.0f;
+    radio_style.base.mark_radius = 3.0f;
+    radio_style.base.leading_padding = 4.0f;
     radio_style.base.minimum_width = 150.0f;
     radio_style.base.control_height = 50.0f;
     radio_style.selected.mark_fill = radio_selected;
@@ -376,11 +380,11 @@ void explicit_styles_control_checkbox_and_radio_presentation_and_measurement() {
     NUI_CHECK_NEAR(radio_metrics.preferred.h, 50.0f, 0.0001f);
     NUI_CHECK(radio_metrics.preferred.w >= 150.0f);
     NUI_CHECK(renderer.render(radio));
-    NUI_CHECK(pixel_near(renderer.pixel(20, 32), radio_outer));
+    NUI_CHECK(pixel_near(renderer.pixel(24, 32), radio_outer));
 
     selected.set(1);
     NUI_CHECK(renderer.render(radio));
-    NUI_CHECK(pixel_near(renderer.pixel(12, 32), radio_selected));
+    NUI_CHECK(pixel_near(renderer.pixel(16, 32), radio_selected));
 }
 
 void visual_state_goldens() {
