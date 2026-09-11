@@ -10,6 +10,7 @@
         focusables_.clear();
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
+        pointer_interaction_active_ = false;
         focus_structure_dirty_ = true;
         pointer_passthrough_dynamic_root_ =
             dynamic_source(*root_) != nullptr &&
@@ -97,6 +98,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
+        pointer_interaction_active_ = false;
         active_platform_ = nullptr;
         deactivate_node(*root_);
         reset_focus_scope_cache(*root_);
@@ -116,6 +118,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
+        pointer_interaction_active_ = false;
         active_platform_ = nullptr;
         if (active_) {
             deactivate_node(*root_);
@@ -189,6 +192,14 @@
     void set_global_command_handler(std::function<EventResult(Command)> handler) {
         global_command_handler_ = std::move(handler);
     }
+
+    /// Mark that a pointer button interaction is in progress anywhere in this
+    /// tree. Retained presentation policies such as Tooltip consult the flag
+    /// through their interaction observers so a drag that starts outside the
+    /// anchor can never arm a hover-only presentation. The interaction ends
+    /// when PointerUp/PointerCancel routing completes.
+    void begin_pointer_interaction() noexcept { pointer_interaction_active_ = true; }
+    void end_pointer_interaction() noexcept { pointer_interaction_active_ = false; }
 
     /// Route one input event according to the retained-mode targeting rules:
     ///
@@ -311,12 +322,15 @@
         }
 
         if (event.type == InputType::PointerCancel) {
-            return finish(cancel_pointer_capture(platform, event));
+            const auto result = cancel_pointer_capture(platform, event);
+            pointer_interaction_active_ = false;
+            return finish(result);
         }
 
         if (event.type == InputType::PointerDown) {
             // A new pointer-down starts a new interaction. Never leave an old
             // owner captured if a previous interaction missed its PointerUp.
+            pointer_interaction_active_ = true;
             if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
 
             auto* target = hit_test_pointer(
@@ -349,8 +363,10 @@
             if (auto* owner = pointer_capture_owner()) {
                 const auto result = route_from(*owner, event, platform);
                 clear_pointer_capture();
+                pointer_interaction_active_ = false;
                 return finish(result);
             }
+            pointer_interaction_active_ = false;
             if (target) {
                 return finish(route_from(*target, event, platform));
             }

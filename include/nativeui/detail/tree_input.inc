@@ -43,14 +43,16 @@
             if (next && is_descendant_or_self(next, current)) continue;
             if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
                     current->component.get())) {
-                observer->retained_pointer_hover_changed(false, dispatcher);
+                observer->retained_pointer_hover_changed(
+                    false, pointer_interaction_active_, dispatcher);
             }
         }
         for (auto* current = next; current; current = current->parent) {
             if (previous && is_descendant_or_self(previous, current)) continue;
             if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
                     current->component.get())) {
-                observer->retained_pointer_hover_changed(true, dispatcher);
+                observer->retained_pointer_hover_changed(
+                    true, pointer_interaction_active_, dispatcher);
             }
         }
     }
@@ -131,6 +133,7 @@
     PointerCaptureState pointer_capture_{};
     Node* pointer_hover_target_{};
     detail::OverlayService* overlay_service_{};
+    bool pointer_interaction_active_{};
     bool cancelling_pointer_capture_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};

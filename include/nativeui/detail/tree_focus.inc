@@ -15,14 +15,16 @@
             if (next && is_descendant_or_self(next, current)) continue;
             if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
                     current->component.get())) {
-                observer->retained_focus_within_changed(false, dispatcher);
+                observer->retained_focus_within_changed(
+                    false, pointer_interaction_active_, dispatcher);
             }
         }
         for (auto* current = next; current; current = current->parent) {
             if (previous && is_descendant_or_self(previous, current)) continue;
             if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
                     current->component.get())) {
-                observer->retained_focus_within_changed(true, dispatcher);
+                observer->retained_focus_within_changed(
+                    true, pointer_interaction_active_, dispatcher);
             }
         }
     }

@@ -17,9 +17,6 @@
 #include <vector>
 
 namespace ui {
-
-class Tooltip;
-
 namespace detail {
 
 inline constexpr float kTooltipDefaultMaxWidth = 320.0f;
@@ -53,6 +50,25 @@ public:
 
     void set_hovered(bool hovered) { set_trigger(Trigger::Hover, hovered); }
     void set_focused(bool focused) { set_trigger(Trigger::Focus, focused); }
+
+    /// A pointer button interaction anywhere in the owning tree makes hover
+    /// ineligible: a plain hover must never arm a tooltip during a drag. The
+    /// end of the interaction is deliberately not a new eligibility
+    /// transition, so releasing a stationary pointer does not immediately
+    /// re-show after a PointerDown dismissal.
+    void set_pointer_interaction_active(bool active) {
+        if (!state_ || state_->shutting_down ||
+            state_->pointer_interaction_active == active) {
+            return;
+        }
+
+        state_->pointer_interaction_active = active;
+        if (active) {
+            state_->suppressed = true;
+            cancel_pending(*state_);
+            hide_visible(*state_);
+        }
+    }
 
     /// Hidden/Collapsed/Disabled anchors cannot present a tooltip. Losing
     /// availability cancels both pending and visible work and suppresses
@@ -130,7 +146,7 @@ private:
 
         [[nodiscard]] bool triggered() const noexcept { return hovered || focused; }
         [[nodiscard]] bool eligible() const noexcept {
-            return anchor_available && triggered();
+            return anchor_available && triggered() && !pointer_interaction_active;
         }
 
         Dispatcher dispatcher;
@@ -141,6 +157,7 @@ private:
         bool hovered{};
         bool focused{};
         bool anchor_available{true};
+        bool pointer_interaction_active{};
         bool visible{};
         bool suppressed{};
         bool shutting_down{};
@@ -198,8 +215,11 @@ private:
             hide_visible(*state_);
             // Only the retained hover/focus state reaching false clears
             // suppression. Availability restoration itself is deliberately not
-            // a new presentation trigger.
-            if (!state_->triggered()) state_->suppressed = false;
+            // a new presentation trigger, and neither is the end of a pointer
+            // button interaction.
+            if (!state_->triggered() && !state_->pointer_interaction_active) {
+                state_->suppressed = false;
+            }
             return;
         }
 
@@ -439,20 +459,30 @@ public:
         overlay_ = {};
     }
 
-    void retained_pointer_hover_changed(bool hovered, Dispatcher dispatcher) override {
+    void retained_pointer_hover_changed(
+        bool hovered, bool pointer_interaction_active, Dispatcher dispatcher) override {
         reconcile_presentation();
         refresh_anchor_availability();
         hovered_ = hovered;
+        pointer_interaction_active_ = pointer_interaction_active;
         ensure_controller(dispatcher);
-        if (controller_) controller_->set_hovered(hovered);
+        if (controller_) {
+            controller_->set_pointer_interaction_active(pointer_interaction_active_);
+            controller_->set_hovered(hovered);
+        }
     }
 
-    void retained_focus_within_changed(bool focused, Dispatcher dispatcher) override {
+    void retained_focus_within_changed(
+        bool focused, bool pointer_interaction_active, Dispatcher dispatcher) override {
         reconcile_presentation();
         refresh_anchor_availability();
         focused_ = focused;
+        pointer_interaction_active_ = pointer_interaction_active;
         ensure_controller(dispatcher);
-        if (controller_) controller_->set_focused(focused);
+        if (controller_) {
+            controller_->set_pointer_interaction_active(pointer_interaction_active_);
+            controller_->set_focused(focused);
+        }
     }
 
     void dismiss_transient_presentation() override {
@@ -487,6 +517,7 @@ private:
             [this] { present(); },
             [this] { hide(); });
         controller_->set_anchor_available(anchor_available());
+        controller_->set_pointer_interaction_active(pointer_interaction_active_);
         if (hovered_) controller_->set_hovered(true);
         if (focused_) controller_->set_focused(true);
     }
@@ -547,6 +578,7 @@ private:
     bool mounted_{};
     bool hovered_{};
     bool focused_{};
+    bool pointer_interaction_active_{};
 };
 
 } // namespace detail
