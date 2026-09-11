@@ -108,6 +108,9 @@ public:
         // deliberately independent from T061 overlay pointer policy: a
         // non-hit-test tooltip must still be cancelled without consuming the
         // event that passes through to the control underneath it.
+        if (event.type == InputType::PointerDown) {
+            tree_.begin_pointer_interaction();
+        }
         if (event.type == InputType::PointerDown ||
             (event.type == InputType::KeyDown && event.key == Key::Escape)) {
             tree_.dismiss_transient_presentations();

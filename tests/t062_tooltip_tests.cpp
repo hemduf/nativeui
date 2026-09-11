@@ -165,6 +165,44 @@ void pointer_down(ui::UI& ui, test::MockPlatform& platform, float x, float y) {
     (void)ui.dispatch(test::pointer(ui::InputType::PointerDown, x, y), platform);
 }
 
+void default_delay_without_builder_call_contract() {
+    static_assert(ui::Tooltip::kDefaultDelay == std::chrono::milliseconds{500});
+    Harness harness;
+    auto anchor = std::make_shared<AnchorState>();
+    // No .delay() call: the decorated default must be exactly 500 ms.
+    ui::UI ui{TooltipRoot{one_slot(), {ui::make_spec(
+        ui::Tooltip{"Default help", Anchor{false, anchor}})}}};
+    ui.resize({360.0f, 240.0f});
+    ui.activate(harness.platform);
+
+    move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
+    harness.advance(499ms);
+    NUI_CHECK(harness.owner.checkpoint() == 0);
+    NUI_CHECK(ui.overlay_entries().empty());
+    harness.advance(1ms);
+    NUI_CHECK(harness.owner.checkpoint() == 1);
+    NUI_CHECK(ui.overlay_entries().size() == 1);
+}
+
+void utf8_text_respects_default_max_width_contract() {
+    Harness harness;
+    auto anchor = std::make_shared<AnchorState>();
+    std::string text = "Résumé — ünïcödé help text ";
+    text.append(96, 'x');
+    ui::UI ui{TooltipRoot{one_slot(), {tooltip_spec(text, false, anchor)}}};
+    ui.resize({360.0f, 240.0f});
+    ui.activate(harness.platform);
+
+    move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
+    harness.advance(500ms);
+    NUI_CHECK(harness.owner.checkpoint() == 1);
+    ui.resize({360.0f, 240.0f});
+    const auto entries = ui.overlay_entries();
+    NUI_CHECK(entries.size() == 1);
+    NUI_CHECK(entries.front().resolved);
+    NUI_CHECK(entries.front().bounds.w <= ui::Tooltip::kDefaultMaxWidth + 0.5f);
+}
+
 void exact_499_500_contract() {
     Harness harness;
     auto anchor = std::make_shared<AnchorState>();
@@ -376,6 +414,15 @@ void pointer_down_suppresses_until_new_transition_contract() {
     NUI_CHECK(harness.owner.checkpoint() == 0);
     NUI_CHECK(ui.overlay_entries().empty());
 
+    // Releasing the button ends the interaction but is not itself a new
+    // eligibility transition.
+    (void)ui.dispatch(
+        test::pointer(ui::InputType::PointerUp, kFirstCenterX, kFirstCenterY),
+        harness.platform);
+    harness.advance(600ms);
+    NUI_CHECK(harness.owner.checkpoint() == 0);
+    NUI_CHECK(ui.overlay_entries().empty());
+
     // A complete leave -> enter transition is a new eligibility lifetime.
     move_pointer(ui, harness.platform, kOutsideX, kOutsideY);
     move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
@@ -408,6 +455,46 @@ void pointer_down_elsewhere_cancels_contract() {
     harness.advance(600ms);
     NUI_CHECK(harness.owner.checkpoint() == 0);
     NUI_CHECK(ui.overlay_entries().empty());
+}
+
+void pointer_interaction_blocks_hover_arming_contract() {
+    Harness harness;
+    auto first = std::make_shared<AnchorState>();
+    auto second = std::make_shared<AnchorState>();
+    ui::UI ui{TooltipRoot{
+        two_slots(),
+        {tooltip_spec("First help", false, first), ui::make_spec(Anchor{false, second})}}};
+    ui.resize({360.0f, 240.0f});
+    ui.activate(harness.platform);
+
+    move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
+    harness.advance(500ms);
+    NUI_CHECK(harness.owner.checkpoint() == 1);
+    NUI_CHECK(ui.overlay_entries().size() == 1);
+
+    // Press elsewhere and keep the button held: the visible tooltip is
+    // dismissed and a drag hover must never arm a new one.
+    pointer_down(ui, harness.platform, kSecondCenterX, kSecondCenterY);
+    NUI_CHECK(ui.overlay_entries().empty());
+    move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
+    harness.advance(600ms);
+    NUI_CHECK(harness.owner.checkpoint() == 0);
+    NUI_CHECK(ui.overlay_entries().empty());
+
+    // The stationary pointer over the anchor also does not arm at release.
+    (void)ui.dispatch(
+        test::pointer(ui::InputType::PointerUp, kFirstCenterX, kFirstCenterY),
+        harness.platform);
+    harness.advance(600ms);
+    NUI_CHECK(harness.owner.checkpoint() == 0);
+    NUI_CHECK(ui.overlay_entries().empty());
+
+    // A complete leave -> enter after the interaction is a new lifetime.
+    move_pointer(ui, harness.platform, kOutsideX, kOutsideY);
+    move_pointer(ui, harness.platform, kFirstCenterX, kFirstCenterY);
+    harness.advance(500ms);
+    NUI_CHECK(harness.owner.checkpoint() == 1);
+    NUI_CHECK(ui.overlay_entries().size() == 1);
 }
 
 void tooltip_is_not_hit_testable_contract() {
@@ -790,6 +877,8 @@ void two_ui_instances_are_isolated_contract() {
 }
 
 void suite() {
+    default_delay_without_builder_call_contract();
+    utf8_text_respects_default_max_width_contract();
     exact_499_500_contract();
     zero_delay_checkpoint_contract();
     pointer_move_inside_does_not_restart_contract();
@@ -800,6 +889,7 @@ void suite() {
     hover_plus_focus_combined_eligibility_contract();
     pointer_down_suppresses_until_new_transition_contract();
     pointer_down_elsewhere_cancels_contract();
+    pointer_interaction_blocks_hover_arming_contract();
     tooltip_is_not_hit_testable_contract();
     tooltip_does_not_take_focus_contract();
     unavailability_cancels_contract();

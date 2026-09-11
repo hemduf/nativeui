@@ -18,6 +18,8 @@ struct T062InteractionState {
     int focus_out{};
     bool hover_dispatcher_valid{};
     bool focus_dispatcher_valid{};
+    bool hover_interaction_active{};
+    bool focus_interaction_active{};
 };
 
 class T062InteractionObserverComponent final
@@ -42,14 +44,18 @@ public:
         if (!placements.empty()) placements.front().bounds = bounds;
     }
 
-    void retained_pointer_hover_changed(bool hovered, ui::Dispatcher dispatcher) override {
+    void retained_pointer_hover_changed(
+        bool hovered, bool pointer_interaction_active, ui::Dispatcher dispatcher) override {
         hovered ? ++state_->hover_in : ++state_->hover_out;
         state_->hover_dispatcher_valid = dispatcher.valid();
+        state_->hover_interaction_active = pointer_interaction_active;
     }
 
-    void retained_focus_within_changed(bool focused, ui::Dispatcher dispatcher) override {
+    void retained_focus_within_changed(
+        bool focused, bool pointer_interaction_active, ui::Dispatcher dispatcher) override {
         focused ? ++state_->focus_in : ++state_->focus_out;
         state_->focus_dispatcher_valid = dispatcher.valid();
+        state_->focus_interaction_active = pointer_interaction_active;
     }
 
     void paint(ui::PaintContext&) const override {}
@@ -100,6 +106,7 @@ void t062_interaction_observer_suite() {
     NUI_CHECK(observed->focus_in == 1);
     NUI_CHECK(observed->focus_out == 0);
     NUI_CHECK(observed->focus_dispatcher_valid);
+    NUI_CHECK(!observed->focus_interaction_active);
 
     NUI_CHECK(tree.dispatch(
                   test::pointer(ui::InputType::PointerMove, 40.0f, 40.0f), platform) ==
@@ -107,6 +114,7 @@ void t062_interaction_observer_suite() {
     NUI_CHECK(observed->hover_in == 1);
     NUI_CHECK(observed->hover_out == 0);
     NUI_CHECK(observed->hover_dispatcher_valid);
+    NUI_CHECK(!observed->hover_interaction_active);
 
     (void)tree.dispatch(
         test::pointer(ui::InputType::PointerMove, 42.0f, 42.0f), platform);
