@@ -1,5 +1,7 @@
 #include <nativeui/nativeui.hpp>
 
+#include "view_geometry.hpp"
+
 #include <pugl/gl.h>
 #include <pugl/pugl.h>
 
@@ -42,9 +44,7 @@ constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 
 PuglSpan to_pugl_span(float physical) {
-    constexpr float kMaxPuglSpan = 10000.0f;
-    return static_cast<PuglSpan>(
-        std::lround(std::clamp(physical, 1.0f, kMaxPuglSpan)));
+    return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
 
 [[noreturn]] void throw_pugl(PuglStatus status, const char* what) {
