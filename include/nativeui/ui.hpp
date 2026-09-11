@@ -1,8 +1,10 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/theme.hpp>
 
 #include <functional>
+#include <string>
 #include <utility>
 
 namespace ui {
@@ -18,9 +20,17 @@ class UI {
 public:
     template <class Root>
     explicit UI(Root&& root)
+        : UI(std::forward<Root>(root), default_theme()) {}
+
+    template <class Root>
+    UI(Root&& root, Theme theme)
         : tree_(compile(make_spec(std::forward<Root>(root)))) {
+        tree_.set_theme(std::move(theme));
         tree_.mount();
     }
+
+    [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
+    void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
         return tree_.measure(constraints);
@@ -43,6 +53,9 @@ public:
     [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
+    }
+    [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
+        return tree_.structural_diagnostic();
     }
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {

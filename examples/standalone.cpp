@@ -230,7 +230,9 @@ int main() {
         }.padding(24.0f).gap(18.0f)
     };
 
+    ui::Application application;
     ui::StandaloneWindow window{
+        application,
         app_ui,
         ui::WindowDesc{
             .title = "NativeUI Pugl + Skia",
@@ -239,5 +241,5 @@ int main() {
         }
     };
 
-    return window.run();
+    return application.run();
 }
