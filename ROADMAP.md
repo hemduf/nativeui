@@ -19,9 +19,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` is `621a56e462590e47e7360e122f3d4031814d8947` and includes completed T067 / PR #219, T045 / PR #210, T037 / PR #151, T058 / PR #154, T036 / PR #155, T065 / PR #133, T034 / PR #135, T060/T042 lifecycle qualification, T052 v0.1 release qualification, the warning-free source-tree baseline, hover correction #212 / PR #213 and Tree paint-ownership correction #152 / PR #153.
+The current pre-T067-regression baseline is `main` `7d9fc61cc1453bc3557a6ea1908541dc6a701c8a`. It includes completed T043 / PR #142, T061 / PR #216, T067 / PR #219, T045 / PR #210, T037 / PR #151, T058 / PR #154, T036 / PR #155, T065 / PR #133, T034 / PR #135, T060/T042 lifecycle qualification, T052 v0.1 release qualification, the warning-free source-tree baseline, hover correction #212 / PR #213 and Tree paint-ownership correction #152 / PR #153.
 
-The dynamic/overlay critical lane is completing **T061 / issue #73 / PR #216**. Its exact pre-documentation source head `d028d43c3ad95d229f02ff50e975f49a12f5b9e8` is synchronized with current main (`behind_by=0`) and is green across normal Linux X11/macOS/Windows/Linux ASan+UBSan CI plus T042, T045, T052, T060, T065 and T067 dedicated gates. Final source review `5174681221` reports no remaining Blocking/Important finding. The completion documentation changes the exact candidate head, so the documentation-complete head still requires fresh exact-head qualification before merge.
+PR #233 is the T067 post-completion regression closure. The 100k-item example previously put the virtual `ListView` directly in a `Column`; with default `shrink = 0`, the list's full 2.8-million-pixel preferred content height became the initial viewport and almost all rows were materialized before window show. The closure constrains that viewport with `Flex(grow=1, shrink=1)`, adds a startup materialization regression through the real production composition, runs the production `--self-test` in dedicated T067 CI and adds a root-integration guard for that workflow wiring.
 
 Current dependency frontier:
 
@@ -32,7 +32,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
 style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
 
-dynamic/overlay:   T058(done) -> T061(completion PR #216)
+dynamic/overlay:   T058(done) -> T061(done)
                                       |-> T035 --------------------------> T068
                                       |-> T063 --------------------------> T068
                                       +-> T062
@@ -45,13 +45,13 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
 critical platform: T060(done) -> T065(done) -> T072 -> T064
-                   T041(done) -> T043 -> T066
-                                      |-> T068
+                   T041(done) -> T043(done) -> T066
+                                      |-------> T068
 
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T035 and T063 require T061 plus already-complete T034. T062 requires T061 plus already-complete T065. When those downstream owned tickets are simultaneously Ready, priority is T035, then T063, then T062 because T035/T063 directly unblock T068.
+T035 and T063 require completed T061 plus already-complete T034. T062 requires completed T061 plus already-complete T065. T043 is complete, unlocks T066 and remains an explicit completed T068 dependency. T044 remains an explicit T071 dependency and is being reconciled independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -75,7 +75,7 @@ T035 and T063 require T061 plus already-complete T034. T062 requires T061 plus a
 
 ## Milestone 5 — Standard widget set
 
-**T030–T034 and T036 complete; T035 waits for T061.**
+**T030–T034 and T036 complete; T035 is unblocked by completed T061.**
 
 - T030 Button — PR #94.
 - T031 Checkbox/Radio — PR #95.
@@ -84,7 +84,7 @@ T035 and T063 require T061 plus already-complete T034. T062 requires T061 plus a
 - T034 ScrollView — PR #135; `ScrollState` remains sole offset authority with nested wheel bubbling, pointer pan, retained scrollbars and `ensure_visible`.
 - T036 ListView/Tabs — PR #155; stable logical selection, composite focus, T034 reveal, automatic tab activation and T059 availability semantics.
 - #212 / PR #213 adds deterministic paint-only ListView/Tabs hover and retained pointer-leave lifetime without changing selection/activation semantics.
-- T035 ComboBox/DropDown remains dependency-gated on T061 and T034; it must consume the generic T061 overlay layer rather than create popup infrastructure.
+- T035 ComboBox/DropDown must consume the generic T061 overlay layer rather than create popup infrastructure.
 
 ## Milestone 6 — Styling, theme and animation
 
@@ -94,47 +94,31 @@ T037 / PR #151 provides typed per-UI Theme values and representative control the
 
 ## Milestone 7 — Platform and embedded robustness
 
-Delivered foundations include plug-in host isolation, standalone ownership Decision B, T042 lifecycle stress, T053 Objective-C runtime identity, T060 Application ownership, T065 Dispatcher/timers and T045 accessibility architecture.
+Delivered foundations include plug-in host isolation, standalone ownership Decision B, T042 lifecycle stress, T053 Objective-C runtime identity, T060 Application ownership, T065 Dispatcher/timers, T045 accessibility architecture and T043 resize/scale negotiation.
 
-Current platform order:
+### T043 — Resize/scale negotiation
 
-1. T072 / issue #84 — shared bounded Linux `libdbus-1` transport; unlocks T064 and Linux T068.
-2. T043 / issue #43 / PR #142 — logical/physical resize-scale contract; unlocks T066 and T068.
-3. T064 / issue #76 — DesktopServices after T072.
-4. T066 / issue #78 — final standalone window controls after T043.
+**Complete in PR #142.** T043 freezes one platform-boundary contract for logical public geometry, physical native/framebuffer geometry and per-view scale state.
 
-T044 / issue #44 / PR #145 remains a T071 release dependency but is not on the immediate T068/T069 convergence path.
+Its qualified contract includes per-view finite-positive retained scale, authoritative configure snapshots, exactly one resulting layout per accepted configure, exactly one native request per accepted public logical size request, no recursive request echo, correct fractional input/dirty/drop/text conversion, embedded parent authority, reentrancy/lifetime-safe preferred-size notification and dedicated deterministic/platform smoke coverage.
+
+T066 / issue #78 is now unblocked. T072 / issue #84 independently unlocks T064.
+
+T044 / issue #44 / PR #145 remains a T071 release dependency and requires its own current-main reconciliation, native capture evidence and exact-head qualification.
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T067 fixed-height virtualized ListView and the T045 semantic architecture it consumes.
+Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView and the T045 semantic architecture it consumes.
 
 ### T061 — Generic overlay / portal layer
 
-T061 / issue #73 / PR #216 is in its completion cycle.
-
-Delivered contract:
-
-- one per-UI overlay host/stack with creation-order z-index and monotonically increasing lifetime-safe handles;
-- Modal/NonModal and Normal/Ignore policies with `Modal + Ignore` rejected;
-- collision-safe public placement names `AnchorBelow`, `AnchorAbove`, `AnchorRight`, `AnchorLeft`, `Center`, `Auto`, preserving the issue's requested placement semantics while avoiding Xlib `Above`/`Below` macro collisions;
-- requested/opposite fallback, Auto priority, deterministic equal-area tie handling, finite origin clamping and no automatic resize/scroll;
-- Modal barrier preventing input to lower overlays/root while preserving overlays above it; Ignore overlays are pointer-transparent but remain paint-visible;
-- outside-dismiss no-click-through and deterministic Escape ownership;
-- retained `NodeId` anchoring with relayout tracking and auto-close for missing/Hidden/Collapsed/deactivated anchors;
-- modal focus trapping/restoration with `NodeId` restore identity, stale-target fallback and prevention of pointer-focus escape into a later NonModal sibling;
-- exact one-cancel lower-capture takeover when a new modal appears, including callback-driven modal creation; exact one-cancel captured-overlay teardown;
-- T058 `DynamicChildrenSource` as the sole structural checkpoint/reconciliation mechanism, with reentrant show/close and pre-flush show+close coalescing;
-- two-UI isolation, headless/golden coverage, standalone/EmbeddedView smoke parity and dedicated `t061_overlay_portal` interactive/self-test example;
-- no native popup window, global overlay registry, automatic anchor styling, tooltip/menu/dialog policy, automatic scrolling/resizing or second mutation queue.
-
-Exact source head `d028d43c3ad95d229f02ff50e975f49a12f5b9e8` passed normal CI `34554637275` (Linux X11/macOS/Windows/Linux ASan+UBSan), T052 `34554637335`, T042 `34554637304`, T045 `34554637284`, T060 `34554637332`, T065 `34554637322` and T067 `34554637270`. Linux X11 reported 93/93 CTests green, including generic focus, dynamic composition, headless, golden, T061 acceptance and the T061 feature self-test. Final source review `5174681221` found no remaining Blocking/Important issue.
-
-This roadmap/context synchronization creates a documentation-complete head that must be requalified exactly before T061 is marked Done/merged. No code requirement is waived by the documentation-only completion step.
+**Complete in PR #216.** T061 provides one generic retained in-view overlay/portal layer per UI using T058 structural reconciliation. It includes creation-order z-order, modal/non-modal and pointer-transparent policies, deterministic placement, retained anchor tracking, modal focus trapping/restoration, lower-capture cancellation, no-click-through dismissal, reentrant show/close safety, standalone/EmbeddedView parity and the dedicated `t061_overlay_portal` example/self-test.
 
 ### T067 — Fixed-height virtualized ListView
 
-**Complete in PR #219.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
+**Complete in PR #219; startup regression closure is carried by PR #233.** T067 provides finite-positive fixed-height virtualization, O(1) visible-range math, bounded visual materialization, stable keyed retained identity, T034/T036 behavior preservation, T058 safe keyed reconciliation and immutable T045 virtual semantic metadata that does not rebuild on ordinary scroll/selection/focus projection.
+
+The required 100k-item example in PR #233 enforces viewport-bounded startup composition. It wraps the virtual list in `Flex(grow=1, shrink=1)` so the list viewport is the available window space rather than its full intrinsic content height. A deterministic startup self-test fails if initial row-factory materialization escapes a small bounded count, the dedicated T067 workflow builds and runs `nativeui_example_t067_virtual_list --self-test`, and the root integration contract requires that CI wiring to remain present.
 
 ### T068 convergence
 
@@ -144,9 +128,9 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 
 ```text
 T036(done) -> T045(done) -> T067(done) -------------------\
-T058(done) -> T061 -> T035/T063 --------------------------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
+T058(done) -> T061(done) -> T035/T063 --------------------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
 T065(done) -> T072 -> T064 -------------------------------+
-T043 -----------------> T066 ------------------------------/
+T043(done) -----------> T066 ------------------------------/
 other explicit T069 dependencies --------------------------/
 ```
 
@@ -154,12 +138,13 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Requalify the documentation-complete T061 exact head and merge PR #216 only at 100% evidenced conformity.
-2. After T061, advance T035, then T063, then T062 as dependencies permit.
-3. Keep T068 blocked until every explicit issue #80 dependency is Done.
-4. Continue T072/T043 -> T064/T066 in the independent platform lane.
-5. Continue T038 -> T039 and T040 in the style lane as capacity permits.
-6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.
+1. Complete the exact-head qualification/review for T067 regression PR #233 and merge only at 100% evidenced conformity.
+2. Reconcile, qualify and merge T044 / PR #145 independently; do not reuse T043 platform evidence.
+3. Advance T035, then T063, then T062 as dependencies and current active work permit.
+4. Continue T072 -> T064 and T066 in the independent platform lane.
+5. Keep T068 blocked until every explicit issue #80 dependency is Done.
+6. Continue T038 -> T039 and T040 in the style lane as capacity permits.
+7. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.
 
 ## Prioritization rule
 
