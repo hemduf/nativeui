@@ -137,6 +137,101 @@ void test_request_bookkeeping_is_configure_authoritative() {
     NUI_CHECK(!geometry.pending_request().has_value());
 }
 
+void test_size_request_echo_does_not_recurse() {
+    ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
+    NUI_CHECK(geometry.configure({200.0f, 100.0f}, 2.0f).has_value());
+
+    int native_requests = 0;
+    ui::Size requested_physical{};
+    NUI_CHECK(ui::detail::submit_logical_size_request(
+        geometry,
+        {120.0f, 60.0f},
+        [&](ui::Size physical) {
+            ++native_requests;
+            requested_physical = physical;
+            return true;
+        }));
+    NUI_CHECK(native_requests == 1);
+    NUI_CHECK(same(requested_physical, {240.0f, 120.0f}));
+    NUI_CHECK(same(geometry.logical_size(), {100.0f, 50.0f}));
+    NUI_CHECK(geometry.pending_request().has_value());
+    NUI_CHECK(same(*geometry.pending_request(), {120.0f, 60.0f}));
+
+    int layout_calls = 0;
+    const auto configured = ui::detail::apply_authoritative_configure(
+        geometry,
+        {240.0f, 120.0f},
+        2.0f,
+        [&](ui::Size logical) {
+            ++layout_calls;
+            NUI_CHECK(same(logical, {120.0f, 60.0f}));
+        });
+    NUI_CHECK(configured.has_value());
+    NUI_CHECK(layout_calls == 1);
+    NUI_CHECK(native_requests == 1);
+    NUI_CHECK(!geometry.pending_request().has_value());
+    NUI_CHECK(same(geometry.logical_size(), {120.0f, 60.0f}));
+
+    NUI_CHECK(!ui::detail::submit_logical_size_request(
+        geometry,
+        {0.0f, 60.0f},
+        [&](ui::Size) {
+            ++native_requests;
+            return true;
+        }));
+    NUI_CHECK(native_requests == 1);
+
+    NUI_CHECK(!ui::detail::submit_logical_size_request(
+        geometry,
+        {140.0f, 70.0f},
+        [&](ui::Size) {
+            ++native_requests;
+            return false;
+        }));
+    NUI_CHECK(native_requests == 2);
+    NUI_CHECK(!geometry.pending_request().has_value());
+    NUI_CHECK(same(geometry.logical_size(), {120.0f, 60.0f}));
+}
+
+void test_configure_snapshot_dispatches_exactly_one_layout() {
+    ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
+    int layout_calls = 0;
+    ui::Size last_layout{};
+
+    const auto apply = [&](ui::Size physical, float scale, ui::Size expected) {
+        const int before = layout_calls;
+        const auto configured = ui::detail::apply_authoritative_configure(
+            geometry,
+            physical,
+            scale,
+            [&](ui::Size logical) {
+                ++layout_calls;
+                last_layout = logical;
+            });
+        NUI_CHECK(configured.has_value());
+        NUI_CHECK(layout_calls == before + 1);
+        NUI_CHECK(same(*configured, expected));
+        NUI_CHECK(same(last_layout, expected));
+    };
+
+    // Resize-only snapshot: extent changes, scale stays constant.
+    apply({120.0f, 60.0f}, 1.0f, {120.0f, 60.0f});
+    // Scale-only snapshot: extent stays constant, scale changes.
+    apply({120.0f, 60.0f}, 2.0f, {60.0f, 30.0f});
+    // Combined snapshot: both extent and scale change, still one layout.
+    apply({300.0f, 150.0f}, 1.5f, {200.0f, 100.0f});
+
+    const int before_invalid = layout_calls;
+    const auto invalid = ui::detail::apply_authoritative_configure(
+        geometry,
+        {0.0f, 150.0f},
+        1.5f,
+        [&](ui::Size) { ++layout_calls; });
+    NUI_CHECK(!invalid.has_value());
+    NUI_CHECK(layout_calls == before_invalid);
+    NUI_CHECK(same(geometry.logical_size(), {200.0f, 100.0f}));
+}
+
 void test_fractional_dirty_and_pointer_conversion() {
     const auto physical = ui::detail::logical_to_physical_covering_rect(
         {0.2f, 1.2f, 10.2f, 4.2f}, 1.5f);
@@ -229,6 +324,8 @@ void suite() {
     test_scale_observation_acceptance_state();
     test_invalid_requests_and_transient_zero_configure();
     test_request_bookkeeping_is_configure_authoritative();
+    test_size_request_echo_does_not_recurse();
+    test_configure_snapshot_dispatches_exactly_one_layout();
     test_fractional_dirty_and_pointer_conversion();
     test_two_view_scale_isolation();
     test_preferred_size_epsilon_coalescing_and_reentrancy();
