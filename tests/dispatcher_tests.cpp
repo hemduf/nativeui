@@ -325,6 +325,40 @@ void suite() {
         NUI_CHECK(owner.checkpoint() == 1);
         NUI_CHECK(shown == 2);
     }
+
+    // Becoming unavailable is a hard lifetime/dismissal boundary. It cancels
+    // pending and visible presentation and requires a fresh eligibility
+    // transition before presentation can arm again after availability returns.
+    {
+        auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner{{}, clock};
+        int shown = 0;
+        int hidden = 0;
+        ui::detail::TooltipController tooltip{
+            owner.dispatcher(), 500ms, [&] { ++shown; }, [&] { ++hidden; }};
+
+        tooltip.set_hovered(true);
+        NUI_CHECK(tooltip.pending());
+        tooltip.set_anchor_available(false);
+        NUI_CHECK(!tooltip.pending());
+        NUI_CHECK(!tooltip.visible());
+        clock->advance(500ms);
+        NUI_CHECK(owner.checkpoint() == 0);
+        NUI_CHECK(shown == 0);
+
+        tooltip.set_anchor_available(true);
+        NUI_CHECK(!tooltip.pending());
+        tooltip.set_hovered(false);
+        tooltip.set_hovered(true);
+        clock->advance(500ms);
+        NUI_CHECK(owner.checkpoint() == 1);
+        NUI_CHECK(shown == 1);
+        NUI_CHECK(tooltip.visible());
+
+        tooltip.set_anchor_available(false);
+        NUI_CHECK(!tooltip.visible());
+        NUI_CHECK(hidden == 1);
+    }
 }
 
 } // namespace
