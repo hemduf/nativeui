@@ -139,9 +139,11 @@ public:
         return pointer_is_inside(target);
     }
 
-    bool press_inside(const ui::StandaloneWindow& window) {
-        if (!activate(window)) return false;
-        return send_button(window, true);
+    bool press() {
+        if (!display_) return false;
+        if (!XTestFakeButtonEvent(display_, 1, True, 0)) return false;
+        XSync(display_, False);
+        return button_one_is_down();
     }
 
     bool move_outside(const ui::StandaloneWindow& window, int extra = 0) {
@@ -168,8 +170,11 @@ public:
         return pointer_is_inside(target);
     }
 
-    bool release(const ui::StandaloneWindow& window) {
-        return send_button(window, false);
+    bool release() {
+        if (!display_) return false;
+        if (!XTestFakeButtonEvent(display_, 1, False, 0)) return false;
+        XSync(display_, False);
+        return !button_one_is_down();
     }
 
 private:
@@ -222,35 +227,29 @@ private:
         return win_x >= 0 && win_y >= 0 && win_x < attrs.width && win_y < attrs.height;
     }
 
-    bool send_button(const ui::StandaloneWindow& window, bool pressed) {
-        if (!display_) return false;
-        const Window target = native_window(window);
-        Geometry g{};
-        if (!target || !geometry(window, g)) return false;
-
-        XEvent event{};
-        event.xbutton.type = pressed ? ButtonPress : ButtonRelease;
-        event.xbutton.display = display_;
-        event.xbutton.window = target;
-        event.xbutton.root = DefaultRootWindow(display_);
-        event.xbutton.subwindow = 0;
-        event.xbutton.time = CurrentTime;
-        event.xbutton.x = 24;
-        event.xbutton.y = 24;
-        event.xbutton.x_root = g.root_x + 24;
-        event.xbutton.y_root = g.root_y + 24;
-        event.xbutton.state = pressed ? 0U : Button1Mask;
-        event.xbutton.button = Button1;
-        event.xbutton.same_screen = True;
-
-        const long mask = pressed ? ButtonPressMask : ButtonReleaseMask;
-        if (!XSendEvent(display_, target, False, mask, &event)) return false;
-        XSync(display_, False);
-        return true;
+    bool button_one_is_down() const {
+        int x{};
+        int y{};
+        unsigned int mask{};
+        if (!query_pointer(DefaultRootWindow(display_), x, y, mask)) return false;
+        return (mask & Button1Mask) != 0;
     }
 
     Display* display_{};
 };
+
+bool activate_and_press(ui::Application& app,
+                        X11Driver& driver,
+                        ui::StandaloneWindow& window,
+                        std::string_view stage) {
+    if (!expect(driver.activate(window), stage, "failed to activate target view")) return false;
+    // NativeUI ignores ordinary pointer input until the platform FocusIn has
+    // activated the retained tree. Consume that native transition before the
+    // real XTEST button press so the fixture never races focus delivery.
+    if (!pump(app)) return false;
+    if (!expect(driver.press(), stage, "failed to synthesize a held button press")) return false;
+    return pump(app);
+}
 
 bool outside_release_cycle(ui::Application& app,
                            X11Driver& driver,
@@ -263,14 +262,13 @@ bool outside_release_cycle(ui::Application& app,
     const int up = state->up;
     const int cancel = state->cancel;
 
-    if (!expect(driver.press_inside(window), stage, "failed to synthesize a button press")) return false;
-    if (!pump(app)) return false;
+    if (!activate_and_press(app, driver, window, stage)) return false;
     if (!expect(state->down == down + 1, stage, "pointer down not delivered")) return false;
     if (!expect(driver.move_outside(window), stage, "first outside motion injection failed") || !pump(app)) return false;
     if (!expect(driver.move_outside(window, 20), stage, "second outside motion injection failed") || !pump(app)) return false;
     if (!expect(state->move >= move + 2, stage, "captured outside motion was lost")) return false;
     if (!expect(state->outside_move >= outside + 2, stage, "outside coordinates were not delivered")) return false;
-    if (!expect(driver.release(window), stage, "button release injection failed") || !pump(app)) return false;
+    if (!expect(driver.release(), stage, "button release injection failed") || !pump(app)) return false;
     if (!expect(state->up == up + 1, stage, "outside release was lost")) return false;
     return expect(state->cancel == cancel, stage, "normal release synthesized cancel");
 }
@@ -307,7 +305,8 @@ int main() {
 
     const int cancel_before = a_state->cancel;
     const int up_before = a_state->up;
-    if (!expect(driver.press_inside(*a), "focus-loss", "failed to press A") || !pump(app)) return 1;
+    if (!activate_and_press(app, driver, *a, "focus-loss")) return 1;
+    if (!expect(a_state->down > 0, "focus-loss", "view A did not receive pointer down")) return 1;
     if (!expect(driver.activate(*b), "focus-loss", "failed to focus B") || !pump(app)) return 1;
     if (!expect(a_state->cancel == cancel_before + 1,
                 "focus-loss", "focus loss did not cancel retained capture")) return 1;
@@ -315,7 +314,7 @@ int main() {
     if (!expect(driver.move_inside(*b), "focus-loss", "failed to move into B") || !pump(app)) return 1;
     if (!expect(b_state->move > b_move_before,
                 "focus-loss", "X11 grab remained owned by A after retained cancellation")) return 1;
-    if (!expect(driver.release(*a), "focus-loss", "failed to inject release after cancel") || !pump(app)) return 1;
+    if (!expect(driver.release(), "focus-loss", "failed to release held button") || !pump(app)) return 1;
     if (!expect(a_state->up == up_before,
                 "focus-loss", "cancelled capture received a duplicate release")) return 1;
 
@@ -325,7 +324,7 @@ int main() {
         app, *c_ui, ui::WindowDesc{.title = "T044 X11 C", .size = {240.0f, 170.0f}, .resizable = true});
     if (!c->valid()) return fail("window-c", c->last_error());
     if (!expect(driver.place(*c, 40, 400), "destroy", "failed to place C") || !pump(app)) return 1;
-    if (!expect(driver.press_inside(*c), "destroy", "failed to press C") || !pump(app)) return 1;
+    if (!activate_and_press(app, driver, *c, "destroy")) return 1;
     if (!expect(c_state->down == 1, "destroy", "view C did not receive pointer down")) return 1;
     c.reset();
     c_ui.reset();
@@ -334,6 +333,7 @@ int main() {
     if (!expect(driver.move_inside(*b), "destroy", "failed to move into B") || !pump(app)) return 1;
     if (!expect(b_state->move > after_destroy,
                 "destroy", "destroyed X11 view retained pointer grab")) return 1;
+    if (!expect(driver.release(), "destroy", "failed to release held button after destroy") || !pump(app)) return 1;
 
     for (int i = 0; i < 32; ++i) {
         if (!outside_release_cycle(app, driver, *a, a_state, "stress")) return 1;
