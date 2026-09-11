@@ -59,6 +59,15 @@ def main() -> None:
     forbid(dispatcher, "include/nativeui/nativeui.hpp", "t065-dispatcher-contract.yml")
     forbid(dispatcher, "      - 'CMakeLists.txt'", "t065-dispatcher-contract.yml")
 
+    # T067's implementation is split between the public wrapper and retained
+    # detail headers. Path scoping must not omit those implementation files.
+    virtual_list = read("t067-virtual-list.yml")
+    require(
+        virtual_list,
+        "      - 'include/nativeui/detail/virtual_list_*'",
+        "t067-virtual-list.yml",
+    )
+
     ci = read("ci.yml")
     require(ci, "pull_request:\n    branches: [main]", "ci.yml")
 
