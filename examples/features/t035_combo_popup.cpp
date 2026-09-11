@@ -91,6 +91,25 @@ int opening_key_contract() {
     {
         example::Platform platform;
         ui::State<int> selection{1};
+        ui::UI tree{ui::ComboBox<int>{
+            selection,
+            {{1, "One", true}, {2, "Disabled", false}, {3, "Three", true}}}};
+        tree.resize({240.0f, 160.0f});
+        tree.activate(platform);
+
+        if (tree.dispatch(example::key(ui::Key::Down), platform) != ui::EventResult::Handled ||
+            tree.dispatch(key_up(ui::Key::Down), platform) != ui::EventResult::Handled ||
+            tree.dispatch(example::key(ui::Key::Up), platform) != ui::EventResult::Handled ||
+            tree.dispatch(example::key(ui::Key::Enter), platform) != ui::EventResult::Handled ||
+            selection.get() != 3) {
+            return example::fail("ComboBox Up wrap/disabled-skip contract failed");
+        }
+        (void)tree.dispatch(key_up(ui::Key::Enter), platform);
+    }
+
+    {
+        example::Platform platform;
+        ui::State<int> selection{1};
         ui::UI tree{ui::Column{
             ui::ComboBox<int>{selection, {{1, "One", true}, {2, "Two", true}}},
             ui::Button{"After", [] {}},
