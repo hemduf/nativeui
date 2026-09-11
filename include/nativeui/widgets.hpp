@@ -11,4 +11,5 @@
 #include <nativeui/detail/widgets_slider.inc>
 #include <nativeui/detail/widgets_range_slider.inc>
 #include <nativeui/detail/widgets_progress_meter.inc>
+#include <nativeui/combo_popup.hpp>
 #include <nativeui/detail/widgets_list_tabs.inc>
