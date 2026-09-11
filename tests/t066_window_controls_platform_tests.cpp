@@ -31,6 +31,46 @@ void require(bool condition, std::string_view message) {
     if (!condition) throw Failure(std::string{message});
 }
 
+struct LifecycleCounts {
+    int mounts{};
+    int unmounts{};
+};
+
+class LifecycleProbeComponent final : public ui::Component {
+public:
+    explicit LifecycleProbeComponent(std::shared_ptr<LifecycleCounts> counts)
+        : counts_(std::move(counts)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {120.0f, 40.0f};
+    }
+
+    void mount(ui::MountContext&) override { ++counts_->mounts; }
+    void unmount(ui::LifecycleContext&) override { ++counts_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<LifecycleCounts> counts_;
+};
+
+class LifecycleProbe {
+public:
+    explicit LifecycleProbe(std::shared_ptr<LifecycleCounts> counts)
+        : counts_(std::move(counts)) {}
+
+    ui::Spec spec() && {
+        auto counts = std::move(counts_);
+        return ui::Spec{
+            [counts = std::move(counts)] {
+                return std::make_unique<LifecycleProbeComponent>(counts);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<LifecycleCounts> counts_;
+};
+
 bool send_native_close(ui::NativeViewHandle handle) {
     if (!handle) return false;
 #if defined(__APPLE__)
@@ -112,7 +152,11 @@ ui::WindowDesc desc(std::string title) {
 
 void runtime_controls_and_hidden_registration() {
     ui::Application app;
-    ui::UI tree{ui::Label{"T066 runtime controls"}};
+    auto lifecycle = std::make_shared<LifecycleCounts>();
+    ui::UI tree{LifecycleProbe{lifecycle}};
+    require(lifecycle->mounts == 1 && lifecycle->unmounts == 0,
+            "fixture did not mount exactly once");
+
     int closed = 0;
     ui::StandaloneWindow window{app, tree, desc("T066 runtime")};
     require(window.valid(), "window construction failed");
@@ -129,6 +173,8 @@ void runtime_controls_and_hidden_registration() {
     pump(app, 2);
     require(!app.quit_requested(), "hidden window triggered last-window quit");
     require(window.show() && window.show(), "show was not idempotent");
+    require(lifecycle->mounts == 1 && lifecycle->unmounts == 0,
+            "show/hide remounted or unmounted UI content");
 
     window.on_closed([&] { ++closed; });
     window.request_close();
@@ -159,8 +205,10 @@ void native_close_veto_then_accept() {
     require(!app.quit_requested(), "vetoed native close triggered last-window quit");
     require(native_window_visible(window.native_handle()),
             "vetoed native close did not leave the native window visible");
-    require(window.set_title("T066 still operational"),
-            "vetoed native close left window non-operational");
+    if (!window.set_title("T066 still operational")) {
+        throw Failure("vetoed native close left window non-operational: " +
+                      std::string{window.last_error()});
+    }
 
     window.on_close_request([&] {
         ++requests;
@@ -172,6 +220,113 @@ void native_close_veto_then_accept() {
     require(window.is_closed(), "accepted native close did not complete");
     require(closed == 1, "accepted native close did not fire on_closed exactly once");
     require(app.quit_requested(), "accepted last-window close did not trigger quit policy");
+}
+
+void native_close_without_request_handler_accepts_once() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T066 no request handler"}};
+    int closed = 0;
+    ui::StandaloneWindow window{app, tree, desc("T066 no handler")};
+    require(window.valid(), "no-handler window construction failed");
+    window.on_closed([&] { ++closed; });
+
+    require(send_native_close(window.native_handle()), "failed first no-handler close request");
+    require(send_native_close(window.native_handle()), "failed duplicate no-handler close request");
+    pump(app, 4);
+    require(window.is_closed(), "no-handler native close did not complete");
+    require(closed == 1, "duplicate native close fired on_closed more than once");
+    require(app.quit_requested(), "no-handler last-window close did not trigger quit");
+}
+
+void programmatic_close_bypasses_veto() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T066 bypass veto"}};
+    int requests = 0;
+    int closed = 0;
+    ui::StandaloneWindow window{app, tree, desc("T066 bypass veto")};
+    require(window.valid(), "bypass-veto window construction failed");
+    window.on_close_request([&] {
+        ++requests;
+        return ui::CloseDecision::Cancel;
+    });
+    window.on_closed([&] { ++closed; });
+
+    window.request_close();
+    pump(app, 4);
+    require(requests == 0, "programmatic close incorrectly invoked veto callback");
+    require(window.is_closed() && closed == 1,
+            "programmatic close did not complete exactly once");
+}
+
+void reentrant_request_close_inside_veto_wins() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T066 reentrant self close"}};
+    int requests = 0;
+    int closed = 0;
+    ui::StandaloneWindow window{app, tree, desc("T066 reentrant self close")};
+    require(window.valid(), "reentrant-self window construction failed");
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        window.request_close();
+        return ui::CloseDecision::Cancel;
+    });
+
+    require(send_native_close(window.native_handle()), "failed reentrant-self native close");
+    pump(app, 4);
+    require(requests == 1, "reentrant-self veto callback count mismatch");
+    require(window.is_closed() && closed == 1,
+            "request_close inside veto did not win over returned Cancel");
+}
+
+void reentrant_veto_can_close_other_window() {
+    ui::Application app;
+    ui::UI tree_a{ui::Label{"T066 reentrant A"}};
+    ui::UI tree_b{ui::Label{"T066 reentrant B"}};
+    int requests_a = 0;
+    int closed_b = 0;
+    ui::StandaloneWindow a{app, tree_a, desc("T066 reentrant A")};
+    ui::StandaloneWindow b{app, tree_b, desc("T066 reentrant B")};
+    require(a.valid() && b.valid(), "reentrant-two-window construction failed");
+    b.on_closed([&] { ++closed_b; });
+    a.on_close_request([&] {
+        ++requests_a;
+        b.request_close();
+        return ui::CloseDecision::Cancel;
+    });
+
+    require(send_native_close(a.native_handle()), "failed reentrant close-other request");
+    pump(app, 4);
+    require(requests_a == 1, "close-other veto callback count mismatch");
+    require(!a.is_closed(), "close-other veto unexpectedly closed source window");
+    require(b.is_closed() && closed_b == 1,
+            "close-other veto did not close target exactly once");
+    require(!app.quit_requested(), "close-other veto triggered quit while source remained open");
+    require(a.set_title("T066 source survives close-other"),
+            "source window was not operational after close-other callback");
+
+    a.request_close();
+    pump(app, 3);
+    require(a.is_closed(), "source cleanup close failed");
+}
+
+void reentrant_veto_can_request_application_quit() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T066 request quit"}};
+    int requests = 0;
+    ui::StandaloneWindow window{app, tree, desc("T066 request quit")};
+    require(window.valid(), "request-quit window construction failed");
+    window.on_close_request([&] {
+        ++requests;
+        app.request_quit();
+        return ui::CloseDecision::Cancel;
+    });
+
+    require(send_native_close(window.native_handle()), "failed request-quit native close");
+    (void)app.poll(0.0);
+    require(requests == 1, "request-quit veto callback count mismatch");
+    require(app.quit_requested(), "request_quit from veto was lost");
+    require(!window.is_closed(), "request_quit plus Cancel unexpectedly closed window");
 }
 
 void destructor_is_silent_but_updates_quit_policy() {
@@ -240,6 +395,11 @@ void two_windows_close_independently() {
 void suite() {
     runtime_controls_and_hidden_registration();
     native_close_veto_then_accept();
+    native_close_without_request_handler_accepts_once();
+    programmatic_close_bypasses_veto();
+    reentrant_request_close_inside_veto_wins();
+    reentrant_veto_can_close_other_window();
+    reentrant_veto_can_request_application_quit();
     destructor_is_silent_but_updates_quit_policy();
     destructor_suppresses_pending_close_callback();
     two_windows_close_independently();
