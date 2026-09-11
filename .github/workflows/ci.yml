@@ -3,16 +3,35 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CODE_REVIEW.md'
+      - 'CONTEXT.md'
+      - 'ROADMAP.md'
+      - 'VALIDATION.md'
+      - 'DESIGN.md'
+      - 'THIRD_PARTY.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CODE_REVIEW.md'
+      - 'CONTEXT.md'
+      - 'ROADMAP.md'
+      - 'VALIDATION.md'
+      - 'DESIGN.md'
+      - 'THIRD_PARTY.md'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
 
 jobs:
   build:
@@ -37,6 +56,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-
+
+      - name: CI workflow policy contract
+        if: runner.os == 'Linux'
+        run: python3 tests/ci_policy_contract.py
 
       - name: T047 public attachment contract
         run: >-
@@ -204,6 +235,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-
 
       - name: T047 public attachment contract
         run: >-

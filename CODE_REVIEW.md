@@ -280,7 +280,7 @@ For rendering or windowing changes verify:
 
 ## 11. Mandatory validation matrix
 
-Every code ticket must run the smallest applicable subset plus the full relevant project suite.
+Every code ticket must run the smallest applicable subset plus the full relevant project suite **before merge/final qualification**. This is a coverage requirement, not an instruction to launch every remote workflow on every intermediate commit. Remote execution cadence follows [`CI_POLICY.md`](CI_POLICY.md).
 
 ### 11.1 Always
 
@@ -319,6 +319,14 @@ Every code ticket must run the smallest applicable subset plus the full relevant
 - [ ] prove it does not take contended/blocking locks;
 - [ ] prove it performs no I/O/UI/runtime initialization;
 - [ ] verify cross-thread state handoff is bounded and race-free.
+
+### 11.5 CI qualification cadence
+
+- During active TDD, keep the PR Draft and use normal CI plus only path-scoped dedicated workflows relevant to the changed subsystem.
+- Do not interpret this validation matrix as a requirement to run unrelated historical ticket matrices on every commit.
+- Once source/tests/build/workflows are frozen and normal/relevant CI is green, mark the PR Ready for review; that transition runs the heavyweight final-candidate lifecycle/release gates defined by `CI_POLICY.md`.
+- Source/test/build/workflow changes after qualification invalidate the candidate and require a new Draft -> Ready transition.
+- Pure project-state/completion documentation does not invalidate executable qualification unless it contains release/API material that is itself tested or shipped as part of the contract.
 
 ## 12. Required review record in each issue/PR
 
