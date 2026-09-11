@@ -68,9 +68,11 @@ public:
         // final ButtonRelease ends it automatically, but retained cancellation
         // can happen first (focus loss, destruction, modal/lifecycle changes).
         // This Display is the exact Pugl client connection for this view, so
-        // XUngrabPointer releases only that client's active grab.
+        // XUngrabPointer releases only that client's active grab. Synchronize
+        // the request so another NativeUI view observes the released ownership
+        // before this retained cancellation boundary returns.
         XUngrabPointer(display_, CurrentTime);
-        XFlush(display_);
+        XSync(display_, False);
     }
 
 private:
