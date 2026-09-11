@@ -91,6 +91,17 @@ struct DynamicItem {
     bool operator==(const DynamicItem&) const = default;
 };
 
+ui::DialogSpec dialog_spec() {
+    ui::DialogSpec spec;
+    spec.title = "Confirm";
+    spec.body = ui::make_spec(ui::Spacer{120.0f, 80.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    spec.actions.push_back(ui::DialogAction{
+        "cancel", "Cancel", true, ui::DialogActionRole::Cancel});
+    return spec;
+}
+
 void suite() {
     // Existing focus/resize lifecycle regression.
     {
@@ -197,6 +208,51 @@ void suite() {
         items.set({DynamicItem{"A", 10.0f}, DynamicItem{"B", 20.0f}});
         tree.resize({120.0f, 80.0f});
         NUI_CHECK((duplicate_log->events == std::vector<std::string>{"A.mount", "B.mount"}));
+    }
+
+    // T063 owns exactly one active Dialog slot per UI, not per controller.
+    // Closing the first controller releases that shared slot before invoking
+    // its callback, so a second controller can become active immediately.
+    {
+        ui::UI tree{ui::Spacer{160.0f, 100.0f}};
+        ui::Dialog first{tree};
+        ui::Dialog second{tree};
+        int callbacks = 0;
+
+        NUI_CHECK(first.show(dialog_spec(), [&](ui::DialogResult result) {
+            NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+            ++callbacks;
+        }) == ui::DialogShowResult::Shown);
+        NUI_CHECK(second.show(dialog_spec(), [](ui::DialogResult) {}) ==
+                  ui::DialogShowResult::Busy);
+        NUI_CHECK(first.close());
+        NUI_CHECK(callbacks == 1);
+
+        NUI_CHECK(second.show(dialog_spec(), [&](ui::DialogResult result) {
+            NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+            ++callbacks;
+        }) == ui::DialogShowResult::Shown);
+        NUI_CHECK(second.close());
+        NUI_CHECK(callbacks == 2);
+    }
+
+    // Whole-UI teardown is observably different from explicit controller
+    // destruction: a surviving controller must become inert and suppress its
+    // application callback rather than reporting Dismissed after its UI died.
+    {
+        int callbacks = 0;
+        std::unique_ptr<ui::Dialog> surviving_dialog;
+        {
+            ui::UI tree{ui::Spacer{160.0f, 100.0f}};
+            surviving_dialog = std::make_unique<ui::Dialog>(tree);
+            NUI_CHECK(surviving_dialog->show(dialog_spec(), [&](ui::DialogResult) {
+                ++callbacks;
+            }) == ui::DialogShowResult::Shown);
+        }
+        NUI_CHECK(callbacks == 0);
+        NUI_CHECK(!surviving_dialog->active());
+        surviving_dialog.reset();
+        NUI_CHECK(callbacks == 0);
     }
 
     // Deterministic mount/activate/deactivate/unmount order and stable IDs.
