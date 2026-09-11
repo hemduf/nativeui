@@ -41,6 +41,10 @@ public:
         return static_cast<float>(text.size()) * size * 0.5f;
     }
 
+    [[nodiscard]] ui::Dispatcher dispatcher() const noexcept override {
+        return dispatcher_value;
+    }
+
     void set_text_input(bool active, ui::Rect area, float cursor_offset) override {
         text_input_active = active;
         text_input_area = area;
@@ -70,6 +74,7 @@ public:
         ++drop_reject_count;
     }
 
+    ui::Dispatcher dispatcher_value;
     bool text_input_active{};
     bool paste_requested{};
     float text_input_cursor_offset{};
