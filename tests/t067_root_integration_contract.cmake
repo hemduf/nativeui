@@ -8,6 +8,7 @@ file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
 file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
 file(READ "${SOURCE_DIR}/tests/t051/CMakeLists.txt" _t051_cmake)
 set(_example "${SOURCE_DIR}/examples/features/t067_virtual_list.cpp")
+set(_workflow "${SOURCE_DIR}/.github/workflows/t067-virtual-list.yml")
 set(_t051_benchmark "${SOURCE_DIR}/tests/t051/t067_virtual_list_benchmarks.cpp")
 
 function(require_text haystack needle description)
@@ -32,6 +33,9 @@ require_text("${_t051_cmake}" "t051.t067_virtual_list" "T051 virtual-list benchm
 if(NOT EXISTS "${_example}")
   message(FATAL_ERROR "T067 root integration contract: missing dedicated feature example: ${_example}")
 endif()
+if(NOT EXISTS "${_workflow}")
+  message(FATAL_ERROR "T067 root integration contract: missing dedicated workflow: ${_workflow}")
+endif()
 if(NOT EXISTS "${_t051_benchmark}")
   message(FATAL_ERROR "T067 root integration contract: missing T051 virtual-list benchmark: ${_t051_benchmark}")
 endif()
@@ -40,5 +44,10 @@ string(FIND "${_example_source}" "nativeui/detail/" _detail_index)
 if(NOT _detail_index EQUAL -1)
   message(FATAL_ERROR "T067 feature example must use only the normal public NativeUI API")
 endif()
+file(READ "${_workflow}" _workflow_source)
+require_text(
+  "${_workflow_source}"
+  "nativeui_example_t067_virtual_list --self-test"
+  "dedicated example self-test execution")
 
 message(STATUS "T067 root integration contract passed")
