@@ -266,6 +266,65 @@ void suite() {
         NUI_CHECK(dispatcher.post([] {}));
         NUI_CHECK_NEAR(owner.next_delay()->count(), 0.0, 0.000001);
     }
+
+    // T062 uses the T065 dispatcher clock exactly: 499 ms is still pending,
+    // 500 ms shows once, and repeated hover inside the same anchor does not
+    // restart the timer. Hover/focus share one eligibility lifetime.
+    {
+        auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner{{}, clock};
+        int shown = 0;
+        int hidden = 0;
+        ui::detail::TooltipController tooltip{
+            owner.dispatcher(), 500ms, [&] { ++shown; }, [&] { ++hidden; }};
+
+        tooltip.set_hovered(true);
+        NUI_CHECK(tooltip.pending());
+        clock->advance(499ms);
+        NUI_CHECK(owner.checkpoint() == 0);
+        NUI_CHECK(shown == 0);
+
+        tooltip.set_hovered(true);
+        clock->advance(1ms);
+        NUI_CHECK(owner.checkpoint() == 1);
+        NUI_CHECK(shown == 1);
+        NUI_CHECK(tooltip.visible());
+
+        tooltip.set_focused(true);
+        tooltip.set_hovered(false);
+        NUI_CHECK(tooltip.visible());
+        NUI_CHECK(hidden == 0);
+        tooltip.set_focused(false);
+        NUI_CHECK(!tooltip.visible());
+        NUI_CHECK(hidden == 1);
+    }
+
+    // PointerDown is a stronger dismissal: remaining stationary eligibility
+    // cannot re-arm the tooltip. A complete false->true transition is required.
+    {
+        auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner{{}, clock};
+        int shown = 0;
+        int hidden = 0;
+        ui::detail::TooltipController tooltip{
+            owner.dispatcher(), 0ms, [&] { ++shown; }, [&] { ++hidden; }};
+
+        tooltip.set_hovered(true);
+        NUI_CHECK(owner.checkpoint() == 1);
+        NUI_CHECK(shown == 1);
+        tooltip.dismiss_until_eligibility_transition();
+        NUI_CHECK(hidden == 1);
+        NUI_CHECK(!tooltip.visible());
+
+        tooltip.set_hovered(true);
+        NUI_CHECK(owner.checkpoint() == 0);
+        NUI_CHECK(shown == 1);
+
+        tooltip.set_hovered(false);
+        tooltip.set_hovered(true);
+        NUI_CHECK(owner.checkpoint() == 1);
+        NUI_CHECK(shown == 2);
+    }
 }
 
 } // namespace
