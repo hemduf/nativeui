@@ -25,6 +25,7 @@
 #include <nativeui/command.hpp>
 #include <nativeui/focus.hpp>
 #include <nativeui/layout.hpp>
+#include <nativeui/virtual_list.hpp>
 #include <nativeui/widgets.hpp>
 #include <nativeui/ui.hpp>
 #include <nativeui/headless.hpp>
