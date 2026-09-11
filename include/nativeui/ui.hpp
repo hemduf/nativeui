@@ -1,10 +1,12 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/dialog_state.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -13,6 +15,8 @@
 #include <vector>
 
 namespace ui {
+
+class Dialog;
 
 /// One retained NativeUI component tree.
 ///
@@ -29,11 +33,20 @@ public:
 
     template <class Root>
     UI(Root&& root, Theme theme)
-        : overlay_state_(std::make_shared<detail::OverlayState>()),
+        : dialog_state_(std::make_shared<detail::DialogState>()),
+          overlay_state_(std::make_shared<detail::OverlayState>()),
           tree_(compile(detail::make_overlay_host_spec(
               make_spec(std::forward<Root>(root)), overlay_state_))) {
         tree_.set_theme(std::move(theme));
         tree_.mount();
+    }
+
+    ~UI() {
+        // T063 distinguishes whole-UI teardown from explicit Dialog controller
+        // destruction. Publish the terminal state before Tree/overlay members
+        // begin reverse-order destruction so an outliving controller is inert
+        // and never invokes an application callback after the UI lifetime.
+        if (dialog_state_) dialog_state_->begin_ui_teardown();
     }
 
     [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
@@ -52,11 +65,37 @@ public:
         enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
+        // T063 deactivation suppresses the application callback and must not
+        // restore focus into a UI whose platform focus is already leaving. A
+        // live Dialog is therefore the one case where focus deactivation must
+        // precede overlay removal. Keep the historical T061/T035 order when no
+        // Dialog is active so unrelated anchored-overlay behavior is unchanged.
+        const bool active_dialog = dialog_state_ && dialog_state_->active_generation != 0;
+        if (active_dialog) {
+            tree_.deactivate_focus(platform);
+            if (dialog_state_->handle_deactivate()) prepare_overlay_layout();
+            close_anchored_overlays();
+            return;
+        }
+
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        // T063 Escape is dialog policy, not focused-child policy. Resolve it
+        // before ordinary retained routing so a focused TextInput/custom body
+        // cannot consume Escape ahead of the enabled Cancel action/Dismissed
+        // fallback. Keep a strong local DialogState reference because the
+        // application completion may destroy this UI before handle_escape()
+        // returns; no UI member is touched after a successful completion.
+        if (event.type == InputType::KeyDown && event.key == Key::Escape) {
+            auto dialog_state = dialog_state_;
+            if (dialog_state && dialog_state->handle_escape()) {
+                return EventResult::Handled;
+            }
+        }
+
         // Keep the no-overlay path as close as possible to the pre-T061 UI
         // dispatch contract. T035 component requests are drained only after
         // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
@@ -65,11 +104,18 @@ public:
         if (overlay_state_->entries.empty()) {
             const auto command_source = overlay_command_source(event);
             const auto result = tree_.dispatch(event, platform);
-            process_component_overlay_command(command_source, platform);
-            if (!overlay_state_->entries.empty()) {
-                prepare_overlay_layout();
-                enforce_new_modal_capture_barrier(platform);
+            const bool completing_dialog = has_pending_dialog_completion();
+            if (!completing_dialog) {
+                process_component_overlay_command(command_source, platform);
+                if (!overlay_state_->entries.empty()) {
+                    prepare_overlay_layout();
+                    enforce_new_modal_capture_barrier(platform);
+                }
             }
+            // T063 application completion is intentionally the final operation
+            // of this dispatch. The callback may replace or destroy this UI;
+            // after it runs, return using only the local result value.
+            if (completing_dialog) flush_pending_dialog_completion();
             return result;
         }
 
@@ -123,10 +169,9 @@ public:
                     return EventResult::Handled;
                 }
 
-                // The topmost modal owns keyboard activation below it. If it
-                // is not itself Escape-dismissable, lower overlays/root must
-                // not observe this Escape; overlays created above it have
-                // already had their eligibility checked by this reverse scan.
+                // Preserve the generic T061 contract: the topmost modal owns
+                // Escape even when it is not auto-dismissable. T063 has already
+                // handled its dedicated Cancel/Dismissed policy above.
                 if (it->spec.mode == OverlayMode::Modal) {
                     return EventResult::Handled;
                 }
@@ -149,7 +194,10 @@ public:
 
         const auto command_source = overlay_command_source(event);
         const auto result = tree_.dispatch(event, platform);
-        process_component_overlay_command(command_source, platform);
+        const bool completing_dialog = has_pending_dialog_completion();
+        if (!completing_dialog) {
+            process_component_overlay_command(command_source, platform);
+        }
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
         // open. Resolve that source transition in the same outer dispatch, not
@@ -161,6 +209,11 @@ public:
         // unwinds; cancel the now-lower capture here, after Tree::dispatch has
         // reached that safe checkpoint, never reentrantly inside PointerDown.
         enforce_new_modal_capture_barrier(platform);
+
+        // Keep the application callback last for the same lifetime reason as
+        // the no-overlay path above. flush_pending_dialog_completion() first
+        // performs the retained detach and releases the per-UI Dialog slot.
+        if (completing_dialog) flush_pending_dialog_completion();
         return result;
     }
     EventResult cancel_pointer(PlatformServices& platform) {
@@ -219,6 +272,8 @@ public:
     }
 
 private:
+    friend class Dialog;
+
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
     }
@@ -352,6 +407,47 @@ private:
         enforce_new_modal_capture_barrier(platform);
     }
 
+    [[nodiscard]] bool has_pending_dialog_completion() const noexcept {
+        return dialog_state_ && !dialog_state_->ui_tearing_down &&
+               static_cast<bool>(dialog_state_->pending_completion);
+    }
+
+    void finish_dialog_completion(
+        std::uint64_t generation, std::function<void()> completion) {
+        if (!dialog_state_ || !dialog_state_->release(generation)) return;
+        if (completion) completion();
+    }
+
+    void complete_dialog_close(
+        std::uint64_t generation, std::function<void()> completion) {
+        if (!dialog_state_ || !dialog_state_->owns(generation)) return;
+
+        // During Tree::dispatch, destroying the retained dialog subtree here
+        // would invalidate the currently executing Component::input object.
+        // Defer application completion until the outer dispatch checkpoint.
+        if (tree_.dispatch_depth_ != 0) {
+            (void)dialog_state_->defer_completion(generation, std::move(completion));
+            return;
+        }
+
+        prepare_overlay_layout();
+        finish_dialog_completion(generation, std::move(completion));
+    }
+
+    void flush_pending_dialog_completion() {
+        if (!dialog_state_ || dialog_state_->ui_tearing_down ||
+            !dialog_state_->pending_completion) {
+            return;
+        }
+
+        const auto generation = dialog_state_->pending_completion_generation;
+        auto completion = std::move(dialog_state_->pending_completion);
+        dialog_state_->pending_completion_generation = 0;
+        dialog_state_->pending_completion = {};
+        prepare_overlay_layout();
+        finish_dialog_completion(generation, std::move(completion));
+    }
+
     [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {
         for (auto it = overlay_state_->entries.rbegin();
              it != overlay_state_->entries.rend(); ++it) {
@@ -427,8 +523,9 @@ private:
         for (const auto id : anchored) (void)overlay_state_->close_id(id);
     }
 
-    // State must outlive Tree because the retained OverlayHost clears its T058
-    // structural invalidator during tree teardown.
+    // Shared dialog/overlay state must outlive Tree because controllers and the
+    // retained OverlayHost can keep lifetime seams until Tree teardown ends.
+    std::shared_ptr<detail::DialogState> dialog_state_;
     std::shared_ptr<detail::OverlayState> overlay_state_;
     Tree tree_;
     Size viewport_{};

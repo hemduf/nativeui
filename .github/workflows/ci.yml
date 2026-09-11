@@ -151,7 +151,7 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke'
+          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke && ./build/nativeui_example_t063_dialog --platform-smoke'
 
       # Some feature-example self-tests initialize the native Pugl world even
       # when they do not show a window. Keep the whole Linux/X11 test suite on
@@ -225,11 +225,13 @@ jobs:
       # The real AppKit/Pugl path validates both the T028 clipboard regression
       # and CODE_REVIEW.md's lifecycle requirement: simultaneous PUGL_MODULE
       # editor instances, sibling destruction, survivor use and repeated cycles.
-      - name: macOS clipboard, lifecycle, and T035 popup smoke
+      # T035 and T063 both exercise their real standalone + EmbeddedView policy.
+      - name: macOS clipboard, lifecycle, T035 popup, and T063 dialog smoke
         if: runner.os == 'macOS'
         run: |
           ./build/nativeui_smoke_standalone
           ./build/nativeui_example_t035_combo_popup --platform-smoke
+          ./build/nativeui_example_t063_dialog --platform-smoke
 
   sanitizers:
     name: Linux ASan + UBSan
