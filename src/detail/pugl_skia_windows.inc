@@ -440,23 +440,29 @@ QuitPolicy Application::quit_policy() const noexcept {
     return impl_ ? impl_->quit_policy : QuitPolicy::OnLastWindowClosed;
 }
 
-struct StandaloneWindow::Impl final : PlatformServices {
+struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     explicit Impl(std::shared_ptr<detail::DispatcherWakeBackend> wake_backend = {})
         : dispatcher_owner(
               std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))),
           lifetime_token(std::make_shared<int>(0)) {}
 
+    // Declared before `core` so reverse member destruction tears ViewCore down
+    // while the T065 dispatcher remains available to component deactivation.
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     std::unique_ptr<ViewCore> core;
     Application* application{};
     std::uint64_t registration_id{};
     std::string construction_error;
-    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     detail::WindowCloseState close_state;
     std::function<CloseDecision()> close_request_callback;
     std::function<void()> closed_callback;
     std::shared_ptr<int> lifetime_token;
     bool close_completion_posted{};
     bool close_request_callback_active{};
+
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
+    }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
         if (core) core->set_text_input(active, area, cursor_offset);
@@ -742,17 +748,21 @@ void StandaloneWindow::reject_drop(Rect region) {
     if (impl_ && impl_->core && !is_closed()) impl_->core->reject_drop(region);
 }
 
-struct EmbeddedView::Impl final : PlatformServices {
+struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     Impl(UI& ui, NativeParentHandle parent, Size size)
-        : core(ui,
+        : dispatcher_owner(std::make_shared<detail::DispatcherOwner>()),
+          core(ui,
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true, std::nullopt, std::nullopt},
-               parent),
-          dispatcher_owner(std::make_shared<detail::DispatcherOwner>()) {}
+               parent) {}
 
     ~Impl() override {
         if (dispatcher_owner) dispatcher_owner->shutdown();
+    }
+
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override {
+        return dispatcher_owner ? dispatcher_owner->dispatcher() : Dispatcher{};
     }
 
     void set_text_input(bool active, Rect area, float cursor_offset) override {
@@ -765,8 +775,9 @@ struct EmbeddedView::Impl final : PlatformServices {
     }
     void reject_drop(Rect region) override { core.reject_drop(region); }
 
-    ViewCore core;
+    // Keep dispatcher alive through ViewCore destruction/deactivation.
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    ViewCore core;
 };
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
