@@ -399,10 +399,10 @@ public:
         if (generation_ != 0 || state->active_generation != 0) return DialogShowResult::Busy;
         if (!valid_spec(spec)) return DialogShowResult::InvalidSpec;
 
-        // Build all allocation-heavy local policy before acquiring the per-UI
-        // Dialog slot. A construction failure therefore cannot strand the UI in
-        // Busy with no visible overlay. Only show_overlay() remains after the
-        // acquire and is rolled back explicitly if it throws.
+        // Build every allocation-capable piece of local policy before acquiring
+        // the per-UI Dialog slot. A construction failure therefore cannot strand
+        // the UI in Busy with no visible overlay. Only show_overlay() remains
+        // after acquire and is rolled back explicitly if it throws.
         const auto escape_result = escape_result_for(spec);
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
@@ -412,6 +412,8 @@ public:
         overlay.dismiss_on_escape = false;
         overlay.dismiss_on_outside_pointer_down = false;
         overlay.content = build_content(std::move(spec));
+        auto escape_handler = guarded_completion(escape_result);
+        auto deactivate_handler = guarded_abandon();
 
         const auto generation = state->acquire();
         if (generation == 0) return DialogShowResult::Unavailable;
@@ -420,8 +422,8 @@ public:
         completion_ = std::move(completion);
         if (!state->bind_handlers(
                 generation,
-                guarded_completion(escape_result),
-                guarded_abandon())) {
+                std::move(escape_handler),
+                std::move(deactivate_handler))) {
             (void)state->release(generation);
             clear_local_state();
             return DialogShowResult::Unavailable;
