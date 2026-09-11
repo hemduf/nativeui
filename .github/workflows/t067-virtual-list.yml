@@ -1,0 +1,47 @@
+name: T067 Virtual List Contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  root-integration-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify root integration contract
+        run: cmake -DSOURCE_DIR="$GITHUB_WORKSPACE" -P tests/t067_root_integration_contract.cmake
+
+  virtual-list-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure isolated virtual-list contract
+        run: cmake -S tests/t067 -B build-t067 -DCMAKE_BUILD_TYPE=Release
+      - name: Build isolated virtual-list contract
+        run: cmake --build build-t067 --config Release --parallel
+      - name: Run isolated virtual-list contract
+        run: ctest --test-dir build-t067 -C Release --output-on-failure
+
+  retained-runtime-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install retained-runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev
+      - name: Configure retained-runtime contract
+        run: cmake -S tests/t067_retained -B build-t067-retained -DCMAKE_BUILD_TYPE=Release
+      - name: Build retained-runtime contract
+        run: cmake --build build-t067-retained --parallel
+      - name: Run retained-runtime contract
+        run: ctest --test-dir build-t067-retained --output-on-failure

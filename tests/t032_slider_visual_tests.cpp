@@ -136,11 +136,40 @@ void deterministic_headless_orientation_and_two_thumbs() {
     }
 }
 
+void custom_theme_slider_palette() {
+    ui::State<float> value{0.5f};
+    auto theme = ui::default_theme();
+    theme.palette.accent = ui::Color{0.72f, 0.19f, 0.41f, 1.0f};
+    ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f), theme};
+    ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(pixel_matches(renderer.pixel(100, 30), theme.palette.accent));
+}
+
+void default_theme_preserves_slider_measurement() {
+    ui::State<float> value{0.5f};
+
+    ui::UI horizontal{ui::Slider{value}.formatter([](float) { return std::string{"0.50"}; })};
+    const auto horizontal_metrics = horizontal.measure();
+    NUI_CHECK_NEAR(horizontal_metrics.preferred.w, 160.0f, 0.0001f);
+    NUI_CHECK_NEAR(horizontal_metrics.preferred.h, 48.0f, 0.0001f);
+
+    ui::UI vertical{
+        ui::Slider{value}
+            .orientation(ui::SliderOrientation::Vertical)
+            .formatter([](float) { return std::string{"0.50"}; })};
+    const auto vertical_metrics = vertical.measure();
+    NUI_CHECK_NEAR(vertical_metrics.preferred.w, 72.0f, 0.0001f);
+    NUI_CHECK_NEAR(vertical_metrics.preferred.h, 160.0f, 0.0001f);
+}
+
 void suite() {
     pure_visual_state_contract();
     deterministic_headless_slider_states();
     deterministic_headless_interaction_states();
     deterministic_headless_orientation_and_two_thumbs();
+    custom_theme_slider_palette();
+    default_theme_preserves_slider_measurement();
 }
 
 } // namespace
