@@ -30,226 +30,169 @@ namespace detail {
 #if defined(__linux__)
 // The pinned Pugl X11 backend translates FocusIn/FocusOut but consumes those
 // translated events only for XIM focus bookkeeping instead of forwarding them
-// to the application callback. Keep NativeUI's retained activation state in
-// sync with the authoritative X11 input focus immediately before Pugl drains
-// its event queue. This also preserves the first pointer press after a focus
-// transition instead of letting Tree::dispatch reject it while inactive.
-struct X11FocusRecord final {
+// to the application callback. Keep the missing focus bookkeeping and pointer
+// grab ownership strictly per native view: no process-global registry and no
+// thread-local current-view state are needed.
+struct X11ViewBridge final {
+    PuglView* view{};
+    void* user_handle{};
     PuglEventFunc callback{};
-    bool known{};
+    bool focus_known{};
     bool focused{};
 };
 
-std::unordered_map<PuglView*, X11FocusRecord>& x11_focus_records() {
-    static std::unordered_map<PuglView*, X11FocusRecord> records;
-    return records;
-}
-
-thread_local PuglView* x11_callback_view = nullptr;
-
-class X11CallbackScope final {
+class X11PointerCapturePlatformServices : public PlatformServices {
 public:
-    explicit X11CallbackScope(PuglView* view) noexcept
-        : previous_(x11_callback_view) {
-        x11_callback_view = view;
+    void bind_view(PuglView* view, void* user_handle) noexcept {
+        bridge_ = X11ViewBridge{view, user_handle, nullptr, false, false};
+        display_ = view
+            ? static_cast<Display*>(puglGetNativeWorld(puglGetWorld(view)))
+            : nullptr;
+        ::puglSetHandle(view, &bridge_);
     }
 
-    X11CallbackScope(const X11CallbackScope&) = delete;
-    X11CallbackScope& operator=(const X11CallbackScope&) = delete;
+    [[nodiscard]] X11ViewBridge* bridge_for(PuglView* view) noexcept {
+        return bridge_.view == view ? &bridge_ : nullptr;
+    }
 
-    ~X11CallbackScope() { x11_callback_view = previous_; }
+    void begin_pointer_capture() noexcept override {
+        pointer_capture_active_ = display_ && bridge_.view;
+    }
+
+    void end_pointer_capture() noexcept override {
+        if (!pointer_capture_active_) return;
+        pointer_capture_active_ = false;
+        if (!display_) return;
+
+        // X11 creates an implicit active pointer grab for ButtonPress. A normal
+        // final ButtonRelease ends it automatically, but retained cancellation
+        // can happen first (focus loss, destruction, modal/lifecycle changes).
+        // This Display is the exact Pugl client connection for this view, so
+        // XUngrabPointer releases only that client's active grab.
+        XUngrabPointer(display_, CurrentTime);
+        XFlush(display_);
+    }
 
 private:
-    PuglView* previous_{};
+    X11ViewBridge bridge_{};
+    Display* display_{};
+    bool pointer_capture_active_{};
 };
 
-PuglView* current_x11_callback_view() noexcept {
-    return x11_callback_view;
+[[nodiscard]] X11ViewBridge* x11_bridge(PuglView* view) noexcept {
+    return view ? static_cast<X11ViewBridge*>(::puglGetHandle(view)) : nullptr;
 }
 
-PuglStatus invoke_x11_callback(
-    PuglView* view, PuglEventFunc callback, const PuglEvent* event) noexcept {
-    if (!callback) return PUGL_SUCCESS;
-    X11CallbackScope scope{view};
-    return callback(view, event);
-}
-
-PuglStatus dispatch_x11_focus_transition(PuglView* view, bool focused) noexcept {
-    auto& records = x11_focus_records();
-    const auto found = records.find(view);
-    if (found == records.end()) return PUGL_SUCCESS;
-
-    auto& record = found->second;
-    if (record.known && record.focused == focused) return PUGL_SUCCESS;
+PuglStatus dispatch_x11_focus_transition(
+    PuglView* view, X11ViewBridge& bridge, bool focused) noexcept {
+    if (bridge.focus_known && bridge.focused == focused) return PUGL_SUCCESS;
 
     // A newly registered, currently unfocused view is already in NativeUI's
-    // inactive state. Learn that baseline without manufacturing a FocusOut
-    // callback that the native system never delivered to an active view.
-    if (!record.known && !focused) {
-        record.known = true;
-        record.focused = false;
+    // inactive state. Learn that baseline without manufacturing FocusOut.
+    if (!bridge.focus_known && !focused) {
+        bridge.focus_known = true;
+        bridge.focused = false;
         return PUGL_SUCCESS;
     }
 
-    const auto callback = record.callback;
-    record.known = true;
-    record.focused = focused;
+    bridge.focus_known = true;
+    bridge.focused = focused;
+    if (!bridge.callback) return PUGL_SUCCESS;
 
-    PuglEvent event{};
-    event.focus.type = focused ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT;
-    event.focus.mode = PUGL_CROSSING_NORMAL;
-    return invoke_x11_callback(view, callback, &event);
+    PuglEvent focus_event{};
+    focus_event.focus.type = focused ? PUGL_FOCUS_IN : PUGL_FOCUS_OUT;
+    focus_event.focus.mode = PUGL_CROSSING_NORMAL;
+    return bridge.callback(view, &focus_event);
 }
 
 PuglStatus x11_event_proxy(PuglView* view, const PuglEvent* event) noexcept {
-    auto& records = x11_focus_records();
-    const auto found = records.find(view);
-    if (found == records.end() || !found->second.callback) return PUGL_SUCCESS;
+    auto* bridge = x11_bridge(view);
+    if (!bridge || !bridge->callback) return PUGL_SUCCESS;
 
-    const auto callback = found->second.callback;
+    // If a later Pugl revision forwards native focus itself, accept that event
+    // directly and suppress only exact duplicates of the per-view state.
     if (event && (event->type == PUGL_FOCUS_IN || event->type == PUGL_FOCUS_OUT)) {
         const bool focused = event->type == PUGL_FOCUS_IN;
-        if (found->second.known && found->second.focused == focused) {
+        if (bridge->focus_known && bridge->focused == focused) {
             return PUGL_SUCCESS;
         }
-        found->second.known = true;
-        found->second.focused = focused;
+        bridge->focus_known = true;
+        bridge->focused = focused;
+        return bridge->callback(view, event);
     }
-    return invoke_x11_callback(view, callback, event);
+
+    // Query the authoritative X11 focus immediately before every application
+    // callback. This activates the Tree before a first PointerDown/KeyPress and
+    // uses PUGL_UPDATE to observe focus loss even though the pinned backend
+    // swallows the corresponding translated focus event.
+    const bool focused = puglHasFocus(view);
+    if (const auto status = dispatch_x11_focus_transition(view, *bridge, focused)) {
+        return status;
+    }
+
+    return bridge->callback(view, event);
 }
 
-PuglStatus tracked_pugl_set_event_func(PuglView* view, PuglEventFunc callback) {
+void tracked_pugl_set_handle(
+    PuglView* view,
+    void* user_handle,
+    X11PointerCapturePlatformServices& services) noexcept {
+    services.bind_view(view, user_handle);
+}
+
+void* tracked_pugl_get_handle(PuglView* view) noexcept {
+    auto* bridge = x11_bridge(view);
+    return bridge ? bridge->user_handle : nullptr;
+}
+
+PuglStatus tracked_pugl_set_event_func(PuglView* view, PuglEventFunc callback) noexcept {
+    auto* bridge = x11_bridge(view);
+    if (!bridge) return PUGL_BAD_PARAMETER;
+
+    bridge->callback = callback;
     const auto status = ::puglSetEventFunc(view, &x11_event_proxy);
-    if (status == PUGL_SUCCESS) {
-        x11_focus_records()[view] = X11FocusRecord{callback, false, false};
-    }
+    if (status != PUGL_SUCCESS) bridge->callback = nullptr;
     return status;
 }
 
-void tracked_pugl_free_view(PuglView* view) {
-    // Keep the proxy record alive while Pugl performs its implicit unrealize:
-    // PUGL_UNREALIZE must still reach the NativeUI callback on cleanup paths
-    // that call puglFreeView() without an explicit preceding unrealize.
+void tracked_pugl_free_view(PuglView* view) noexcept {
+    auto* bridge = x11_bridge(view);
+
+    // Keep the bridge alive while Pugl performs its implicit unrealize so
+    // PUGL_UNREALIZE still reaches NativeUI on exceptional cleanup paths.
     ::puglFreeView(view);
-    x11_focus_records().erase(view);
+
+    if (bridge) {
+        bridge->view = nullptr;
+        bridge->user_handle = nullptr;
+        bridge->callback = nullptr;
+        bridge->focus_known = false;
+        bridge->focused = false;
+    }
 }
 
-bool x11_focus_sync_needed(PuglWorld* world) {
-    for (const auto& [view, record] : x11_focus_records()) {
-        if (puglGetWorld(view) == world && !record.known) return true;
-    }
-    return false;
-}
-
-PuglStatus sync_x11_focus(PuglWorld* world) noexcept {
-    auto* display = static_cast<Display*>(puglGetNativeWorld(world));
-    if (!display) return PUGL_FAILURE;
-
-    Window focused_window = 0;
-    int revert_to = 0;
-    XGetInputFocus(display, &focused_window, &revert_to);
-
-    std::vector<PuglView*> views;
-    views.reserve(x11_focus_records().size());
-    for (const auto& [view, record] : x11_focus_records()) {
-        (void)record;
-        if (puglGetWorld(view) == world) views.push_back(view);
-    }
-
-    for (auto* view : views) {
-        if (x11_focus_records().find(view) == x11_focus_records().end()) continue;
-        const auto native_view = static_cast<Window>(puglGetNativeView(view));
-        const bool focused = native_view != 0 && native_view == focused_window;
-        if (const auto status = dispatch_x11_focus_transition(view, focused)) return status;
-    }
-    return PUGL_SUCCESS;
-}
-
-PuglStatus tracked_pugl_update(PuglWorld* world, double timeout_seconds) {
-    auto* display = static_cast<Display*>(puglGetNativeWorld(world));
-    if (!display) return PUGL_FAILURE;
-
-    bool have_events = XPending(display) > 0;
-    if (!have_events && timeout_seconds != 0.0) {
-        const int connection = ConnectionNumber(display);
-        if (connection < 0) return PUGL_FAILURE;
-
-        int wait_milliseconds = -1;
-        if (timeout_seconds > 0.0) {
-            const double milliseconds = std::ceil(timeout_seconds * 1000.0);
-            wait_milliseconds = static_cast<int>(std::clamp(
-                milliseconds, 1.0, static_cast<double>(INT_MAX)));
-        }
-
-        pollfd descriptor{connection, POLLIN, 0};
-        int result = 0;
-        do {
-            result = ::poll(&descriptor, 1, wait_milliseconds);
-        } while (result < 0 && errno == EINTR);
-        if (result < 0) return PUGL_FAILURE;
-        have_events = XPending(display) > 0;
-    }
-
-    if (have_events || x11_focus_sync_needed(world)) {
-        if (const auto status = sync_x11_focus(world)) return status;
-    }
-
-    return ::puglUpdate(world, 0.0);
-}
-
-#  define puglSetEventFunc ::ui::detail::tracked_pugl_set_event_func
-#  define puglFreeView ::ui::detail::tracked_pugl_free_view
-#  define puglUpdate ::ui::detail::tracked_pugl_update
+#  define PlatformServices ::ui::detail::X11PointerCapturePlatformServices
+#  define puglSetHandle(view, handle) \
+    ::ui::detail::tracked_pugl_set_handle((view), (handle), services_)
+#  define puglGetHandle(view) ::ui::detail::tracked_pugl_get_handle((view))
+#  define puglSetEventFunc(view, callback) \
+    ::ui::detail::tracked_pugl_set_event_func((view), (callback))
+#  define puglFreeView(view) ::ui::detail::tracked_pugl_free_view((view))
 #endif
 
 #include "detail/pugl_skia_view_a.inc"
 #include "detail/pugl_skia_view_b.inc"
 
+#if defined(__linux__)
+#  undef puglFreeView
+#  undef puglSetEventFunc
+#  undef puglGetHandle
+#  undef puglSetHandle
+#endif
+
 using ViewCore = detail::ViewCore;
 
-#if defined(__linux__)
-// X11 creates an implicit active pointer grab for a ButtonPress. A normal
-// ButtonRelease ends it automatically, but retained cancellation can happen
-// first (focus loss, destruction, modal/lifecycle cancellation). Record only
-// the native view whose callback established this retained owner, then release
-// that same client connection when the retained owner ends.
-class X11PointerCapturePlatformServices : public PlatformServices {
-public:
-    void begin_pointer_capture() noexcept override {
-        auto* view = ::ui::detail::current_x11_callback_view();
-        if (!view) return;
-
-        auto* world = puglGetWorld(view);
-        auto* display = world ? static_cast<Display*>(puglGetNativeWorld(world)) : nullptr;
-        const auto window = static_cast<Window>(puglGetNativeView(view));
-        if (!display || !window) return;
-
-        captured_display_ = display;
-        captured_window_ = window;
-    }
-
-    void end_pointer_capture() noexcept override {
-        auto* display = captured_display_;
-        const auto window = captured_window_;
-        captured_display_ = nullptr;
-        captured_window_ = 0;
-        if (!display || !window) return;
-
-        // XUngrabPointer only affects an active grab owned by this X client.
-        // Each PlatformServices instance records its own view at the retained
-        // none->owner transition, so sibling views cannot clear each other's
-        // retained bookkeeping; repeated release is an X11 no-op.
-        XUngrabPointer(display, CurrentTime);
-        XFlush(display);
-    }
-
-private:
-    Display* captured_display_{};
-    Window captured_window_{};
-};
-
-#  define PlatformServices X11PointerCapturePlatformServices
-#elif defined(_WIN32)
+#if defined(_WIN32)
 // Pugl already acquires HWND capture before dispatching a button press and
 // releases it on the matching button release. T044 needs the retained tree's
 // cancellation path (focus loss/deactivation/destruction) to mirror that
@@ -280,12 +223,6 @@ private:
 
 #if defined(__linux__) || defined(_WIN32)
 #  undef PlatformServices
-#endif
-
-#if defined(__linux__)
-#  undef puglUpdate
-#  undef puglFreeView
-#  undef puglSetEventFunc
 #endif
 
 } // namespace ui
