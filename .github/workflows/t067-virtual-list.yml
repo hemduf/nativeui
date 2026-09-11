@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'include/nativeui/virtual_list.hpp'
+      - 'include/nativeui/detail/virtual_list_*'
       - 'include/nativeui/semantics.hpp'
       - 'tests/t067/**'
       - 'tests/t067_retained/**'
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - 'include/nativeui/virtual_list.hpp'
+      - 'include/nativeui/detail/virtual_list_*'
       - 'include/nativeui/semantics.hpp'
       - 'tests/t067/**'
       - 'tests/t067_retained/**'
