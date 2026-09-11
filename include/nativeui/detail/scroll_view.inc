@@ -204,25 +204,36 @@ enum class ScrollbarAxis {
     return result;
 }
 
-class ScrollbarComponent final : public Component {
+class ScrollbarComponent final : public Component, public ThemeBinding {
 public:
-    ScrollbarComponent(ScrollState& state, ScrollbarAxis axis)
-        : state_(&state), axis_(axis) {}
+    ScrollbarComponent(ScrollState& state, ScrollbarAxis axis, ScrollbarStyle style)
+        : state_(&state), axis_(axis), style_(std::move(style)) {}
 
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
-    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override { return {}; }
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        const float thickness = sanitized_thickness(resolved_style().thickness);
+        return Size{thickness, thickness};
+    }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
         switch (event.type) {
         case InputType::PointerDown: {
-            const auto geometry = scrollbar_for_track(*state_, axis_, context.bounds());
+            const auto before = resolved_style();
+            const auto geometry = scrollbar_for_track(
+                *state_, axis_, context.bounds(), before.minimum_thumb);
             if (!geometry.visible) return EventResult::Ignored;
+
+            hovered_ = true;
             if (!geometry.thumb.contains(event.position)) {
+                (void)invalidate_style_transition(context, before);
                 return EventResult::Handled;
             }
 
             drag_active_ = true;
+            const auto pressed = resolved_style();
+            const auto pressed_geometry = scrollbar_for_track(
+                *state_, axis_, context.bounds(), pressed.minimum_thumb);
             pointer_origin_ = axis_ == ScrollbarAxis::Horizontal
                 ? event.position.x
                 : event.position.y;
@@ -231,44 +242,118 @@ public:
             const auto maximum = state_->max_offset();
             maximum_ = axis_ == ScrollbarAxis::Horizontal ? maximum.x : maximum.y;
             const float track_extent = axis_ == ScrollbarAxis::Horizontal
-                ? geometry.track.w
-                : geometry.track.h;
+                ? pressed_geometry.track.w
+                : pressed_geometry.track.h;
             const float thumb_extent = axis_ == ScrollbarAxis::Horizontal
-                ? geometry.thumb.w
-                : geometry.thumb.h;
+                ? pressed_geometry.thumb.w
+                : pressed_geometry.thumb.h;
             travel_ = std::max(0.0f, track_extent - thumb_extent);
             context.capture_pointer();
+            (void)invalidate_style_transition(context, before);
             return EventResult::Handled;
         }
 
-        case InputType::PointerMove:
-            if (!drag_active_) return EventResult::Ignored;
-            update_drag(event.position);
-            return EventResult::Handled;
+        case InputType::PointerMove: {
+            const auto before = resolved_style();
+            const bool was_dragging = drag_active_;
+            hovered_ = context.bounds().contains(event.position);
+            if (was_dragging) update_drag(event.position);
+            const bool layout_changed = invalidate_style_transition(context, before);
+            return was_dragging || layout_changed
+                ? EventResult::Handled
+                : EventResult::Ignored;
+        }
 
-        case InputType::PointerUp:
-        case InputType::PointerCancel:
+        case InputType::PointerLeave: {
+            const auto before = resolved_style();
+            hovered_ = false;
+            return invalidate_style_transition(context, before)
+                ? EventResult::Handled
+                : EventResult::Ignored;
+        }
+
+        case InputType::PointerUp: {
             if (!drag_active_) return EventResult::Ignored;
+            const auto before = resolved_style();
             drag_active_ = false;
+            hovered_ = context.bounds().contains(event.position);
             context.release_pointer();
+            (void)invalidate_style_transition(context, before);
             return EventResult::Handled;
+        }
+
+        case InputType::PointerCancel: {
+            if (!drag_active_) return EventResult::Ignored;
+            const auto before = resolved_style();
+            drag_active_ = false;
+            hovered_ = false;
+            context.release_pointer();
+            (void)invalidate_style_transition(context, before);
+            return EventResult::Handled;
+        }
 
         default:
             return EventResult::Ignored;
         }
     }
 
-    void deactivate(LifecycleContext&) override { drag_active_ = false; }
+    void deactivate(LifecycleContext& context) override {
+        if (!drag_active_ && !hovered_) return;
+        const auto before = resolved_style();
+        drag_active_ = false;
+        hovered_ = false;
+        (void)invalidate_style_transition(context, before);
+    }
 
     void paint(PaintContext& context) const override {
-        const auto geometry = scrollbar_for_track(*state_, axis_, context.bounds());
+        const auto resolved = resolved_style();
+        const auto geometry = scrollbar_for_track(
+            *state_, axis_, context.bounds(), resolved.minimum_thumb);
         if (!geometry.visible) return;
+        const float radius = sanitized_nonnegative(resolved.corner_radius);
         auto& painter = context.painter();
-        painter.fill_rounded_rect(geometry.track, 4.0f, colors::input);
-        painter.fill_rounded_rect(geometry.thumb, 4.0f, colors::borderFocus);
+        painter.fill_rounded_rect(geometry.track, radius, resolved.track);
+        painter.fill_rounded_rect(geometry.thumb, radius, resolved.thumb);
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state() const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = hovered_,
+            .pressed = drag_active_,
+        };
+    }
+
+    [[nodiscard]] ResolvedScrollbarStyle resolved_style() const {
+        return resolve_scrollbar_style(
+            default_scrollbar_style(current_theme()), style_, current_visual_state());
+    }
+
+    [[nodiscard]] static float sanitized_nonnegative(float value) noexcept {
+        return std::isfinite(value) ? std::max(0.0f, value) : 0.0f;
+    }
+
+    [[nodiscard]] static float sanitized_thickness(float value) noexcept {
+        return sanitized_nonnegative(value);
+    }
+
+    template <class Context>
+    [[nodiscard]] bool invalidate_style_transition(
+        Context& context,
+        const ResolvedScrollbarStyle& before) const {
+        const auto after = resolved_style();
+        if (after == before) return false;
+        if (sanitized_thickness(after.thickness) !=
+            sanitized_thickness(before.thickness)) {
+            context.invalidate_layout();
+            return true;
+        }
+        context.invalidate();
+        return false;
+    }
+
     void update_drag(Point position) {
         if (!(travel_ > 0.0f) || !(maximum_ > 0.0f)) return;
         const float pointer = axis_ == ScrollbarAxis::Horizontal ? position.x : position.y;
@@ -289,7 +374,9 @@ private:
 
     ScrollState* state_{};
     ScrollbarAxis axis_{ScrollbarAxis::Vertical};
+    ScrollbarStyle style_;
     bool drag_active_{};
+    bool hovered_{};
     float pointer_origin_{};
     float offset_origin_{};
     float travel_{};
@@ -341,7 +428,7 @@ public:
 
     [[nodiscard]] Constraints child_constraints(
         const Constraints& constraints, std::size_t index, std::size_t) const override {
-        if (index != 0) return Constraints::tight({});
+        if (index != 0) return constraints.loosen();
         auto child = constraints.loosen();
         if (detail::scroll_axis_horizontal(state_->axis())) child.max.w = kUnboundedExtent;
         if (detail::scroll_axis_vertical(state_->axis())) child.max.h = kUnboundedExtent;
@@ -362,17 +449,33 @@ public:
         if (state_->axis() == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
 
         placements[0].bounds = bounds;
-        const auto bars = detail::scroll_view_bars_for_metrics(
-            state_->axis(), state_->offset(), Size{bounds.w, bounds.h}, content, bounds);
+        const bool horizontal_visible = detail::scroll_axis_horizontal(state_->axis()) &&
+                                        content.w > bounds.w;
+        const bool vertical_visible = detail::scroll_axis_vertical(state_->axis()) &&
+                                      content.h > bounds.h;
+        const float horizontal_thickness = horizontal_visible && children.size() > 1
+            ? normalized_thickness(children[1].preferred.h)
+            : 0.0f;
+        const float vertical_thickness = vertical_visible && children.size() > 2
+            ? normalized_thickness(children[2].preferred.w)
+            : 0.0f;
 
         if (placements.size() > 1) {
-            placements[1].bounds = bars.horizontal.visible
-                ? bars.horizontal.track
+            placements[1].bounds = horizontal_visible
+                ? Rect{
+                      bounds.x,
+                      bounds.y + std::max(0.0f, bounds.h - horizontal_thickness),
+                      std::max(0.0f, bounds.w - vertical_thickness),
+                      horizontal_thickness}
                 : Rect{bounds.x, bounds.y, 0.0f, 0.0f};
         }
         if (placements.size() > 2) {
-            placements[2].bounds = bars.vertical.visible
-                ? bars.vertical.track
+            placements[2].bounds = vertical_visible
+                ? Rect{
+                      bounds.x + std::max(0.0f, bounds.w - vertical_thickness),
+                      bounds.y,
+                      vertical_thickness,
+                      std::max(0.0f, bounds.h - horizontal_thickness)}
                 : Rect{bounds.x, bounds.y, 0.0f, 0.0f};
         }
     }
@@ -428,6 +531,10 @@ private:
         return a.x == b.x && a.y == b.y;
     }
 
+    [[nodiscard]] static float normalized_thickness(float value) noexcept {
+        return std::isfinite(value) ? std::max(0.0f, value) : 0.0f;
+    }
+
     ScrollState* state_{};
     bool pointer_pan_{};
     bool pan_active_{};
@@ -446,6 +553,11 @@ public:
         return std::move(*this);
     }
 
+    ScrollView&& style(ScrollbarStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* state = state_;
 
@@ -455,21 +567,22 @@ public:
             [state] { return std::make_unique<ScrollComponent>(*state); },
             std::move(scroll_children)};
 
+        auto style = std::move(style_);
         std::vector<Spec> children;
         // Paint order is content first, then horizontal and vertical overlays.
         // Pointer hit testing walks children in reverse paint order, so occupied
         // scrollbar tracks win over interactive content without a global router.
         children.push_back(std::move(scroll));
         children.push_back(Spec{
-            [state] {
+            [state, style] {
                 return std::make_unique<detail::ScrollbarComponent>(
-                    *state, detail::ScrollbarAxis::Horizontal);
+                    *state, detail::ScrollbarAxis::Horizontal, style);
             },
             {}});
         children.push_back(Spec{
-            [state] {
+            [state, style] {
                 return std::make_unique<detail::ScrollbarComponent>(
-                    *state, detail::ScrollbarAxis::Vertical);
+                    *state, detail::ScrollbarAxis::Vertical, style);
             },
             {}});
 
@@ -485,4 +598,5 @@ private:
     ScrollState* state_{};
     Spec content_;
     bool pointer_pan_{};
+    ScrollbarStyle style_;
 };
