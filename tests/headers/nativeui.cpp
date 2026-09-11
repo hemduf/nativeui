@@ -128,6 +128,31 @@ void nativeui_header_compile_t038_progress_widget_styles(ui::State<float>& value
     (void)meter_spec;
 }
 
+void nativeui_header_compile_t038_toggle_style(const ui::Theme& theme,
+                                                ui::State<bool>& value) {
+    ui::ToggleStyle style{};
+    style.base.fill = ui::Color{0.1f, 0.1f, 0.1f, 1.0f};
+    style.base.border = ui::Color{0.3f, 0.3f, 0.3f, 1.0f};
+    style.base.text = ui::Color{0.9f, 0.9f, 0.9f, 1.0f};
+    style.base.track = ui::Color{0.2f, 0.2f, 0.2f, 1.0f};
+    style.base.thumb = ui::Color{0.8f, 0.8f, 0.8f, 1.0f};
+    style.checked.track = ui::Color{0.2f, 0.6f, 0.8f, 1.0f};
+    style.hovered.border = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    style.pressed.thumb = ui::Color{1.0f, 1.0f, 1.0f, 1.0f};
+    style.disabled.text = ui::Color{0.4f, 0.4f, 0.4f, 1.0f};
+    style.read_only.track = ui::Color{0.5f, 0.5f, 0.5f, 1.0f};
+    style.focused.border_width = 2.0f;
+
+    const auto resolved = ui::resolve_toggle_style(
+        ui::default_toggle_style(theme),
+        style,
+        ui::VisualState{.enabled = true, .focused = true, .checked = true});
+    (void)resolved;
+
+    auto spec = ui::make_spec(ui::Toggle{"Bypass", value}.style(style));
+    (void)spec;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
