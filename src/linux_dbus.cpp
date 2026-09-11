@@ -588,11 +588,11 @@ struct LinuxDbusTransport::Impl final {
         return completion;
     }
 
-    static void free_notify_context(void* data) {
+    static void free_notify_context(void* data) noexcept {
         delete static_cast<NotifyContext*>(data);
     }
 
-    static void pending_notify(DBusPendingCall* pending, void* data) {
+    static void pending_notify(DBusPendingCall* pending, void* data) noexcept {
         auto* context = static_cast<NotifyContext*>(data);
         if (context == nullptr || context->owner == nullptr) {
             return;
@@ -601,19 +601,43 @@ struct LinuxDbusTransport::Impl final {
         Impl* owner = context->owner;
         const LinuxDbusClientId client = context->client;
         const LinuxDbusRequestId id = context->id;
-        auto native = owner->take_pending(client, id, pending);
-        if (!native) {
-            return;
-        }
+        std::optional<NativePendingCall> native;
+        DBusMessage* reply = nullptr;
 
-        DBusMessage* reply = dbus_pending_call_steal_reply(pending);
-        LinuxDbusCompletion completion = classify_reply(reply);
-        if (reply != nullptr) {
-            dbus_message_unref(reply);
-        }
+        try {
+            native = owner->take_pending(client, id, pending);
+            if (!native) {
+                return;
+            }
 
-        (void)owner->calls.complete(client, id, std::move(completion));
-        dbus_pending_call_unref(native->pending);
+            reply = dbus_pending_call_steal_reply(pending);
+            LinuxDbusCompletion completion = classify_reply(reply);
+            if (reply != nullptr) {
+                dbus_message_unref(reply);
+                reply = nullptr;
+            }
+
+            (void)owner->calls.complete(client, id, std::move(completion));
+            dbus_pending_call_unref(native->pending);
+            native.reset();
+        } catch (...) {
+            if (reply != nullptr) {
+                dbus_message_unref(reply);
+            }
+            if (native && native->pending != nullptr) {
+                try {
+                    (void)owner->calls.complete(
+                        client, id,
+                        LinuxDbusCompletion{LinuxDbusErrorCode::LocalProtocolError, {},
+                                            "D-Bus pending-call callback failed"});
+                } catch (...) {
+                    // The foreign-C callback boundary must never leak C++
+                    // exceptions. The pending call remains terminal even when
+                    // the UI-side failure diagnostic cannot be marshalled.
+                }
+                dbus_pending_call_unref(native->pending);
+            }
+        }
     }
 
     [[nodiscard]] int io_wait_timeout_ms() const noexcept {
@@ -823,62 +847,64 @@ struct LinuxDbusTransport::Impl final {
         return true;
     }
 
-    static DBusHandlerResult signal_filter(DBusConnection*, DBusMessage* message, void* data) {
+    static DBusHandlerResult signal_filter(DBusConnection*, DBusMessage* message, void* data) noexcept {
         if (message == nullptr || data == nullptr ||
             dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) {
             return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
         }
 
-        auto* owner = static_cast<Impl*>(data);
-        std::vector<std::shared_ptr<SignalEntry>> targets;
         try {
-            std::lock_guard lock{owner->signal_mutex};
-            targets.reserve(owner->signals.size());
-            for (const auto& [id, entry] : owner->signals) {
-                (void)id;
-                if (entry && entry->active->load(std::memory_order_acquire) &&
-                    signal_matches(entry->match, message)) {
-                    targets.push_back(entry);
+            auto* owner = static_cast<Impl*>(data);
+            std::vector<std::shared_ptr<SignalEntry>> targets;
+            {
+                std::lock_guard lock{owner->signal_mutex};
+                targets.reserve(owner->signals.size());
+                for (const auto& [id, entry] : owner->signals) {
+                    (void)id;
+                    if (entry && entry->active->load(std::memory_order_acquire) &&
+                        signal_matches(entry->match, message)) {
+                        targets.push_back(entry);
+                    }
                 }
             }
+
+            if (targets.empty()) {
+                return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+            }
+
+            LinuxDbusSignal signal;
+            signal.sender = copy_message_string(dbus_message_get_sender(message));
+            signal.path = copy_message_string(dbus_message_get_path(message));
+            signal.interface = copy_message_string(dbus_message_get_interface(message));
+            signal.member = copy_message_string(dbus_message_get_member(message));
+            std::string decode_error;
+            if (!linux_dbus_decode_values(message, signal.arguments, decode_error)) {
+                return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+            }
+
+            for (const auto& entry : targets) {
+                try {
+                    auto dispatcher = entry->dispatcher;
+                    auto callback = entry->callback;
+                    auto active = entry->active;
+                    LinuxDbusSignal delivered = signal;
+                    (void)dispatcher.post(
+                        [active = std::move(active), callback = std::move(callback),
+                         delivered = std::move(delivered)]() mutable {
+                            if (!active->load(std::memory_order_acquire)) {
+                                return;
+                            }
+                            callback(std::move(delivered));
+                        });
+                } catch (...) {
+                    // Dispatcher rejection/allocation failure drops this delivery;
+                    // never run client callbacks on the D-Bus I/O thread.
+                }
+            }
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
         } catch (...) {
             return DBUS_HANDLER_RESULT_NEED_MEMORY;
         }
-
-        if (targets.empty()) {
-            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-        }
-
-        LinuxDbusSignal signal;
-        signal.sender = copy_message_string(dbus_message_get_sender(message));
-        signal.path = copy_message_string(dbus_message_get_path(message));
-        signal.interface = copy_message_string(dbus_message_get_interface(message));
-        signal.member = copy_message_string(dbus_message_get_member(message));
-        std::string decode_error;
-        if (!linux_dbus_decode_values(message, signal.arguments, decode_error)) {
-            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
-        }
-
-        for (const auto& entry : targets) {
-            try {
-                auto dispatcher = entry->dispatcher;
-                auto callback = entry->callback;
-                auto active = entry->active;
-                LinuxDbusSignal delivered = signal;
-                (void)dispatcher.post(
-                    [active = std::move(active), callback = std::move(callback),
-                     delivered = std::move(delivered)]() mutable {
-                        if (!active->load(std::memory_order_acquire)) {
-                            return;
-                        }
-                        callback(std::move(delivered));
-                    });
-            } catch (...) {
-                // Dispatcher rejection/allocation failure drops this delivery;
-                // never run client callbacks on the D-Bus I/O thread.
-            }
-        }
-        return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
     }
 
     void unregister_all_signals(DBusConnection* current_connection) noexcept {
@@ -1012,13 +1038,13 @@ struct LinuxDbusTransport::Impl final {
                              : DBUS_HANDLER_RESULT_NEED_MEMORY;
     }
 
-    static void object_path_unregistered(DBusConnection*, void* data) {
+    static void object_path_unregistered(DBusConnection*, void* data) noexcept {
         delete static_cast<ObjectPathContext*>(data);
     }
 
     static DBusHandlerResult object_path_message(DBusConnection* callback_connection,
                                                  DBusMessage* message,
-                                                 void* data) {
+                                                 void* data) noexcept {
         auto* context = static_cast<ObjectPathContext*>(data);
         if (context == nullptr || context->owner == nullptr) {
             return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
