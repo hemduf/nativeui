@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-10
+**Updated:** 2026-09-11
 
 ## Mission and invariants
 
@@ -27,29 +27,16 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-The current implementation baseline includes completed T045 / PR #210 and the post-T036 hover correction #212 / PR #213 (squash merge `2d483ffe3585b9ab619a743a2131badb4709fa4f`) on top of T037, T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and the warning-free source-tree baseline.
+This T067 completion branch is based directly on current `main` `16adaab7b0a215f825f7ea2b4b0282cfa7b8ee8b`, which includes completed T045 / PR #210 and the post-T036 hover correction #212 / PR #213 (squash merge `2d483ffe3585b9ab619a743a2131badb4709fa4f`) on top of T037, T058, T036, T065, T034, T060/T042 lifecycle, T052 developer-preview release gate and the warning-free source-tree baseline.
 
 The UI/accessibility critical path is now:
 
 ```text
-T034(done) -> T036(done) -> T045(done) -> T067(active PR #219) -> T068
-                              T058(done) ---------------------------^
+T034(done) -> T036(done) -> T045(done) -> T067(completion PR #219) -> T068
+                              T058(done) -------------------------------^
 ```
 
-T045 freezes the accessibility semantics architecture that T067 and T068 consume. Its delivered contract provides:
-
-- backend-neutral `SemanticRole`, `SemanticAction`, checked/expanded/value/range data and the closed semantic change categories;
-- stable semantic identities independent of raw component addresses;
-- immutable semantic node/tree snapshot value types suitable for native read-side publication;
-- a concrete data-only `VirtualSemanticChildren` model for large ListView collections, with stable item tokens, shared immutable O(N) metadata and lazy selection/bounds projection;
-- a 100k-item deterministic virtual collection fixture proving semantic lookup does not construct retained visual rows;
-- exact NSAccessibility, Windows UIA and Linux AT-SPI2 mapping/lifetime/action-routing design in `docs/accessibility.md`;
-- explicit native-proxy rule: weak bridge/root + semantic identity only, never a long-lived raw `Node*`/`Component*`;
-- immutable native read snapshots and UI-thread action marshalling through T065 for T068;
-- no process-global semantic/proxy registry;
-- isolated warning-as-error T045 tests plus public-header isolation.
-
-T067 is active after T045 completion and must preserve those identity/metadata rules while integrating fixed-height virtualization with T034/T036/T058.
+T045 freezes the accessibility semantics architecture that T067 and T068 consume. T067 now implements the fixed-height virtualized ListView against that contract while retaining T034 `ScrollState`, T036 composite selection/focus semantics and T058 safe keyed reconciliation.
 
 ## Completed foundations relevant to v1
 
@@ -62,7 +49,7 @@ T067 is active after T045 completion and must preserve those identity/metadata r
 - T033 / PR #123: ProgressBar + Meter.
 - T034 / PR #135: ScrollView with change-based wheel bubbling, pointer pan, retained overlay scrollbars and focus reveal.
 - T036 / PR #155: retained non-virtualized ListView + Tabs baseline with stable key/value selection and composite focus.
-- #212 / PR #213: restores deterministic paint-only ListView/Tabs hover presentation, adds retained/native pointer-leave handling and makes hover lifetime safe across T058 dynamic subtree removal.
+- #212 / PR #213: deterministic paint-only ListView/Tabs hover presentation, retained/native pointer-leave handling and T058-safe hover lifetime.
 - T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
 - T045 / PR #210: accessibility semantic architecture and virtual collection contract.
 - T047 / PR #92: relocatable low-level package exposing `NativeUI::Core` plus `nativeui_attach_platform()`.
@@ -78,6 +65,25 @@ T067 is active after T045 completion and must preserve those identity/metadata r
 - #139 / PR #140: T042 stress qualification of the supported T060 multi-window path.
 - #163 / PR #181: warning-free NativeUI-owned builds and v1 Application ownership in examples/smokes.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
+
+## T067 completion state
+
+T067 / issue #79 / PR #219 is the current exact merge candidate. Delivered behavior includes:
+
+- finite positive fixed row height with overflow-safe logical content extent;
+- O(1) visible-range and default 2+2 overscan derivation;
+- viewport-bounded visual materialization with at most the specified focused/captured off-range exceptions;
+- stable logical-key identity and no cross-key live Component rebinding;
+- T034 `ScrollState` as the sole viewport/offset authority with exact `ScrollAlignment` behavior;
+- T036 composite keyboard/pointer selection and activation semantics over the virtualized path;
+- T058 safe keyed retained-row reconciliation and atomic rejection of invalid/duplicate-key datasets;
+- immutable T045 virtual semantic metadata created only on accepted dataset replacement and shared across ordinary scroll/selection/focus projections;
+- offscreen semantic `item_at()` without visual row construction and old/new metadata-generation lifetime coverage;
+- 1,000 repeated scroll/selection semantic projections retaining the exact metadata object/generation;
+- canonical T051 1k/10k/100k benchmark coverage with `factory_calls`, `max_materialized` and `metadata_rebuilds` counters;
+- required `examples/features/t067_virtual_list.cpp` interactive 100k-item example and deterministic `--self-test`.
+
+Pre-documentation exact head `8cf1a4f900fbf8c5f55a343393fa38489632440f` passed T067 Virtual List Contract `34543202644`, T051 Release Benchmarks `34543202602`, T045 Accessibility Semantics `34543202669`, T065 Dispatcher Contract `34543202612`, T060 Application Contract `34543202653`, T042 Lifecycle Stress `34543202623`, T052 v0.1 Release Gate `34543202599` and normal CI `34543202607` including Linux ASan+UBSan. CODE_REVIEW.md follow-up review `5173364825` found no remaining Blocking/Important code issue. Because this completion documentation changes the branch head, the final documentation head must rerun the applicable exact-head gates before merge.
 
 ## T036 hover follow-up — complete
 
@@ -141,9 +147,9 @@ The default build must use an empty `NATIVEUI_ALLOWED_WARNINGS`. A code-changing
 
 ## Next actions
 
-1. Continue T067 / PR #219 as the Critical UI lane now that T045 is complete.
-2. Continue T061 -> T035/T063 in the independent overlay lane because those converge on T068.
-3. Continue T072 and T043 -> T064/T066 in the independent platform lane because those converge on T068/T069.
-4. Continue T038 -> T039 and then T040 in the style lane as capacity permits.
-5. Do not start T068 until every explicit dependency in issue #80 is Done.
+1. Complete exact-head validation/review and merge T067 / PR #219.
+2. Keep T068 blocked until every explicit dependency in issue #80 is Done; when unblocked, this lane takes it immediately.
+3. Continue T061 -> T035/T063 in the independent overlay lane because those converge on T068.
+4. Continue T072 and T043 -> T064/T066 in the independent platform lane because those converge on T068/T069.
+5. Continue T038 -> T039 and then T040 in the style lane as capacity permits.
 6. Keep T069/T070/T071 dependency-gated and do not freeze the v1 API early.
