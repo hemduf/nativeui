@@ -56,7 +56,7 @@ jobs:
       - name: Build contracts
         run: >-
           cmake --build build-t066 --config Release
-          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests
+          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests
           --parallel 2
 
       - name: Install Windows software OpenGL
@@ -101,14 +101,15 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
           GALLIUM_DRIVER: llvmpipe
-        run: >-
-          xvfb-run -a
-          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ./build-t066/nativeui_t066_window_controls_platform_tests
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_window_controls_platform_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_destroy_survivor_tests
 
       - name: Run macOS contract
         if: runner.os == 'macOS'
-        run: ./build-t066/nativeui_t066_window_controls_platform_tests
+        run: |
+          ./build-t066/nativeui_t066_window_controls_platform_tests
+          ./build-t066/nativeui_t066_destroy_survivor_tests
 
       - name: Run Windows contract
         if: runner.os == 'Windows'
@@ -116,3 +117,4 @@ jobs:
         run: |
           $env:GALLIUM_DRIVER = 'llvmpipe'
           ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
+          ./build-t066/Release/nativeui_t066_destroy_survivor_tests.exe
