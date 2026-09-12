@@ -59,6 +59,17 @@ namespace semantic_snapshot_detail {
     return *lhs_metadata == *rhs_metadata;
 }
 
+[[nodiscard]] inline bool virtual_selection_equal(const VirtualSemanticChildren& lhs,
+                                                   const VirtualSemanticChildren& rhs) noexcept {
+    return lhs.selected_token() == rhs.selected_token();
+}
+
+[[nodiscard]] inline bool virtual_bounds_equal(const VirtualSemanticChildren& lhs,
+                                                const VirtualSemanticChildren& rhs) noexcept {
+    return rect_equal(lhs.list_bounds(), rhs.list_bounds()) &&
+           lhs.row_height() == rhs.row_height() && lhs.scroll_y() == rhs.scroll_y();
+}
+
 } // namespace semantic_snapshot_detail
 
 [[nodiscard]] inline std::vector<SemanticChange> diff_semantic_snapshots(
@@ -104,9 +115,16 @@ namespace semantic_snapshot_detail {
             if (!semantic_snapshot_detail::virtual_structure_equal(
                     *before_node.virtual_children, *after_node.virtual_children)) {
                 structure_changed = true;
-            } else if (!semantic_snapshot_detail::virtual_value_equal(
-                           *before_node.virtual_children, *after_node.virtual_children)) {
-                value_changed = true;
+            } else {
+                selection_changed = selection_changed ||
+                    !semantic_snapshot_detail::virtual_selection_equal(
+                        *before_node.virtual_children, *after_node.virtual_children);
+                value_changed = value_changed ||
+                    !semantic_snapshot_detail::virtual_value_equal(
+                        *before_node.virtual_children, *after_node.virtual_children);
+                bounds_changed = bounds_changed ||
+                    !semantic_snapshot_detail::virtual_bounds_equal(
+                        *before_node.virtual_children, *after_node.virtual_children);
             }
         }
 
