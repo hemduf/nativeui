@@ -208,6 +208,22 @@ public:
         return metadata_;
     }
 
+    [[nodiscard]] std::optional<VirtualSemanticItemToken> selected_token() const noexcept {
+        return selected_;
+    }
+
+    [[nodiscard]] Rect list_bounds() const noexcept {
+        return list_bounds_;
+    }
+
+    [[nodiscard]] float row_height() const noexcept {
+        return row_height_;
+    }
+
+    [[nodiscard]] float scroll_y() const noexcept {
+        return scroll_y_;
+    }
+
 private:
     VirtualSemanticChildren(std::uint64_t dataset_generation,
                             MetadataSnapshot metadata,
