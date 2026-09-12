@@ -27,7 +27,7 @@ namespace semantic_snapshot_detail {
 
 [[nodiscard]] inline bool virtual_structure_equal(const VirtualSemanticChildren& lhs,
                                                    const VirtualSemanticChildren& rhs) noexcept {
-    if (lhs.dataset_generation() != rhs.dataset_generation() || lhs.size() != rhs.size()) {
+    if (lhs.size() != rhs.size()) {
         return false;
     }
 
@@ -48,17 +48,30 @@ namespace semantic_snapshot_detail {
     return true;
 }
 
-[[nodiscard]] inline bool virtual_value_equal(const VirtualSemanticChildren& lhs,
-                                               const VirtualSemanticChildren& rhs) {
+[[nodiscard]] inline bool virtual_common_values_equal(const VirtualSemanticChildren& lhs,
+                                                       const VirtualSemanticChildren& rhs) {
     const auto& lhs_metadata = lhs.metadata_snapshot();
     const auto& rhs_metadata = rhs.metadata_snapshot();
     if (lhs_metadata.get() == rhs_metadata.get()) {
         return true;
     }
-    if (!lhs_metadata || !rhs_metadata || lhs_metadata->size() != rhs_metadata->size()) {
-        return false;
+    if (!lhs_metadata || !rhs_metadata) {
+        return true;
     }
-    return *lhs_metadata == *rhs_metadata;
+
+    std::unordered_map<VirtualSemanticItemToken, const VirtualSemanticItemMetadata*> lhs_by_token;
+    lhs_by_token.reserve(lhs_metadata->size());
+    for (const auto& item : *lhs_metadata) {
+        lhs_by_token.emplace(item.token, &item);
+    }
+
+    for (const auto& item : *rhs_metadata) {
+        const auto before = lhs_by_token.find(item.token);
+        if (before != lhs_by_token.end() && *before->second != item) {
+            return false;
+        }
+    }
+    return true;
 }
 
 [[nodiscard]] inline bool virtual_selection_equal(const VirtualSemanticChildren& lhs,
@@ -114,20 +127,18 @@ namespace semantic_snapshot_detail {
         if (before_node.virtual_children.has_value() != after_node.virtual_children.has_value()) {
             structure_changed = true;
         } else if (before_node.virtual_children && after_node.virtual_children) {
-            if (!semantic_snapshot_detail::virtual_structure_equal(
-                    *before_node.virtual_children, *after_node.virtual_children)) {
-                structure_changed = true;
-            } else {
-                selection_changed = selection_changed ||
-                    !semantic_snapshot_detail::virtual_selection_equal(
-                        *before_node.virtual_children, *after_node.virtual_children);
-                value_changed = value_changed ||
-                    !semantic_snapshot_detail::virtual_value_equal(
-                        *before_node.virtual_children, *after_node.virtual_children);
-                bounds_changed = bounds_changed ||
-                    !semantic_snapshot_detail::virtual_bounds_equal(
-                        *before_node.virtual_children, *after_node.virtual_children);
-            }
+            structure_changed = structure_changed ||
+                !semantic_snapshot_detail::virtual_structure_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            selection_changed = selection_changed ||
+                !semantic_snapshot_detail::virtual_selection_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            value_changed = value_changed ||
+                !semantic_snapshot_detail::virtual_common_values_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            bounds_changed = bounds_changed ||
+                !semantic_snapshot_detail::virtual_bounds_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
         }
 
         focus_changed = focus_changed || before_node.info.focused != after_node.info.focused;
