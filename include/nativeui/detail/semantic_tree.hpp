@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component_base.hpp>
+#include <nativeui/detail/semantic_virtual_source.hpp>
 #include <nativeui/semantics.hpp>
 
 #include <string>
@@ -73,6 +74,11 @@ struct InheritedSemanticFields {
     semantic_node.parent = semantic_parent;
     semantic_node.info = std::move(info);
     semantic_node.bounds = source.bounds;
+    if (const auto* virtual_source =
+            dynamic_cast<const VirtualSemanticChildrenSource*>(source.component.get())) {
+        semantic_node.virtual_children =
+            virtual_source->virtual_semantic_children(semantic_node.bounds);
+    }
 
     const auto node_index = snapshot.nodes.size();
     snapshot.nodes.push_back(std::move(semantic_node));
