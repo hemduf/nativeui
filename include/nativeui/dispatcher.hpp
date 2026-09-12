@@ -77,4 +77,14 @@ private:
     friend class detail::DispatcherOwner;
 };
 
+/// Optional platform capability exposing the T065 dispatcher that owns a
+/// concrete native UI/event-loop instance. PlatformServices stays focused on
+/// drawing/input services; retained policies such as Tooltip discover timing
+/// only when the concrete platform object supplies this capability.
+class DispatcherProvider {
+public:
+    virtual ~DispatcherProvider() = default;
+    [[nodiscard]] virtual Dispatcher dispatcher() const noexcept = 0;
+};
+
 } // namespace ui

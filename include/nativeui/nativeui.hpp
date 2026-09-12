@@ -31,11 +31,13 @@
 #include <nativeui/component_state.hpp>
 #include <nativeui/dynamic.hpp>
 #include <nativeui/overlay.hpp>
+#include <nativeui/tooltip.hpp>
 #include <nativeui/command.hpp>
 #include <nativeui/focus.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/virtual_list.hpp>
 #include <nativeui/widgets.hpp>
 #include <nativeui/ui.hpp>
+#include <nativeui/dialog.hpp>
 #include <nativeui/headless.hpp>
 #include <nativeui/window.hpp>

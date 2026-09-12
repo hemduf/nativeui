@@ -1,6 +1,7 @@
 #include <nativeui/nativeui.hpp>
 #include <nativeui/semantics.hpp>
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
@@ -252,4 +253,35 @@ void nativeui_header_compile_t061_overlay(ui::UI& tree) {
 
     const ui::OverlayHandle handle = tree.show_overlay(std::move(overlay));
     (void)tree.close_overlay(handle);
+}
+
+void nativeui_header_compile_t062_tooltip() {
+    auto ticket_shape = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}}
+            .delay(std::chrono::milliseconds{500}));
+    auto default_delay = ui::make_spec(
+        ui::Tooltip{"Reset to default", ui::Spacer{24.0f, 12.0f}});
+    ui::Tooltip lvalue{"Lvalue delay", ui::Spacer{24.0f, 12.0f}};
+    lvalue.delay(std::chrono::milliseconds{100});
+    (void)ticket_shape;
+    (void)default_delay;
+    (void)lvalue;
+}
+
+void nativeui_header_compile_t063_dialog(ui::UI& tree) {
+    ui::Dialog dialog{tree};
+
+    ui::DialogSpec spec;
+    spec.title = "Confirm";
+    spec.body = ui::make_spec(ui::Spacer{120.0f, 80.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    spec.actions.push_back(ui::DialogAction{
+        "cancel", "Cancel", true, ui::DialogActionRole::Cancel});
+
+    const ui::DialogShowResult shown = dialog.show(
+        std::move(spec), [](ui::DialogResult result) { (void)result; });
+    (void)shown;
+    (void)dialog.active();
+    (void)dialog.close();
 }

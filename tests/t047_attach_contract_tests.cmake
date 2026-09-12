@@ -50,6 +50,13 @@ function(_nativeui_attach_consumer_platform)
     NATIVEUI_CONSUMER_ID "${NUI_CONSUMER_ID}")
 endfunction()
 
+# T072 owns the real Linux D-Bus dependency/package contract. T047 validates
+# only final-target and identity semantics and runs before Linux dependencies
+# are installed in the normal CI job, so keep that independent platform service
+# behind a no-op fixture seam here.
+function(nativeui_add_linux_dbus_transport)
+endfunction()
+
 @CASE_BODY@
 ]=])
   set(CASE_BODY "${body}")
