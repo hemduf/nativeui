@@ -282,12 +282,38 @@ void explicit_style_controls_button_presentation_and_measurement() {
     NUI_CHECK(pixel_near(renderer.pixel(20, 20), disabled));
 }
 
+void equal_resolved_hover_style_does_not_invalidate() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    const ui::Color stable_fill{0.16f, 0.28f, 0.40f, 1.0f};
+
+    ui::ButtonStyle style{};
+    style.base.fill = stable_fill;
+    style.hovered.fill = stable_fill;
+
+    ui::UI tree{ui::Button{"Stable", [] {}}.style(style)};
+    test::MockPlatform platform;
+    tree.resize(size);
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(!tree.layout_dirty());
+    NUI_CHECK(!tree.paint_dirty());
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(!tree.layout_dirty());
+    NUI_CHECK(!tree.paint_dirty());
+}
+
 void suite() {
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
     visual_state_goldens();
     custom_theme_controls_presentation_and_measurement();
     explicit_style_controls_button_presentation_and_measurement();
+    equal_resolved_hover_style_does_not_invalidate();
 }
 
 } // namespace
