@@ -34,7 +34,7 @@ int combo_anchor_contract() {
         tree.resize(size);
         tree.activate(platform);
         ui::HeadlessRenderer renderer{size, 1.0f};
-        if (!renderer.render(tree)) return example::fail("ComboBox layout baseline failed");
+        if (!renderer.render(tree)) return example::fail("ComboBox layout baseline render failed");
 
         tree.dispatch(example::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
         if (!tree.layout_dirty() || !tree.paint_dirty()) {
@@ -123,10 +123,62 @@ int availability_contract() {
     return 0;
 }
 
+int button_availability_contract() {
+    constexpr ui::Size size{320.0f, 120.0f};
+    example::Platform platform;
+
+    {
+        ui::State<bool> enabled{true};
+        ui::ButtonStyle style;
+        style.disabled.control_height = 72.0f;
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Button{"Action", [] {}}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Button availability-layout baseline render failed");
+        }
+
+        enabled.set(false);
+        if (!tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "layout-affecting Button disabled style did not invalidate layout + paint");
+        }
+    }
+
+    {
+        ui::State<bool> enabled{true};
+        ui::ButtonStyle style;
+        style.disabled.fill = ui::Color{0.12f, 0.18f, 0.24f, 1.0f};
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Button{"Action", [] {}}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Button paint-only availability baseline render failed");
+        }
+
+        enabled.set(false);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "paint-only Button disabled style invalidated layout or missed repaint");
+        }
+    }
+
+    return 0;
+}
+
 int self_test() {
     if (const int result = combo_anchor_contract(); result != 0) return result;
     if (const int result = tabs_contract(); result != 0) return result;
     if (const int result = availability_contract(); result != 0) return result;
+    if (const int result = button_availability_contract(); result != 0) return result;
     return 0;
 }
 
