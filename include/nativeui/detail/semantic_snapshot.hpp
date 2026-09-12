@@ -1,0 +1,225 @@
+#pragma once
+
+#include <nativeui/semantics.hpp>
+
+#include <atomic>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+namespace ui::detail {
+
+namespace semantic_snapshot_detail {
+
+[[nodiscard]] inline bool rect_equal(const Rect& lhs, const Rect& rhs) noexcept {
+    return lhs.x == rhs.x && lhs.y == rhs.y && lhs.w == rhs.w && lhs.h == rhs.h;
+}
+
+[[nodiscard]] inline bool value_fields_equal(const SemanticInfo& lhs,
+                                             const SemanticInfo& rhs) {
+    return lhs.role == rhs.role && lhs.name == rhs.name &&
+           lhs.description == rhs.description && lhs.text_value == rhs.text_value &&
+           lhs.numeric_value == rhs.numeric_value && lhs.value_range == rhs.value_range &&
+           lhs.enabled == rhs.enabled && lhs.read_only == rhs.read_only &&
+           lhs.checked == rhs.checked && lhs.expanded == rhs.expanded &&
+           lhs.focusable == rhs.focusable && lhs.actions == rhs.actions;
+}
+
+[[nodiscard]] inline bool virtual_structure_equal(const VirtualSemanticChildren& lhs,
+                                                   const VirtualSemanticChildren& rhs) noexcept {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+
+    const auto& lhs_metadata = lhs.metadata_snapshot();
+    const auto& rhs_metadata = rhs.metadata_snapshot();
+    if (lhs_metadata.get() == rhs_metadata.get()) {
+        return true;
+    }
+    if (!lhs_metadata || !rhs_metadata || lhs_metadata->size() != rhs_metadata->size()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < lhs_metadata->size(); ++index) {
+        if ((*lhs_metadata)[index].token != (*rhs_metadata)[index].token) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool virtual_common_values_equal(const VirtualSemanticChildren& lhs,
+                                                       const VirtualSemanticChildren& rhs) {
+    const auto& lhs_metadata = lhs.metadata_snapshot();
+    const auto& rhs_metadata = rhs.metadata_snapshot();
+    if (lhs_metadata.get() == rhs_metadata.get()) {
+        return true;
+    }
+    if (!lhs_metadata || !rhs_metadata) {
+        return true;
+    }
+
+    std::unordered_map<VirtualSemanticItemToken, const VirtualSemanticItemMetadata*> lhs_by_token;
+    lhs_by_token.reserve(lhs_metadata->size());
+    for (const auto& item : *lhs_metadata) {
+        lhs_by_token.emplace(item.token, &item);
+    }
+
+    for (const auto& item : *rhs_metadata) {
+        const auto before = lhs_by_token.find(item.token);
+        if (before != lhs_by_token.end() && *before->second != item) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool virtual_selection_equal(const VirtualSemanticChildren& lhs,
+                                                   const VirtualSemanticChildren& rhs) noexcept {
+    return lhs.selected_token() == rhs.selected_token();
+}
+
+[[nodiscard]] inline bool virtual_bounds_equal(const VirtualSemanticChildren& lhs,
+                                                const VirtualSemanticChildren& rhs) noexcept {
+    return rect_equal(lhs.list_bounds(), rhs.list_bounds()) &&
+           lhs.row_height() == rhs.row_height() && lhs.scroll_y() == rhs.scroll_y();
+}
+
+} // namespace semantic_snapshot_detail
+
+[[nodiscard]] inline std::vector<SemanticChange> diff_semantic_snapshots(
+    const SemanticTreeSnapshot& before,
+    const SemanticTreeSnapshot& after) {
+    bool structure_changed = before.root != after.root || before.nodes.size() != after.nodes.size();
+    bool focus_changed = false;
+    bool selection_changed = false;
+    bool value_changed = false;
+    bool bounds_changed = false;
+
+    std::unordered_map<SemanticId, const SemanticNodeSnapshot*> before_by_id;
+    before_by_id.reserve(before.nodes.size());
+    for (const auto& node : before.nodes) {
+        before_by_id.emplace(node.id, &node);
+    }
+
+    std::unordered_map<SemanticId, const SemanticNodeSnapshot*> after_by_id;
+    after_by_id.reserve(after.nodes.size());
+    for (const auto& node : after.nodes) {
+        after_by_id.emplace(node.id, &node);
+    }
+
+    if (before_by_id.size() != before.nodes.size() || after_by_id.size() != after.nodes.size()) {
+        structure_changed = true;
+    }
+
+    for (const auto& after_node : after.nodes) {
+        const auto before_it = before_by_id.find(after_node.id);
+        if (before_it == before_by_id.end()) {
+            structure_changed = true;
+            continue;
+        }
+
+        const auto& before_node = *before_it->second;
+        if (before_node.parent != after_node.parent || before_node.children != after_node.children) {
+            structure_changed = true;
+        }
+
+        if (before_node.virtual_children.has_value() != after_node.virtual_children.has_value()) {
+            structure_changed = true;
+        } else if (before_node.virtual_children && after_node.virtual_children) {
+            structure_changed = structure_changed ||
+                !semantic_snapshot_detail::virtual_structure_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            selection_changed = selection_changed ||
+                !semantic_snapshot_detail::virtual_selection_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            value_changed = value_changed ||
+                !semantic_snapshot_detail::virtual_common_values_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+            bounds_changed = bounds_changed ||
+                !semantic_snapshot_detail::virtual_bounds_equal(
+                    *before_node.virtual_children, *after_node.virtual_children);
+        }
+
+        focus_changed = focus_changed || before_node.info.focused != after_node.info.focused;
+        selection_changed =
+            selection_changed || before_node.info.selected != after_node.info.selected;
+        value_changed = value_changed ||
+                        !semantic_snapshot_detail::value_fields_equal(before_node.info,
+                                                                     after_node.info);
+        bounds_changed = bounds_changed ||
+                         !semantic_snapshot_detail::rect_equal(before_node.bounds,
+                                                               after_node.bounds);
+    }
+
+    if (!structure_changed) {
+        for (const auto& before_node : before.nodes) {
+            if (!after_by_id.contains(before_node.id)) {
+                structure_changed = true;
+                break;
+            }
+        }
+    }
+
+    std::vector<SemanticChange> changes;
+    changes.reserve(5);
+    if (structure_changed) {
+        changes.push_back(SemanticChange::StructureChanged);
+    }
+    if (focus_changed) {
+        changes.push_back(SemanticChange::FocusChanged);
+    }
+    if (selection_changed) {
+        changes.push_back(SemanticChange::SelectionChanged);
+    }
+    if (value_changed) {
+        changes.push_back(SemanticChange::ValueChanged);
+    }
+    if (bounds_changed) {
+        changes.push_back(SemanticChange::BoundsChanged);
+    }
+    return changes;
+}
+
+class SemanticSnapshotPublisher {
+public:
+    SemanticSnapshotPublisher()
+        : current_(std::make_shared<const SemanticTreeSnapshot>()) {}
+
+    [[nodiscard]] std::shared_ptr<const SemanticTreeSnapshot> current() const noexcept {
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+        return current_.load(std::memory_order_acquire);
+#else
+        return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+#endif
+    }
+
+    [[nodiscard]] std::vector<SemanticChange> publish(SemanticTreeSnapshot candidate) {
+        const auto previous = current();
+        auto changes = diff_semantic_snapshots(*previous, candidate);
+        if (changes.empty()) {
+            return changes;
+        }
+
+        candidate.generation = previous->generation + 1;
+        auto published = std::make_shared<const SemanticTreeSnapshot>(std::move(candidate));
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+        current_.store(std::move(published), std::memory_order_release);
+#else
+        std::atomic_store_explicit(&current_, std::move(published), std::memory_order_release);
+#endif
+        return changes;
+    }
+
+private:
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+    std::atomic<std::shared_ptr<const SemanticTreeSnapshot>> current_;
+#else
+    // Some supported libc++ versions still lack the C++20 atomic<shared_ptr<T>>
+    // specialization. Keep the same immutable snapshot publication contract via
+    // the standard shared_ptr atomic access functions on those toolchains.
+    mutable std::shared_ptr<const SemanticTreeSnapshot> current_;
+#endif
+};
+
+} // namespace ui::detail

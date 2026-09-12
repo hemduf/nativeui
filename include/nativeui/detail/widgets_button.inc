@@ -32,6 +32,15 @@ public:
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
+    [[nodiscard]] SemanticInfo semantics() const override {
+        SemanticInfo info;
+        info.role = SemanticRole::Button;
+        info.name = label_;
+        info.focusable = true;
+        info.actions = {SemanticAction::Activate, SemanticAction::Focus};
+        return info;
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto& theme = current_theme();
         TextStyle style{};

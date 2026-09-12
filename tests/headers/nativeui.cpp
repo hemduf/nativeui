@@ -16,6 +16,30 @@ void nativeui_header_compile_nativeui() {
     snapshot.info = std::move(info);
 }
 
+class NativeUIHeaderT068SemanticComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::SemanticInfo semantics() const override {
+        ui::SemanticInfo info;
+        info.role = ui::SemanticRole::Custom;
+        info.name = "Semantic probe";
+        info.focusable = true;
+        info.actions = {ui::SemanticAction::Focus};
+        return info;
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
+void nativeui_header_compile_t068_custom_semantics() {
+    NativeUIHeaderT068SemanticComponent component;
+    const auto info = component.semantics();
+    (void)info;
+}
+
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
     (void)spec;
