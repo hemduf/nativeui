@@ -2,11 +2,42 @@ name: T050 Inspector Contract
 
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/t050-inspector.yml'
+      - 'CMakeLists.txt'
+      - 'include/nativeui/component_tree.hpp'
+      - 'include/nativeui/detail/inspector_paint.hpp'
+      - 'include/nativeui/detail/tree_inspector_public.inc'
+      - 'include/nativeui/inspector.hpp'
+      - 'include/nativeui/ui.hpp'
+      - 'tests/headers/inspector.cpp'
+      - 'tests/t050_inspector_*'
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/t050-inspector.yml'
+      - 'CMakeLists.txt'
+      - 'include/nativeui/component_tree.hpp'
+      - 'include/nativeui/detail/inspector_paint.hpp'
+      - 'include/nativeui/detail/tree_inspector_public.inc'
+      - 'include/nativeui/inspector.hpp'
+      - 'include/nativeui/ui.hpp'
+      - 'tests/headers/inspector.cpp'
+      - 'tests/t050_inspector_*'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCCACHE_GHA_ENABLED: 'true'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
 
 jobs:
   inspector-build-matrix:
@@ -17,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Install headless inspector dependencies
         run: |
           sudo apt-get update
@@ -36,7 +69,7 @@ jobs:
           if [[ "${{ matrix.inspector }}" == "ON" ]]; then
             targets="$targets nativeui_t050_inspector_runtime_tests"
           fi
-          cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel 2
+          cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel
       - name: Run inspector tests
         run: >-
           ctest --test-dir build-t050-${{ matrix.inspector }}
