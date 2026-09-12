@@ -130,6 +130,55 @@ int self_test() {
         return example::fail("MenuItemStyle paint states changed geometry");
     }
 
+    ui::ListViewStyle list_style;
+    list_style.base.row_fill = ui::Color{0.08f, 0.10f, 0.14f, 1.0f};
+    list_style.base.row_horizontal_inset = 5.0f;
+    list_style.hovered.row_fill = ui::Color{0.15f, 0.22f, 0.32f, 1.0f};
+    list_style.selected.row_fill = ui::Color{0.20f, 0.42f, 0.66f, 1.0f};
+    list_style.disabled.row_fill = ui::Color{0.12f, 0.13f, 0.15f, 1.0f};
+
+    const auto list_selected = ui::resolve_list_view_style(
+        ui::default_list_view_style(theme),
+        list_style,
+        ui::VisualState{.enabled = true, .selected = true});
+    const auto list_disabled = ui::resolve_list_view_style(
+        ui::default_list_view_style(theme),
+        list_style,
+        ui::VisualState{.enabled = false, .hovered = true, .pressed = true, .selected = true});
+    if (!same_color(list_selected.row_fill, *list_style.selected.row_fill) ||
+        !same_color(list_disabled.row_fill, *list_style.disabled.row_fill)) {
+        return example::fail("ListViewStyle selected/disabled resolution is incorrect");
+    }
+    if (list_selected.row_horizontal_inset != 5.0f ||
+        list_disabled.row_horizontal_inset != 5.0f) {
+        return example::fail("ListViewStyle paint states changed row geometry");
+    }
+
+    ui::TabsStyle tabs_style;
+    tabs_style.base.header_height = 42.0f;
+    tabs_style.base.text = ui::Color{0.72f, 0.76f, 0.82f, 1.0f};
+    tabs_style.selected.tab_fill = ui::Color{0.14f, 0.20f, 0.28f, 1.0f};
+    tabs_style.hovered.tab_fill = ui::Color{0.18f, 0.28f, 0.40f, 1.0f};
+    tabs_style.disabled.text = ui::Color{0.33f, 0.35f, 0.39f, 1.0f};
+    tabs_style.focused.header_border = ui::Color{0.70f, 0.86f, 1.0f, 1.0f};
+
+    const auto tabs_hovered = ui::resolve_tabs_style(
+        ui::default_tabs_style(theme),
+        tabs_style,
+        ui::VisualState{.enabled = true, .hovered = true, .focused = true});
+    const auto tabs_disabled = ui::resolve_tabs_style(
+        ui::default_tabs_style(theme),
+        tabs_style,
+        ui::VisualState{.enabled = false, .hovered = true, .pressed = true, .selected = true});
+    if (!same_color(tabs_hovered.tab_fill, *tabs_style.hovered.tab_fill) ||
+        !same_color(tabs_hovered.header_border, *tabs_style.focused.header_border) ||
+        !same_color(tabs_disabled.text, *tabs_style.disabled.text)) {
+        return example::fail("TabsStyle interaction/orthogonal resolution is incorrect");
+    }
+    if (tabs_hovered.header_height != 42.0f || tabs_disabled.header_height != 42.0f) {
+        return example::fail("TabsStyle paint states changed header geometry");
+    }
+
     DemoState state;
     auto tree = make_ui(state);
     tree.resize({640.0f, 320.0f});
