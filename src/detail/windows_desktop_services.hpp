@@ -653,7 +653,9 @@ private:
 
     HWND parent_{};
     std::mutex mutex_;
-    std::unordered_map<DesktopRequestId, std::shared_ptr<RequestState>> active_;
+    std::unordered_map<
+        DesktopRequestId,
+        std::shared_ptr<windows_desktop_services_detail::RequestState>> active_;
     bool closing_{};
 };
 
