@@ -56,7 +56,7 @@ jobs:
       - name: Build contracts
         run: >-
           cmake --build build-t066 --config Release
-          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests
+          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests nativeui_t066_window_controls_example
           --parallel 2
 
       - name: Install Windows software OpenGL
@@ -86,6 +86,8 @@ jobs:
           }
           Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
           Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
+          Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
+          Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
 
       - name: Run pure state contract (Unix)
         if: runner.os != 'Windows'
@@ -104,12 +106,14 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_window_controls_platform_tests
           xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_destroy_survivor_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_window_controls_example --self-test
 
       - name: Run macOS contract
         if: runner.os == 'macOS'
         run: |
           ./build-t066/nativeui_t066_window_controls_platform_tests
           ./build-t066/nativeui_t066_destroy_survivor_tests
+          ./build-t066/nativeui_t066_window_controls_example --self-test
 
       - name: Run Windows contract
         if: runner.os == 'Windows'
@@ -118,3 +122,4 @@ jobs:
           $env:GALLIUM_DRIVER = 'llvmpipe'
           ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
           ./build-t066/Release/nativeui_t066_destroy_survivor_tests.exe
+          ./build-t066/Release/nativeui_t066_window_controls_example.exe --self-test
