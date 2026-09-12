@@ -10,15 +10,16 @@
 #include <windows.h>
 #include <objbase.h>
 #include <shellapi.h>
-#include <shlobj_core.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
 #include <atomic>
 #include <climits>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -176,12 +177,38 @@ struct FilterStorage final {
 }
 
 struct RequestState final {
+    // Exactly one side wins the terminal decision. A successful cancel() owns
+    // the result before it returns true; otherwise the worker owns the native
+    // result before cancel() is allowed to return false. This closes the race
+    // between Show() returning and publication of its result.
+    std::atomic<bool> terminal_claimed{false};
     std::atomic<bool> cancel_requested{false};
-    std::atomic<bool> finished{false};
+    std::atomic<bool> worker_finished{false};
     std::mutex marshal_mutex;
     IStream* marshaled_dialog{};
     std::thread worker;
 };
+
+[[nodiscard]] inline bool claim_cancellation(RequestState& state) noexcept {
+    bool expected = false;
+    if (!state.terminal_claimed.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return false;
+    }
+    state.cancel_requested.store(true, std::memory_order_release);
+    return true;
+}
+
+inline void arbitrate_worker_result(RequestState& state,
+                                    FileDialogResult& result) noexcept {
+    bool expected = false;
+    const bool worker_won = state.terminal_claimed.compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+    if (!worker_won || state.cancel_requested.load(std::memory_order_acquire)) {
+        result = cancelled_result();
+    }
+    state.worker_finished.store(true, std::memory_order_release);
+}
 
 [[nodiscard]] inline IStream* take_marshaled_dialog(RequestState& state) noexcept {
     std::lock_guard lock{state.marshal_mutex};
@@ -222,18 +249,15 @@ inline void request_marshaled_close(const std::shared_ptr<RequestState>& state) 
     }
 }
 
-[[nodiscard]] inline bool prepare_marshaled_dialog(
-    RequestState& state,
-    IFileDialog& dialog) {
+[[nodiscard]] inline bool prepare_marshaled_dialog(RequestState& state,
+                                                   IFileDialog& dialog) {
     IStream* stream = nullptr;
     if (FAILED(CoMarshalInterThreadInterfaceInStream(
             IID_IFileDialog, &dialog, &stream)) || !stream) {
         return false;
     }
-    {
-        std::lock_guard lock{state.marshal_mutex};
-        state.marshaled_dialog = stream;
-    }
+    std::lock_guard lock{state.marshal_mutex};
+    state.marshaled_dialog = stream;
     return true;
 }
 
@@ -355,7 +379,7 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
         result = error_result("Unexpected Windows open dialog failure");
     }
 
-    state->finished.store(true, std::memory_order_release);
+    arbitrate_worker_result(*state, result);
     try {
         completion(std::move(result));
     } catch (...) {
@@ -421,7 +445,7 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
         result = error_result("Unexpected Windows save dialog failure");
     }
 
-    state->finished.store(true, std::memory_order_release);
+    arbitrate_worker_result(*state, result);
     try {
         completion(std::move(result));
     } catch (...) {
@@ -436,21 +460,24 @@ public:
         : parent_(reinterpret_cast<HWND>(parent_window)) {}
 
     ~WindowsDesktopServicesBackend() override {
-        std::vector<std::shared_ptr<windows_desktop_services_detail::RequestState>> requests;
+        using namespace windows_desktop_services_detail;
+        std::vector<std::shared_ptr<RequestState>> requests;
         {
             std::lock_guard lock{mutex_};
             closing_ = true;
             requests.reserve(active_.size());
             for (const auto& [id, request] : active_) {
                 (void)id;
-                request->cancel_requested.store(true, std::memory_order_release);
+                if (!claim_cancellation(*request)) {
+                    request->cancel_requested.store(true, std::memory_order_release);
+                }
                 requests.push_back(request);
             }
             active_.clear();
         }
 
         for (const auto& request : requests) {
-            windows_desktop_services_detail::request_marshaled_close(request);
+            request_marshaled_close(request);
         }
         for (const auto& request : requests) {
             if (request->worker.joinable()) request->worker.join();
@@ -537,6 +564,8 @@ public:
             parent_, L"open", wide_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
         if (result <= 32) return DesktopServiceStatus::Error;
 
+        // ShellExecuteW has completed the backend operation at this point. The
+        // facade still marshals the application callback through T065.
         completion(DesktopServiceStatus::Accepted);
         return DesktopServiceStatus::Accepted;
     }
@@ -550,12 +579,10 @@ public:
         {
             std::lock_guard lock{mutex_};
             const auto found = active_.find(request_id);
-            if (closing_ || found == active_.end() ||
-                found->second->finished.load(std::memory_order_acquire)) {
+            if (closing_ || found == active_.end() || !claim_cancellation(*found->second)) {
                 return false;
             }
             request = found->second;
-            request->cancel_requested.store(true, std::memory_order_release);
         }
         request_marshaled_close(request);
         return true;
@@ -611,7 +638,7 @@ private:
         {
             std::lock_guard lock{mutex_};
             for (auto iterator = active_.begin(); iterator != active_.end();) {
-                if (iterator->second->finished.load(std::memory_order_acquire)) {
+                if (iterator->second->worker_finished.load(std::memory_order_acquire)) {
                     finished.push_back(iterator->second);
                     iterator = active_.erase(iterator);
                 } else {
@@ -626,8 +653,7 @@ private:
 
     HWND parent_{};
     std::mutex mutex_;
-    std::unordered_map<DesktopRequestId,
-                       std::shared_ptr<windows_desktop_services_detail::RequestState>> active_;
+    std::unordered_map<DesktopRequestId, std::shared_ptr<RequestState>> active_;
     bool closing_{};
 };
 
