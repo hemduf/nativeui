@@ -62,7 +62,15 @@ private:
 
 std::shared_ptr<DesktopServicesBackend> make_linux_desktop_services_backend(
     Application& application,
-    Dispatcher dispatcher) {
+    Dispatcher dispatcher,
+    std::uintptr_t native_window) {
+    std::string parent_window;
+    try {
+        parent_window = linux_x11_portal_parent_window(native_window);
+    } catch (...) {
+        return {};
+    }
+
     const auto client = ApplicationBackendAccess::register_linux_dbus_client(application);
     if (client == kInvalidLinuxDbusClientId) return {};
 
@@ -72,18 +80,19 @@ std::shared_ptr<DesktopServicesBackend> make_linux_desktop_services_backend(
         return {};
     }
 
+    std::shared_ptr<T072LinuxPortalBus> bus;
     try {
-        auto bus = std::make_shared<T072LinuxPortalBus>(application, *operations, client);
-        auto backend = make_linux_portal_desktop_services_backend(
-            std::move(bus), std::move(dispatcher), client);
-        if (!backend) {
-            ApplicationBackendAccess::release_linux_dbus_client(application, client);
-        }
-        return backend;
+        bus = std::make_shared<T072LinuxPortalBus>(application, *operations, client);
     } catch (...) {
         ApplicationBackendAccess::release_linux_dbus_client(application, client);
         return {};
     }
+
+    // From this point the bus owns the T072 client lifetime. If the portal
+    // backend cannot be created, destroying `bus` releases the client exactly
+    // once; no second cleanup path is required here.
+    return make_linux_portal_desktop_services_backend(
+        std::move(bus), std::move(dispatcher), client, std::move(parent_window));
 }
 
 } // namespace ui::detail
