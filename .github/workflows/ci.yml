@@ -119,6 +119,37 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      # Hosted Windows runners do not provide a deterministic modern OpenGL
+      # implementation for Skia GPU tests. Keep the native window suite on the
+      # same pinned llvmpipe contract used by the dedicated platform workflows.
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build\opengl32.dll -Force
+          Copy-Item $gallium.FullName build\libgallium_wgl.dll -Force
+
       - name: Linux X11 renderer and lifecycle smoke
         if: runner.os == 'Linux'
         env:
@@ -139,9 +170,21 @@ jobs:
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
           ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
 
-      - name: Test
-        if: runner.os != 'Linux'
+      - name: Test Windows
+        if: runner.os == 'Windows'
+        env:
+          GALLIUM_DRIVER: llvmpipe
         run: ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
+
+      # macOS CI shares one Objective-C bridge across ordinary feature examples
+      # to keep builds bounded. T066 intentionally mutates the standalone window
+      # delegate close lifecycle, so its exact example is qualified in the
+      # dedicated T066 workflow with a normal consumer-scoped bridge instead.
+      - name: Test macOS
+        if: runner.os == 'macOS'
+        run: >-
+          ctest --test-dir build --output-on-failure -C Release
+          -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}|^nativeui_example_t066_window_controls_self_test$'
 
       # T053/CODE_REVIEW.md requires proof that two final consumers configured
       # together derive different Objective-C runtime namespaces.

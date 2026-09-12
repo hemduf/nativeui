@@ -1,11 +1,13 @@
 #pragma once
 
+#include <nativeui/desktop_services.hpp>
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/ui.hpp>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -24,11 +26,18 @@ struct WindowDesc {
     std::string title{"NativeUI"};
     Size size{720.0f, 520.0f};
     bool resizable{true};
+    std::optional<Size> min_size{};
+    std::optional<Size> max_size{};
 };
 
 enum class QuitPolicy {
     OnLastWindowClosed,
     ExplicitOnly,
+};
+
+enum class CloseDecision {
+    Accept,
+    Cancel,
 };
 
 /// Explicit owner of the standalone application world/event loop.
@@ -95,16 +104,38 @@ public:
     /// until T069 removes legacy per-window loop ownership.
     int run();
     bool poll(double timeout_seconds = -1.0);
+
+    /// Programmatic accepted close. This bypasses the user-close veto callback
+    /// and completes at a safe platform checkpoint after the current callback
+    /// unwinds.
     void request_close();
 
     [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] bool should_close() const noexcept;
+    [[nodiscard]] bool is_closed() const noexcept;
     [[nodiscard]] Size size() const noexcept;
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services();
+
+    bool set_title(std::string_view title);
+    bool show();
+    bool hide();
     bool set_size(Size logical_size);
+    bool set_min_size(std::optional<Size> logical_size);
+    bool set_max_size(std::optional<Size> logical_size);
+
+    /// Called for native/user close requests only. An empty callback is
+    /// equivalent to accepting the close. Programmatic request_close() never
+    /// calls this function. Native requests are evaluated at the next safe
+    /// Dispatcher checkpoint after the OS callback has unwound.
+    void on_close_request(std::function<CloseDecision()> callback);
+
+    /// Called exactly once after an accepted close completes while this C++
+    /// object remains alive. Direct C++ destruction is deliberately silent.
+    void on_closed(std::function<void()> callback);
 
     /// Advisory logical preferred-size notification for external owners.
     /// The callback runs on the platform/UI thread at a safe top-level
@@ -119,11 +150,17 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    void handle_native_close_request();
+    void process_native_close_request();
+    void schedule_close_completion();
+    void complete_close();
     void mark_application_window_closed() noexcept;
     void unregister_from_application() noexcept;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
 /// Embedded native child view for one UI/plugin-editor instance.
@@ -135,6 +172,10 @@ private:
 class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
+    EmbeddedView(UI& ui,
+                 NativeParentHandle parent,
+                 Size size,
+                 std::shared_ptr<DesktopServicesBackend> desktop_services_backend);
     ~EmbeddedView() override;
 
     EmbeddedView(const EmbeddedView&) = delete;
@@ -151,6 +192,7 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services();
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding
@@ -166,6 +208,8 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
 } // namespace ui
