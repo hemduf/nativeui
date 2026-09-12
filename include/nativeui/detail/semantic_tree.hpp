@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component_base.hpp>
+#include <nativeui/detail/semantic_rules.hpp>
 #include <nativeui/detail/semantic_virtual_source.hpp>
 #include <nativeui/semantics.hpp>
 
@@ -43,15 +44,11 @@ struct InheritedSemanticFields {
         info.description = inherited.description;
     }
 
-    info.enabled = info.enabled && availability.enabled;
-    info.read_only = info.read_only || availability.read_only;
-    if (!info.enabled) {
-        info.focusable = false;
-        info.focused = false;
-        info.actions.clear();
-    } else {
-        info.focused = info.focusable && source.id == focused_node_id;
-    }
+    info = normalize_semantic_info(
+        std::move(info),
+        availability.enabled,
+        availability.read_only,
+        source.id == focused_node_id);
 
     if (info.role == SemanticRole::None) {
         auto next_inherited = inherited;
