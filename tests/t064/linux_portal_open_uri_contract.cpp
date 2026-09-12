@@ -203,5 +203,14 @@ int main() {
     bus->emit_response(last_subscription, 1);
     if (user_cancel != DesktopServiceStatus::Cancelled) return EXIT_FAILURE;
 
+    // The normative T064 Linux ownership amendment requires hard T072 quota
+    // exhaustion to remain distinguishable from this facade's own Busy limit.
+    bus->fail_next_call(LinuxDbusErrorCode::ResourceLimit);
+    if (backend->start_open_url(
+            15, "https://example.invalid/resource-limit",
+            [](DesktopServiceStatus) {}) != DesktopServiceStatus::ResourceLimit) {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
