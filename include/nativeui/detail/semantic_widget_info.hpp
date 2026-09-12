@@ -90,4 +90,17 @@ namespace ui::detail {
     return info;
 }
 
+[[nodiscard]] inline SemanticInfo text_edit_semantic_info(
+    std::string_view label,
+    std::string_view text,
+    bool multiline) {
+    SemanticInfo info;
+    info.role = multiline ? SemanticRole::TextArea : SemanticRole::TextInput;
+    info.name = label;
+    info.text_value = std::string{text};
+    info.focusable = true;
+    info.actions = {SemanticAction::SetValue, SemanticAction::Focus};
+    return info;
+}
+
 } // namespace ui::detail
