@@ -97,16 +97,43 @@ int tabs_contract() {
     return 0;
 }
 
+int availability_contract() {
+    constexpr ui::Size size{320.0f, 120.0f};
+    example::Platform platform;
+    ui::State<float> value{0.5f};
+    ui::State<bool> enabled{true};
+    ui::ProgressBarStyle style;
+    style.disabled.horizontal_size = ui::Size{224.0f, 52.0f};
+
+    ui::UI tree{ui::Enabled{
+        enabled,
+        ui::ProgressBar{value}.style(style)}};
+    tree.resize(size);
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    if (!renderer.render(tree)) {
+        return example::fail("availability-style baseline render failed");
+    }
+
+    enabled.set(false);
+    if (!tree.layout_dirty() || !tree.paint_dirty()) {
+        return example::fail(
+            "layout-affecting disabled style did not invalidate layout + paint");
+    }
+    return 0;
+}
+
 int self_test() {
     if (const int result = combo_anchor_contract(); result != 0) return result;
     if (const int result = tabs_contract(); result != 0) return result;
+    if (const int result = availability_contract(); result != 0) return result;
     return 0;
 }
 
 ui::UI make_demo() {
     return ui::UI{ui::Column{
         ui::Header{"T038 — Closure invalidation"},
-        ui::Label{"Final state-aware invalidation checks for ComboBox and Tabs."}.size(12.0f),
+        ui::Label{"Final state-aware invalidation checks for ComboBox, Tabs and availability variants."}.size(12.0f),
     }.gap(12.0f)};
 }
 
