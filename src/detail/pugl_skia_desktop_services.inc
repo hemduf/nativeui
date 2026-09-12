@@ -20,9 +20,9 @@ DesktopServices& StandaloneWindow::desktop_services() {
                 impl_->core->native_handle());
         }
 #elif defined(__linux__)
-        if (!desktop_services_backend_ && impl_ && impl_->application) {
+        if (!desktop_services_backend_ && impl_ && impl_->application && impl_->core) {
             desktop_services_backend_ = detail::make_linux_desktop_services_backend(
-                *impl_->application, dispatcher());
+                *impl_->application, dispatcher(), impl_->core->native_handle());
         }
 #endif
         desktop_services_ = std::make_unique<DesktopServices>(
