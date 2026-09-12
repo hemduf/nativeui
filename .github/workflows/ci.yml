@@ -32,6 +32,7 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  SCCACHE_GHA_ENABLED: 'true'
 
 jobs:
   build:
@@ -64,6 +65,13 @@ jobs:
           key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
           restore-keys: |
             nativeui-cpm-${{ runner.os }}-
+
+      # CMake compiler launchers are supported by the Ninja jobs below. Keep
+      # Windows on the native Visual Studio generator required by the pinned
+      # MSVC Skia archive instead of adding a fragile compiler-wrapper path.
+      - name: Set up sccache
+        if: runner.os != 'Windows'
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: CI workflow policy contract
         if: runner.os == 'Linux'
@@ -116,6 +124,8 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DNATIVEUI_BUILD_PLATFORM=ON
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
@@ -137,7 +147,7 @@ jobs:
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
 
       - name: Build
-        run: cmake --build build --config Release --parallel 2
+        run: cmake --build build --config Release --parallel
 
       # Hosted Windows runners do not provide a deterministic modern OpenGL
       # implementation for Skia GPU tests. Keep the native window suite on the
@@ -196,13 +206,13 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release
+          ctest --test-dir build --output-on-failure -C Release --parallel 4
 
       - name: Test
         if: runner.os != 'Linux'
         env:
           GALLIUM_DRIVER: ${{ runner.os == 'Windows' && 'llvmpipe' || '' }}
-        run: ctest --test-dir build --output-on-failure -C Release
+        run: ctest --test-dir build --output-on-failure -C Release --parallel 4
 
       - name: T047 external package contract
         run: >-
@@ -282,6 +292,9 @@ jobs:
           restore-keys: |
             nativeui-cpm-${{ runner.os }}-
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
       - name: T047 public attachment contract
         run: >-
           cmake
@@ -327,6 +340,8 @@ jobs:
         run: >-
           cmake -S . -B build-sanitize -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DNATIVEUI_BUILD_PLATFORM=OFF
           -DNATIVEUI_BUILD_EXAMPLES=OFF
           -DNATIVEUI_BUILD_TESTS=ON
@@ -334,7 +349,7 @@ jobs:
           -DNATIVEUI_SKIA_CONFIG=Release
 
       - name: Build
-        run: cmake --build build-sanitize --parallel 2
+        run: cmake --build build-sanitize --parallel
 
       - name: Test
         env:
@@ -345,4 +360,4 @@ jobs:
           # hosted image. Keep leak detection enabled and suppress only this
           # known third-party allocation path; NativeUI/Skia leaks remain fatal.
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure
+        run: ctest --test-dir build-sanitize --output-on-failure --parallel 4
