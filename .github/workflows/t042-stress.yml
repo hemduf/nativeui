@@ -1,17 +1,18 @@
 name: T042 Lifecycle Stress
 
+# Heavy lifecycle qualification runs once for a frozen pull-request candidate.
+# Draft PR commits rely on the normal CI and narrowly scoped contract workflows.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    types: [ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: t042-stress-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,7 +38,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb gdb
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb gdb
 
       - name: Configure Unix
         if: runner.os != 'Windows'

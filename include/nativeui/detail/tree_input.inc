@@ -36,6 +36,27 @@
         pointer_capture_ = {};
     }
 
+    void notify_pointer_hover_transition(
+        Node* previous, Node* next, PlatformServices& platform) {
+        const auto dispatcher = detail::dispatcher_for_platform(platform);
+        for (auto* current = previous; current; current = current->parent) {
+            if (next && is_descendant_or_self(next, current)) continue;
+            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                    current->component.get())) {
+                observer->retained_pointer_hover_changed(
+                    false, pointer_interaction_active_, dispatcher);
+            }
+        }
+        for (auto* current = next; current; current = current->parent) {
+            if (previous && is_descendant_or_self(previous, current)) continue;
+            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                    current->component.get())) {
+                observer->retained_pointer_hover_changed(
+                    true, pointer_interaction_active_, dispatcher);
+            }
+        }
+    }
+
     [[nodiscard]] bool update_pointer_hover_target(
         Node* target, const InputEvent& source_event, PlatformServices& platform) {
         auto* const previous = pointer_hover_target_;
@@ -46,7 +67,8 @@
         // future structural removal and must clear this pointer before node
         // destruction just as it does for capture/focus ownership.
         pointer_hover_target_ = target;
-        if (!previous) return false;
+        notify_pointer_hover_transition(previous, target, platform);
+        if (!previous) return target != nullptr;
 
         InputEvent leave = source_event;
         leave.type = InputType::PointerLeave;
@@ -67,6 +89,7 @@
         auto* const previous = pointer_hover_target_;
         if (!previous) return false;
         pointer_hover_target_ = nullptr;
+        notify_pointer_hover_transition(previous, nullptr, platform);
 
         InputEvent leave = source_event;
         leave.type = InputType::PointerLeave;
@@ -109,6 +132,8 @@
     std::size_t focused_index_{};
     PointerCaptureState pointer_capture_{};
     Node* pointer_hover_target_{};
+    detail::OverlayService* overlay_service_{};
+    bool pointer_interaction_active_{};
     bool cancelling_pointer_capture_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};

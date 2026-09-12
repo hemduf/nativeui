@@ -172,6 +172,18 @@
                 }
             }
 
+            // A hover route whose target becomes Hidden/Collapsed/Disabled is no
+            // longer an eligible interaction. Retained hover presentation must
+            // observe PointerLeave exactly as if the pointer had moved away;
+            // otherwise a delayed policy such as Tooltip could still fire while
+            // its anchor is unavailable.
+            if (pointer_hover_target_ &&
+                !pending_availability_for(pending, pointer_hover_target_).interactive()) {
+                InputEvent leave{};
+                leave.type = InputType::PointerLeave;
+                (void)clear_pointer_hover(leave, platform);
+            }
+
             if (auto* focused = current_focus_node()) {
                 if (!pending_availability_for(pending, focused).interactive()) {
                     rehome_scope = trapping_scope_for(focused);
@@ -320,13 +332,17 @@
     }
 
     void mount_node(Node& node) {
+        if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
+            binding->bind_theme(theme_);
+        }
         if (dynamic_source(node)) register_dynamic_node(node);
         MountContext context{
             node.id,
             paint_invalidator(node),
             layout_invalidator(node),
             focus_invalidator(node),
-            availability_invalidator(node)};
+            availability_invalidator(node),
+            overlay_service_};
         node.component->mount(context);
         if (node.component->focusable()) focusables_.push_back(&node);
         for (auto& child : node.children) mount_node(*child);
