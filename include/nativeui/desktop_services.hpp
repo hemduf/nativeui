@@ -21,6 +21,7 @@ enum class DesktopServiceStatus {
     Accepted,
     Cancelled,
     Busy,
+    ResourceLimit,
     Unsupported,
     InvalidArgument,
     Error,
