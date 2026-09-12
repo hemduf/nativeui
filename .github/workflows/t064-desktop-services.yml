@@ -8,8 +8,15 @@ on:
       - 'include/nativeui/desktop_services.hpp'
       - 'include/nativeui/dispatcher.hpp'
       - 'include/nativeui/detail/dispatcher_owner.hpp'
+      - 'include/nativeui/window.hpp'
+      - 'cmake/NativeUILinuxDbus.cmake'
       - 'src/desktop_services.cpp'
       - 'src/dispatcher.cpp'
+      - 'src/linux_desktop_services_backend.cpp'
+      - 'src/linux_portal_desktop_services.cpp'
+      - 'src/detail/linux_desktop_services.hpp'
+      - 'src/detail/pugl_skia_desktop_services.inc'
+      - 'src/pugl_skia.cpp'
       - 'tests/t064/**'
   workflow_dispatch:
 
