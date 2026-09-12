@@ -1,4 +1,5 @@
 #include "example_support.hpp"
+#include "native_window_self_test_lock.hpp"
 
 #include <nativeui/nativeui.hpp>
 
@@ -28,6 +29,11 @@ void pump_native_events(ui::Application& app, int iterations = 8) {
 }
 
 int self_test() {
+    example::NativeWindowSelfTestLock native_test_lock;
+    if (!native_test_lock.valid()) {
+        return example::fail("failed to acquire native window self-test lock");
+    }
+
     ui::UI ui{
         ui::Column{
             ui::Label{"T066 window controls"},
