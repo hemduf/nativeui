@@ -71,7 +71,13 @@ jobs:
           fi
           cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel
       - name: Run inspector tests
-        run: >-
-          ctest --test-dir build-t050-${{ matrix.inspector }}
-          --output-on-failure
-          -R "^nativeui_t050_inspector_"
+        shell: bash
+        run: |
+          ctest --test-dir build-t050-${{ matrix.inspector }} \
+            --output-on-failure \
+            -R "^nativeui_t050_inspector_"
+          if [[ "${{ matrix.inspector }}" == "ON" ]]; then
+            ctest --test-dir build-t050-${{ matrix.inspector }} \
+              --output-on-failure \
+              --parallel 4
+          fi
