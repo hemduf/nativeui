@@ -52,26 +52,26 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = presentation_signature(focused_);
         focused_ = focused;
-        interaction_.focus_changed(focused, context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.focus_changed(focused, context, false);
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     void deactivate(LifecycleContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = presentation_signature(focused_);
         focused_ = false;
-        interaction_.deactivate(context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.deactivate(context, false);
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const auto before = layout_signature(focused_);
-        const auto outcome = interaction_.input(event, context, true);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        const auto before = presentation_signature(focused_);
+        const auto outcome = interaction_.input(event, context, true, false);
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, context);
         if (!outcome.activate) return outcome.result;
 
         // User code may synchronously disable/hide/remove this component. Copy
@@ -113,7 +113,12 @@ public:
     }
 
 private:
-    struct LayoutSignature {
+    struct PresentationSignature {
+        Color fill{};
+        Color border{};
+        Color text{};
+        float border_width{};
+        float corner_radius{};
         float minimum_width{};
         float control_height{};
         float horizontal_padding{};
@@ -124,8 +129,13 @@ private:
         const std::vector<std::string>* fallback_families{};
     };
 
-    static void apply_layout_patch(LayoutSignature& target,
-                                   const ButtonStylePatch& patch) noexcept {
+    static void apply_patch(PresentationSignature& target,
+                            const ButtonStylePatch& patch) noexcept {
+        if (patch.fill) target.fill = *patch.fill;
+        if (patch.border) target.border = *patch.border;
+        if (patch.text) target.text = *patch.text;
+        if (patch.border_width) target.border_width = *patch.border_width;
+        if (patch.corner_radius) target.corner_radius = *patch.corner_radius;
         if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
         if (patch.control_height) target.control_height = *patch.control_height;
         if (patch.horizontal_padding) target.horizontal_padding = *patch.horizontal_padding;
@@ -136,9 +146,14 @@ private:
         if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
     }
 
-    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
+    [[nodiscard]] PresentationSignature presentation_signature(bool focused) const noexcept {
         const auto& theme = current_theme();
-        LayoutSignature result{
+        PresentationSignature result{
+            .fill = theme.palette.surface,
+            .border = theme.palette.border,
+            .text = theme.palette.text,
+            .border_width = theme.controls.border_width,
+            .corner_radius = theme.radii.medium,
             .minimum_width = theme.controls.minimum_width,
             .control_height = theme.controls.control_height,
             .horizontal_padding = theme.spacing.large,
@@ -148,39 +163,79 @@ private:
             .font_family = theme.typography.family,
             .fallback_families = &theme.typography.fallback_families,
         };
-        apply_layout_patch(result, style_.base);
+        apply_patch(result, style_.base);
 
         const auto state = current_visual_state(focused);
         switch (resolve_interaction_state(state)) {
             case InteractionVisualState::Normal:
                 break;
             case InteractionVisualState::Hovered:
-                apply_layout_patch(result, style_.hovered);
+                result.fill = theme.palette.control_hover;
+                apply_patch(result, style_.hovered);
                 break;
             case InteractionVisualState::Pressed:
-                apply_layout_patch(result, style_.pressed);
+                result.fill = theme.palette.accent;
+                result.border = theme.palette.accent;
+                result.text = theme.palette.background;
+                apply_patch(result, style_.pressed);
                 break;
             case InteractionVisualState::Disabled:
-                apply_layout_patch(result, style_.disabled);
+                result.fill = theme.palette.control_background;
+                result.text = theme.palette.disabled;
+                apply_patch(result, style_.disabled);
                 break;
         }
-        if (state.read_only) apply_layout_patch(result, style_.read_only);
-        if (state.focused) apply_layout_patch(result, style_.focused);
+        if (state.read_only) apply_patch(result, style_.read_only);
+        if (state.focused) {
+            result.border = theme.palette.focus;
+            result.border_width = theme.controls.focus_ring_width;
+            apply_patch(result, style_.focused);
+        }
         return result;
     }
 
-    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
-                                          const LayoutSignature& rhs) {
-        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
+    [[nodiscard]] static bool same_color(Color lhs, Color rhs) noexcept {
+        return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+    }
+
+    [[nodiscard]] static bool same_fallbacks(const PresentationSignature& lhs,
+                                             const PresentationSignature& rhs) {
+        return lhs.fallback_families == rhs.fallback_families ||
             (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
              *lhs.fallback_families == *rhs.fallback_families);
+    }
+
+    [[nodiscard]] static bool same_layout(const PresentationSignature& lhs,
+                                          const PresentationSignature& rhs) {
         return lhs.minimum_width == rhs.minimum_width &&
                lhs.control_height == rhs.control_height &&
                lhs.horizontal_padding == rhs.horizontal_padding &&
                lhs.text_size == rhs.text_size &&
                lhs.text_weight == rhs.text_weight &&
                lhs.text_slant == rhs.text_slant &&
-               lhs.font_family == rhs.font_family && same_fallbacks;
+               lhs.font_family == rhs.font_family && same_fallbacks(lhs, rhs);
+    }
+
+    [[nodiscard]] static bool same_presentation(const PresentationSignature& lhs,
+                                                const PresentationSignature& rhs) {
+        return same_color(lhs.fill, rhs.fill) &&
+               same_color(lhs.border, rhs.border) &&
+               same_color(lhs.text, rhs.text) &&
+               lhs.border_width == rhs.border_width &&
+               lhs.corner_radius == rhs.corner_radius &&
+               same_layout(lhs, rhs);
+    }
+
+    template <class Context>
+    static void invalidate_style_transition(const PresentationSignature& before,
+                                            const PresentationSignature& after,
+                                            Context& context) {
+        if (same_presentation(before, after)) return;
+        if (!same_layout(before, after)) {
+            context.invalidate_layout();
+            return;
+        }
+        context.invalidate();
     }
 
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
