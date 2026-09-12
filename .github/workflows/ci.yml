@@ -33,6 +33,13 @@ concurrency:
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
   SCCACHE_GHA_ENABLED: 'true'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  CTEST_PARALLEL_LEVEL: '4'
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJC_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJCXX_COMPILER_LAUNCHER: sccache
+  NATIVEUI_CTEST_EXCLUDE: '^(nativeui_t047_attach_contract_tests|nativeui_t054_application_contract_tests|nativeui_t054_argument_boundary_tests|nativeui_t054_package_source_contract_tests)$'
 
 jobs:
   build:
@@ -41,17 +48,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The standard arm64 macOS pool has been persistently queued for this
-          # repository while Linux/Windows jobs complete. The pinned Skia
-          # artifact is universal, so use the standard Intel macOS 15 runner to
-          # retain macOS/CoreText/AppKit coverage without depending on scarce
-          # arm64 runner capacity.
           - name: macOS
             os: macos-15-intel
+            cmake_args: -DNATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE=ON
           - name: Windows
             os: windows-latest
+            cmake_args: ''
           - name: Linux X11
             os: ubuntu-latest
+            cmake_args: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
 
@@ -66,52 +71,18 @@ jobs:
           restore-keys: |
             nativeui-cpm-${{ runner.os }}-
 
-      # CMake compiler launchers are supported by the Ninja jobs below. Keep
-      # Windows on the native Visual Studio generator required by the pinned
-      # MSVC Skia archive instead of adding a fragile compiler-wrapper path.
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Set up sccache
-        if: runner.os != 'Windows'
         uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: CI workflow policy contract
         if: runner.os == 'Linux'
         run: python3 tests/ci_policy_contract.py
-
-      - name: T047 public attachment contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t047_attach_contract_tests.cmake
-
-      - name: T048 external consumer source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t048_external_consumer_contract_tests.cmake
-
-      - name: T054 application argument contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_argument_boundary_tests.cmake
-
-      - name: T054 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_package_source_contract_tests.cmake
-
-      - name: T056 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_package_source_contract_tests.cmake
-
-      - name: T056 binary-data contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_binary_data_contract_tests.cmake
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -124,23 +95,22 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DNATIVEUI_BUILD_PLATFORM=ON
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+          ${{ matrix.cmake_args }}
 
-      # skia-builder's Windows archive is built with the MSVC ABI. Do not use
-      # Ninja from Git Bash here: on hosted runners that can select MinGW and
-      # cannot link the supplied Skia.lib. The native default Visual Studio
-      # generator discovers the installed MSVC toolchain without relying on
-      # shell PATH ordering.
+      # Ninja keeps the MSVC ABI required by the pinned Skia archive while also
+      # making CMake's compiler-launcher path available to sccache.
       - name: Configure Windows MSVC
         if: runner.os == 'Windows'
         shell: pwsh
         run: >-
-          cmake -S . -B build -A x64
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
           -DNATIVEUI_BUILD_PLATFORM=ON
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
@@ -177,13 +147,9 @@ jobs:
           if (-not $opengl -or -not $gallium) {
             throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
           }
-          Copy-Item $opengl.FullName build\Release\opengl32.dll -Force
-          Copy-Item $gallium.FullName build\Release\libgallium_wgl.dll -Force
+          Copy-Item $opengl.FullName build\opengl32.dll -Force
+          Copy-Item $gallium.FullName build\libgallium_wgl.dll -Force
 
-      # Keep a real Linux/X11 renderer exposure in the normal merge gate. T042
-      # stress caught a production crash here that the previous compile/core
-      # coverage could not see. The native smoke uses one supported PROGRAM
-      # world and the existing embedded multi-instance lifecycle path.
       - name: Linux X11 renderer and lifecycle smoke
         if: runner.os == 'Linux'
         env:
@@ -194,10 +160,6 @@ jobs:
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
           sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke && ./build/nativeui_example_t063_dialog --platform-smoke && ./build/nativeui_example_t062_tooltip --platform-smoke'
 
-      # Some feature-example self-tests initialize the native Pugl world even
-      # when they do not show a window. Keep the whole Linux/X11 test suite on
-      # a virtual display so every current and future example has the same
-      # display contract as the renderer smoke above.
       - name: Test Linux X11
         if: runner.os == 'Linux'
         env:
@@ -206,57 +168,16 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release --parallel 4
+          ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
 
       - name: Test
         if: runner.os != 'Linux'
         env:
           GALLIUM_DRIVER: ${{ runner.os == 'Windows' && 'llvmpipe' || '' }}
-        run: ctest --test-dir build --output-on-failure -C Release --parallel 4
-
-      - name: T047 external package contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -DBUILD_DIR=${{ github.workspace }}/build
-          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
-          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
-          -DCONFIG=Release
-          -P tests/t047_package_tests.cmake
-
-      - name: T048 relocated external consumers
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -DBUILD_DIR=${{ github.workspace }}/build
-          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
-          -DCONFIG=Release
-          -P tests/t048_external_consumer_tests.cmake
-
-      - name: T054 build-tree and relocated application consumers
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -DBUILD_DIR=${{ github.workspace }}/build
-          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
-          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
-          -DCONFIG=Release
-          -P tests/t054_package_tests.cmake
-
-      - name: T056 build-tree and relocated binary-data consumers
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -DBUILD_DIR=${{ github.workspace }}/build
-          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
-          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
-          -DCONFIG=Release
-          -P tests/t056_package_tests.cmake
+        run: ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
 
       # T053/CODE_REVIEW.md requires proof that two final consumers configured
-      # together derive different Objective-C runtime namespaces while sharing
-      # one generic Core/platform-C layer, and that both bridge images load in
-      # one process without duplicate runtime classes.
+      # together derive different Objective-C runtime namespaces.
       - name: macOS two-consumer Objective-C runtime isolation
         if: runner.os == 'macOS'
         run: >-
@@ -265,10 +186,6 @@ jobs:
           -DOUTER_BUILD=${{ github.workspace }}/build
           -P tests/check_objc_two_consumers.cmake
 
-      # The real AppKit/Pugl path validates both the T028 clipboard regression
-      # and CODE_REVIEW.md's lifecycle requirement: simultaneous PUGL_MODULE
-      # editor instances, sibling destruction, survivor use and repeated cycles.
-      # T035 and T063 both exercise their real standalone + EmbeddedView policy.
       - name: macOS clipboard, lifecycle, T035 popup, T063 dialog and T062 tooltip smoke
         if: runner.os == 'macOS'
         run: |
@@ -295,42 +212,6 @@ jobs:
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.11
 
-      - name: T047 public attachment contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t047_attach_contract_tests.cmake
-
-      - name: T048 external consumer source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t048_external_consumer_contract_tests.cmake
-
-      - name: T054 application argument contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_argument_boundary_tests.cmake
-
-      - name: T054 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_package_source_contract_tests.cmake
-
-      - name: T056 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_package_source_contract_tests.cmake
-
-      - name: T056 binary-data contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_binary_data_contract_tests.cmake
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -340,8 +221,6 @@ jobs:
         run: >-
           cmake -S . -B build-sanitize -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DNATIVEUI_BUILD_PLATFORM=OFF
           -DNATIVEUI_BUILD_EXAMPLES=OFF
           -DNATIVEUI_BUILD_TESTS=ON
@@ -355,9 +234,5 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-          # Skia's Linux fallback path calls Fontconfig FcFontRenderPrepare,
-          # whose process-lifetime caches are reported as leaks by LSan on the
-          # hosted image. Keep leak detection enabled and suppress only this
-          # known third-party allocation path; NativeUI/Skia leaks remain fatal.
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure --parallel 4
+        run: ctest --test-dir build-sanitize --output-on-failure -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
