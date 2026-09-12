@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/desktop_services.hpp>
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/ui.hpp>
 
@@ -117,6 +118,7 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services();
 
     bool set_title(std::string_view title);
     bool show();
@@ -157,6 +159,8 @@ private:
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
 /// Embedded native child view for one UI/plugin-editor instance.
@@ -168,6 +172,10 @@ private:
 class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
+    EmbeddedView(UI& ui,
+                 NativeParentHandle parent,
+                 Size size,
+                 std::shared_ptr<DesktopServicesBackend> desktop_services_backend);
     ~EmbeddedView() override;
 
     EmbeddedView(const EmbeddedView&) = delete;
@@ -184,6 +192,7 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services();
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding
@@ -199,6 +208,8 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
 } // namespace ui

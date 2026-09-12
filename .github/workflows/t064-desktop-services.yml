@@ -1,0 +1,64 @@
+name: T064 Desktop Services Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/t064-desktop-services.yml'
+      - 'include/nativeui/desktop_services.hpp'
+      - 'include/nativeui/dispatcher.hpp'
+      - 'include/nativeui/detail/dispatcher_owner.hpp'
+      - 'include/nativeui/window.hpp'
+      - 'cmake/Dependencies.cmake'
+      - 'cmake/NativeUIConsumerPlatform.cmake'
+      - 'cmake/NativeUIConfig.cmake.in'
+      - 'cmake/NativeUIBuildTreeConfig.cmake.in'
+      - 'cmake/NativeUILinuxDbus.cmake'
+      - 'src/desktop_services.cpp'
+      - 'src/dispatcher.cpp'
+      - 'src/linux_desktop_services_backend.cpp'
+      - 'src/linux_portal_desktop_services.cpp'
+      - 'src/detail/linux_desktop_services.hpp'
+      - 'src/detail/macos_desktop_services.hpp'
+      - 'src/detail/macos_desktop_services_backend.mm'
+      - 'src/detail/windows_desktop_services.hpp'
+      - 'src/detail/pugl_skia_desktop_services.inc'
+      - 'src/pugl_skia.cpp'
+      - 'examples/features/t064_desktop_services.cpp'
+      - 'tests/t064/**'
+      - 'tests/t064_root_integration_contract.cmake'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t064-desktop-services-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: T064 public/request contract
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure isolated contract (Unix)
+        if: runner.os != 'Windows'
+        run: cmake -S tests/t064 -B build-t064 -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure isolated contract (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -S tests/t064 -B build-t064 -A x64
+
+      - name: Build isolated contract
+        run: cmake --build build-t064 --config Release --parallel 2
+
+      - name: Test isolated contract
+        run: ctest --test-dir build-t064 --output-on-failure -C Release

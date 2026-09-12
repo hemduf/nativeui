@@ -1,0 +1,84 @@
+cmake_minimum_required(VERSION 3.24)
+
+if(NOT DEFINED SOURCE_DIR)
+  message(FATAL_ERROR "SOURCE_DIR is required")
+endif()
+
+file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/cmake/Dependencies.cmake" _dependencies)
+file(READ "${SOURCE_DIR}/cmake/NativeUIConsumerPlatform.cmake" _consumer_platform)
+file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
+file(READ "${SOURCE_DIR}/include/nativeui/window.hpp" _window_header)
+file(READ "${SOURCE_DIR}/src/pugl_skia.cpp" _platform_source)
+file(READ "${SOURCE_DIR}/src/detail/pugl_skia_desktop_services.inc" _desktop_services_ownership)
+set(_header_fixture "${SOURCE_DIR}/tests/headers/desktop_services.cpp")
+set(_window_fixture "${SOURCE_DIR}/tests/headers/window.cpp")
+set(_feature_example "${SOURCE_DIR}/examples/features/t064_desktop_services.cpp")
+set(_macos_backend "${SOURCE_DIR}/src/detail/macos_desktop_services_backend.mm")
+set(_macos_backend_header "${SOURCE_DIR}/src/detail/macos_desktop_services.hpp")
+set(_windows_backend_header "${SOURCE_DIR}/src/detail/windows_desktop_services.hpp")
+set(_linux_backend "${SOURCE_DIR}/src/linux_desktop_services_backend.cpp")
+
+function(require_text haystack needle description)
+  string(FIND "${haystack}" "${needle}" _index)
+  if(_index EQUAL -1)
+    message(FATAL_ERROR "T064 root integration contract: missing ${description}: ${needle}")
+  endif()
+endfunction()
+
+require_text("${_root_cmake}" "src/desktop_services.cpp" "DesktopServices implementation in NativeUI::Core")
+require_text("${_root_cmake}" "nativeui_t064_root_integration_contract" "root contract registration")
+require_text("${_root_cmake}" "state dispatcher desktop_services text_edit" "isolated DesktopServices public-header compile coverage")
+require_text("${_umbrella}" "#include <nativeui/desktop_services.hpp>" "DesktopServices umbrella export")
+require_text("${_window_header}" "DesktopServices& desktop_services();" "view-owned DesktopServices accessor")
+require_text("${_window_header}" "std::shared_ptr<DesktopServicesBackend> desktop_services_backend" "explicit EmbeddedView backend injection")
+require_text("${_platform_source}" "detail/pugl_skia_desktop_services.inc" "platform ownership implementation seam")
+
+# A backend contract compiled only by tests is not a production backend. The
+# macOS implementation must be reachable from the real StandaloneWindow path,
+# built by the platform attachment machinery and live under src/detail, which
+# is shipped wholesale for relocated consumers.
+if(NOT EXISTS "${_macos_backend}" OR NOT EXISTS "${_macos_backend_header}")
+  message(FATAL_ERROR "T064 root integration contract: missing macOS DesktopServices backend sources")
+endif()
+require_text("${_dependencies}" "enable_language(OBJCXX)" "Objective-C++ language for macOS backend")
+require_text("${_consumer_platform}" "src/detail/macos_desktop_services_backend.mm" "packaged macOS backend target")
+require_text("${_consumer_platform}" "UniformTypeIdentifiers" "macOS backend UniformTypeIdentifiers framework linkage")
+require_text("${_platform_source}" "detail/macos_desktop_services.hpp" "macOS backend factory visibility in platform implementation")
+require_text("${_desktop_services_ownership}" "make_macos_desktop_services_backend" "StandaloneWindow macOS backend construction")
+
+# Windows stays source-private but must be compiled from the normal platform TU,
+# reachable from StandaloneWindow and shipped under src/detail for relocated
+# consumers. EmbeddedView deliberately does not construct either built-in backend.
+if(NOT EXISTS "${_windows_backend_header}")
+  message(FATAL_ERROR "T064 root integration contract: missing Windows DesktopServices backend")
+endif()
+require_text("${_platform_source}" "detail/windows_desktop_services.hpp" "Windows backend factory visibility in platform implementation")
+require_text("${_desktop_services_ownership}" "make_windows_desktop_services_backend" "StandaloneWindow Windows backend construction")
+
+# Linux must use the same requesting StandaloneWindow native XID as the XDG
+# Portal parent identifier while keeping the T072 transport Application-owned.
+if(NOT EXISTS "${_linux_backend}")
+  message(FATAL_ERROR "T064 root integration contract: missing Linux DesktopServices backend")
+endif()
+require_text("${_desktop_services_ownership}" "make_linux_desktop_services_backend" "StandaloneWindow Linux backend construction")
+require_text("${_desktop_services_ownership}" "*impl_->application, dispatcher(), impl_->core->native_handle()" "Linux requesting-window handle propagation")
+
+if(NOT EXISTS "${_header_fixture}")
+  message(FATAL_ERROR "T064 root integration contract: missing isolated public-header fixture: ${_header_fixture}")
+endif()
+if(NOT EXISTS "${_window_fixture}")
+  message(FATAL_ERROR "T064 root integration contract: missing window public-header fixture: ${_window_fixture}")
+endif()
+if(NOT EXISTS "${_feature_example}")
+  message(FATAL_ERROR "T064 root integration contract: missing required feature example: ${_feature_example}")
+endif()
+file(READ "${_window_fixture}" _window_fixture_content)
+require_text("${_window_fixture_content}" ".desktop_services()" "compiled window DesktopServices accessor coverage")
+require_text("${_window_fixture_content}" "std::shared_ptr<ui::DesktopServicesBackend>" "compiled EmbeddedView backend injection coverage")
+file(READ "${_feature_example}" _feature_example_content)
+require_text("${_feature_example_content}" "self_test_requested" "deterministic feature --self-test")
+require_text("${_feature_example_content}" "DesktopServicesBackend" "fake-only self-test backend")
+require_text("${_feature_example_content}" ".desktop_services()" "interactive view-owned DesktopServices consumption")
+
+message(STATUS "T064 root DesktopServices integration contract passed")

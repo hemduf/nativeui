@@ -23,6 +23,13 @@
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
+#if defined(__APPLE__)
+#  include "detail/macos_desktop_services.hpp"
+#elif defined(_WIN32)
+#  include "detail/windows_desktop_services.hpp"
+#elif defined(__linux__)
+#  include "detail/linux_desktop_services.hpp"
+#endif
 #include "detail/native_ime_bridge.h"
 #include "detail/pugl_skia_setup.inc"
 #include "detail/pugl_skia_show_policy.inc"
@@ -225,6 +232,7 @@ private:
 #endif
 
 #include "detail/pugl_skia_windows.inc"
+#include "detail/pugl_skia_desktop_services.inc"
 
 #if defined(__linux__) || defined(_WIN32)
 #  undef PlatformServices

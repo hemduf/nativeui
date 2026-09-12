@@ -47,8 +47,10 @@ if(NATIVEUI_BUILD_PLATFORM)
     # T053 deliberately does not create one generic Objective-C Pugl archive.
     # Only the generic common/internal C sources are shared; mac.m, mac_gl.m
     # and NativeUI's Cocoa IME bridge are compiled by the final-consumer target
-    # factory with the derived consumer-specific runtime prefix.
+    # factory with the derived consumer-specific runtime prefix. T064 adds a
+    # small Objective-C++ desktop-services backend to the same final bridge.
     enable_language(OBJC)
+    enable_language(OBJCXX)
     find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
     find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
