@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <nativeui/component_state.hpp>
 #include <nativeui/detail/inspector_paint.hpp>
 #include <nativeui/dynamic.hpp>
 #include <nativeui/headless.hpp>
