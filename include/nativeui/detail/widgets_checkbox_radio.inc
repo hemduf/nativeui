@@ -12,6 +12,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,7 +34,7 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto resolved = resolved_style(false);
+        const auto resolved = resolved_style(focused_);
         TextStyle text_style{};
         text_style.size = resolved.text_size;
         text_style.weight = resolved.text_weight;
@@ -57,21 +58,34 @@ public:
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = layout_signature(focused_);
+        focused_ = focused;
         interaction_.focus_changed(focused, context);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     void deactivate(LifecycleContext& context) override {
+        const auto before = layout_signature(focused_);
+        focused_ = false;
         interaction_.deactivate(context);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        const auto before = layout_signature(focused_);
         if (effective_read_only() && read_only_value_input(event)) {
             interaction_.cancel_pending_mutation(context);
+            const auto after = layout_signature(focused_);
+            if (!same_layout(before, after)) context.invalidate_layout();
             return EventResult::Handled;
         }
 
         auto* state = &state_;
         const auto outcome = interaction_.input(event, context, false);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
         if (outcome.activate) state->set(!state->get());
         return outcome.result;
     }
@@ -121,6 +135,85 @@ public:
     }
 
 private:
+    struct LayoutSignature {
+        float box_size{};
+        float minimum_width{};
+        float control_height{};
+        float leading_padding{};
+        float label_gap{};
+        float text_size{};
+        FontWeight text_weight{FontWeight::Regular};
+        FontSlant text_slant{FontSlant::Upright};
+        std::string_view font_family;
+        const std::vector<std::string>* fallback_families{};
+    };
+
+    static void apply_layout_patch(LayoutSignature& target,
+                                   const CheckboxStylePatch& patch) noexcept {
+        if (patch.box_size) target.box_size = *patch.box_size;
+        if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
+        if (patch.control_height) target.control_height = *patch.control_height;
+        if (patch.leading_padding) target.leading_padding = *patch.leading_padding;
+        if (patch.label_gap) target.label_gap = *patch.label_gap;
+        if (patch.text_size) target.text_size = *patch.text_size;
+        if (patch.text_weight) target.text_weight = *patch.text_weight;
+        if (patch.text_slant) target.text_slant = *patch.text_slant;
+        if (patch.font_family) target.font_family = *patch.font_family;
+        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
+    }
+
+    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
+        const auto& theme = current_theme();
+        LayoutSignature result{
+            .box_size = 18.0f,
+            .minimum_width = 72.0f,
+            .control_height = 32.0f,
+            .leading_padding = 3.0f,
+            .label_gap = 10.0f,
+            .text_size = theme.typography.control_size,
+            .text_weight = theme.typography.control_weight,
+            .text_slant = theme.typography.slant,
+            .font_family = theme.typography.family,
+            .fallback_families = &theme.typography.fallback_families,
+        };
+        apply_layout_patch(result, style_.base);
+
+        const auto state = current_visual_state(focused);
+        if (state.checked) apply_layout_patch(result, style_.checked);
+        switch (resolve_interaction_state(state)) {
+            case InteractionVisualState::Normal:
+                break;
+            case InteractionVisualState::Hovered:
+                apply_layout_patch(result, style_.hovered);
+                break;
+            case InteractionVisualState::Pressed:
+                apply_layout_patch(result, style_.pressed);
+                break;
+            case InteractionVisualState::Disabled:
+                apply_layout_patch(result, style_.disabled);
+                break;
+        }
+        if (state.read_only) apply_layout_patch(result, style_.read_only);
+        if (state.focused) apply_layout_patch(result, style_.focused);
+        return result;
+    }
+
+    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
+                                          const LayoutSignature& rhs) {
+        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
+            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
+             *lhs.fallback_families == *rhs.fallback_families);
+        return lhs.box_size == rhs.box_size &&
+               lhs.minimum_width == rhs.minimum_width &&
+               lhs.control_height == rhs.control_height &&
+               lhs.leading_padding == rhs.leading_padding &&
+               lhs.label_gap == rhs.label_gap &&
+               lhs.text_size == rhs.text_size &&
+               lhs.text_weight == rhs.text_weight &&
+               lhs.text_slant == rhs.text_slant &&
+               lhs.font_family == rhs.font_family && same_fallbacks;
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return VisualState{
             .enabled = effective_enabled(),
@@ -142,6 +235,7 @@ private:
     CheckboxStyle style_;
     State<bool>::Subscription subscription_;
     PressActivationState interaction_;
+    bool focused_{};
 };
 
 struct RadioGroupToken final {};
@@ -195,7 +289,7 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto resolved = resolved_style(false);
+        const auto resolved = resolved_style(focused_);
         TextStyle text_style{};
         text_style.size = resolved.text_size;
         text_style.weight = resolved.text_weight;
@@ -219,11 +313,19 @@ public:
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = layout_signature(focused_);
+        focused_ = focused;
         interaction_.focus_changed(focused, context);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     void deactivate(LifecycleContext& context) override {
+        const auto before = layout_signature(focused_);
+        focused_ = false;
         interaction_.deactivate(context);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     [[nodiscard]] const void* focus_group_identity() const noexcept override {
@@ -241,13 +343,18 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        const auto before = layout_signature(focused_);
         if (effective_read_only() && read_only_value_input(event)) {
             interaction_.cancel_pending_mutation(context);
+            const auto after = layout_signature(focused_);
+            if (!same_layout(before, after)) context.invalidate_layout();
             return EventResult::Handled;
         }
 
         auto select = select_;
         const auto outcome = interaction_.input(event, context, false);
+        const auto after = layout_signature(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
         if (outcome.activate && select) select();
         return outcome.result;
     }
@@ -281,6 +388,85 @@ public:
     }
 
 private:
+    struct LayoutSignature {
+        float outer_radius{};
+        float minimum_width{};
+        float control_height{};
+        float leading_padding{};
+        float label_gap{};
+        float text_size{};
+        FontWeight text_weight{FontWeight::Regular};
+        FontSlant text_slant{FontSlant::Upright};
+        std::string_view font_family;
+        const std::vector<std::string>* fallback_families{};
+    };
+
+    static void apply_layout_patch(LayoutSignature& target,
+                                   const RadioStylePatch& patch) noexcept {
+        if (patch.outer_radius) target.outer_radius = *patch.outer_radius;
+        if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
+        if (patch.control_height) target.control_height = *patch.control_height;
+        if (patch.leading_padding) target.leading_padding = *patch.leading_padding;
+        if (patch.label_gap) target.label_gap = *patch.label_gap;
+        if (patch.text_size) target.text_size = *patch.text_size;
+        if (patch.text_weight) target.text_weight = *patch.text_weight;
+        if (patch.text_slant) target.text_slant = *patch.text_slant;
+        if (patch.font_family) target.font_family = *patch.font_family;
+        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
+    }
+
+    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
+        const auto& theme = current_theme();
+        LayoutSignature result{
+            .outer_radius = 9.0f,
+            .minimum_width = 72.0f,
+            .control_height = 32.0f,
+            .leading_padding = 3.0f,
+            .label_gap = 9.0f,
+            .text_size = theme.typography.control_size,
+            .text_weight = theme.typography.control_weight,
+            .text_slant = theme.typography.slant,
+            .font_family = theme.typography.family,
+            .fallback_families = &theme.typography.fallback_families,
+        };
+        apply_layout_patch(result, style_.base);
+
+        const auto state = current_visual_state(focused);
+        if (state.selected) apply_layout_patch(result, style_.selected);
+        switch (resolve_interaction_state(state)) {
+            case InteractionVisualState::Normal:
+                break;
+            case InteractionVisualState::Hovered:
+                apply_layout_patch(result, style_.hovered);
+                break;
+            case InteractionVisualState::Pressed:
+                apply_layout_patch(result, style_.pressed);
+                break;
+            case InteractionVisualState::Disabled:
+                apply_layout_patch(result, style_.disabled);
+                break;
+        }
+        if (state.read_only) apply_layout_patch(result, style_.read_only);
+        if (state.focused) apply_layout_patch(result, style_.focused);
+        return result;
+    }
+
+    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
+                                          const LayoutSignature& rhs) {
+        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
+            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
+             *lhs.fallback_families == *rhs.fallback_families);
+        return lhs.outer_radius == rhs.outer_radius &&
+               lhs.minimum_width == rhs.minimum_width &&
+               lhs.control_height == rhs.control_height &&
+               lhs.leading_padding == rhs.leading_padding &&
+               lhs.label_gap == rhs.label_gap &&
+               lhs.text_size == rhs.text_size &&
+               lhs.text_weight == rhs.text_weight &&
+               lhs.text_slant == rhs.text_slant &&
+               lhs.font_family == rhs.font_family && same_fallbacks;
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const {
         return VisualState{
             .enabled = effective_enabled(),
@@ -305,6 +491,7 @@ private:
     RadioStyle style_;
     std::shared_ptr<void> subscription_;
     PressActivationState interaction_;
+    bool focused_{};
 };
 
 } // namespace detail
