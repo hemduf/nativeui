@@ -7,6 +7,7 @@
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/dispatcher.hpp>
+#include <nativeui/desktop_services.hpp>
 #include <nativeui/semantics.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>

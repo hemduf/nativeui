@@ -21,6 +21,9 @@
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
+#if defined(__linux__)
+#  include "detail/linux_desktop_services.hpp"
+#endif
 #include "detail/native_ime_bridge.h"
 #include "detail/pugl_skia_setup.inc"
 #include "detail/pugl_skia_show_policy.inc"
@@ -34,6 +37,7 @@ namespace detail {
 using ViewCore = detail::ViewCore;
 
 #include "detail/pugl_skia_windows.inc"
+#include "detail/pugl_skia_desktop_services.inc"
 
 } // namespace ui
 
