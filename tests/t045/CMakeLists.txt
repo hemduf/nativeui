@@ -26,6 +26,7 @@ endfunction()
 enable_testing()
 nativeui_add_semantics_test(t045_semantics ../t045_semantics_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_proxy t068_semantic_proxy_tests.cpp)
+nativeui_add_semantics_test(t068_semantic_proxy_cache t068_semantic_proxy_cache_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_diff_regression t068_semantic_diff_regression_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_action_router t068_semantic_action_router_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_read_only t068_semantic_read_only_tests.cpp)
@@ -33,3 +34,4 @@ target_sources(t068_semantic_action_router PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
 )
 target_link_libraries(t068_semantic_action_router PRIVATE Threads::Threads)
+target_link_libraries(t068_semantic_proxy_cache PRIVATE Threads::Threads)
