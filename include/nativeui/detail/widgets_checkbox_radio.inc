@@ -104,6 +104,7 @@ void invalidate_resolved_style_transition(const Resolved& before,
     if (same_presentation(before, after)) return;
     if (!same_layout(before, after)) {
         context.invalidate_layout();
+        context.invalidate();
         return;
     }
     context.invalidate();
@@ -133,14 +134,19 @@ public:
     }
 
     void mount(MountContext& context) override {
-        // State::set() snapshots listeners before callbacks run. Capture only a
-        // retained-tree invalidator here: an earlier listener may synchronously
+        // State::set() snapshots listeners before callbacks run. Capture only
+        // retained-tree invalidators here: an earlier listener may synchronously
         // remove this component, so a callback that captured `this` would dangle.
-        auto invalidate = checkbox_patch_affects_layout(style_.checked)
-            ? context.layout_invalidator()
-            : context.invalidator();
+        const bool checked_changes_layout = checkbox_patch_affects_layout(style_.checked);
+        auto invalidate = context.invalidator();
+        auto invalidate_layout = context.layout_invalidator();
         subscription_ = state_.observe(
-            [invalidate = std::move(invalidate)](const bool&) { invalidate(); });
+            [checked_changes_layout,
+             invalidate = std::move(invalidate),
+             invalidate_layout = std::move(invalidate_layout)](const bool&) {
+                if (checked_changes_layout) invalidate_layout();
+                invalidate();
+            });
     }
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
@@ -328,10 +334,16 @@ public:
 
     void mount(MountContext& context) override {
         if (!observe_) return;
-        auto invalidate = radio_patch_affects_layout(style_.selected)
-            ? context.layout_invalidator()
-            : context.invalidator();
-        subscription_ = observe_(std::move(invalidate));
+        const bool selected_changes_layout = radio_patch_affects_layout(style_.selected);
+        auto invalidate = context.invalidator();
+        auto invalidate_layout = context.layout_invalidator();
+        subscription_ = observe_(
+            [selected_changes_layout,
+             invalidate = std::move(invalidate),
+             invalidate_layout = std::move(invalidate_layout)]() {
+                if (selected_changes_layout) invalidate_layout();
+                invalidate();
+            });
     }
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
