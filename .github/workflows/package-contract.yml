@@ -1,0 +1,219 @@
+name: Package Contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-contract.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/Dependencies.cmake'
+      - 'cmake/NativeUIAttachPlatform.cmake'
+      - 'cmake/NativeUIConsumerPlatform.cmake'
+      - 'cmake/NativeUIApplication.cmake'
+      - 'cmake/NativeUIBinaryData.cmake'
+      - 'cmake/NativeUIEmbedResource.cmake'
+      - 'cmake/NativeUIConfig.cmake.in'
+      - 'cmake/NativeUIBuildTreeConfig.cmake.in'
+      - 'include/nativeui/embedded_resource.hpp'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/**'
+      - 'tests/t047_*'
+      - 'tests/t047_*/**'
+      - 'tests/t048_*'
+      - 'tests/t048_*/**'
+      - 'tests/t054_*'
+      - 'tests/t054_*/**'
+      - 'tests/t056_*'
+      - 'tests/t056_*/**'
+      - 'tests/check_objc_*'
+      - 'tests/resources/t056_binary.bin'
+      - 'LICENSE.md'
+      - 'NOTICE.md'
+      - 'THIRD_PARTY.md'
+      - 'EULA.md'
+      - 'PRIVACY.md'
+      - 'TERMS.md'
+      - 'LEGAL.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-contract.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/Dependencies.cmake'
+      - 'cmake/NativeUIAttachPlatform.cmake'
+      - 'cmake/NativeUIConsumerPlatform.cmake'
+      - 'cmake/NativeUIApplication.cmake'
+      - 'cmake/NativeUIBinaryData.cmake'
+      - 'cmake/NativeUIEmbedResource.cmake'
+      - 'cmake/NativeUIConfig.cmake.in'
+      - 'cmake/NativeUIBuildTreeConfig.cmake.in'
+      - 'include/nativeui/embedded_resource.hpp'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/**'
+      - 'tests/t047_*'
+      - 'tests/t047_*/**'
+      - 'tests/t048_*'
+      - 'tests/t048_*/**'
+      - 'tests/t054_*'
+      - 'tests/t054_*/**'
+      - 'tests/t056_*'
+      - 'tests/t056_*/**'
+      - 'tests/check_objc_*'
+      - 'tests/resources/t056_binary.bin'
+      - 'LICENSE.md'
+      - 'NOTICE.md'
+      - 'THIRD_PARTY.md'
+      - 'EULA.md'
+      - 'PRIVACY.md'
+      - 'TERMS.md'
+      - 'LEGAL.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  SCCACHE_GHA_ENABLED: 'true'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
+
+jobs:
+  source-contracts:
+    name: Package source contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: T047 public attachment contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t047_attach_contract_tests.cmake
+
+      - name: T048 external consumer source contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t048_external_consumer_contract_tests.cmake
+
+      - name: T054 application argument contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_argument_boundary_tests.cmake
+
+      - name: T054 package source contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_package_source_contract_tests.cmake
+
+      - name: T056 package source contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t056_package_source_contract_tests.cmake
+
+      - name: T056 binary-data contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t056_binary_data_contract_tests.cmake
+
+  package:
+    name: Package — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-
+
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - name: Configure Unix package producer
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure Windows package producer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build package producer
+        run: cmake --build build --config Release --parallel
+
+      - name: T047 external package contract
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t047_package_tests.cmake
+
+      - name: T048 relocated external consumers
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t048_external_consumer_tests.cmake
+
+      - name: T054 build-tree and relocated application consumers
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t054_package_tests.cmake
+
+      - name: T056 build-tree and relocated binary-data consumers
+        run: >-
+          cmake
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DBUILD_PACKAGE_DIR=${{ github.workspace }}/build/nativeui-package
+          -DINSTALL_CMAKE_DIR=lib/cmake/NativeUI
+          -DCONFIG=Release
+          -P tests/t056_package_tests.cmake
