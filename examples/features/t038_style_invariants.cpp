@@ -117,7 +117,8 @@ int self_test() {
     if (large_metrics.preferred.w != 167.0f || large_metrics.preferred.h != 49.0f) {
         return example::fail("second Button instance did not retain its explicit style geometry");
     }
-    if (compact_metrics.preferred == large_metrics.preferred) {
+    if (compact_metrics.preferred.w == large_metrics.preferred.w &&
+        compact_metrics.preferred.h == large_metrics.preferred.h) {
         return example::fail("explicit Button styles leaked/shared geometry between instances");
     }
 
