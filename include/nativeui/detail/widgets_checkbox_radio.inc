@@ -12,7 +12,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -24,6 +23,90 @@ namespace detail {
     if (event.type == InputType::PointerDown || event.type == InputType::PointerUp) return true;
     return (event.type == InputType::KeyDown || event.type == InputType::KeyUp) &&
            event.key == Key::Space;
+}
+
+[[nodiscard]] inline bool style_color_equal(Color lhs, Color rhs) noexcept {
+    return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+}
+
+[[nodiscard]] inline bool checkbox_layout_equal(const ResolvedCheckboxStyle& lhs,
+                                                const ResolvedCheckboxStyle& rhs) {
+    return lhs.box_size == rhs.box_size &&
+           lhs.minimum_width == rhs.minimum_width &&
+           lhs.control_height == rhs.control_height &&
+           lhs.leading_padding == rhs.leading_padding &&
+           lhs.label_gap == rhs.label_gap &&
+           lhs.text_size == rhs.text_size &&
+           lhs.text_weight == rhs.text_weight &&
+           lhs.text_slant == rhs.text_slant &&
+           lhs.font_family == rhs.font_family &&
+           lhs.fallback_families == rhs.fallback_families;
+}
+
+[[nodiscard]] inline bool checkbox_presentation_equal(const ResolvedCheckboxStyle& lhs,
+                                                      const ResolvedCheckboxStyle& rhs) {
+    return checkbox_layout_equal(lhs, rhs) &&
+           style_color_equal(lhs.box_fill, rhs.box_fill) &&
+           style_color_equal(lhs.box_border, rhs.box_border) &&
+           style_color_equal(lhs.checkmark, rhs.checkmark) &&
+           style_color_equal(lhs.text, rhs.text) &&
+           lhs.box_corner_radius == rhs.box_corner_radius &&
+           lhs.box_border_width == rhs.box_border_width &&
+           lhs.checkmark_width == rhs.checkmark_width;
+}
+
+[[nodiscard]] inline bool checkbox_patch_affects_layout(
+    const CheckboxStylePatch& patch) noexcept {
+    return patch.box_size || patch.minimum_width || patch.control_height ||
+           patch.leading_padding || patch.label_gap || patch.text_size ||
+           patch.text_weight || patch.text_slant || patch.font_family ||
+           patch.fallback_families;
+}
+
+[[nodiscard]] inline bool radio_layout_equal(const ResolvedRadioStyle& lhs,
+                                             const ResolvedRadioStyle& rhs) {
+    return lhs.outer_radius == rhs.outer_radius &&
+           lhs.minimum_width == rhs.minimum_width &&
+           lhs.control_height == rhs.control_height &&
+           lhs.leading_padding == rhs.leading_padding &&
+           lhs.label_gap == rhs.label_gap &&
+           lhs.text_size == rhs.text_size &&
+           lhs.text_weight == rhs.text_weight &&
+           lhs.text_slant == rhs.text_slant &&
+           lhs.font_family == rhs.font_family &&
+           lhs.fallback_families == rhs.fallback_families;
+}
+
+[[nodiscard]] inline bool radio_presentation_equal(const ResolvedRadioStyle& lhs,
+                                                   const ResolvedRadioStyle& rhs) {
+    return radio_layout_equal(lhs, rhs) &&
+           style_color_equal(lhs.outer_fill, rhs.outer_fill) &&
+           style_color_equal(lhs.inner_fill, rhs.inner_fill) &&
+           style_color_equal(lhs.mark_fill, rhs.mark_fill) &&
+           style_color_equal(lhs.text, rhs.text) &&
+           lhs.inner_radius == rhs.inner_radius &&
+           lhs.mark_radius == rhs.mark_radius;
+}
+
+[[nodiscard]] inline bool radio_patch_affects_layout(const RadioStylePatch& patch) noexcept {
+    return patch.outer_radius || patch.minimum_width || patch.control_height ||
+           patch.leading_padding || patch.label_gap || patch.text_size ||
+           patch.text_weight || patch.text_slant || patch.font_family ||
+           patch.fallback_families;
+}
+
+template <class Context, class Resolved, class SameLayout, class SamePresentation>
+void invalidate_resolved_style_transition(const Resolved& before,
+                                          const Resolved& after,
+                                          Context& context,
+                                          SameLayout&& same_layout,
+                                          SamePresentation&& same_presentation) {
+    if (same_presentation(before, after)) return;
+    if (!same_layout(before, after)) {
+        context.invalidate_layout();
+        return;
+    }
+    context.invalidate();
 }
 
 class CheckboxComponent final : public Component, public ThemeBinding {
@@ -50,7 +133,12 @@ public:
     }
 
     void mount(MountContext& context) override {
-        auto invalidate = context.invalidator();
+        // State::set() snapshots listeners before callbacks run. Capture only a
+        // retained-tree invalidator here: an earlier listener may synchronously
+        // remove this component, so a callback that captured `this` would dangle.
+        auto invalidate = checkbox_patch_affects_layout(style_.checked)
+            ? context.layout_invalidator()
+            : context.invalidator();
         subscription_ = state_.observe(
             [invalidate = std::move(invalidate)](const bool&) { invalidate(); });
     }
@@ -58,35 +146,40 @@ public:
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         focused_ = focused;
-        interaction_.focus_changed(focused, context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.focus_changed(focused, context, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
     }
 
     void deactivate(LifecycleContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         focused_ = false;
-        interaction_.deactivate(context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.deactivate(context, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         if (effective_read_only() && read_only_value_input(event)) {
-            interaction_.cancel_pending_mutation(context);
-            const auto after = layout_signature(focused_);
-            if (!same_layout(before, after)) context.invalidate_layout();
+            interaction_.cancel_pending_mutation(context, false);
+            const auto after = resolved_style(focused_);
+            invalidate_transition(before, after, context);
             return EventResult::Handled;
         }
 
         auto* state = &state_;
-        const auto outcome = interaction_.input(event, context, false);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
-        if (outcome.activate) state->set(!state->get());
+        const auto outcome = interaction_.input(event, context, false, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
+        if (!outcome.activate) return outcome.result;
+
+        // State observers may synchronously rebuild/destroy this component.
+        // Complete all component/context work before publishing the value and
+        // never touch `this` afterwards.
+        state->set(!state->get());
         return outcome.result;
     }
 
@@ -135,85 +228,6 @@ public:
     }
 
 private:
-    struct LayoutSignature {
-        float box_size{};
-        float minimum_width{};
-        float control_height{};
-        float leading_padding{};
-        float label_gap{};
-        float text_size{};
-        FontWeight text_weight{FontWeight::Regular};
-        FontSlant text_slant{FontSlant::Upright};
-        std::string_view font_family;
-        const std::vector<std::string>* fallback_families{};
-    };
-
-    static void apply_layout_patch(LayoutSignature& target,
-                                   const CheckboxStylePatch& patch) noexcept {
-        if (patch.box_size) target.box_size = *patch.box_size;
-        if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
-        if (patch.control_height) target.control_height = *patch.control_height;
-        if (patch.leading_padding) target.leading_padding = *patch.leading_padding;
-        if (patch.label_gap) target.label_gap = *patch.label_gap;
-        if (patch.text_size) target.text_size = *patch.text_size;
-        if (patch.text_weight) target.text_weight = *patch.text_weight;
-        if (patch.text_slant) target.text_slant = *patch.text_slant;
-        if (patch.font_family) target.font_family = *patch.font_family;
-        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
-    }
-
-    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
-        const auto& theme = current_theme();
-        LayoutSignature result{
-            .box_size = 18.0f,
-            .minimum_width = 72.0f,
-            .control_height = 32.0f,
-            .leading_padding = 3.0f,
-            .label_gap = 10.0f,
-            .text_size = theme.typography.control_size,
-            .text_weight = theme.typography.control_weight,
-            .text_slant = theme.typography.slant,
-            .font_family = theme.typography.family,
-            .fallback_families = &theme.typography.fallback_families,
-        };
-        apply_layout_patch(result, style_.base);
-
-        const auto state = current_visual_state(focused);
-        if (state.checked) apply_layout_patch(result, style_.checked);
-        switch (resolve_interaction_state(state)) {
-            case InteractionVisualState::Normal:
-                break;
-            case InteractionVisualState::Hovered:
-                apply_layout_patch(result, style_.hovered);
-                break;
-            case InteractionVisualState::Pressed:
-                apply_layout_patch(result, style_.pressed);
-                break;
-            case InteractionVisualState::Disabled:
-                apply_layout_patch(result, style_.disabled);
-                break;
-        }
-        if (state.read_only) apply_layout_patch(result, style_.read_only);
-        if (state.focused) apply_layout_patch(result, style_.focused);
-        return result;
-    }
-
-    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
-                                          const LayoutSignature& rhs) {
-        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
-            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
-             *lhs.fallback_families == *rhs.fallback_families);
-        return lhs.box_size == rhs.box_size &&
-               lhs.minimum_width == rhs.minimum_width &&
-               lhs.control_height == rhs.control_height &&
-               lhs.leading_padding == rhs.leading_padding &&
-               lhs.label_gap == rhs.label_gap &&
-               lhs.text_size == rhs.text_size &&
-               lhs.text_weight == rhs.text_weight &&
-               lhs.text_slant == rhs.text_slant &&
-               lhs.font_family == rhs.font_family && same_fallbacks;
-    }
-
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return VisualState{
             .enabled = effective_enabled(),
@@ -228,6 +242,14 @@ private:
     [[nodiscard]] ResolvedCheckboxStyle resolved_style(bool focused) const {
         return resolve_checkbox_style(
             default_checkbox_style(current_theme()), style_, current_visual_state(focused));
+    }
+
+    template <class Context>
+    static void invalidate_transition(const ResolvedCheckboxStyle& before,
+                                      const ResolvedCheckboxStyle& after,
+                                      Context& context) {
+        invalidate_resolved_style_transition(
+            before, after, context, checkbox_layout_equal, checkbox_presentation_equal);
     }
 
     State<bool>& state_;
@@ -306,26 +328,28 @@ public:
 
     void mount(MountContext& context) override {
         if (!observe_) return;
-        auto invalidate = context.invalidator();
-        subscription_ = observe_([invalidate = std::move(invalidate)] { invalidate(); });
+        auto invalidate = radio_patch_affects_layout(style_.selected)
+            ? context.layout_invalidator()
+            : context.invalidator();
+        subscription_ = observe_(std::move(invalidate));
     }
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         focused_ = focused;
-        interaction_.focus_changed(focused, context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.focus_changed(focused, context, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
     }
 
     void deactivate(LifecycleContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         focused_ = false;
-        interaction_.deactivate(context);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
+        interaction_.deactivate(context, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
     }
 
     [[nodiscard]] const void* focus_group_identity() const noexcept override {
@@ -343,19 +367,23 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const auto before = layout_signature(focused_);
+        const auto before = resolved_style(focused_);
         if (effective_read_only() && read_only_value_input(event)) {
-            interaction_.cancel_pending_mutation(context);
-            const auto after = layout_signature(focused_);
-            if (!same_layout(before, after)) context.invalidate_layout();
+            interaction_.cancel_pending_mutation(context, false);
+            const auto after = resolved_style(focused_);
+            invalidate_transition(before, after, context);
             return EventResult::Handled;
         }
 
         auto select = select_;
-        const auto outcome = interaction_.input(event, context, false);
-        const auto after = layout_signature(focused_);
-        if (!same_layout(before, after)) context.invalidate_layout();
-        if (outcome.activate && select) select();
+        const auto outcome = interaction_.input(event, context, false, false);
+        const auto after = resolved_style(focused_);
+        invalidate_transition(before, after, context);
+        if (!outcome.activate) return outcome.result;
+
+        // Selection callbacks may rebuild the retained tree. Do not access the
+        // component or InputContext after invoking user/application state.
+        if (select) select();
         return outcome.result;
     }
 
@@ -388,85 +416,6 @@ public:
     }
 
 private:
-    struct LayoutSignature {
-        float outer_radius{};
-        float minimum_width{};
-        float control_height{};
-        float leading_padding{};
-        float label_gap{};
-        float text_size{};
-        FontWeight text_weight{FontWeight::Regular};
-        FontSlant text_slant{FontSlant::Upright};
-        std::string_view font_family;
-        const std::vector<std::string>* fallback_families{};
-    };
-
-    static void apply_layout_patch(LayoutSignature& target,
-                                   const RadioStylePatch& patch) noexcept {
-        if (patch.outer_radius) target.outer_radius = *patch.outer_radius;
-        if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
-        if (patch.control_height) target.control_height = *patch.control_height;
-        if (patch.leading_padding) target.leading_padding = *patch.leading_padding;
-        if (patch.label_gap) target.label_gap = *patch.label_gap;
-        if (patch.text_size) target.text_size = *patch.text_size;
-        if (patch.text_weight) target.text_weight = *patch.text_weight;
-        if (patch.text_slant) target.text_slant = *patch.text_slant;
-        if (patch.font_family) target.font_family = *patch.font_family;
-        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
-    }
-
-    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
-        const auto& theme = current_theme();
-        LayoutSignature result{
-            .outer_radius = 9.0f,
-            .minimum_width = 72.0f,
-            .control_height = 32.0f,
-            .leading_padding = 3.0f,
-            .label_gap = 9.0f,
-            .text_size = theme.typography.control_size,
-            .text_weight = theme.typography.control_weight,
-            .text_slant = theme.typography.slant,
-            .font_family = theme.typography.family,
-            .fallback_families = &theme.typography.fallback_families,
-        };
-        apply_layout_patch(result, style_.base);
-
-        const auto state = current_visual_state(focused);
-        if (state.selected) apply_layout_patch(result, style_.selected);
-        switch (resolve_interaction_state(state)) {
-            case InteractionVisualState::Normal:
-                break;
-            case InteractionVisualState::Hovered:
-                apply_layout_patch(result, style_.hovered);
-                break;
-            case InteractionVisualState::Pressed:
-                apply_layout_patch(result, style_.pressed);
-                break;
-            case InteractionVisualState::Disabled:
-                apply_layout_patch(result, style_.disabled);
-                break;
-        }
-        if (state.read_only) apply_layout_patch(result, style_.read_only);
-        if (state.focused) apply_layout_patch(result, style_.focused);
-        return result;
-    }
-
-    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
-                                          const LayoutSignature& rhs) {
-        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
-            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
-             *lhs.fallback_families == *rhs.fallback_families);
-        return lhs.outer_radius == rhs.outer_radius &&
-               lhs.minimum_width == rhs.minimum_width &&
-               lhs.control_height == rhs.control_height &&
-               lhs.leading_padding == rhs.leading_padding &&
-               lhs.label_gap == rhs.label_gap &&
-               lhs.text_size == rhs.text_size &&
-               lhs.text_weight == rhs.text_weight &&
-               lhs.text_slant == rhs.text_slant &&
-               lhs.font_family == rhs.font_family && same_fallbacks;
-    }
-
     [[nodiscard]] VisualState current_visual_state(bool focused) const {
         return VisualState{
             .enabled = effective_enabled(),
@@ -481,6 +430,14 @@ private:
     [[nodiscard]] ResolvedRadioStyle resolved_style(bool focused) const {
         return resolve_radio_style(
             default_radio_style(current_theme()), style_, current_visual_state(focused));
+    }
+
+    template <class Context>
+    static void invalidate_transition(const ResolvedRadioStyle& before,
+                                      const ResolvedRadioStyle& after,
+                                      Context& context) {
+        invalidate_resolved_style_transition(
+            before, after, context, radio_layout_equal, radio_presentation_equal);
     }
 
     std::shared_ptr<RadioGroupToken> group_;
