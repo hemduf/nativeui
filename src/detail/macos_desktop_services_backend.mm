@@ -1,4 +1,4 @@
-#include "detail/macos_desktop_services.hpp"
+#include "macos_desktop_services.hpp"
 
 #import <AppKit/AppKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
