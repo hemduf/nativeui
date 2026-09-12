@@ -9,7 +9,6 @@
 #endif
 #include <windows.h>
 #include <objbase.h>
-#include <objidl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
@@ -50,9 +49,6 @@ public:
     ComApartment& operator=(const ComApartment&) = delete;
 
     [[nodiscard]] bool initialized() const noexcept { return initialized_; }
-    [[nodiscard]] bool usable() const noexcept {
-        return initialized_ || result_ == RPC_E_CHANGED_MODE;
-    }
 
 private:
     HRESULT result_{E_FAIL};
@@ -177,8 +173,6 @@ struct FilterStorage final {
     return result;
 }
 
-inline constexpr UINT kDialogCloseMessage = WM_APP + 0x064;
-
 struct RequestState final {
     // Exactly one side wins the terminal decision. A successful cancel() owns
     // the result before it returns true; otherwise the worker owns the native
@@ -187,7 +181,7 @@ struct RequestState final {
     std::atomic<bool> terminal_claimed{false};
     std::atomic<bool> cancel_requested{false};
     std::atomic<bool> worker_finished{false};
-    std::atomic<HWND> close_window{nullptr};
+    std::atomic<DWORD> worker_thread_id{0};
     std::thread worker;
 };
 
@@ -212,102 +206,59 @@ inline void arbitrate_worker_result(RequestState& state,
     state.worker_finished.store(true, std::memory_order_release);
 }
 
-struct DialogCloseWindowContext final {
-    IFileDialog* dialog{};
-    WNDPROC previous_proc{};
+struct DialogWindowSearch final {
+    HWND parent{};
+    HWND found{};
+    bool require_parent{};
 };
 
-LRESULT CALLBACK dialog_close_window_proc(HWND window,
-                                          UINT message,
-                                          WPARAM wparam,
-                                          LPARAM lparam) {
-    auto* context = reinterpret_cast<DialogCloseWindowContext*>(
-        GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == kDialogCloseMessage && context && context->dialog) {
-        (void)context->dialog->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-        return 0;
+BOOL CALLBACK find_dialog_window_callback(HWND window, LPARAM data) noexcept {
+    auto* search = reinterpret_cast<DialogWindowSearch*>(data);
+    if (!search || !IsWindowVisible(window)) return TRUE;
+    if (search->require_parent && search->parent != nullptr &&
+        GetWindow(window, GW_OWNER) != search->parent) {
+        return TRUE;
     }
-    if (context && context->previous_proc) {
-        return CallWindowProcW(context->previous_proc, window, message, wparam, lparam);
-    }
-    return DefWindowProcW(window, message, wparam, lparam);
+    search->found = window;
+    return FALSE;
 }
 
-class DialogCloseChannel final {
-public:
-    DialogCloseChannel(RequestState& state, IFileDialog& dialog) noexcept
-        : state_(state) {
-        window_ = CreateWindowExW(
-            0,
-            L"STATIC",
-            L"",
-            0,
-            0,
-            0,
-            0,
-            0,
-            HWND_MESSAGE,
-            nullptr,
-            GetModuleHandleW(nullptr),
-            nullptr);
-        if (!window_) return;
+[[nodiscard]] inline HWND find_dialog_window(DWORD thread_id, HWND parent) noexcept {
+    if (thread_id == 0) return nullptr;
 
-        context_.dialog = &dialog;
-        SetLastError(ERROR_SUCCESS);
-        const auto previous = SetWindowLongPtrW(
-            window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&dialog_close_window_proc));
-        if (previous == 0 && GetLastError() != ERROR_SUCCESS) {
-            DestroyWindow(window_);
-            window_ = nullptr;
-            return;
-        }
-        context_.previous_proc = reinterpret_cast<WNDPROC>(previous);
+    DialogWindowSearch owned{parent, nullptr, parent != nullptr};
+    (void)EnumThreadWindows(
+        thread_id, &find_dialog_window_callback, reinterpret_cast<LPARAM>(&owned));
+    if (owned.found) return owned.found;
 
-        SetLastError(ERROR_SUCCESS);
-        const auto previous_data = SetWindowLongPtrW(
-            window_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&context_));
-        if (previous_data == 0 && GetLastError() != ERROR_SUCCESS) {
-            if (context_.previous_proc) {
-                (void)SetWindowLongPtrW(
-                    window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(context_.previous_proc));
-            }
-            DestroyWindow(window_);
-            window_ = nullptr;
-            return;
-        }
+    // Common Item Dialog ownership can be mediated by shell windows on hosted
+    // desktops. The worker is dedicated to exactly one file request, so a
+    // visible top-level fallback on that thread is still request-local.
+    DialogWindowSearch fallback{};
+    (void)EnumThreadWindows(
+        thread_id, &find_dialog_window_callback, reinterpret_cast<LPARAM>(&fallback));
+    return fallback.found;
+}
 
-        state_.close_window.store(window_, std::memory_order_release);
-    }
-
-    ~DialogCloseChannel() {
-        if (!window_) return;
-        HWND expected = window_;
-        (void)state_.close_window.compare_exchange_strong(
-            expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
-        (void)SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
-        if (context_.previous_proc) {
-            (void)SetWindowLongPtrW(
-                window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(context_.previous_proc));
-        }
-        DestroyWindow(window_);
-    }
-
-    DialogCloseChannel(const DialogCloseChannel&) = delete;
-    DialogCloseChannel& operator=(const DialogCloseChannel&) = delete;
-
-    [[nodiscard]] bool valid() const noexcept { return window_ != nullptr; }
-
-private:
-    RequestState& state_;
-    HWND window_{};
-    DialogCloseWindowContext context_{};
-};
-
-inline void request_dialog_close(const std::shared_ptr<RequestState>& state) noexcept {
+inline void request_dialog_close(const std::shared_ptr<RequestState>& state,
+                                 HWND parent) noexcept {
     if (!state || state->worker_finished.load(std::memory_order_acquire)) return;
-    const HWND window = state->close_window.load(std::memory_order_acquire);
-    if (window) {
-        (void)PostMessageW(window, kDialogCloseMessage, 0, 0);
+
+    // Cancellation may race the tiny interval between the worker checking its
+    // flag and the shell creating the modal HWND. Search only this request's
+    // dedicated worker thread and retry for a small fixed interval. If the
+    // worker observes cancellation before Show(), it exits without a dialog;
+    // if Show() wins the race, WM_CLOSE is delivered to the actual modal HWND.
+    constexpr int kMaxCloseSearchAttempts = 40;
+    constexpr DWORD kCloseSearchSleepMs = 5;
+    for (int attempt = 0; attempt < kMaxCloseSearchAttempts; ++attempt) {
+        if (state->worker_finished.load(std::memory_order_acquire)) return;
+        const DWORD thread_id = state->worker_thread_id.load(std::memory_order_acquire);
+        if (const HWND dialog = find_dialog_window(thread_id, parent)) {
+            (void)PostMessageW(dialog, WM_CLOSE, 0, 0);
+            return;
+        }
+        Sleep(kCloseSearchSleepMs);
     }
 }
 
@@ -361,6 +312,7 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
                             OpenFileOptions options,
                             DirectoryOptions directory_options,
                             FileDialogCallback completion) noexcept {
+    state->worker_thread_id.store(GetCurrentThreadId(), std::memory_order_release);
     FileDialogResult result;
     try {
         ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
@@ -403,24 +355,19 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
 
                     if (!configured) {
                         result = error_result("Windows open dialog configuration failed");
+                    } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                        result = cancelled_result();
                     } else {
-                        DialogCloseChannel close_channel{*state, *dialog.Get()};
-                        if (!close_channel.valid()) {
-                            result = error_result("Windows file dialog cancellation channel failed");
-                        } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                        const HRESULT show_result = dialog->Show(parent);
+                        if (state->cancel_requested.load(std::memory_order_acquire) ||
+                            show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
                             result = cancelled_result();
+                        } else if (FAILED(show_result)) {
+                            result = error_result("IFileOpenDialog Show failed");
+                        } else if (kind == OpenDialogKind::MultipleFiles) {
+                            result = collect_multiple_results(*dialog.Get());
                         } else {
-                            const HRESULT show_result = dialog->Show(parent);
-                            if (state->cancel_requested.load(std::memory_order_acquire) ||
-                                show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-                                result = cancelled_result();
-                            } else if (FAILED(show_result)) {
-                                result = error_result("IFileOpenDialog Show failed");
-                            } else if (kind == OpenDialogKind::MultipleFiles) {
-                                result = collect_multiple_results(*dialog.Get());
-                            } else {
-                                result = collect_single_result(*dialog.Get());
-                            }
+                            result = collect_single_result(*dialog.Get());
                         }
                     }
                 }
@@ -441,6 +388,7 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
                             HWND parent,
                             SaveFileOptions options,
                             FileDialogCallback completion) noexcept {
+    state->worker_thread_id.store(GetCurrentThreadId(), std::memory_order_release);
     FileDialogResult result;
     try {
         ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
@@ -473,22 +421,17 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
 
                 if (!configured) {
                     result = error_result("Windows save dialog configuration failed");
+                } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                    result = cancelled_result();
                 } else {
-                    DialogCloseChannel close_channel{*state, *dialog.Get()};
-                    if (!close_channel.valid()) {
-                        result = error_result("Windows save dialog cancellation channel failed");
-                    } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                    const HRESULT show_result = dialog->Show(parent);
+                    if (state->cancel_requested.load(std::memory_order_acquire) ||
+                        show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
                         result = cancelled_result();
+                    } else if (FAILED(show_result)) {
+                        result = error_result("IFileSaveDialog Show failed");
                     } else {
-                        const HRESULT show_result = dialog->Show(parent);
-                        if (state->cancel_requested.load(std::memory_order_acquire) ||
-                            show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
-                            result = cancelled_result();
-                        } else if (FAILED(show_result)) {
-                            result = error_result("IFileSaveDialog Show failed");
-                        } else {
-                            result = collect_single_result(*dialog.Get());
-                        }
+                        result = collect_single_result(*dialog.Get());
                     }
                 }
             }
@@ -529,7 +472,7 @@ public:
         }
 
         for (const auto& request : requests) {
-            request_dialog_close(request);
+            request_dialog_close(request, parent_);
         }
         for (const auto& request : requests) {
             if (request->worker.joinable()) request->worker.join();
@@ -636,7 +579,7 @@ public:
             }
             request = found->second;
         }
-        request_dialog_close(request);
+        request_dialog_close(request, parent_);
         return true;
     }
 
