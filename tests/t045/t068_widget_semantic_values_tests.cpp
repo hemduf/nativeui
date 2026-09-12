@@ -18,6 +18,14 @@ void check(bool condition, const char* expression, int line) {
 
 #define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
+void label_value_contract() {
+    const auto info = ui::detail::label_semantic_info("Status ready");
+    T068_CHECK(info.role == ui::SemanticRole::Text);
+    T068_CHECK(info.name == "Status ready");
+    T068_CHECK(!info.focusable);
+    T068_CHECK(info.actions.empty());
+}
+
 void checkbox_value_contract() {
     const auto checked = ui::detail::checkbox_semantic_info("Enabled", true);
     T068_CHECK(checked.role == ui::SemanticRole::Checkbox);
@@ -138,6 +146,7 @@ void text_edit_value_contract() {
 
 int main() {
     try {
+        label_value_contract();
         checkbox_value_contract();
         radio_value_contract();
         toggle_value_contract();
