@@ -20,11 +20,13 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` is `1ddb6b89d9c1f49f4baff1a73cd21e69bfcae038` and includes T063 / PR #227 plus the completed T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations.
+Current `main` is `07690842bab94f2d975685d28e0d2b0c1c0fc9d4` and includes T072 / PR #185 plus the completed T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations.
 
 T063 is complete. Its executable candidate `e907bd3119f59116522b1e672e690703c845f1e6` passed normal CI and the completion candidate passed T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
 
-T072 / issue #84 / PR #185 has completed implementation, current-main synchronization and exact-head qualification. Exact candidate `b5658be1cc4af872642811790bd5821149a885f5` passed normal CI `34631977571`, T072 Linux D-Bus Contract `34631977574`, T060 Application Contract `34631977534`, T065 Platform Dispatcher `34631977512`, T067 Virtual List Contract `34631977511`, T042 Lifecycle Stress `34637714563` and T052 v0.1 Release Gate `34637714484`. Reviews `5181043847` and `5182564487` record the complete #84 evidence matrix and no remaining Blocking/Important finding. Completion-only project-state synchronization is the final pre-merge step.
+T072 / issue #84 / PR #185 is merged on `main` as `07690842bab94f2d975685d28e0d2b0c1c0fc9d4`. Exact candidate `b5658be1cc4af872642811790bd5821149a885f5` passed normal CI `34631977571`, T072 Linux D-Bus Contract `34631977574`, T060 Application Contract `34631977534`, T065 Platform Dispatcher `34631977512`, T067 Virtual List Contract `34631977511`, T042 Lifecycle Stress `34637714563` and T052 v0.1 Release Gate `34637714484`. Reviews `5181043847` and `5182564487` record the complete #84 evidence matrix and no remaining Blocking/Important finding. T064 is now Ready and should start immediately.
+
+T062 / issue #74 / PR #226 is implementation-complete on `feat/t062-tooltip`, synchronized with `main`, with full Release and ASan/UBSan local suites, deterministic self-test and native standalone/EmbeddedView platform smoke green. It delivers the last dynamic/overlay convergence item before T068; exact-head normal/path-scoped CI and Ready-only T042/T052 qualification are the remaining merge steps.
 
 Current dependency frontier:
 
@@ -35,7 +37,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
 dynamic/overlay:   T058(done) -> T061(done)
                                       |-> T035(done) --------------------> T068
                                       |-> T063(done) --------------------> T068
-                                      +-> T062
+                                      +-> T062(complete, PR #226) -------> T068
 
 style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
@@ -47,14 +49,14 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(done) -> T072(completion) -> T064
+critical platform: T060(done) -> T065(done) -> T072(done) -> T064
                    T041(done) -> T043(done) -> T066
                                       |-------> T068
 
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 depends on T072 and must not start before T072 is actually merged/Done. T066 is independently unblocked by completed T043 and must progress in parallel rather than waiting for T072. T044 remains an explicit T071 dependency and is qualified independently.
+T064 depends on merged/Done T072 and is now Ready. T066 is independently unblocked by completed T043 and must progress in parallel rather than waiting for T072. T044 remains an explicit T071 dependency and is qualified independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -112,7 +114,7 @@ Delivered foundations include plug-in host isolation, standalone ownership Decis
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T063 Dialog and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog and T045 semantic architecture.
 
 ### Build/example registration hardening
 
@@ -129,6 +131,10 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 ### T063 — Dialog
 
 **Complete in PR #227 / issue #75.** Dialog remains policy over T061 rather than a second modal/window manager. It provides one active Dialog slot per UI, validated action/result IDs, Default/Cancel semantics, styleable backdrop, bounded centered sizing, fixed title/actions, T034 scrolling for overflow, no-click-through pointer behavior, trapped focus/restoration, child-first Enter behavior, Escape Cancel/Dismissed policy, exact-once completion, safe controller/UI teardown, per-UI isolation and close-before-callback reentrancy.
+
+### T062 — Tooltip
+
+**Complete in PR #226 / issue #74.** A text-only retained decorator over T061/T065: exact 500 ms default delay with zero-delay checkpoint deferral, one per-instance timer/eligibility controller, no warm-up or cross-anchor reuse, shared hover/focus delay with full restart on new transitions, a `NonModal`/`Auto`/`Ignore` overlay that is non-focusable and non-hit-testable, deterministic dismissal (pointer/focus loss, PointerDown, Escape, Hidden/Collapsed/Disabled, removal, deactivation, overlay opening) with suppression until a new eligibility transition, and semantic help published through the T045 `Component::semantics()` seam independently of the rendered overlay. The native window `Impl` objects now expose the per-view T065 dispatcher so retained policies work through real Pugl events; deterministic unit coverage, an example self-test and standalone + EmbeddedView platform smoke are part of normal CI.
 
 ### T072 — Bounded Linux D-Bus transport
 
@@ -154,9 +160,10 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 ### Final v1 release path
 
 ```text
-T036(done) -> T045(done) -> T067(done) --------------------\
-T058(done) -> T061(done) -> T035(done) -> T063(done) -------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
-T065(done) -> T072(completion) -> T064 ---------------------+
+T036(done) -> T045(done) -> T067(done) ---------------------\
+T058(done) -> T061(done) -> T035(done) -> T063(done) --------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
+                         \-> T062(complete, PR #226) --------/
+T065(done) -> T072(done) -> T064 ---------------------------+
 T043(done) ---------------------> T066 ----------------------/
 other explicit T069 dependencies ---------------------------/
 ```
@@ -165,9 +172,9 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Merge/close T072 after completion-only metadata synchronization; then start T064 immediately.
-2. Continue T066 independently and treat exact Windows CI evidence as authoritative for the remaining integration regression.
-3. Continue T062 as the next dynamic/overlay convergence item.
+1. Qualify and merge T062 / PR #226 (exact-head normal/path-scoped CI, mandatory review, Ready-only T042/T052 gates); T068's last dynamic/overlay dependency then reaches Done.
+2. Start T064 immediately on merged T072.
+3. Continue T066 independently and treat exact Windows CI evidence as authoritative for the remaining integration regression.
 4. Reconcile/qualify T044 independently when primary platform streams are externally waiting.
 5. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
 6. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
