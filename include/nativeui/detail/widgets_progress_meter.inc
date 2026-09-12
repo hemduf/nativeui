@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -85,6 +86,11 @@ public:
           meter_(meter) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return false; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return bounded_display_semantic_info(
+            state_.get(), domain_.minimum(), domain_.maximum(), meter_);
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         if (orientation_ == ProgressOrientation::Vertical) {
