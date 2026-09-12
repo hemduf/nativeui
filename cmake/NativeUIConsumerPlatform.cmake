@@ -129,15 +129,19 @@ function(_nativeui_platform_opengl_target out_var)
 endfunction()
 
 # The portable Pugl C core is generic and compiled once. Only Cocoa/OpenGL and
-# NativeUI's Objective-C IME bridge are consumer-specific on macOS.
+# NativeUI's Objective-C IME bridge are consumer-specific on macOS. T064's
+# Objective-C++ desktop-service backend defines no runtime-visible classes, so
+# it is safe as one hidden NativeUI-owned static target shared by consumers.
 function(_nativeui_prepare_macos_platform_common)
   if(NOT APPLE OR TARGET nativeui_pugl_common)
     return()
   endif()
 
-  if(NOT CMAKE_C_COMPILER_LOADED OR NOT CMAKE_OBJC_COMPILER_LOADED)
+  if(NOT CMAKE_C_COMPILER_LOADED OR
+     NOT CMAKE_OBJC_COMPILER_LOADED OR
+     NOT CMAKE_OBJCXX_COMPILER_LOADED)
     message(FATAL_ERROR
-      "NativeUI macOS platform attachment requires C and OBJC languages to be enabled at file scope before platform helpers are used")
+      "NativeUI macOS platform attachment requires C, OBJC and OBJCXX languages to be enabled at file scope before platform helpers are used")
   endif()
 
   _nativeui_platform_opengl_target(_nativeui_opengl_target)
@@ -182,6 +186,28 @@ function(_nativeui_prepare_macos_platform_common)
     "${_nativeui_foundation}"
     "${_nativeui_corevideo}"
   )
+
+  if(NOT TARGET nativeui_macos_desktop_services)
+    find_library(_nativeui_uniform_type_identifiers UniformTypeIdentifiers REQUIRED)
+    add_library(nativeui_macos_desktop_services STATIC
+      "${_nativeui_root}/src/detail/macos_desktop_services_backend.mm"
+    )
+    set_target_properties(nativeui_macos_desktop_services PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      CXX_VISIBILITY_PRESET hidden
+      OBJCXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN YES
+    )
+    target_compile_features(nativeui_macos_desktop_services PRIVATE cxx_std_20)
+    target_link_libraries(nativeui_macos_desktop_services
+      PRIVATE NativeUI::Core "${_nativeui_appkit}" "${_nativeui_uniform_type_identifiers}"
+    )
+    if(COMMAND nativeui_enable_project_warnings)
+      nativeui_enable_project_warnings(nativeui_macos_desktop_services)
+    else()
+      target_compile_options(nativeui_macos_desktop_services PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+  endif()
 
   # Dependencies.cmake still defines its historical all-in-one Pugl target for
   # non-macOS platforms. It is intentionally unreachable/excluded on macOS once
@@ -405,6 +431,9 @@ function(_nativeui_attach_consumer_platform)
   target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_platform_target}")
   if(_nativeui_bridge)
     target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_bridge}")
+  endif()
+  if(APPLE AND TARGET nativeui_macos_desktop_services)
+    target_link_libraries("${NUI_TARGET}" PRIVATE nativeui_macos_desktop_services)
   endif()
 
   set_property(TARGET "${NUI_TARGET}" PROPERTY
