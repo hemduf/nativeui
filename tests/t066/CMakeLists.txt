@@ -61,3 +61,20 @@ _nativeui_attach_consumer_platform(
 )
 nativeui_enable_project_warnings(nativeui_t066_destroy_survivor_tests)
 nativeui_enable_sanitizers(nativeui_t066_destroy_survivor_tests)
+
+# Exercise the exact feature example with a normal consumer-scoped bridge.
+# Root macOS CI intentionally shares one bridge across most examples for build
+# speed; T066 changes the native window delegate close lifecycle, so its exact
+# example must be qualified with the production consumer-isolation contract.
+add_executable(nativeui_t066_window_controls_example
+  "${NATIVEUI_SOURCE_DIR}/examples/features/t066_window_controls.cpp"
+)
+target_include_directories(nativeui_t066_window_controls_example PRIVATE
+  "${NATIVEUI_SOURCE_DIR}/examples/features"
+)
+_nativeui_attach_consumer_platform(
+  TARGET nativeui_t066_window_controls_example
+  CONSUMER_ID org.nativeui.test.t066-window-controls-example
+)
+nativeui_enable_project_warnings(nativeui_t066_window_controls_example)
+nativeui_enable_sanitizers(nativeui_t066_window_controls_example)
