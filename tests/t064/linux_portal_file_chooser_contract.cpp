@@ -179,13 +179,12 @@ private:
            std::to_string(id);
 }
 
-[[nodiscard]] bool complete_initial(FakePortalBus& bus,
-                                    std::size_t call_index,
-                                    std::string handle) {
+void complete_initial(FakePortalBus& bus,
+                      std::size_t call_index,
+                      std::string handle) {
     LinuxDbusCompletion reply;
     reply.values = {LinuxDbusValue::object_path(std::move(handle))};
     bus.complete_call(call_index, std::move(reply));
-    return true;
 }
 
 } // namespace
