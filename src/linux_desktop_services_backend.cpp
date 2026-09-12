@@ -80,24 +80,27 @@ std::shared_ptr<DesktopServicesBackend> make_linux_desktop_services_backend(
         return {};
     }
 
-    std::shared_ptr<LinuxPortalBus> bus;
+    std::shared_ptr<T072LinuxPortalBus> transport_bus;
     try {
-        auto transport_bus =
+        transport_bus =
             std::make_shared<T072LinuxPortalBus>(application, *operations, client);
-        bus = std::make_shared<LinuxPortalParentBus>(
-            std::move(transport_bus), std::move(parent_window));
     } catch (...) {
-        // If T072LinuxPortalBus was constructed, its destructor owns release.
-        // If its allocation failed, no object exists to own the client yet.
-        // Detect that case through the still-empty wrapper pointer.
-        if (!bus) {
-            ApplicationBackendAccess::release_linux_dbus_client(application, client);
-        }
+        // No RAII owner exists yet.
+        ApplicationBackendAccess::release_linux_dbus_client(application, client);
+        return {};
+    }
+
+    std::shared_ptr<LinuxPortalBus> portal_bus;
+    try {
+        portal_bus = std::make_shared<LinuxPortalParentBus>(
+            transport_bus, std::move(parent_window));
+    } catch (...) {
+        // transport_bus is now the sole client owner and releases exactly once.
         return {};
     }
 
     return make_linux_portal_desktop_services_backend(
-        std::move(bus), std::move(dispatcher), client);
+        std::move(portal_bus), std::move(dispatcher), client);
 }
 
 } // namespace ui::detail
