@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/desktop_services.hpp>
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/ui.hpp>
 
@@ -104,6 +105,7 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services() noexcept;
     bool set_size(Size logical_size);
 
     /// Advisory logical preferred-size notification for external owners.
@@ -135,6 +137,10 @@ private:
 class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
+    EmbeddedView(UI& ui,
+                 NativeParentHandle parent,
+                 Size size,
+                 std::shared_ptr<DesktopServicesBackend> desktop_services_backend);
     ~EmbeddedView() override;
 
     EmbeddedView(const EmbeddedView&) = delete;
@@ -151,6 +157,7 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
+    [[nodiscard]] DesktopServices& desktop_services() noexcept;
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding
