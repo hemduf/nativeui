@@ -86,7 +86,10 @@
 
             const bool old_collapsed = old.visibility == VisibilityMode::Collapsed;
             const bool new_collapsed = change.value.visibility == VisibilityMode::Collapsed;
-            layout_changed = layout_changed || old_collapsed != new_collapsed;
+            const bool style_layout_changed =
+                change.node->component->availability_change_affects_layout(old, change.value);
+            layout_changed = layout_changed || old_collapsed != new_collapsed ||
+                style_layout_changed;
             focus_changed = focus_changed ||
                 old.visibility != change.value.visibility || old.enabled != change.value.enabled;
             paint_changed = true;

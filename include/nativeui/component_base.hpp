@@ -507,6 +507,14 @@ public:
 
 private:
     friend class Tree;
+    /// Internal availability transition hook used by T038 style-aware widgets.
+    /// Most components have geometry that is independent from Enabled/ReadOnly
+    /// state and therefore keep the default paint-only invalidation behavior.
+    [[nodiscard]] virtual bool availability_change_affects_layout(
+        const ComponentAvailability&,
+        const ComponentAvailability&) const {
+        return false;
+    }
     void set_effective_availability(ComponentAvailability value) noexcept {
         effective_availability_ = value;
     }
