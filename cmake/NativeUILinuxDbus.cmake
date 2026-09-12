@@ -54,11 +54,14 @@ function(nativeui_add_linux_dbus_transport)
       "${_nativeui_source_root}/src/linux_dbus_codec.cpp"
       "${_nativeui_source_root}/src/linux_dbus_client_operations.cpp"
       "${_nativeui_source_root}/src/linux_application_backend.cpp"
+      "${_nativeui_source_root}/src/linux_portal_desktop_services.cpp"
+      "${_nativeui_source_root}/src/linux_desktop_services_backend.cpp"
       "${_nativeui_source_root}/src/detail/linux_dbus.hpp"
       "${_nativeui_source_root}/src/detail/linux_dbus_codec.hpp"
       "${_nativeui_source_root}/src/detail/linux_dbus_client_operations.hpp"
       "${_nativeui_source_root}/src/detail/linux_dbus_application_transport_owner.hpp"
-      "${_nativeui_source_root}/src/detail/application_platform_state.hpp")
+      "${_nativeui_source_root}/src/detail/application_platform_state.hpp"
+      "${_nativeui_source_root}/src/detail/linux_desktop_services.hpp")
     if(NOT EXISTS "${_nativeui_required}")
       message(FATAL_ERROR
         "NativeUI Linux D-Bus package is incomplete: ${_nativeui_required}")
@@ -76,7 +79,9 @@ function(nativeui_add_linux_dbus_transport)
   )
   if(NOT NUI_TRANSPORT_ONLY)
     list(APPEND _nativeui_linux_dbus_sources
-      "${_nativeui_source_root}/src/linux_application_backend.cpp")
+      "${_nativeui_source_root}/src/linux_application_backend.cpp"
+      "${_nativeui_source_root}/src/linux_portal_desktop_services.cpp"
+      "${_nativeui_source_root}/src/linux_desktop_services_backend.cpp")
   endif()
 
   add_library(nativeui_linux_dbus STATIC ${_nativeui_linux_dbus_sources})
@@ -119,6 +124,8 @@ if(EXISTS "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus.cpp")
       "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus_codec.cpp"
       "${_nativeui_linux_dbus_module_source_root}/src/linux_dbus_client_operations.cpp"
       "${_nativeui_linux_dbus_module_source_root}/src/linux_application_backend.cpp"
+      "${_nativeui_linux_dbus_module_source_root}/src/linux_portal_desktop_services.cpp"
+      "${_nativeui_linux_dbus_module_source_root}/src/linux_desktop_services_backend.cpp"
       DESTINATION "${NATIVEUI_INSTALL_SOURCE_DIR}/src"
     )
   endif()
