@@ -83,3 +83,21 @@ target_include_directories(t064_linux_portal_file_chooser_contract PRIVATE
 )
 t064_enable_warnings(t064_linux_portal_file_chooser_contract)
 add_test(NAME t064.linux_portal_file_chooser_contract COMMAND t064_linux_portal_file_chooser_contract)
+
+if(APPLE)
+  enable_language(OBJCXX)
+  add_executable(t064_macos_backend_contract
+    macos_backend_contract.mm
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/macos_desktop_services_backend.mm"
+  )
+  target_include_directories(t064_macos_backend_contract PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../include"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src"
+  )
+  target_link_libraries(t064_macos_backend_contract PRIVATE
+    "-framework AppKit"
+    "-framework UniformTypeIdentifiers"
+  )
+  t064_enable_warnings(t064_macos_backend_contract)
+  add_test(NAME t064.macos_backend_contract COMMAND t064_macos_backend_contract)
+endif()
