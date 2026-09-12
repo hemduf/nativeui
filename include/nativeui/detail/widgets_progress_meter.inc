@@ -103,11 +103,7 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return false; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto resolved = resolved_style();
-        if (orientation_ == ProgressOrientation::Vertical) {
-            return formatter_ ? resolved.vertical_formatted_size : resolved.vertical_size;
-        }
-        return formatter_ ? resolved.horizontal_formatted_size : resolved.horizontal_size;
+        return preferred_size(resolved_style());
     }
 
     void mount(MountContext& context) override {
@@ -148,22 +144,47 @@ public:
     }
 
 private:
-    [[nodiscard]] VisualState current_visual_state() const noexcept {
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const override {
+        const auto before_size = preferred_size(resolved_style(before));
+        const auto after_size = preferred_size(resolved_style(after));
+        return before_size.w != after_size.w || before_size.h != after_size.h;
+    }
+
+    [[nodiscard]] Size preferred_size(const ResolvedProgressStyle& resolved) const noexcept {
+        if (orientation_ == ProgressOrientation::Vertical) {
+            return formatter_ ? resolved.vertical_formatted_size : resolved.vertical_size;
+        }
+        return formatter_ ? resolved.horizontal_formatted_size : resolved.horizontal_size;
+    }
+
+    [[nodiscard]] static VisualState visual_state(
+        const ComponentAvailability& availability) noexcept {
         return VisualState{
-            .enabled = effective_enabled(),
-            .read_only = effective_read_only(),
+            .enabled = availability.enabled,
+            .read_only = availability.read_only,
         };
     }
 
-    [[nodiscard]] ResolvedProgressStyle resolved_style() const {
+    [[nodiscard]] VisualState current_visual_state() const noexcept {
+        return visual_state(effective_availability());
+    }
+
+    [[nodiscard]] ResolvedProgressStyle resolved_style(
+        const ComponentAvailability& availability) const {
         if (meter_) {
             return resolve_meter_style(
-                default_meter_style(current_theme()), meter_style_, current_visual_state());
+                default_meter_style(current_theme()), meter_style_, visual_state(availability));
         }
         return resolve_progress_bar_style(
             default_progress_bar_style(current_theme()),
             progress_style_,
-            current_visual_state());
+            visual_state(availability));
+    }
+
+    [[nodiscard]] ResolvedProgressStyle resolved_style() const {
+        return resolved_style(effective_availability());
     }
 
     State<float>& state_;
