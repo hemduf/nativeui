@@ -9,6 +9,7 @@
 #endif
 #include <windows.h>
 #include <objbase.h>
+#include <objidl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
@@ -185,7 +186,7 @@ struct RequestState final {
     std::atomic<bool> cancel_requested{false};
     std::atomic<bool> worker_finished{false};
     std::mutex marshal_mutex;
-    IStream* marshaled_dialog{};
+    DWORD dialog_cookie{};
     std::thread worker;
 };
 
@@ -210,54 +211,93 @@ inline void arbitrate_worker_result(RequestState& state,
     state.worker_finished.store(true, std::memory_order_release);
 }
 
-[[nodiscard]] inline IStream* take_marshaled_dialog(RequestState& state) noexcept {
+[[nodiscard]] inline ComPtr<IGlobalInterfaceTable> make_global_interface_table() noexcept {
+    ComPtr<IGlobalInterfaceTable> table;
+    if (FAILED(CoCreateInstance(
+            CLSID_StdGlobalInterfaceTable,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&table)))) {
+        table.Reset();
+    }
+    return table;
+}
+
+[[nodiscard]] inline DWORD registered_dialog_cookie(RequestState& state) noexcept {
     std::lock_guard lock{state.marshal_mutex};
-    IStream* stream = state.marshaled_dialog;
-    state.marshaled_dialog = nullptr;
-    return stream;
+    return state.dialog_cookie;
 }
 
-inline void release_marshaled_dialog_on_worker(RequestState& state) noexcept {
-    IStream* stream = take_marshaled_dialog(state);
-    if (!stream) return;
-    (void)CoReleaseMarshalData(stream);
-    stream->Release();
+[[nodiscard]] inline DWORD take_registered_dialog_cookie(RequestState& state) noexcept {
+    std::lock_guard lock{state.marshal_mutex};
+    const DWORD cookie = state.dialog_cookie;
+    state.dialog_cookie = 0;
+    return cookie;
 }
 
-inline void request_marshaled_close(const std::shared_ptr<RequestState>& state) noexcept {
-    if (!state) return;
-    IStream* stream = take_marshaled_dialog(*state);
-    if (!stream) return;
+inline void revoke_registered_dialog_on_worker(RequestState& state) noexcept {
+    const DWORD cookie = take_registered_dialog_cookie(state);
+    if (cookie == 0) return;
+    auto table = make_global_interface_table();
+    if (table) {
+        (void)table->RevokeInterfaceFromGlobal(cookie);
+    }
+}
+
+inline void request_registered_close(const std::shared_ptr<RequestState>& state) noexcept {
+    if (!state || state->worker_finished.load(std::memory_order_acquire)) return;
 
     ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
-    if (!apartment.usable()) {
-        std::lock_guard lock{state->marshal_mutex};
-        if (!state->marshaled_dialog) {
-            state->marshaled_dialog = stream;
-            return;
-        }
-        stream->Release();
+    if (!apartment.usable()) return;
+
+    auto table = make_global_interface_table();
+    if (!table) return;
+
+    const DWORD cookie = registered_dialog_cookie(*state);
+    if (cookie == 0) return;
+
+    ComPtr<IFileDialog> dialog;
+    if (FAILED(table->GetInterfaceFromGlobal(cookie, IID_PPV_ARGS(&dialog))) || !dialog) {
         return;
     }
 
-    IFileDialog* dialog = nullptr;
-    const HRESULT result = CoGetInterfaceAndReleaseStream(
-        stream, IID_IFileDialog, reinterpret_cast<void**>(&dialog));
-    if (SUCCEEDED(result) && dialog) {
-        (void)dialog->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-        dialog->Release();
+    // Common-item dialogs may transiently reject a cross-apartment Close while
+    // their modal loop is entering a nested COM call. Cancellation owns the
+    // terminal result before this function runs, so a few bounded retries are
+    // safe and prevent a successful cancel() from leaving teardown blocked on
+    // a still-visible modal worker. The GIT cookie remains valid until the
+    // worker exits, so destruction may also retry without a raw cross-thread
+    // interface pointer or process-global NativeUI registry.
+    constexpr int kMaxCloseAttempts = 8;
+    for (int attempt = 0; attempt < kMaxCloseAttempts; ++attempt) {
+        const HRESULT result = dialog->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+        if (SUCCEEDED(result) || state->worker_finished.load(std::memory_order_acquire)) {
+            return;
+        }
+        if (result != RPC_E_CALL_REJECTED && result != RPC_E_SERVERCALL_RETRYLATER) {
+            return;
+        }
+        Sleep(10);
     }
 }
 
-[[nodiscard]] inline bool prepare_marshaled_dialog(RequestState& state,
-                                                   IFileDialog& dialog) {
-    IStream* stream = nullptr;
-    if (FAILED(CoMarshalInterThreadInterfaceInStream(
-            IID_IFileDialog, &dialog, &stream)) || !stream) {
+[[nodiscard]] inline bool prepare_registered_dialog(RequestState& state,
+                                                     IFileDialog& dialog) {
+    auto table = make_global_interface_table();
+    if (!table) return false;
+
+    DWORD cookie = 0;
+    if (FAILED(table->RegisterInterfaceInGlobal(&dialog, IID_IFileDialog, &cookie)) ||
+        cookie == 0) {
         return false;
     }
+
     std::lock_guard lock{state.marshal_mutex};
-    state.marshaled_dialog = stream;
+    if (state.dialog_cookie != 0) {
+        (void)table->RevokeInterfaceFromGlobal(cookie);
+        return false;
+    }
+    state.dialog_cookie = cookie;
     return true;
 }
 
@@ -353,7 +393,7 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
 
                     if (!configured) {
                         result = error_result("Windows open dialog configuration failed");
-                    } else if (!prepare_marshaled_dialog(*state, *dialog.Get())) {
+                    } else if (!prepare_registered_dialog(*state, *dialog.Get())) {
                         result = error_result("Windows file dialog cancellation channel failed");
                     } else if (state->cancel_requested.load(std::memory_order_acquire)) {
                         result = cancelled_result();
@@ -370,12 +410,12 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
                             result = collect_single_result(*dialog.Get());
                         }
                     }
-                    release_marshaled_dialog_on_worker(*state);
+                    revoke_registered_dialog_on_worker(*state);
                 }
             }
         }
     } catch (...) {
-        release_marshaled_dialog_on_worker(*state);
+        revoke_registered_dialog_on_worker(*state);
         result = error_result("Unexpected Windows open dialog failure");
     }
 
@@ -422,7 +462,7 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
 
                 if (!configured) {
                     result = error_result("Windows save dialog configuration failed");
-                } else if (!prepare_marshaled_dialog(*state, *dialog.Get())) {
+                } else if (!prepare_registered_dialog(*state, *dialog.Get())) {
                     result = error_result("Windows save dialog cancellation channel failed");
                 } else if (state->cancel_requested.load(std::memory_order_acquire)) {
                     result = cancelled_result();
@@ -437,11 +477,11 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
                         result = collect_single_result(*dialog.Get());
                     }
                 }
-                release_marshaled_dialog_on_worker(*state);
+                revoke_registered_dialog_on_worker(*state);
             }
         }
     } catch (...) {
-        release_marshaled_dialog_on_worker(*state);
+        revoke_registered_dialog_on_worker(*state);
         result = error_result("Unexpected Windows save dialog failure");
     }
 
@@ -477,7 +517,7 @@ public:
         }
 
         for (const auto& request : requests) {
-            request_marshaled_close(request);
+            request_registered_close(request);
         }
         for (const auto& request : requests) {
             if (request->worker.joinable()) request->worker.join();
@@ -584,7 +624,7 @@ public:
             }
             request = found->second;
         }
-        request_marshaled_close(request);
+        request_registered_close(request);
         return true;
     }
 
