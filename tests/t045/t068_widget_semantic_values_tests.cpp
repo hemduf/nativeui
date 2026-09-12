@@ -112,6 +112,28 @@ void bounded_display_value_contract() {
     T068_CHECK(*non_finite.numeric_value == -2.0);
 }
 
+void text_edit_value_contract() {
+    const auto single_line = ui::detail::text_edit_semantic_info(
+        "Name", "Ada", false);
+    T068_CHECK(single_line.role == ui::SemanticRole::TextInput);
+    T068_CHECK(single_line.name == "Name");
+    T068_CHECK(single_line.text_value.has_value());
+    T068_CHECK(*single_line.text_value == "Ada");
+    T068_CHECK(single_line.focusable);
+    T068_CHECK(single_line.supports(ui::SemanticAction::SetValue));
+    T068_CHECK(single_line.supports(ui::SemanticAction::Focus));
+
+    const auto multiline = ui::detail::text_edit_semantic_info(
+        "Notes", "line one\nline two", true);
+    T068_CHECK(multiline.role == ui::SemanticRole::TextArea);
+    T068_CHECK(multiline.name == "Notes");
+    T068_CHECK(multiline.text_value.has_value());
+    T068_CHECK(*multiline.text_value == "line one\nline two");
+    T068_CHECK(multiline.focusable);
+    T068_CHECK(multiline.supports(ui::SemanticAction::SetValue));
+    T068_CHECK(multiline.supports(ui::SemanticAction::Focus));
+}
+
 } // namespace
 
 int main() {
@@ -121,6 +143,7 @@ int main() {
         toggle_value_contract();
         slider_value_contract();
         bounded_display_value_contract();
+        text_edit_value_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
