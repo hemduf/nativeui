@@ -15,6 +15,7 @@ std::string status_text(ui::DesktopServiceStatus status) {
     case ui::DesktopServiceStatus::Accepted: return "Accepted";
     case ui::DesktopServiceStatus::Cancelled: return "Cancelled";
     case ui::DesktopServiceStatus::Busy: return "Busy";
+    case ui::DesktopServiceStatus::ResourceLimit: return "ResourceLimit";
     case ui::DesktopServiceStatus::Unsupported: return "Unsupported";
     case ui::DesktopServiceStatus::InvalidArgument: return "InvalidArgument";
     case ui::DesktopServiceStatus::Error: return "Error";

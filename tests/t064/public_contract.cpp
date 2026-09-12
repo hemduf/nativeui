@@ -53,6 +53,7 @@ int main() {
              ui::DesktopServiceStatus::Accepted,
              ui::DesktopServiceStatus::Cancelled,
              ui::DesktopServiceStatus::Busy,
+             ui::DesktopServiceStatus::ResourceLimit,
              ui::DesktopServiceStatus::Unsupported,
              ui::DesktopServiceStatus::InvalidArgument,
              ui::DesktopServiceStatus::Error,
