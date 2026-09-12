@@ -61,3 +61,14 @@ target_include_directories(t064_inline_backend_contract PRIVATE
 )
 t064_enable_warnings(t064_inline_backend_contract)
 add_test(NAME t064.inline_backend_contract COMMAND t064_inline_backend_contract)
+
+add_executable(t064_linux_portal_open_uri_contract
+  linux_portal_open_uri_contract.cpp
+  "${CMAKE_CURRENT_LIST_DIR}/../../src/linux_portal_desktop_services.cpp"
+)
+target_include_directories(t064_linux_portal_open_uri_contract PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/../../include"
+  "${CMAKE_CURRENT_LIST_DIR}/../../src"
+)
+t064_enable_warnings(t064_linux_portal_open_uri_contract)
+add_test(NAME t064.linux_portal_open_uri_contract COMMAND t064_linux_portal_open_uri_contract)
