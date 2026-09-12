@@ -100,4 +100,12 @@ if(APPLE)
   )
   t064_enable_warnings(t064_macos_backend_contract)
   add_test(NAME t064.macos_backend_contract COMMAND t064_macos_backend_contract)
+elseif(WIN32)
+  add_executable(t064_windows_backend_contract windows_backend_contract.cpp)
+  target_include_directories(t064_windows_backend_contract PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../include"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src"
+  )
+  t064_enable_warnings(t064_windows_backend_contract)
+  add_test(NAME t064.windows_backend_contract COMMAND t064_windows_backend_contract)
 endif()
