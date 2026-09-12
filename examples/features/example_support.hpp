@@ -161,7 +161,11 @@ inline int run_window(ui::UI& ui, std::string title, ui::Size size) {
     ui::StandaloneWindow window{
         application,
         ui,
-        ui::WindowDesc{.title = std::move(title), .size = size, .resizable = true}};
+        ui::WindowDesc{.title = std::move(title),
+                       .size = size,
+                       .resizable = true,
+                       .min_size = std::nullopt,
+                       .max_size = std::nullopt}};
     return application.run();
 #endif
 }

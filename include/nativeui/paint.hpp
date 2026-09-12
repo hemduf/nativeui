@@ -417,6 +417,11 @@ public:
     virtual void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         (void)active; (void)area; (void)cursor_offset;
     }
+    // Pointer capture remains owned by the retained tree. These platform-neutral
+    // lifecycle hooks let a concrete native view mirror only real none<->owner
+    // transitions when its OS requires an explicit native pointer grab.
+    virtual void begin_pointer_capture() noexcept {}
+    virtual void end_pointer_capture() noexcept {}
     virtual void set_clipboard_text(std::string_view text) = 0;
     virtual void request_clipboard_text() = 0;
     // Drag-and-drop is synchronous at offer time. The default implementation

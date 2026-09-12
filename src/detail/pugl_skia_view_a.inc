@@ -9,10 +9,10 @@ public:
              std::function<void()> close_callback = {})
         : ui_(ui),
           services_(services),
-          geometry_(desc.size),
+          geometry_(validated_initial_size(desc)),
           close_callback_(std::move(close_callback)) {
-        if (!detail::valid_logical_size(desc.size)) {
-            throw std::invalid_argument("NativeUI initial logical size must be finite and positive");
+        if (!size_constraints_.update(desc.min_size, desc.max_size)) {
+            throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
         }
 
         if (shared_world) {
@@ -45,7 +45,7 @@ public:
         // boundary. Native configure remains authoritative for the actual size.
         record_scale_observation(
             geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
-        const auto initial_physical = geometry_.physical_request(desc.size);
+        const auto initial_physical = geometry_.physical_request(geometry_.logical_size());
         if (!initial_physical) {
             cleanup_and_throw(PUGL_BAD_PARAMETER, "invalid initial logical size");
         }
@@ -79,6 +79,15 @@ public:
 
         record_scale_observation(
             geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
+        // Apply logical min/max only after realization. In particular, Pugl's
+        // macOS realize path builds wrapper-view Auto Layout constraints directly
+        // from pre-realize size hints even though those hints are physical pixels.
+        // Deferring the hints until the native view exists makes Pugl route them
+        // through the platform runtime setters, which convert them to Cocoa points
+        // and avoids a conflicting backing-size constraint during visible resize.
+        if (!apply_size_constraints()) {
+            cleanup_and_throw(PUGL_BAD_PARAMETER, "failed to apply window size constraints");
+        }
         // Initial layout uses the requested logical size so synchronous focus
         // and IME callbacks during show have valid bounds. Subsequent size
         // changes are driven only by authoritative configure snapshots.
@@ -87,6 +96,7 @@ public:
         if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
             cleanup_and_throw(status, "puglShow failed");
         }
+        visible_ = true;
 
         // Attach exposure scheduling only after the native view is visible.
         // The callback replays the already accumulated initial dirty region,
@@ -98,26 +108,7 @@ public:
     }
 
     ~ViewCore() {
-        // Release focus/capture/component activation while PlatformServices is
-        // still alive. PUGL_FOCUS_OUT normally does this earlier, but teardown
-        // must also be deterministic when a host destroys an active view.
-        ui_.deactivate(services_);
-        set_text_input(false, {}, 0.0f);
-        preferred_size_callback_ = {};
-        preferred_size_state_.reset();
-        ui_.clear_invalidation_callback();
-        if (ime_bridge_) {
-            nativeuiImeDestroy(ime_bridge_);
-            ime_bridge_ = nullptr;
-        }
-        if (view_) {
-            // PUGL_UNREALIZE is the graphics-safe teardown point. Pugl enters
-            // the backend context for this event before destroying the native
-            // GL context.
-            (void)puglUnrealize(view_);
-            puglFreeView(view_);
-            view_ = nullptr;
-        }
+        close_native_view();
         if (world_ && owns_world_) {
             puglFreeWorld(world_);
         }
@@ -138,8 +129,9 @@ public:
         return !should_close_;
     }
 
-    void request_close() { should_close_ = true; }
+    void request_close() { (void)close_native_view(); }
     [[nodiscard]] bool should_close() const noexcept { return should_close_; }
+    [[nodiscard]] bool native_view_open() const noexcept { return view_ != nullptr && !should_close_; }
     [[nodiscard]] Size size() const noexcept { return geometry_.logical_size(); }
     [[nodiscard]] float scale_factor() const noexcept { return geometry_.last_valid_scale(); }
     [[nodiscard]] NativeViewHandle native_handle() const noexcept {
@@ -147,11 +139,35 @@ public:
     }
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
+    bool set_title(std::string_view title) {
+        if (!native_view_open()) return false;
+        const std::string owned{title};
+        return puglSetViewString(view_, PUGL_WINDOW_TITLE, owned.c_str()) == PUGL_SUCCESS;
+    }
+
+    bool show() {
+        if (!native_view_open()) return false;
+        if (visible_) return true;
+        if (puglShow(view_, PUGL_SHOW_RAISE) != PUGL_SUCCESS) return false;
+        visible_ = true;
+        return true;
+    }
+
+    bool hide() {
+        if (!native_view_open()) return false;
+        if (!visible_) return true;
+        if (puglHide(view_) != PUGL_SUCCESS) return false;
+        visible_ = false;
+        return true;
+    }
+
     bool set_size(Size logical) {
-        if (!view_) return false;
+        if (!native_view_open()) return false;
+        const auto clamped = size_constraints_.clamp(logical);
+        if (!clamped) return false;
         return detail::submit_logical_size_request(
             geometry_,
-            logical,
+            *clamped,
             [this](Size physical) {
                 return puglSetSizeHint(
                            view_,
@@ -159,6 +175,45 @@ public:
                            to_pugl_span(physical.w),
                            to_pugl_span(physical.h)) == PUGL_SUCCESS;
             });
+    }
+
+    bool set_min_size(std::optional<Size> logical) {
+        return update_size_constraints(logical, size_constraints_.max_size());
+    }
+
+    bool set_max_size(std::optional<Size> logical) {
+        return update_size_constraints(size_constraints_.min_size(), logical);
+    }
+
+    bool close_native_view() {
+        if (!view_) {
+            should_close_ = true;
+            visible_ = false;
+            return false;
+        }
+
+        // Release focus/capture/component activation while PlatformServices is
+        // still alive. This is intentionally safe both for an accepted close
+        // checkpoint and direct C++ destructor teardown.
+        (void)ui_.cancel_pointer(services_);
+        ui_.deactivate(services_);
+        set_text_input(false, {}, 0.0f);
+        preferred_size_callback_ = {};
+        preferred_size_state_.reset();
+        ui_.clear_invalidation_callback();
+        if (ime_bridge_) {
+            nativeuiImeDestroy(ime_bridge_);
+            ime_bridge_ = nullptr;
+        }
+
+        // PUGL_UNREALIZE is the graphics-safe teardown point. Pugl enters the
+        // backend context for this event before destroying the native GL context.
+        (void)puglUnrealize(view_);
+        puglFreeView(view_);
+        view_ = nullptr;
+        visible_ = false;
+        should_close_ = true;
+        return true;
     }
 
     void set_preferred_size_callback(PreferredSizeCallback callback) {
@@ -278,6 +333,59 @@ public:
     }
 
 private:
+    [[nodiscard]] static Size validated_initial_size(const WindowDesc& desc) {
+        detail::WindowSizeConstraints constraints;
+        if (!constraints.update(desc.min_size, desc.max_size)) {
+            throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
+        }
+        const auto clamped = constraints.clamp(desc.size);
+        if (!clamped) {
+            throw std::invalid_argument("NativeUI initial logical size must be finite and positive");
+        }
+        return *clamped;
+    }
+
+    [[nodiscard]] bool apply_size_constraints() {
+        if (!view_) return false;
+        const float scale = geometry_.last_valid_scale();
+
+        const auto min_logical = size_constraints_.min_size();
+        const auto max_logical = size_constraints_.max_size();
+        const Size min_physical = min_logical
+            ? detail::logical_to_physical_size(*min_logical, scale)
+            : Size{1.0f, 1.0f};
+        const Size max_physical = max_logical
+            ? detail::logical_to_physical_size(*max_logical, scale)
+            : Size{static_cast<float>(INT16_MAX), static_cast<float>(INT16_MAX)};
+
+        const auto min_status = puglSetSizeHint(
+            view_, PUGL_MIN_SIZE, to_pugl_span(min_physical.w), to_pugl_span(min_physical.h));
+        if (min_status != PUGL_SUCCESS) return false;
+        const auto max_status = puglSetSizeHint(
+            view_, PUGL_MAX_SIZE, to_pugl_span(max_physical.w), to_pugl_span(max_physical.h));
+        return max_status == PUGL_SUCCESS;
+    }
+
+    [[nodiscard]] bool update_size_constraints(std::optional<Size> min_size,
+                                               std::optional<Size> max_size) {
+        if (!native_view_open()) return false;
+        const auto previous = size_constraints_;
+        if (!size_constraints_.update(min_size, max_size)) return false;
+        if (!apply_size_constraints()) {
+            size_constraints_ = previous;
+            (void)apply_size_constraints();
+            return false;
+        }
+
+        const auto clamped = size_constraints_.clamp(geometry_.logical_size());
+        if (!clamped) return false;
+        if (clamped->w == geometry_.logical_size().w &&
+            clamped->h == geometry_.logical_size().h) {
+            return true;
+        }
+        return set_size(*clamped);
+    }
+
     void record_scale_observation(bool accepted) {
         if (!accepted) {
             last_error_ = "NativeUI ignored invalid platform scale factor";

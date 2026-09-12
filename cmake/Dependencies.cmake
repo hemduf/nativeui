@@ -7,7 +7,7 @@ if(NATIVEUI_BUILD_PLATFORM)
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
   set(NATIVEUI_PUGL_COMMIT
-      "195f79b22644010c81a5e0c3231c591856787ec6"
+      "723474fa43a5d1b08be2446966a4db9007b749c6"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
@@ -47,8 +47,10 @@ if(NATIVEUI_BUILD_PLATFORM)
     # T053 deliberately does not create one generic Objective-C Pugl archive.
     # Only the generic common/internal C sources are shared; mac.m, mac_gl.m
     # and NativeUI's Cocoa IME bridge are compiled by the final-consumer target
-    # factory with the derived consumer-specific runtime prefix.
+    # factory with the derived consumer-specific runtime prefix. T064 adds a
+    # small Objective-C++ desktop-services backend to the same final bridge.
     enable_language(OBJC)
+    enable_language(OBJCXX)
     find_library(APPKIT_FRAMEWORK AppKit REQUIRED)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
     find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
