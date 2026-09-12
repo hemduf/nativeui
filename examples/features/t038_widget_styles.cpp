@@ -79,6 +79,57 @@ int self_test() {
         return example::fail("paint-only interaction variants changed scrollbar geometry");
     }
 
+    ui::ComboBoxStyle combo_style;
+    combo_style.base.fill = ui::Color{0.09f, 0.11f, 0.15f, 1.0f};
+    combo_style.base.control_height = 34.0f;
+    combo_style.base.minimum_width = 132.0f;
+    combo_style.hovered.border = ui::Color{0.28f, 0.52f, 0.76f, 1.0f};
+    combo_style.pressed.border = ui::Color{0.50f, 0.72f, 0.94f, 1.0f};
+    combo_style.disabled.text = ui::Color{0.33f, 0.35f, 0.39f, 1.0f};
+    combo_style.focused.border = ui::Color{0.70f, 0.86f, 1.0f, 1.0f};
+
+    const auto combo_hovered = ui::resolve_combo_box_style(
+        ui::default_combo_box_style(theme),
+        combo_style,
+        ui::VisualState{.enabled = true, .hovered = true, .focused = true});
+    const auto combo_disabled = ui::resolve_combo_box_style(
+        ui::default_combo_box_style(theme),
+        combo_style,
+        ui::VisualState{.enabled = false, .hovered = true, .pressed = true});
+    if (!same_color(combo_hovered.border, *combo_style.focused.border) ||
+        !same_color(combo_disabled.text, *combo_style.disabled.text)) {
+        return example::fail("ComboBoxStyle state resolution precedence is incorrect");
+    }
+    if (combo_hovered.control_height != 34.0f || combo_disabled.control_height != 34.0f ||
+        combo_hovered.minimum_width != 132.0f || combo_disabled.minimum_width != 132.0f) {
+        return example::fail("ComboBoxStyle paint states changed geometry");
+    }
+
+    ui::MenuItemStyle item_style;
+    item_style.base.fill = ui::Color{0.09f, 0.11f, 0.15f, 1.0f};
+    item_style.base.text = ui::Color{0.88f, 0.90f, 0.94f, 1.0f};
+    item_style.base.row_height = 34.0f;
+    item_style.selected.fill = ui::Color{0.18f, 0.38f, 0.60f, 1.0f};
+    item_style.hovered.fill = ui::Color{0.14f, 0.24f, 0.36f, 1.0f};
+    item_style.pressed.fill = ui::Color{0.22f, 0.44f, 0.66f, 1.0f};
+    item_style.disabled.text = ui::Color{0.33f, 0.35f, 0.39f, 1.0f};
+
+    const auto item_selected = ui::resolve_menu_item_style(
+        ui::default_menu_item_style(theme),
+        item_style,
+        ui::VisualState{.enabled = true, .hovered = true, .selected = true});
+    const auto item_disabled = ui::resolve_menu_item_style(
+        ui::default_menu_item_style(theme),
+        item_style,
+        ui::VisualState{.enabled = false, .hovered = true, .pressed = true, .selected = true});
+    if (!same_color(item_selected.fill, *item_style.hovered.fill) ||
+        !same_color(item_disabled.text, *item_style.disabled.text)) {
+        return example::fail("MenuItemStyle state resolution precedence is incorrect");
+    }
+    if (item_selected.row_height != 34.0f || item_disabled.row_height != 34.0f) {
+        return example::fail("MenuItemStyle paint states changed geometry");
+    }
+
     DemoState state;
     auto tree = make_ui(state);
     tree.resize({640.0f, 320.0f});
