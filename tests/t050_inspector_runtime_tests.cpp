@@ -52,6 +52,42 @@ void state_is_per_ui_and_snapshot_is_value_based() {
     NUI_CHECK(snapshot.nodes.size() == original_count);
 }
 
+void snapshot_reports_runtime_hierarchy_bounds_and_child_order() {
+    ui::UI ui{ui::Padding{8.0f, ui::Label{"Hierarchy"}}};
+    ui.resize({160.0f, 100.0f});
+
+    const auto snapshot = ui::debug::inspector_snapshot(ui);
+    NUI_CHECK(snapshot.nodes.size() >= 3);
+
+    const auto& root = snapshot.nodes.front();
+    NUI_CHECK(root.id != ui::kInvalidNodeId);
+    NUI_CHECK(root.parent_id == ui::kInvalidNodeId);
+    NUI_CHECK(root.depth == 0);
+    NUI_CHECK(root.child_order == 0);
+    NUI_CHECK(same_rect(root.bounds, {0.0f, 0.0f, 160.0f, 100.0f}));
+
+    bool saw_nested_node = false;
+    for (std::size_t index = 0; index < snapshot.nodes.size(); ++index) {
+        const auto& node = snapshot.nodes[index];
+        NUI_CHECK(node.id != ui::kInvalidNodeId);
+        NUI_CHECK(node.bounds.w >= 0.0f);
+        NUI_CHECK(node.bounds.h >= 0.0f);
+
+        if (node.parent_id == ui::kInvalidNodeId) continue;
+        const auto* parent = snapshot.find(node.parent_id);
+        NUI_CHECK(parent != nullptr);
+        NUI_CHECK(parent->depth + 1 == node.depth);
+
+        std::size_t earlier_siblings = 0;
+        for (std::size_t earlier = 0; earlier < index; ++earlier) {
+            if (snapshot.nodes[earlier].parent_id == node.parent_id) ++earlier_siblings;
+        }
+        NUI_CHECK(node.child_order == earlier_siblings);
+        saw_nested_node = saw_nested_node || node.depth >= 2;
+    }
+    NUI_CHECK(saw_nested_node);
+}
+
 void destroyed_node_ids_disappear_without_stale_access() {
     ui::State<bool> present{true};
     ui::UI ui{ui::If{present, ui::Label{"Transient"}}};
@@ -204,6 +240,32 @@ void snapshot_reports_focus_capture_and_effective_clip() {
     (void)captured.cancel_pointer(capture_platform);
 }
 
+void snapshot_reports_effective_availability() {
+    ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Hidden};
+    ui::State<bool> enabled{false};
+    ui::UI ui{ui::Visibility{visibility, ui::Enabled{enabled, ui::Label{"Availability"}}}};
+    ui.resize({120.0f, 60.0f});
+
+    auto snapshot = ui::debug::inspector_snapshot(ui);
+    bool saw_hidden_disabled = false;
+    for (const auto& node : snapshot.nodes) {
+        saw_hidden_disabled = saw_hidden_disabled ||
+            (node.availability.visibility == ui::VisibilityMode::Hidden &&
+             !node.availability.enabled);
+    }
+    NUI_CHECK(saw_hidden_disabled);
+
+    visibility.set(ui::VisibilityMode::Collapsed);
+    snapshot = ui::debug::inspector_snapshot(ui);
+    bool saw_collapsed_disabled = false;
+    for (const auto& node : snapshot.nodes) {
+        saw_collapsed_disabled = saw_collapsed_disabled ||
+            (node.availability.visibility == ui::VisibilityMode::Collapsed &&
+             !node.availability.enabled);
+    }
+    NUI_CHECK(saw_collapsed_disabled);
+}
+
 void overlay_draws_focus_and_capture_markers() {
     const auto info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     auto surface = SkSurfaces::Raster(info);
@@ -266,6 +328,28 @@ void inspector_does_not_intercept_focus_or_keyboard_input() {
     NUI_CHECK(toggled.get());
 }
 
+void inspector_does_not_intercept_pointer_input() {
+    int pointer_downs = 0;
+    ui::UI ui{
+        ui::Canvas{80.0f, 40.0f, [](ui::CanvasContext2D&) {}}
+            .on_input([&](const ui::InputEvent& event, ui::CanvasInputContext&) {
+                if (event.type != ui::InputType::PointerDown) {
+                    return ui::EventResult::Ignored;
+                }
+                ++pointer_downs;
+                return ui::EventResult::Handled;
+            })};
+    test::MockPlatform platform;
+    ui.resize({80.0f, 40.0f});
+    ui.activate(platform);
+    ui::debug::set_inspector_enabled(ui, true);
+
+    const auto result = ui.dispatch(
+        test::pointer(ui::InputType::PointerDown, 10.0f, 10.0f), platform);
+    NUI_CHECK(result == ui::EventResult::Handled);
+    NUI_CHECK(pointer_downs == 1);
+}
+
 void inspector_post_paint_preserves_incoming_canvas_state() {
     const auto info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     auto surface = SkSurfaces::Raster(info);
@@ -300,13 +384,16 @@ void inspector_post_paint_preserves_incoming_canvas_state() {
 
 void suite() {
     state_is_per_ui_and_snapshot_is_value_based();
+    snapshot_reports_runtime_hierarchy_bounds_and_child_order();
     destroyed_node_ids_disappear_without_stale_access();
     enable_and_selection_changes_request_only_one_repaint_each();
     query_reports_layout_dirty_and_exact_dirty_regions();
     snapshot_reports_focus_capture_and_effective_clip();
+    snapshot_reports_effective_availability();
     overlay_draws_focus_and_capture_markers();
     inspector_changes_headless_pixels_without_persistent_redraw();
     inspector_does_not_intercept_focus_or_keyboard_input();
+    inspector_does_not_intercept_pointer_input();
     inspector_post_paint_preserves_incoming_canvas_state();
 }
 
