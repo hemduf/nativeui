@@ -4,6 +4,9 @@
 
 #include <nativeui/desktop_services.hpp>
 
+#include <array>
+#include <charconv>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -33,20 +36,40 @@ public:
     [[nodiscard]] virtual bool cancel_request(LinuxDbusRequestId id) = 0;
 };
 
+/// XDG Desktop Portal X11 parent identifier. Zero means that no suitable
+/// native owner is available and therefore maps to the protocol's empty parent.
+[[nodiscard]] inline std::string linux_x11_portal_parent_window(
+    std::uintptr_t native_window) {
+    if (native_window == 0) return {};
+
+    std::array<char, sizeof(std::uintptr_t) * 2> digits{};
+    const auto converted = std::to_chars(
+        digits.data(), digits.data() + digits.size(), native_window, 16);
+    if (converted.ec != std::errc{}) return {};
+
+    std::string parent{"x11:"};
+    parent.append(digits.data(), converted.ptr);
+    return parent;
+}
+
 /// Protocol-level factory used by deterministic tests and the production T072
 /// adapter. The namespace ID must be one non-zero transport-local T072 client
 /// ID so request handle tokens stay unique across windows sharing an Application.
 [[nodiscard]] std::shared_ptr<DesktopServicesBackend>
 make_linux_portal_desktop_services_backend(std::shared_ptr<LinuxPortalBus> bus,
                                            Dispatcher dispatcher,
-                                           LinuxDbusClientId token_namespace);
+                                           LinuxDbusClientId token_namespace,
+                                           std::string parent_window);
 
 #if defined(__linux__)
 /// Production standalone factory. It registers exactly one logical client on
 /// the Application-owned T072 transport and releases it with backend lifetime.
+/// `native_window` is the requesting X11 window XID and is used only to derive
+/// the portal parent identifier; transport ownership remains Application-scoped.
 [[nodiscard]] std::shared_ptr<DesktopServicesBackend>
 make_linux_desktop_services_backend(Application& application,
-                                    Dispatcher dispatcher);
+                                    Dispatcher dispatcher,
+                                    std::uintptr_t native_window);
 #endif
 
 } // namespace ui::detail
