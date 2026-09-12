@@ -17,6 +17,10 @@
 
 namespace ui {
 
+namespace detail {
+class OverlayService;
+} // namespace detail
+
 struct FlexFactors {
     float grow{};
     float shrink{};
@@ -324,12 +328,14 @@ public:
                  std::function<void()> invalidate,
                  std::function<void()> invalidate_layout,
                  std::function<void()> invalidate_focus,
-                 std::function<void()> invalidate_availability = {})
+                 std::function<void()> invalidate_availability = {},
+                 detail::OverlayService* overlay_service = nullptr)
         : node_id_(node_id),
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)),
           invalidate_focus_(std::move(invalidate_focus)),
-          invalidate_availability_(std::move(invalidate_availability)) {}
+          invalidate_availability_(std::move(invalidate_availability)),
+          overlay_service_(overlay_service) {}
 
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     /// Long-lived callback for state changes that only affect painting.
@@ -342,6 +348,11 @@ public:
     [[nodiscard]] std::function<void()> availability_invalidator() const {
         return invalidate_availability_ ? invalidate_availability_ : std::function<void()>{[] {}};
     }
+    /// Borrowed per-UI T061 overlay seam. Null for trees compiled without a UI
+    /// owner (direct internal component use, headless component fixtures).
+    [[nodiscard]] detail::OverlayService* overlay_service() const noexcept {
+        return overlay_service_;
+    }
 
 private:
     NodeId node_id_{kInvalidNodeId};
@@ -349,6 +360,7 @@ private:
     std::function<void()> invalidate_layout_;
     std::function<void()> invalidate_focus_;
     std::function<void()> invalidate_availability_;
+    detail::OverlayService* overlay_service_{};
 };
 
 class LifecycleContext {
@@ -402,14 +414,19 @@ public:
         return effective_availability_.read_only;
     }
 
-    [[nodiscard]] virtual SemanticInfo semantics() const { return {}; }
-
     /// Focus-scope metadata used by the tree focus manager. Normal components
     /// are not scopes and therefore remain unaffected by scope state.
     [[nodiscard]] virtual bool is_focus_scope() const noexcept { return false; }
     [[nodiscard]] virtual bool focus_scope_active() const noexcept { return false; }
     [[nodiscard]] virtual bool focus_scope_traps() const noexcept { return false; }
     [[nodiscard]] virtual std::size_t focus_scope_default_index() const noexcept { return 0; }
+
+    /// T045 platform-neutral semantic projection. The default `None` role
+    /// flattens the component while preserving semantic descendants. Decorators
+    /// such as Tooltip publish owned help text here so accessibility never
+    /// depends on whether a visual overlay is currently rendered. T068 owns the
+    /// immutable snapshot flattening that consumes this seam.
+    [[nodiscard]] virtual SemanticInfo semantics() const { return {}; }
 
     /// Optional main-axis flex factors consumed by Row/Column. Most components
     /// remain intrinsic-sized; the `Flex` layout wrapper overrides this.
