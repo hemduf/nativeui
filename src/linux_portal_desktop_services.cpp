@@ -35,7 +35,7 @@ enum class FileChooserKind {
     case LinuxDbusErrorCode::Disconnected:
         return DesktopServiceStatus::Unsupported;
     case LinuxDbusErrorCode::ResourceLimit:
-        return DesktopServiceStatus::Busy;
+        return DesktopServiceStatus::ResourceLimit;
     case LinuxDbusErrorCode::InvalidArgument:
         return DesktopServiceStatus::InvalidArgument;
     case LinuxDbusErrorCode::Cancelled:
