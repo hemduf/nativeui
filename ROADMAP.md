@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-11
+**Updated:** 2026-09-12
 
 NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -20,13 +20,13 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` is `07690842bab94f2d975685d28e0d2b0c1c0fc9d4` and includes T072 / PR #185 plus the completed T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations.
+The pre-T066 merge baseline is current `main` at `c6575cf8fe4301086af088642fc93ba21e61f5e5`. It includes completed T072, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060. This completion cycle adds T066 / PR #237.
 
-T063 is complete. Its executable candidate `e907bd3119f59116522b1e672e690703c845f1e6` passed normal CI and the completion candidate passed T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
+T072 / issue #84 / PR #185 is complete and merged. Its final executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
 
-T072 / issue #84 / PR #185 is merged on `main` as `07690842bab94f2d975685d28e0d2b0c1c0fc9d4`. Exact candidate `b5658be1cc4af872642811790bd5821149a885f5` passed normal CI `34631977571`, T072 Linux D-Bus Contract `34631977574`, T060 Application Contract `34631977534`, T065 Platform Dispatcher `34631977512`, T067 Virtual List Contract `34631977511`, T042 Lifecycle Stress `34637714563` and T052 v0.1 Release Gate `34637714484`. Reviews `5181043847` and `5182564487` record the complete #84 evidence matrix and no remaining Blocking/Important finding. T064 is now Ready and should start immediately.
+T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5` closes its post-merge completeness gaps. It is no longer a T068 blocker.
 
-T062 / issue #74 / PR #226 is implementation-complete on `feat/t062-tooltip`, synchronized with `main`, with full Release and ASan/UBSan local suites, deterministic self-test and native standalone/EmbeddedView platform smoke green. It delivers the last dynamic/overlay convergence item before T068; exact-head normal/path-scoped CI and Ready-only T042/T052 qualification are the remaining merge steps.
+T066 / issue #78 / PR #237 is completion-qualified. Frozen executable candidate `d6da7c472d7819269e87f0cdbccf6ac99ebfb174` is synchronized with current `main`; current completion head adds only project/release documentation. Normal/path-scoped validation is green (CI `34686088854`, T066 `34686088812`, T060 `34686088852`, T065 `34686088808`, T072 `34686088814`, Package Contracts `34686088902`) and final-candidate T042 `34686364025` plus T052 `34686364059` are green. Reviews `5185850366` and `5186026531` record the complete #78 requirement-to-code/test matrix with no Blocking/Important finding.
 
 Current dependency frontier:
 
@@ -37,7 +37,7 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
 dynamic/overlay:   T058(done) -> T061(done)
                                       |-> T035(done) --------------------> T068
                                       |-> T063(done) --------------------> T068
-                                      +-> T062(complete, PR #226) -------> T068
+                                      +-> T062(done) --------------------> T068
 
 style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
@@ -49,14 +49,14 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(done) -> T072(done) -> T064
-                   T041(done) -> T043(done) -> T066
+critical platform: T060(done) -> T065(done) -> T072(done) -> T064(active PR #240)
+                   T041(done) -> T043(done) -> T066(done, PR #237)
                                       |-------> T068
 
 release:            all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 depends on merged/Done T072 and is now Ready. T066 is independently unblocked by completed T043 and must progress in parallel rather than waiting for T072. T044 remains an explicit T071 dependency and is qualified independently.
+T064 is the remaining primary platform prerequisite on merged/Done T072. T044 remains an explicit T071 dependency and is qualified independently.
 
 ## Milestone 0 — Baseline hardening
 
@@ -102,19 +102,28 @@ Delivered foundations include plug-in host isolation, standalone ownership Decis
 
 ### T043 — Resize/scale negotiation
 
-**Complete in PR #142.** Public/component geometry remains logical while native/framebuffer geometry is physical; per-view finite-positive scale, authoritative configure snapshots, exact request/echo behavior, fractional conversion, embedded parent authority and reentrancy-safe preferred-size notification are qualified. T066 is independently unblocked.
+**Complete in PR #142.** Public/component geometry remains logical while native/framebuffer geometry is physical; per-view finite-positive scale, authoritative configure snapshots, exact request/echo behavior, fractional conversion, embedded parent authority and reentrancy-safe preferred-size notification are qualified.
 
 ### T044 — OS pointer capture qualification
 
-**Active in PR #145.** This remains evidence-gated and is a T071 release dependency rather than a T068/T069 critical prerequisite. Each supported platform must have an explicit Outcome A/B based on the same outside-view drag/release/focus-loss/two-view fixture. Dedicated CI is now path-scoped to the actual T044 capture/platform files. The pinned Pugl X11 backend consumes translated FocusIn/FocusOut for XIC bookkeeping instead of application dispatch, so the branch's per-view focus proxy is retained only to make the required X11 focus-loss capture-cancel evidence observable; it must remain isolated and duplicate-safe.
+**Active in PR #145.** This remains evidence-gated and is a T071 release dependency rather than a T068/T069 critical prerequisite. The implementation has an explicit per-platform Outcome A/B matrix: macOS remains no-change Outcome A; Windows uses a minimal per-view retained/native release bridge with real system pointer injection evidence; Linux/X11 uses retained/native release plus the narrow per-view focus visibility seam required by pinned Pugl. The branch is synchronized with current main at `608de6c2fce6f960b92c6534699b599fbc318863`; normal/path-scoped requalification precedes a fresh Ready transition and heavyweight T042/T052 gates.
 
 ### T066 — Standalone window controls
 
-**Active in PR #237 and independently unblocked by T043.** Scope is limited to logical min/max constraints, runtime title/show/hide/size control and deterministic accepted-close/veto/destructor semantics on T060 Application-owned windows. Its dedicated three-platform contract and T060/T065 regressions are green; normal Windows CI is requalifying the destroy-A/resize-surviving-B integration path before any production correction is accepted.
+**Complete in PR #237 / issue #78.** V1 scope is limited to logical min/max constraints, runtime title/show/hide/size control and deterministic close lifecycle on T060 Application-owned windows:
+
+- finite/order validation, initial clamp and atomic runtime constraint updates preserve T043 native-authoritative configure semantics;
+- UTF-8 title and idempotent show/hide do not recreate or remount UI;
+- user/native close supports veto, accepted close is deferred through T065, and programmatic `request_close()` bypasses veto;
+- reentrant `request_close()` inside veto wins over Cancel and duplicate close requests cannot duplicate `on_closed`;
+- direct C++ destruction is callback-silent, suppresses pending accepted-close completion and still unregisters exactly once through T060 quit policy;
+- close callbacks run outside internal teardown/Application locks and per-window state remains isolated;
+- native macOS/Windows/Linux control/close coverage, pure state tests, two-window destroy-A/survivor-B coverage and deterministic feature `--self-test` are qualified;
+- final normal/path and T042/T052 gates are green with no Blocking/Important review finding.
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T072 Linux D-Bus transport and T045 semantic architecture.
 
 ### Build/example registration hardening
 
@@ -134,11 +143,11 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T062 — Tooltip
 
-**Complete in PR #226 / issue #74.** A text-only retained decorator over T061/T065: exact 500 ms default delay with zero-delay checkpoint deferral, one per-instance timer/eligibility controller, no warm-up or cross-anchor reuse, shared hover/focus delay with full restart on new transitions, a `NonModal`/`Auto`/`Ignore` overlay that is non-focusable and non-hit-testable, deterministic dismissal (pointer/focus loss, PointerDown, Escape, Hidden/Collapsed/Disabled, removal, deactivation, overlay opening) with suppression until a new eligibility transition, and semantic help published through the T045 `Component::semantics()` seam independently of the rendered overlay. The native window `Impl` objects now expose the per-view T065 dispatcher so retained policies work through real Pugl events; deterministic unit coverage, an example self-test and standalone + EmbeddedView platform smoke are part of normal CI.
+**Complete in PR #226 / issue #74, with PR #245 closing post-merge completeness gaps.** A text-only retained decorator over T061/T065: exact 500 ms default delay with zero-delay checkpoint deferral, one per-instance timer/eligibility controller, no warm-up or cross-anchor reuse, shared hover/focus delay with full restart on new transitions, a `NonModal`/`Auto`/`Ignore` overlay that is non-focusable and non-hit-testable, deterministic dismissal and suppression, semantic help through T045 semantics, and native standalone/EmbeddedView qualification.
 
 ### T072 — Bounded Linux D-Bus transport
 
-**Completion-ready in PR #185 / issue #84.** The exact current-main-synchronized candidate is fully qualified and provides the sole Linux D-Bus layer for T064 and T068:
+**Complete in PR #185 / issue #84.** It provides the sole Linux D-Bus layer for T064 and T068:
 
 - system `libdbus-1` only, no public D-Bus API/type leakage;
 - one private session connection + one joinable I/O thread per transport;
@@ -151,7 +160,9 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 - one lazy shared transport per T060 Application and the independently owned EmbeddedView boundary required by T068;
 - package/install integration and Linux prerequisite documentation.
 
-After T072 merges, T064 becomes Ready and should start immediately.
+### T064 — Cross-platform DesktopServices
+
+**Active in PR #240 / issue #76.** Public coordinator semantics, fixed native macOS/Windows/Linux backends, T072-only Linux portal integration, 1 chooser / 16 URL owner-local capacity and the fake-only deterministic feature self-test are implemented. A concrete Windows native smoke timeout on the first all-native fixture is being requalified on exact head `0ce66349d84483c22ca4d9b1c7f98c47a8b76e6e` with a real owner HWND, message pumping and owner-aware modal discovery; production DesktopServices behavior was not changed by that test recovery.
 
 ### T068 convergence
 
@@ -162,9 +173,9 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 ```text
 T036(done) -> T045(done) -> T067(done) ---------------------\
 T058(done) -> T061(done) -> T035(done) -> T063(done) --------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
-                         \-> T062(complete, PR #226) --------/
+                         \-> T062(done) ---------------------/
 T065(done) -> T072(done) -> T064 ---------------------------+
-T043(done) ---------------------> T066 ----------------------/
+T043(done) ---------------------> T066(done) ----------------/
 other explicit T069 dependencies ---------------------------/
 ```
 
@@ -172,12 +183,11 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Qualify and merge T062 / PR #226 (exact-head normal/path-scoped CI, mandatory review, Ready-only T042/T052 gates); T068's last dynamic/overlay dependency then reaches Done.
-2. Start T064 immediately on merged T072.
-3. Continue T066 independently and treat exact Windows CI evidence as authoritative for the remaining integration regression.
-4. Reconcile/qualify T044 independently when primary platform streams are externally waiting.
-5. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
-6. Keep T068 blocked until every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
+1. Merge T066 / PR #237 after this same-cycle project-state synchronization; final T042/T052 qualification is green.
+2. Finish T064 / PR #240, then merge after exact-head native/platform/completeness/final-candidate qualification.
+3. Re-qualify T044 / PR #145 on current main and complete its final Ready-only T042/T052 release-dependency gate.
+4. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
+5. Start T068 only when every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
 
 ## Prioritization rule
 

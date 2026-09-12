@@ -94,11 +94,20 @@ def main() -> int:
             "name: Windows",
             "name: Linux X11",
             "name: Linux ASan + UBSan",
-            "T047 external package contract",
-            "T048 relocated external consumers",
             "macOS two-consumer Objective-C runtime isolation",
         ),
         "normal CI",
+    )
+
+    package_ci = text(".github/workflows/package-contract.yml")
+    require_all(
+        package_ci,
+        (
+            "name: Package Contracts",
+            "T047 external package contract",
+            "T048 relocated external consumers",
+        ),
+        "package contract workflow",
     )
 
     stress = text(".github/workflows/t042-stress.yml")

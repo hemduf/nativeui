@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-11
+**Updated:** 2026-09-12
 
 ## Mission and invariants
 
@@ -28,13 +28,13 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-Current `main` is `07690842bab94f2d975685d28e0d2b0c1c0fc9d4` and includes T072 / PR #185 in addition to the completed T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations.
+The pre-T066 merge baseline is current `main` at `c6575cf8fe4301086af088642fc93ba21e61f5e5`. It includes completed T072, T062 (plus its post-merge completeness fix), T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations. This completion cycle adds T066 / PR #237 without changing the already-qualified T066 executable candidate.
 
-T063 is complete. Its executable candidate `e907bd3119f59116522b1e672e690703c845f1e6` passed normal CI, and completion head `625bf6f13774652159781f39770e9c82ea3e2057` passed T042 Lifecycle Stress and T052 v0.1 Release Gate. Final `CODE_REVIEW.md` review reported no Blocking/Important finding.
+T072 / issue #84 / PR #185 is complete and merged. Its final current-main-synchronized executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate, with final `CODE_REVIEW.md` re-certification reporting no Blocking/Important finding.
 
-T072 / issue #84 / PR #185 is merged on `main` as `07690842bab94f2d975685d28e0d2b0c1c0fc9d4`; T064 is now Ready. The exact current-main-synchronized candidate `b5658be1cc4af872642811790bd5821149a885f5` passed normal CI `34631977571`, T072 Linux D-Bus Contract `34631977574`, T060 Application Contract `34631977534`, T065 Platform Dispatcher `34631977512`, T067 Virtual List Contract `34631977511`, T042 Lifecycle Stress `34637714563` and T052 v0.1 Release Gate `34637714484`, with `CODE_REVIEW.md` re-certification `5182564487` reporting no Blocking/Important finding.
+T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; post-merge completeness gaps were closed by PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5`. Tooltip is no longer a convergence blocker.
 
-T062 / issue #74 / PR #226 is implementation-complete on `feat/t062-tooltip`, synchronized with `main` and validated locally: targeted/full Release CTest (106/106), full ASan/UBSan CTest (106/106), deterministic example self-test and real standalone + EmbeddedView platform smoke all pass. A platform gap discovered during that smoke was corrected in the same branch: `ViewCore` receives the private `StandaloneWindow::Impl`/`EmbeddedView::Impl` as its `PlatformServices`, so those impls now implement `DispatcherProvider` and expose the per-view T065 dispatcher to retained policies. Exact-head normal/path-scoped CI and the Ready-only T042/T052 candidate gates remain the last merge steps.
+T066 / issue #78 / PR #237 is completion-qualified. Frozen executable candidate `d6da7c472d7819269e87f0cdbccf6ac99ebfb174` is synchronized with `main` `c6575cf8fe4301086af088642fc93ba21e61f5e5`; current completion head `9822c79ff02e6cecddd42a2ecf0c0fa129492508` adds only release/document contract synchronization after the executable freeze. Exact-head normal/path-scoped validation is green (CI `34686088854`, T066 `34686088812`, T060 `34686088852`, T065 `34686088808`, T072 `34686088814`, Package Contracts `34686088902`) and final-candidate T042 Lifecycle Stress `34686364025` plus T052 v0.1 Release Gate `34686364059` are green. Final requirement-to-implementation/test review is recorded in PR reviews `5185850366` and `5186026531`, with no Blocking/Important finding.
 
 Current convergence:
 
@@ -45,19 +45,19 @@ critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
 dynamic/overlay:   T058(done) -> T061(done)
                                       |-> T035(done) --------------------> T068
                                       |-> T063(done) --------------------> T068
-                                      +-> T062(complete, PR #226)
+                                      +-> T062(done) --------------------> T068
 
 style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
 
-critical platform: T065(done) -> T072(merged) -> T064
-                   T041(done) -> T043(done) -> T066
+critical platform: T065(done) -> T072(done) -> T064(active PR #240)
+                   T041(done) -> T043(done) -> T066(done, PR #237)
                                       |-------> T068
 
 release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 is now Ready on merged T072. T066 is independently unblocked by completed T043 and is active in PR #237; do not serialize it behind T072. T044 / issue #44 / PR #145 is an independent T071 release dependency and may be qualified opportunistically when the two primary platform streams are waiting on external gates.
+T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 / issue #44 / PR #145 is an independent T071 release dependency and may be qualified opportunistically when T064 is waiting on external gates.
 
 ## Completed foundations relevant to v1
 
@@ -77,9 +77,10 @@ T064 is now Ready on merged T072. T066 is independently unblocked by completed T
 - T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
 - T060 / PR #118 + #139 / PR #140: explicit Application ownership and stress-qualified multi-window lifecycle.
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
-- T062 / PR #226: text-only Tooltip decorator over T061 + T065 with hover/focus eligibility, deterministic dismissal/suppression and semantic help independent of the rendered overlay.
+- T062 / PR #226 + PR #245: text-only Tooltip decorator over T061 + T065 with hover/focus eligibility, deterministic dismissal/suppression, semantic help and completed post-merge qualification coverage.
 - T063 / PR #227: modal Dialog policy over T061 with deterministic action/focus/scroll/reentrancy semantics and standalone/embedded qualification.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
+- T066 / PR #237: standalone window min/max/title/show/hide/resize controls plus deterministic user/programmatic close, veto, exactly-once `on_closed`, destructor-silent teardown and two-window isolation across macOS/Windows/Linux.
 - T067 / PR #219 + PR #233: fixed-height virtualized ListView with bounded materialization and qualified 100k startup behavior.
 - #163 / PR #181: warning-free NativeUI-owned source-tree builds.
 - #152 / PR #153: Tree no longer paints an implicit application background/help overlay.
@@ -103,27 +104,26 @@ PR #185 provides the sole v1 Linux D-Bus transport for T064 portals and T068 AT-
 - one lazy shared transport per T060 Application and an independently ownable operations boundary for accessibility-enabled EmbeddedView use;
 - Linux build/install/package integration and documented `libdbus-1` prerequisite.
 
-The final requirement -> implementation -> test matrix and `CODE_REVIEW.md` audit are recorded in PR #185 reviews `5181043847` and `5182564487`.
+The final requirement -> implementation -> test matrix and `CODE_REVIEW.md` audit are recorded in PR #185.
 
-## T062 delivered contract
+## T066 delivered contract
 
-PR #226 / issue #74 implements a text-only retained Tooltip decorator with no second timer, popup manager or placement algorithm:
+PR #237 completes only the v1 standalone-window control surface:
 
-- `ui::Tooltip{"Reset to default", child}.delay(std::chrono::milliseconds{500})`, plain owned UTF-8 text only, default delay exactly 500 ms, zero delay deferred to the next T065 checkpoint and never reentrant, default maximum text width 320 logical px with UTF-8-safe word wrapping;
-- one `TooltipController` per decorated instance owning hover/focus eligibility, one T065 timer token and the visible flag; no warm-up, no `currentTooltip` and no cross-anchor delay reuse;
-- hover and keyboard focus share the same delay; PointerMove inside the anchor does not restart it; leave/re-enter and focus loss/regain start a fresh full delay; moving A→B never reuses A's elapsed time; two UIs share no timing/state;
-- relocation is a T061 `NonModal`/`Auto` overlay with `OverlayPointerPolicy::Ignore`, so the surface is non-focusable, non-hit-testable and never captures pointer/focus; T061 alone owns placement/clamping;
-- dismissal on pointer leave/focus loss, any PointerDown, Escape, Hidden/Collapsed/Disabled, subtree removal, view deactivation and modal/overlay opening; PointerDown suppression persists until a new false→true eligibility transition, including a hover-only drag guard driven by the per-tree pointer-interaction flag;
-- semantic help is published through the T045 `Component::semantics()` seam on the role-`None` decorator and remains available while no overlay is rendered; empty text contributes no description and never erases a child-supplied description;
-- generic supporting seams: `MountContext::overlay_service()`, per-tree `TransientPresentation` dismissal, per-tree pointer-interaction state, `Tree::component_semantics()`, `UI::overlay_entries()`, and `DispatcherProvider` on the native window `Impl` objects actually handed to `ViewCore`;
-- deterministic `tests/t062_tooltip_tests.cpp` coverage and `examples/features/t062_tooltip.cpp` with hover/focus demo, deterministic `--self-test` and real standalone + EmbeddedView `--platform-smoke` wired into Linux/macOS normal CI.
+- optional logical `WindowDesc::min_size` / `max_size` with finite/order validation, initial clamp and atomic runtime updates;
+- runtime UTF-8 title, idempotent show/hide, logical resize and min/max updates while preserving T043 native-authoritative configure semantics;
+- `CloseDecision`, user/native veto, programmatic `request_close()`, `is_closed`, `on_close_request` and exactly-once `on_closed`;
+- accepted close is deferred through the owned T065 Dispatcher so native/input callback stacks unwind before teardown;
+- `request_close()` inside a veto callback wins over a returned Cancel; duplicate pending/native close requests cannot duplicate completion;
+- direct C++ destruction is deliberately callback-silent, suppresses pending accepted-close completion and still updates T060 registration/quit policy exactly once;
+- close callbacks may safely operate on the Application/other windows and are never invoked while internal teardown locks are held;
+- per-window state only, with native two-window destroy-A/survivor-B qualification;
+- macOS/Windows/Linux native min/max/title/show-hide/close qualification, pure deterministic state tests and `examples/features/t066_window_controls.cpp --self-test`.
 
 ## Active platform work
 
-- **T062 / PR #226:** implementation, local Release/ASan full suites, deterministic example self-test and native standalone/EmbeddedView platform smoke are green and synchronized with `main`. Remaining: exact-head normal/path-scoped CI, mandatory review record, then Draft -> Ready for the T042/T052 final-candidate gates and merge.
-- **T064 / issue #76:** Ready after the T072 merge; start without waiting for T062.
-- **T066 / PR #237:** independently active. Its dedicated T066 platform contract and T060/T065 regressions are green on the current branch; a normal Windows CI rerun is qualifying a previously observed T060 destroy-A/resize-surviving-B failure before any production correction is accepted.
-- **T044 / PR #145:** tertiary release qualification. Dedicated workflow path filtering was narrowed to the actual capture/platform surfaces; pinned Pugl X11 focus delivery behavior is explicitly documented as the reason for the per-view focus proxy used by the focus-loss capture fixture.
+- **T064 / PR #240:** implementation scope is frozen across macOS/Windows/Linux. Exact-head normal/T060/T065/T072/package gates are green on the pre-smoke-recovery candidate. A concrete Windows native-dialog smoke timeout was isolated to the qualification fixture; exact head `0ce66349d84483c22ca4d9b1c7f98c47a8b76e6e` now uses a real owner HWND, owner-aware modal discovery and message pumping while preserving the four required chooser variants and HTTP(S) checks. New exact-head validation is running; keep Draft until it is green and the final completeness review is re-certified.
+- **T044 / PR #145:** tertiary release qualification. The branch is synchronized with current main at `608de6c2fce6f960b92c6534699b599fbc318863`; the T044 capture implementation tree is unchanged by that synchronization. Exact-head normal/path-scoped requalification is running before a new Ready transition and heavyweight final-candidate gates.
 
 ## Validation policy
 
@@ -139,8 +139,7 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 ## Next actions
 
-1. Request exact-head normal CI plus the macOS/Linux T062 platform smoke for PR #226; record the mandatory review and transition Draft -> Ready for T042/T052 qualification, then merge T062.
-2. Start T064 / issue #76 on merged T072 and keep T066 moving independently.
-3. Keep T068 blocked until every explicit issue #80 dependency is Done (T062 is the last dynamic/overlay dependency and reaches Done with PR #226).
-4. Continue T044 qualification only while T072/T066 are externally waiting and without exceeding the platform-lane concurrency budget.
-5. T069/T070/T071 remain dependency-gated.
+1. Merge T066 / PR #237 after this same-cycle project-state synchronization; its normal/path and T042/T052 final-candidate gates are green with a complete review matrix.
+2. Finish T064 / PR #240: validate the owner-aware Windows native smoke, re-run the final completeness/CODE_REVIEW pass, then Ready -> T042/T052 -> merge.
+3. Re-qualify T044 / PR #145 on current main, then Ready -> T042/T052 and merge when its already-recorded Outcome A/B matrix is re-certified on the exact head.
+4. T068 remains dependency-gated until every explicit issue #80 dependency is Done; T069/T070/T071 remain dependency-gated.
