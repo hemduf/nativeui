@@ -8,6 +8,13 @@
 
 namespace ui::detail {
 
+[[nodiscard]] inline SemanticInfo label_semantic_info(std::string_view text) {
+    SemanticInfo info;
+    info.role = SemanticRole::Text;
+    info.name = text;
+    return info;
+}
+
 [[nodiscard]] inline SemanticInfo checkbox_semantic_info(
     std::string_view label,
     bool checked) {
