@@ -117,6 +117,7 @@ add_library(nativeui_core STATIC
   src/skia_svg.cpp
   src/headless.cpp
   src/dispatcher.cpp
+  src/desktop_services.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
 set_target_properties(nativeui_core PROPERTIES
@@ -369,6 +370,12 @@ if(NATIVEUI_BUILD_TESTS)
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_package_source_contract_tests.cmake"
   )
   add_test(
+    NAME nativeui_t064_root_integration_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t064_root_integration_contract.cmake"
+  )
+  add_test(
     NAME nativeui_t065_root_integration_contract
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -402,6 +409,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_t054_argument_boundary_tests
     nativeui_t054_package_source_contract_tests
     PROPERTIES LABELS "build;cmake;t054" TIMEOUT 60
+  )
+  set_tests_properties(
+    nativeui_t064_root_integration_contract
+    PROPERTIES LABELS "build;cmake;t064" TIMEOUT 20
   )
   set_tests_properties(
     nativeui_t065_root_integration_contract
@@ -560,7 +571,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
