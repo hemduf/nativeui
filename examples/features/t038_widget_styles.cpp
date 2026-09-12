@@ -113,6 +113,7 @@ int self_test() {
     item_style.base.row_height = 34.0f;
     item_style.selected.fill = ui::Color{0.18f, 0.38f, 0.60f, 1.0f};
     item_style.hovered.fill = ui::Color{0.14f, 0.24f, 0.36f, 1.0f};
+    item_style.hovered.separator = ui::Color{0.48f, 0.66f, 0.82f, 1.0f};
     item_style.pressed.fill = ui::Color{0.22f, 0.44f, 0.66f, 1.0f};
     item_style.disabled.text = ui::Color{0.33f, 0.35f, 0.39f, 1.0f};
 
@@ -124,9 +125,10 @@ int self_test() {
         ui::default_menu_item_style(theme),
         item_style,
         ui::VisualState{.enabled = false, .hovered = true, .pressed = true, .selected = true});
-    if (!same_color(item_selected.fill, *item_style.hovered.fill) ||
+    if (!same_color(item_selected.fill, *item_style.selected.fill) ||
+        !same_color(item_selected.separator, *item_style.hovered.separator) ||
         !same_color(item_disabled.text, *item_style.disabled.text)) {
-        return example::fail("MenuItemStyle state resolution precedence is incorrect");
+        return example::fail("MenuItemStyle interaction/orthogonal resolution is incorrect");
     }
     if (item_selected.row_height != 34.0f || item_disabled.row_height != 34.0f) {
         return example::fail("MenuItemStyle paint states changed geometry");
