@@ -280,7 +280,7 @@ enum class FileChooserKind {
     }
 
     try {
-        path = std::filesystem::u8path(decoded);
+        path = std::filesystem::path{decoded};
     } catch (...) {
         error = "Portal returned a file URI that cannot be represented as a filesystem path";
         return false;
