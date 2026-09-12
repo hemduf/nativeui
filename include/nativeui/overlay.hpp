@@ -82,6 +82,20 @@ struct OverlaySpec {
     Spec content;
 };
 
+/// Read-only diagnostic view of one T061 overlay entry. It exposes only the
+/// generic policy/placement metadata needed to verify retained overlay
+/// behavior; content components, platform objects and overlay state ownership
+/// never leave the owning UI.
+struct OverlayEntryInfo {
+    std::uint64_t id{};
+    OverlayMode mode{OverlayMode::NonModal};
+    OverlayPointerPolicy pointer_policy{OverlayPointerPolicy::Normal};
+    std::optional<NodeId> anchor;
+    OverlayPlacement placement{OverlayPlacement::Auto};
+    bool resolved{};
+    Rect bounds{};
+};
+
 namespace detail {
 
 [[nodiscard]] inline float overlay_finite_extent(float value) noexcept {
@@ -245,6 +259,7 @@ struct OverlayEntry {
     std::shared_ptr<const OverlayLifetimeToken> lifetime;
     std::optional<Rect> anchor_bounds;
     Rect resolved_bounds{};
+    bool resolved{};
 };
 
 // One OverlayState belongs to one UI. It stores only logical overlay state and
@@ -450,6 +465,7 @@ public:
                 ? entry.spec.placement
                 : OverlayPlacement::Center;
             entry.resolved_bounds = overlay_placement_bounds(bounds, anchor, size, placement);
+            entry.resolved = true;
             placements[child_index].bounds = entry.resolved_bounds;
             ++child_index;
         }
