@@ -424,12 +424,14 @@ void choice_style_state_invalidation_contract() {
         NUI_CHECK(tree.paint_dirty());
     }
 
-    // Radio buttons share the same classification contract.
+    // Radio buttons share the same classification contract. Use inner_fill here:
+    // focused.outer_fill is an orthogonal overlay and intentionally resolves after
+    // hover, so changing outer_fill while focused can legitimately resolve equal.
     {
         ui::State<int> selected{1};
         ui::RadioGroup<int> group{selected};
         ui::RadioStyle style;
-        style.hovered.outer_fill = ui::Color{0.62f, 0.24f, 0.18f, 1.0f};
+        style.hovered.inner_fill = ui::Color{0.62f, 0.24f, 0.18f, 1.0f};
         ui::UI tree{ui::RadioButton{group, 1, "Paint only"}.style(style)};
         tree.resize(size);
         tree.activate(platform);
