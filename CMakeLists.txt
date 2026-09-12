@@ -15,6 +15,7 @@ option(NATIVEUI_BUILD_EXAMPLES "Build NativeUI examples" ON)
 option(NATIVEUI_BUILD_TESTS "Build NativeUI core tests" ON)
 option(NATIVEUI_ENABLE_SANITIZERS "Enable ASan+UBSan on NativeUI-owned code/tests" OFF)
 option(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS "Register native standalone/embedded smoke tests with CTest" OFF)
+option(NATIVEUI_ENABLE_INSPECTOR "Enable the opt-in NativeUI debug inspector" OFF)
 
 if(NATIVEUI_BUILD_EXAMPLES AND NOT NATIVEUI_BUILD_PLATFORM)
   message(FATAL_ERROR "NATIVEUI_BUILD_EXAMPLES requires NATIVEUI_BUILD_PLATFORM=ON")
@@ -129,6 +130,11 @@ target_include_directories(nativeui_core PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(nativeui_core PUBLIC cxx_std_20)
+if(NATIVEUI_ENABLE_INSPECTOR)
+  # UI is header-defined and also consumed from NativeUI-owned .cpp files.
+  # Propagate the flag publicly so every translation unit sees one ABI/layout.
+  target_compile_definitions(nativeui_core PUBLIC NATIVEUI_ENABLE_INSPECTOR=1)
+endif()
 target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
@@ -444,6 +450,10 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
   nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
   nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
+  nativeui_add_core_test(nativeui_t050_inspector_model_tests tests/t050_inspector_model_tests.cpp)
+  if(NATIVEUI_ENABLE_INSPECTOR)
+    nativeui_add_core_test(nativeui_t050_inspector_runtime_tests tests/t050_inspector_runtime_tests.cpp)
+  endif()
   nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
   nativeui_add_core_test(nativeui_gradient_golden_tests tests/gradient_golden_tests.cpp)
   target_compile_definitions(nativeui_golden_tests PRIVATE
@@ -571,7 +581,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
