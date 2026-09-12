@@ -37,6 +37,7 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& ctx) override {
+        const auto before = presentation_signature(focused_);
         const bool was_focused = focused_;
         focused_ = focused;
         caret_visible_ = true;
@@ -50,14 +51,16 @@ public:
             pressed_ = false;
             ctx.set_text_input(false);
         }
-        ctx.invalidate();
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, ctx, true);
     }
 
     void deactivate(LifecycleContext& ctx) override {
-        const bool dirty = hovered_ || pressed_;
+        const auto before = presentation_signature(focused_);
         hovered_ = false;
         pressed_ = false;
-        if (dirty) ctx.invalidate();
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, ctx);
     }
 
     EventResult input(const InputEvent& event, InputContext& ctx) override {
@@ -66,21 +69,27 @@ public:
         if (event.type == InputType::PointerMove) {
             const bool inside = ctx.bounds().contains(event.position);
             if (hovered_ != inside) {
+                const auto before = presentation_signature(focused_);
                 hovered_ = inside;
-                ctx.invalidate();
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
             }
         } else if (event.type == InputType::PointerUp) {
             const bool inside = ctx.bounds().contains(event.position);
             if (pressed_ || hovered_ != inside) {
+                const auto before = presentation_signature(focused_);
                 pressed_ = false;
                 hovered_ = inside;
-                ctx.invalidate();
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
             }
         } else if (event.type == InputType::PointerCancel) {
             if (pressed_ || hovered_) {
+                const auto before = presentation_signature(focused_);
                 pressed_ = false;
                 hovered_ = false;
-                ctx.invalidate();
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
             }
         }
 
@@ -173,6 +182,7 @@ public:
         }
 
         if (event.type == InputType::PointerDown) {
+            const auto before = presentation_signature(focused_);
             pending_ime_commit_.clear();
             model_.cancel_composition();
             hovered_ = true;
@@ -188,7 +198,8 @@ public:
             drag_select_ = event.clicks == 1;
             if (drag_select_) ctx.capture_pointer();
             ensure_cursor_visible(ctx);
-            ctx.invalidate();
+            const auto after = presentation_signature(focused_);
+            invalidate_style_transition(before, after, ctx, true);
             return EventResult::Handled;
         }
 
@@ -348,6 +359,217 @@ private:
         std::size_t begin{};
         std::size_t end{};
     };
+
+    struct PresentationSignature {
+        Color field_fill{};
+        Color border{};
+        Color label{};
+        Color text{};
+        Color placeholder{};
+        Color selection{};
+        Color caret{};
+        Color composition_underline{};
+        float border_width{};
+        float corner_radius{};
+        float control_width{};
+        float control_height{};
+        float field_top{};
+        float minimum_field_height{};
+        float horizontal_padding{};
+        float vertical_padding{};
+        float label_offset_y{};
+        float label_size{};
+        float text_size{};
+        float line_height{};
+        float selection_corner_radius{};
+        float selection_vertical_inset{};
+        float newline_selection_width{};
+        float caret_width{};
+        float caret_vertical_inset{};
+        float composition_underline_width{};
+        float composition_underline_inset{};
+        FontWeight text_weight{FontWeight::Regular};
+        FontSlant text_slant{FontSlant::Upright};
+        std::string_view font_family;
+        const std::vector<std::string>* fallback_families{};
+    };
+
+    static void apply_patch(PresentationSignature& target,
+                            const TextAreaStylePatch& patch) noexcept {
+        if (patch.field_fill) target.field_fill = *patch.field_fill;
+        if (patch.border) target.border = *patch.border;
+        if (patch.label) target.label = *patch.label;
+        if (patch.text) target.text = *patch.text;
+        if (patch.placeholder) target.placeholder = *patch.placeholder;
+        if (patch.selection) target.selection = *patch.selection;
+        if (patch.caret) target.caret = *patch.caret;
+        if (patch.composition_underline) {
+            target.composition_underline = *patch.composition_underline;
+        }
+        if (patch.border_width) target.border_width = *patch.border_width;
+        if (patch.corner_radius) target.corner_radius = *patch.corner_radius;
+        if (patch.control_width) target.control_width = *patch.control_width;
+        if (patch.control_height) target.control_height = *patch.control_height;
+        if (patch.field_top) target.field_top = *patch.field_top;
+        if (patch.minimum_field_height) target.minimum_field_height = *patch.minimum_field_height;
+        if (patch.horizontal_padding) target.horizontal_padding = *patch.horizontal_padding;
+        if (patch.vertical_padding) target.vertical_padding = *patch.vertical_padding;
+        if (patch.label_offset_y) target.label_offset_y = *patch.label_offset_y;
+        if (patch.label_size) target.label_size = *patch.label_size;
+        if (patch.text_size) target.text_size = *patch.text_size;
+        if (patch.line_height) target.line_height = *patch.line_height;
+        if (patch.selection_corner_radius) {
+            target.selection_corner_radius = *patch.selection_corner_radius;
+        }
+        if (patch.selection_vertical_inset) {
+            target.selection_vertical_inset = *patch.selection_vertical_inset;
+        }
+        if (patch.newline_selection_width) target.newline_selection_width = *patch.newline_selection_width;
+        if (patch.caret_width) target.caret_width = *patch.caret_width;
+        if (patch.caret_vertical_inset) target.caret_vertical_inset = *patch.caret_vertical_inset;
+        if (patch.composition_underline_width) {
+            target.composition_underline_width = *patch.composition_underline_width;
+        }
+        if (patch.composition_underline_inset) {
+            target.composition_underline_inset = *patch.composition_underline_inset;
+        }
+        if (patch.text_weight) target.text_weight = *patch.text_weight;
+        if (patch.text_slant) target.text_slant = *patch.text_slant;
+        if (patch.font_family) target.font_family = *patch.font_family;
+        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
+    }
+
+    [[nodiscard]] PresentationSignature presentation_signature(bool focused) const noexcept {
+        const auto& theme = current_theme();
+        PresentationSignature result{
+            .field_fill = theme.palette.control_background,
+            .border = theme.palette.border,
+            .label = theme.palette.muted_text,
+            .text = theme.palette.text,
+            .placeholder = theme.palette.muted_text,
+            .selection = theme.palette.selection,
+            .caret = colors::caret,
+            .composition_underline = theme.palette.focus,
+            .border_width = theme.controls.border_width,
+            .corner_radius = 9.0f,
+            .control_width = 420.0f,
+            .control_height = 180.0f,
+            .field_top = 24.0f,
+            .minimum_field_height = 46.0f,
+            .horizontal_padding = 12.0f,
+            .vertical_padding = 8.0f,
+            .label_offset_y = 10.0f,
+            .label_size = 12.0f,
+            .text_size = 15.0f,
+            .line_height = 22.0f,
+            .selection_corner_radius = 2.0f,
+            .selection_vertical_inset = 2.0f,
+            .newline_selection_width = 6.0f,
+            .caret_width = 1.5f,
+            .caret_vertical_inset = 2.0f,
+            .composition_underline_width = 1.5f,
+            .composition_underline_inset = 3.0f,
+            .text_weight = theme.typography.control_weight,
+            .text_slant = theme.typography.slant,
+            .font_family = theme.typography.family,
+            .fallback_families = &theme.typography.fallback_families,
+        };
+        apply_patch(result, style_.base);
+
+        const auto state = current_visual_state(focused);
+        switch (resolve_interaction_state(state)) {
+            case InteractionVisualState::Normal:
+                break;
+            case InteractionVisualState::Hovered:
+                result.border = theme.palette.control_hover;
+                apply_patch(result, style_.hovered);
+                break;
+            case InteractionVisualState::Pressed:
+                result.border = theme.palette.accent;
+                apply_patch(result, style_.pressed);
+                break;
+            case InteractionVisualState::Disabled:
+                result.label = theme.palette.disabled;
+                result.text = theme.palette.disabled;
+                result.placeholder = theme.palette.disabled;
+                result.caret = theme.palette.disabled;
+                apply_patch(result, style_.disabled);
+                break;
+        }
+        if (state.read_only) {
+            result.text = theme.palette.muted_text;
+            result.caret = theme.palette.muted_text;
+            apply_patch(result, style_.read_only);
+        }
+        if (state.focused) {
+            result.border = theme.palette.focus;
+            result.border_width = theme.controls.focus_ring_width;
+            apply_patch(result, style_.focused);
+        }
+        return result;
+    }
+
+    [[nodiscard]] static bool same_color(Color lhs, Color rhs) noexcept {
+        return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+    }
+
+    [[nodiscard]] static bool same_fallbacks(const PresentationSignature& lhs,
+                                             const PresentationSignature& rhs) {
+        return lhs.fallback_families == rhs.fallback_families ||
+            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
+             *lhs.fallback_families == *rhs.fallback_families);
+    }
+
+    [[nodiscard]] static bool same_layout(const PresentationSignature& lhs,
+                                          const PresentationSignature& rhs) {
+        return lhs.control_width == rhs.control_width &&
+               lhs.control_height == rhs.control_height &&
+               lhs.field_top == rhs.field_top &&
+               lhs.minimum_field_height == rhs.minimum_field_height &&
+               lhs.horizontal_padding == rhs.horizontal_padding &&
+               lhs.vertical_padding == rhs.vertical_padding &&
+               lhs.label_offset_y == rhs.label_offset_y &&
+               lhs.label_size == rhs.label_size &&
+               lhs.text_size == rhs.text_size &&
+               lhs.line_height == rhs.line_height &&
+               lhs.text_weight == rhs.text_weight &&
+               lhs.text_slant == rhs.text_slant &&
+               lhs.font_family == rhs.font_family && same_fallbacks(lhs, rhs);
+    }
+
+    [[nodiscard]] static bool same_presentation(const PresentationSignature& lhs,
+                                                const PresentationSignature& rhs) {
+        return same_color(lhs.field_fill, rhs.field_fill) &&
+               same_color(lhs.border, rhs.border) &&
+               same_color(lhs.label, rhs.label) &&
+               same_color(lhs.text, rhs.text) &&
+               same_color(lhs.placeholder, rhs.placeholder) &&
+               same_color(lhs.selection, rhs.selection) &&
+               same_color(lhs.caret, rhs.caret) &&
+               same_color(lhs.composition_underline, rhs.composition_underline) &&
+               lhs.border_width == rhs.border_width &&
+               lhs.corner_radius == rhs.corner_radius &&
+               lhs.selection_corner_radius == rhs.selection_corner_radius &&
+               lhs.selection_vertical_inset == rhs.selection_vertical_inset &&
+               lhs.newline_selection_width == rhs.newline_selection_width &&
+               lhs.caret_width == rhs.caret_width &&
+               lhs.caret_vertical_inset == rhs.caret_vertical_inset &&
+               lhs.composition_underline_width == rhs.composition_underline_width &&
+               lhs.composition_underline_inset == rhs.composition_underline_inset &&
+               same_layout(lhs, rhs);
+    }
+
+    template <class Context>
+    static void invalidate_style_transition(const PresentationSignature& before,
+                                            const PresentationSignature& after,
+                                            Context& context,
+                                            bool require_paint = false) {
+        if (!same_layout(before, after)) {
+            context.invalidate_layout();
+            return;
+        }
+        if (require_paint || !same_presentation(before, after)) context.invalidate();
+    }
 
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return VisualState{
