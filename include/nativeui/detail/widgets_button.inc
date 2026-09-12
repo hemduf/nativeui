@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -51,25 +52,25 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
-        const auto before = resolved_style(focused_);
+        const auto before = layout_signature(focused_);
         focused_ = focused;
         interaction_.focus_changed(focused, context);
-        const auto after = resolved_style(focused_);
+        const auto after = layout_signature(focused_);
         if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     void deactivate(LifecycleContext& context) override {
-        const auto before = resolved_style(focused_);
+        const auto before = layout_signature(focused_);
         focused_ = false;
         interaction_.deactivate(context);
-        const auto after = resolved_style(focused_);
+        const auto after = layout_signature(focused_);
         if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
-        const auto before = resolved_style(focused_);
+        const auto before = layout_signature(focused_);
         const auto outcome = interaction_.input(event, context, true);
-        const auto after = resolved_style(focused_);
+        const auto after = layout_signature(focused_);
         if (!same_layout(before, after)) context.invalidate_layout();
         if (!outcome.activate) return outcome.result;
 
@@ -112,16 +113,74 @@ public:
     }
 
 private:
-    [[nodiscard]] static bool same_layout(const ResolvedButtonStyle& lhs,
-                                          const ResolvedButtonStyle& rhs) {
+    struct LayoutSignature {
+        float minimum_width{};
+        float control_height{};
+        float horizontal_padding{};
+        float text_size{};
+        FontWeight text_weight{FontWeight::Regular};
+        FontSlant text_slant{FontSlant::Upright};
+        std::string_view font_family;
+        const std::vector<std::string>* fallback_families{};
+    };
+
+    static void apply_layout_patch(LayoutSignature& target,
+                                   const ButtonStylePatch& patch) noexcept {
+        if (patch.minimum_width) target.minimum_width = *patch.minimum_width;
+        if (patch.control_height) target.control_height = *patch.control_height;
+        if (patch.horizontal_padding) target.horizontal_padding = *patch.horizontal_padding;
+        if (patch.text_size) target.text_size = *patch.text_size;
+        if (patch.text_weight) target.text_weight = *patch.text_weight;
+        if (patch.text_slant) target.text_slant = *patch.text_slant;
+        if (patch.font_family) target.font_family = *patch.font_family;
+        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
+    }
+
+    [[nodiscard]] LayoutSignature layout_signature(bool focused) const noexcept {
+        const auto& theme = current_theme();
+        LayoutSignature result{
+            .minimum_width = theme.controls.minimum_width,
+            .control_height = theme.controls.control_height,
+            .horizontal_padding = theme.spacing.large,
+            .text_size = theme.typography.control_size,
+            .text_weight = theme.typography.control_weight,
+            .text_slant = theme.typography.slant,
+            .font_family = theme.typography.family,
+            .fallback_families = &theme.typography.fallback_families,
+        };
+        apply_layout_patch(result, style_.base);
+
+        const auto state = current_visual_state(focused);
+        switch (resolve_interaction_state(state)) {
+            case InteractionVisualState::Normal:
+                break;
+            case InteractionVisualState::Hovered:
+                apply_layout_patch(result, style_.hovered);
+                break;
+            case InteractionVisualState::Pressed:
+                apply_layout_patch(result, style_.pressed);
+                break;
+            case InteractionVisualState::Disabled:
+                apply_layout_patch(result, style_.disabled);
+                break;
+        }
+        if (state.read_only) apply_layout_patch(result, style_.read_only);
+        if (state.focused) apply_layout_patch(result, style_.focused);
+        return result;
+    }
+
+    [[nodiscard]] static bool same_layout(const LayoutSignature& lhs,
+                                          const LayoutSignature& rhs) {
+        const bool same_fallbacks = lhs.fallback_families == rhs.fallback_families ||
+            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
+             *lhs.fallback_families == *rhs.fallback_families);
         return lhs.minimum_width == rhs.minimum_width &&
                lhs.control_height == rhs.control_height &&
                lhs.horizontal_padding == rhs.horizontal_padding &&
                lhs.text_size == rhs.text_size &&
                lhs.text_weight == rhs.text_weight &&
                lhs.text_slant == rhs.text_slant &&
-               lhs.font_family == rhs.font_family &&
-               lhs.fallback_families == rhs.fallback_families;
+               lhs.font_family == rhs.font_family && same_fallbacks;
     }
 
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
