@@ -51,17 +51,26 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = resolved_style(focused_);
         focused_ = focused;
         interaction_.focus_changed(focused, context);
+        const auto after = resolved_style(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     void deactivate(LifecycleContext& context) override {
+        const auto before = resolved_style(focused_);
         focused_ = false;
         interaction_.deactivate(context);
+        const auto after = resolved_style(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        const auto before = resolved_style(focused_);
         const auto outcome = interaction_.input(event, context, true);
+        const auto after = resolved_style(focused_);
+        if (!same_layout(before, after)) context.invalidate_layout();
         if (!outcome.activate) return outcome.result;
 
         // User code may synchronously disable/hide/remove this component. Copy
@@ -103,6 +112,18 @@ public:
     }
 
 private:
+    [[nodiscard]] static bool same_layout(const ResolvedButtonStyle& lhs,
+                                          const ResolvedButtonStyle& rhs) {
+        return lhs.minimum_width == rhs.minimum_width &&
+               lhs.control_height == rhs.control_height &&
+               lhs.horizontal_padding == rhs.horizontal_padding &&
+               lhs.text_size == rhs.text_size &&
+               lhs.text_weight == rhs.text_weight &&
+               lhs.text_slant == rhs.text_slant &&
+               lhs.font_family == rhs.font_family &&
+               lhs.fallback_families == rhs.fallback_families;
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return VisualState{
             .enabled = effective_enabled(),
