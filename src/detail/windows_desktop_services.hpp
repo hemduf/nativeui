@@ -177,6 +177,8 @@ struct FilterStorage final {
     return result;
 }
 
+inline constexpr UINT kDialogCloseMessage = WM_APP + 0x064;
+
 struct RequestState final {
     // Exactly one side wins the terminal decision. A successful cancel() owns
     // the result before it returns true; otherwise the worker owns the native
@@ -185,9 +187,7 @@ struct RequestState final {
     std::atomic<bool> terminal_claimed{false};
     std::atomic<bool> cancel_requested{false};
     std::atomic<bool> worker_finished{false};
-    std::mutex close_mutex;
-    std::mutex marshal_mutex;
-    IStream* marshaled_dialog{};
+    std::atomic<HWND> close_window{nullptr};
     std::thread worker;
 };
 
@@ -212,107 +212,103 @@ inline void arbitrate_worker_result(RequestState& state,
     state.worker_finished.store(true, std::memory_order_release);
 }
 
-[[nodiscard]] inline IStream* take_marshaled_dialog(RequestState& state) noexcept {
-    std::lock_guard lock{state.marshal_mutex};
-    IStream* stream = state.marshaled_dialog;
-    state.marshaled_dialog = nullptr;
-    return stream;
+struct DialogCloseWindowContext final {
+    IFileDialog* dialog{};
+    WNDPROC previous_proc{};
+};
+
+LRESULT CALLBACK dialog_close_window_proc(HWND window,
+                                          UINT message,
+                                          WPARAM wparam,
+                                          LPARAM lparam) {
+    auto* context = reinterpret_cast<DialogCloseWindowContext*>(
+        GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == kDialogCloseMessage && context && context->dialog) {
+        (void)context->dialog->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
+        return 0;
+    }
+    if (context && context->previous_proc) {
+        return CallWindowProcW(context->previous_proc, window, message, wparam, lparam);
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
 }
 
-inline void release_marshaled_dialog_on_worker(RequestState& state) noexcept {
-    IStream* stream = take_marshaled_dialog(state);
-    if (!stream) return;
-    (void)CoReleaseMarshalData(stream);
-    stream->Release();
-}
+class DialogCloseChannel final {
+public:
+    DialogCloseChannel(RequestState& state, IFileDialog& dialog) noexcept
+        : state_(state) {
+        window_ = CreateWindowExW(
+            0,
+            L"STATIC",
+            L"",
+            0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            nullptr,
+            GetModuleHandleW(nullptr),
+            nullptr);
+        if (!window_) return;
 
-inline void restore_marshaled_dialog(RequestState& state, IStream* stream) noexcept {
-    if (!stream) return;
-
-    bool retained = false;
-    {
-        std::lock_guard lock{state.marshal_mutex};
-        if (!state.worker_finished.load(std::memory_order_acquire) &&
-            state.marshaled_dialog == nullptr) {
-            state.marshaled_dialog = stream;
-            retained = true;
+        context_.dialog = &dialog;
+        SetLastError(ERROR_SUCCESS);
+        const auto previous = SetWindowLongPtrW(
+            window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&dialog_close_window_proc));
+        if (previous == 0 && GetLastError() != ERROR_SUCCESS) {
+            DestroyWindow(window_);
+            window_ = nullptr;
+            return;
         }
-    }
-    if (!retained) {
-        (void)CoReleaseMarshalData(stream);
-        stream->Release();
-    }
-}
+        context_.previous_proc = reinterpret_cast<WNDPROC>(previous);
 
-inline void request_marshaled_close(const std::shared_ptr<RequestState>& state) noexcept {
+        SetLastError(ERROR_SUCCESS);
+        const auto previous_data = SetWindowLongPtrW(
+            window_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&context_));
+        if (previous_data == 0 && GetLastError() != ERROR_SUCCESS) {
+            if (context_.previous_proc) {
+                (void)SetWindowLongPtrW(
+                    window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(context_.previous_proc));
+            }
+            DestroyWindow(window_);
+            window_ = nullptr;
+            return;
+        }
+
+        state_.close_window.store(window_, std::memory_order_release);
+    }
+
+    ~DialogCloseChannel() {
+        if (!window_) return;
+        HWND expected = window_;
+        (void)state_.close_window.compare_exchange_strong(
+            expected, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
+        (void)SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
+        if (context_.previous_proc) {
+            (void)SetWindowLongPtrW(
+                window_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(context_.previous_proc));
+        }
+        DestroyWindow(window_);
+    }
+
+    DialogCloseChannel(const DialogCloseChannel&) = delete;
+    DialogCloseChannel& operator=(const DialogCloseChannel&) = delete;
+
+    [[nodiscard]] bool valid() const noexcept { return window_ != nullptr; }
+
+private:
+    RequestState& state_;
+    HWND window_{};
+    DialogCloseWindowContext context_{};
+};
+
+inline void request_dialog_close(const std::shared_ptr<RequestState>& state) noexcept {
     if (!state || state->worker_finished.load(std::memory_order_acquire)) return;
-
-    // Serialize cancel()/destructor close attempts per request so a second
-    // caller never observes the brief interval between consuming the current
-    // marshal stream and publishing its replacement retry channel.
-    std::lock_guard close_lock{state->close_mutex};
-    if (state->worker_finished.load(std::memory_order_acquire)) return;
-
-    IStream* stream = take_marshaled_dialog(*state);
-    if (!stream) return;
-
-    ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
-    if (!apartment.usable()) {
-        restore_marshaled_dialog(*state, stream);
-        return;
+    const HWND window = state->close_window.load(std::memory_order_acquire);
+    if (window) {
+        (void)PostMessageW(window, kDialogCloseMessage, 0, 0);
     }
-
-    IFileDialog* raw_dialog = nullptr;
-    const HRESULT unmarshal_result = CoGetInterfaceAndReleaseStream(
-        stream, IID_IFileDialog, reinterpret_cast<void**>(&raw_dialog));
-    if (FAILED(unmarshal_result) || !raw_dialog) {
-        return;
-    }
-    ComPtr<IFileDialog> dialog;
-    dialog.Attach(raw_dialog);
-
-    // CoGetInterfaceAndReleaseStream is one-shot. Publish a fresh request-local
-    // marshal stream before calling Close so later teardown can retry without a
-    // process-global registry or a raw cross-apartment interface pointer.
-    IStream* retry_stream = nullptr;
-    if (SUCCEEDED(CoMarshalInterThreadInterfaceInStream(
-            IID_IFileDialog, dialog.Get(), &retry_stream)) && retry_stream) {
-        restore_marshaled_dialog(*state, retry_stream);
-    }
-
-    // Common-item dialogs may transiently reject a cross-apartment Close while
-    // their modal loop is entering a nested COM call. Cancellation owns the
-    // terminal result before this function runs, so bounded retries preserve
-    // exactly-once public semantics without turning teardown into an unbounded
-    // wait or relying on a second platform mechanism.
-    constexpr int kMaxCloseAttempts = 8;
-    for (int attempt = 0; attempt < kMaxCloseAttempts; ++attempt) {
-        const HRESULT result = dialog->Close(HRESULT_FROM_WIN32(ERROR_CANCELLED));
-        if (SUCCEEDED(result) || state->worker_finished.load(std::memory_order_acquire)) {
-            return;
-        }
-        if (result != RPC_E_CALL_REJECTED && result != RPC_E_SERVERCALL_RETRYLATER) {
-            return;
-        }
-        Sleep(10);
-    }
-}
-
-[[nodiscard]] inline bool prepare_marshaled_dialog(RequestState& state,
-                                                   IFileDialog& dialog) {
-    IStream* stream = nullptr;
-    if (FAILED(CoMarshalInterThreadInterfaceInStream(
-            IID_IFileDialog, &dialog, &stream)) || !stream) {
-        return false;
-    }
-    std::lock_guard lock{state.marshal_mutex};
-    if (state.marshaled_dialog != nullptr) {
-        (void)CoReleaseMarshalData(stream);
-        stream->Release();
-        return false;
-    }
-    state.marshaled_dialog = stream;
-    return true;
 }
 
 [[nodiscard]] inline FileDialogResult collect_single_result(IFileDialog& dialog) {
@@ -407,29 +403,30 @@ inline void run_open_dialog(std::shared_ptr<RequestState> state,
 
                     if (!configured) {
                         result = error_result("Windows open dialog configuration failed");
-                    } else if (!prepare_marshaled_dialog(*state, *dialog.Get())) {
-                        result = error_result("Windows file dialog cancellation channel failed");
-                    } else if (state->cancel_requested.load(std::memory_order_acquire)) {
-                        result = cancelled_result();
                     } else {
-                        const HRESULT show_result = dialog->Show(parent);
-                        if (state->cancel_requested.load(std::memory_order_acquire) ||
-                            show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                        DialogCloseChannel close_channel{*state, *dialog.Get()};
+                        if (!close_channel.valid()) {
+                            result = error_result("Windows file dialog cancellation channel failed");
+                        } else if (state->cancel_requested.load(std::memory_order_acquire)) {
                             result = cancelled_result();
-                        } else if (FAILED(show_result)) {
-                            result = error_result("IFileOpenDialog Show failed");
-                        } else if (kind == OpenDialogKind::MultipleFiles) {
-                            result = collect_multiple_results(*dialog.Get());
                         } else {
-                            result = collect_single_result(*dialog.Get());
+                            const HRESULT show_result = dialog->Show(parent);
+                            if (state->cancel_requested.load(std::memory_order_acquire) ||
+                                show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                                result = cancelled_result();
+                            } else if (FAILED(show_result)) {
+                                result = error_result("IFileOpenDialog Show failed");
+                            } else if (kind == OpenDialogKind::MultipleFiles) {
+                                result = collect_multiple_results(*dialog.Get());
+                            } else {
+                                result = collect_single_result(*dialog.Get());
+                            }
                         }
                     }
-                    release_marshaled_dialog_on_worker(*state);
                 }
             }
         }
     } catch (...) {
-        release_marshaled_dialog_on_worker(*state);
         result = error_result("Unexpected Windows open dialog failure");
     }
 
@@ -476,26 +473,27 @@ inline void run_save_dialog(std::shared_ptr<RequestState> state,
 
                 if (!configured) {
                     result = error_result("Windows save dialog configuration failed");
-                } else if (!prepare_marshaled_dialog(*state, *dialog.Get())) {
-                    result = error_result("Windows save dialog cancellation channel failed");
-                } else if (state->cancel_requested.load(std::memory_order_acquire)) {
-                    result = cancelled_result();
                 } else {
-                    const HRESULT show_result = dialog->Show(parent);
-                    if (state->cancel_requested.load(std::memory_order_acquire) ||
-                        show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                    DialogCloseChannel close_channel{*state, *dialog.Get()};
+                    if (!close_channel.valid()) {
+                        result = error_result("Windows save dialog cancellation channel failed");
+                    } else if (state->cancel_requested.load(std::memory_order_acquire)) {
                         result = cancelled_result();
-                    } else if (FAILED(show_result)) {
-                        result = error_result("IFileSaveDialog Show failed");
                     } else {
-                        result = collect_single_result(*dialog.Get());
+                        const HRESULT show_result = dialog->Show(parent);
+                        if (state->cancel_requested.load(std::memory_order_acquire) ||
+                            show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                            result = cancelled_result();
+                        } else if (FAILED(show_result)) {
+                            result = error_result("IFileSaveDialog Show failed");
+                        } else {
+                            result = collect_single_result(*dialog.Get());
+                        }
                     }
                 }
-                release_marshaled_dialog_on_worker(*state);
             }
         }
     } catch (...) {
-        release_marshaled_dialog_on_worker(*state);
         result = error_result("Unexpected Windows save dialog failure");
     }
 
@@ -531,7 +529,7 @@ public:
         }
 
         for (const auto& request : requests) {
-            request_marshaled_close(request);
+            request_dialog_close(request);
         }
         for (const auto& request : requests) {
             if (request->worker.joinable()) request->worker.join();
@@ -638,7 +636,7 @@ public:
             }
             request = found->second;
         }
-        request_marshaled_close(request);
+        request_dialog_close(request);
         return true;
     }
 
