@@ -146,7 +146,7 @@ public:
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto& theme = current_theme();
-        const auto resolved = resolved_style(false);
+        const auto resolved = resolved_style(focused_);
         const float styled_cross_axis =
             resolved.thumb_diameter + resolved.focus_ring_width * 2.0f;
         const float compact_cross_axis =
@@ -173,15 +173,26 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
+    void focus_changed(bool focused, FocusContext& context) override {
+        if (focused_ == focused) return;
+        const auto before = resolved_style(focused_);
+        focused_ = focused;
+        invalidate_style_transition(before, resolved_style(focused_), context, true);
+    }
+
     void deactivate(LifecycleContext& context) override {
-        if (!dragging_ && !hovered_) return;
+        if (!dragging_ && !hovered_ && !focused_) return;
+        const auto before = resolved_style(focused_);
+        const bool focus_changed = focused_;
         dragging_ = false;
         hovered_ = false;
-        context.invalidate();
+        focused_ = false;
+        invalidate_style_transition(before, resolved_style(focused_), context, focus_changed);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
         if (effective_read_only() && mutating_input(event)) {
+            const auto before = resolved_style(focused_);
             const bool release_capture = dragging_;
             dragging_ = false;
             if (event.type == InputType::PointerDown || event.type == InputType::PointerMove ||
@@ -189,7 +200,7 @@ public:
                 hovered_ = context.bounds().contains(event.position);
             }
             if (release_capture) context.release_pointer();
-            context.invalidate();
+            invalidate_style_transition(before, resolved_style(focused_), context);
             return EventResult::Handled;
         }
 
@@ -202,15 +213,16 @@ public:
 
             case InputType::PointerUp:
                 if (!dragging_) return EventResult::Ignored;
-                hovered_ = context.bounds().contains(event.position);
                 return update_drag(event, context, true);
 
-            case InputType::PointerCancel:
+            case InputType::PointerCancel: {
                 if (!dragging_) return EventResult::Ignored;
+                const auto before = resolved_style(focused_);
                 dragging_ = false;
                 hovered_ = false;
-                context.invalidate();
+                invalidate_style_transition(before, resolved_style(focused_), context);
                 return EventResult::Handled;
+            }
 
             case InputType::KeyDown:
                 return key_down(event, context);
@@ -290,6 +302,25 @@ public:
     }
 
 private:
+    template <class Context>
+    void invalidate_style_transition(
+        const ResolvedSliderStyle& before,
+        const ResolvedSliderStyle& after,
+        Context& context,
+        bool force_paint = false) const {
+        switch (classify_slider_style_change(before, after)) {
+            case SliderStyleInvalidation::None:
+                if (force_paint) context.invalidate();
+                return;
+            case SliderStyleInvalidation::Paint:
+                context.invalidate();
+                return;
+            case SliderStyleInvalidation::Layout:
+                context.invalidate_layout();
+                return;
+        }
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return VisualState{
             .enabled = effective_enabled(),
@@ -327,43 +358,47 @@ private:
     }
 
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
+        const auto before = resolved_style(focused_);
         const float target = value_from_pointer(event, context);
         auto* state = &state_;
         dragging_ = true;
         hovered_ = true;
         context.capture_pointer();
-        context.invalidate();
+        invalidate_style_transition(before, resolved_style(focused_), context);
         if (state->get() != target) state->set(target);
         return EventResult::Handled;
     }
 
     EventResult pointer_move(const InputEvent& event, InputContext& context) {
+        const auto before = resolved_style(focused_);
         const bool inside = context.bounds().contains(event.position);
+        hovered_ = inside;
         if (!dragging_) {
-            if (hovered_ != inside) {
-                hovered_ = inside;
-                context.invalidate();
-            }
+            invalidate_style_transition(before, resolved_style(focused_), context);
             return EventResult::Handled;
         }
-        hovered_ = inside;
-        return update_drag(event, context, false);
+        return update_drag(event, context, false, before);
     }
 
     EventResult update_drag(
-        const InputEvent& event, InputContext& context, bool release) {
+        const InputEvent& event,
+        InputContext& context,
+        bool release,
+        const ResolvedSliderStyle& before = {}) {
+        const auto effective_before = release ? resolved_style(focused_) : before;
         const float target = value_from_pointer(event, context);
         auto* state = &state_;
         if (release) {
+            hovered_ = context.bounds().contains(event.position);
             dragging_ = false;
             context.release_pointer();
         }
-        context.invalidate();
+        invalidate_style_transition(effective_before, resolved_style(focused_), context);
         if (state->get() != target) state->set(target);
         return EventResult::Handled;
     }
 
-    EventResult key_down(const InputEvent& event, InputContext& context) {
+    EventResult key_down(const InputEvent& event, InputContext&) {
         float target = state_.get();
         const float effective = domain_.effective_external(target);
         const double increment = domain_.keyboard_increment(event.shift);
@@ -388,7 +423,6 @@ private:
         }
 
         auto* state = &state_;
-        context.invalidate();
         if (state->get() != target) state->set(target);
         return EventResult::Handled;
     }
@@ -399,6 +433,7 @@ private:
     Formatter formatter_;
     SliderStyle style_;
     State<float>::Subscription subscription_;
+    bool focused_{};
     bool dragging_{};
     bool hovered_{};
 };

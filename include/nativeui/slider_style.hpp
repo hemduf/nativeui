@@ -42,6 +42,43 @@ struct ResolvedSliderStyle {
 
 namespace detail {
 
+enum class SliderStyleInvalidation {
+    None,
+    Paint,
+    Layout,
+};
+
+[[nodiscard]] constexpr bool slider_style_equal(
+    const ResolvedSliderStyle& lhs,
+    const ResolvedSliderStyle& rhs) noexcept {
+    return theme_color_equal(lhs.track, rhs.track) &&
+           theme_color_equal(lhs.active, rhs.active) &&
+           theme_color_equal(lhs.thumb, rhs.thumb) &&
+           theme_color_equal(lhs.focus_ring, rhs.focus_ring) &&
+           theme_color_equal(lhs.formatter_text, rhs.formatter_text) &&
+           lhs.track_thickness == rhs.track_thickness &&
+           lhs.thumb_diameter == rhs.thumb_diameter &&
+           lhs.focus_ring_width == rhs.focus_ring_width;
+}
+
+[[nodiscard]] constexpr bool slider_layout_style_equal(
+    const ResolvedSliderStyle& lhs,
+    const ResolvedSliderStyle& rhs) noexcept {
+    // Current Slider/RangeSlider measurement derives its cross-axis extent from
+    // thumb diameter plus the focus-ring width. Track thickness remains paint
+    // geometry inside the already measured bounds.
+    return lhs.thumb_diameter == rhs.thumb_diameter &&
+           lhs.focus_ring_width == rhs.focus_ring_width;
+}
+
+[[nodiscard]] constexpr SliderStyleInvalidation classify_slider_style_change(
+    const ResolvedSliderStyle& previous,
+    const ResolvedSliderStyle& next) noexcept {
+    if (slider_style_equal(previous, next)) return SliderStyleInvalidation::None;
+    if (!slider_layout_style_equal(previous, next)) return SliderStyleInvalidation::Layout;
+    return SliderStyleInvalidation::Paint;
+}
+
 inline void apply_slider_style_patch(ResolvedSliderStyle& target,
                                      const SliderStylePatch& patch) {
     if (patch.track) target.track = *patch.track;
