@@ -17,6 +17,7 @@ set(_feature_example "${SOURCE_DIR}/examples/features/t064_desktop_services.cpp"
 set(_macos_backend "${SOURCE_DIR}/src/detail/macos_desktop_services_backend.mm")
 set(_macos_backend_header "${SOURCE_DIR}/src/detail/macos_desktop_services.hpp")
 set(_windows_backend_header "${SOURCE_DIR}/src/detail/windows_desktop_services.hpp")
+set(_linux_backend "${SOURCE_DIR}/src/linux_desktop_services_backend.cpp")
 
 function(require_text haystack needle description)
   string(FIND "${haystack}" "${needle}" _index)
@@ -54,6 +55,14 @@ if(NOT EXISTS "${_windows_backend_header}")
 endif()
 require_text("${_platform_source}" "detail/windows_desktop_services.hpp" "Windows backend factory visibility in platform implementation")
 require_text("${_desktop_services_ownership}" "make_windows_desktop_services_backend" "StandaloneWindow Windows backend construction")
+
+# Linux must use the same requesting StandaloneWindow native XID as the XDG
+# Portal parent identifier while keeping the T072 transport Application-owned.
+if(NOT EXISTS "${_linux_backend}")
+  message(FATAL_ERROR "T064 root integration contract: missing Linux DesktopServices backend")
+endif()
+require_text("${_desktop_services_ownership}" "make_linux_desktop_services_backend" "StandaloneWindow Linux backend construction")
+require_text("${_desktop_services_ownership}" "*impl_->application, dispatcher(), impl_->core->native_handle()" "Linux requesting-window handle propagation")
 
 if(NOT EXISTS "${_header_fixture}")
   message(FATAL_ERROR "T064 root integration contract: missing isolated public-header fixture: ${_header_fixture}")
