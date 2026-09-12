@@ -21,7 +21,9 @@
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
-#if defined(__linux__)
+#if defined(__APPLE__)
+#  include "detail/macos_desktop_services.hpp"
+#elif defined(__linux__)
 #  include "detail/linux_desktop_services.hpp"
 #endif
 #include "detail/native_ime_bridge.h"
