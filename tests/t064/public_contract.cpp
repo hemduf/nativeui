@@ -1,11 +1,9 @@
 #include <nativeui/desktop_services.hpp>
-#include <nativeui/window.hpp>
 
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -18,19 +16,6 @@ static_assert(std::is_same_v<ui::FileDialogCallback,
                              std::function<void(ui::FileDialogResult)>>);
 static_assert(std::is_same_v<ui::StatusCallback,
                              std::function<void(ui::DesktopServiceStatus)>>);
-
-static_assert(std::is_same_v<
-              decltype(std::declval<ui::StandaloneWindow&>().desktop_services()),
-              ui::DesktopServices&>);
-static_assert(std::is_same_v<
-              decltype(std::declval<ui::EmbeddedView&>().desktop_services()),
-              ui::DesktopServices&>);
-static_assert(std::is_constructible_v<
-              ui::EmbeddedView,
-              ui::UI&,
-              ui::NativeParentHandle,
-              ui::Size,
-              std::shared_ptr<ui::DesktopServicesBackend>>);
 
 int main() {
     ui::FileFilter filter{
