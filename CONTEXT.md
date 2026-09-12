@@ -28,7 +28,9 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-Current `main` is `c0140e725ac33b0a3ca315124a3d20091b96a173`. It includes completed T072, T066, T062 plus its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations. This completion cycle adds T044 / PR #145 without changing the frozen qualified implementation/test candidate.
+Current `main` includes T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 and its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations.
+
+T064 / issue #76 / PR #240 is complete and merged. Frozen current-main-synchronized executable head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed normal CI, T064 Desktop Services, T072 Linux D-Bus, T066 Window Controls, T065 Platform Dispatcher, T060 Application, T044 Native Pointer Capture, Package Contracts, T042 Lifecycle Stress and T052 v0.1 Release Gate. The final requirement -> implementation -> test matrix and current-main composition re-certification report no remaining Blocking/Important finding.
 
 T072 / issue #84 / PR #185 is complete and merged. Its final current-main-synchronized executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate, with final `CODE_REVIEW.md` re-certification reporting no Blocking/Important finding.
 
@@ -36,7 +38,7 @@ T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea
 
 T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a3d20091b96a173`. Its frozen executable candidate passed normal/path-scoped validation plus final-candidate T042/T052 qualification, and its final requirement-to-implementation/test review reported no Blocking/Important finding.
 
-T044 / issue #44 / PR #145 is completion-qualified. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` is synchronized with current `main`. Exact-head iterative validation is green: CI `34690800986`, T044 Native Pointer Capture `34690800974`, T060 `34690800996`, T065 `34690800981`, T066 `34690800987`, T072 `34690800985` and Package Contracts `34690801000`. Final-candidate T042 `34692128302` and T052 `34692128310` are green. Reviews `5185659103` and `5186332658` record the complete Outcome A/B, acceptance and `CODE_REVIEW.md` matrices with no Blocking/Important finding.
+T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation and final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete Outcome A/B, acceptance and `CODE_REVIEW.md` matrices with no Blocking/Important finding.
 
 Current convergence:
 
@@ -52,7 +54,7 @@ dynamic/overlay:   T058(done) -> T061(done)
 style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
 
-critical platform: T065(done) -> T072(done) -> T064(active PR #240)
+critical platform: T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
                                       |-------> T068
 
@@ -60,7 +62,7 @@ release:            T044(done) -------------------------------> T071
                     convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 is complete as an independent T071 release dependency.
+The owned v1 platform prerequisite lane T065/T072/T043/T064/T066 is complete. T044 is also complete as an independent T071 release dependency.
 
 ## Completed foundations relevant to v1
 
@@ -83,6 +85,7 @@ T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 
 - T061 / PR #216: generic per-UI overlay/portal layer with deterministic placement, modal focus/capture semantics, anchor tracking and retained reconciliation through T058.
 - T062 / PR #226 + PR #245: text-only Tooltip decorator over T061 + T065 with hover/focus eligibility, deterministic dismissal/suppression, semantic help and completed post-merge qualification coverage.
 - T063 / PR #227: modal Dialog policy over T061 with deterministic action/focus/scroll/reentrancy semantics and standalone/embedded qualification.
+- T064 / PR #240: bounded callback-based DesktopServices with fixed macOS/Windows/Linux backends, T072-only Linux portal integration, owner-local request identity/capacity and native platform qualification.
 - T065 / PR #133: bounded UI-thread Dispatcher/timer service with native wake integration.
 - T066 / PR #237: standalone window min/max/title/show/hide/resize controls plus deterministic user/programmatic close, veto, exactly-once `on_closed`, destructor-silent teardown and two-window isolation across macOS/Windows/Linux.
 - T067 / PR #219 + PR #233: fixed-height virtualized ListView with bounded materialization and qualified 100k startup behavior.
@@ -109,6 +112,23 @@ PR #185 provides the sole v1 Linux D-Bus transport for T064 portals and T068 AT-
 - Linux build/install/package integration and documented `libdbus-1` prerequisite.
 
 The final requirement -> implementation -> test matrix and `CODE_REVIEW.md` audit are recorded in PR #185.
+
+## T064 delivered contract
+
+PR #240 provides the v1 cross-platform DesktopServices layer:
+
+- one lazy view-owned `DesktopServices` facade per standalone window, with built-in EmbeddedView remaining side-effect-free/Unsupported unless an embedding owner explicitly injects a backend;
+- callback-only open-file, open-files, save-file, select-directory and HTTP(S) URL operations, with accepted and immediate failures completed asynchronously through T065;
+- exact one-active-chooser / sixteen-active-URL owner-local bounds, monotonic non-zero IDs, stale/cross-owner cancellation rejection, exactly-once completion and capacity release before application callback;
+- exact filter, suggested-filename, result-cardinality, Unicode path and bounded HTTP(S) validation;
+- distinct facade `Busy` and shared-T072 `ResourceLimit` semantics with no hidden overflow queue/transport;
+- owner destruction cancels backend requests and suppresses not-yet-started application callbacks without invoking backend/user code under coordinator locks;
+- macOS uses `NSOpenPanel` / `NSSavePanel` and `NSWorkspace`, without new NativeUI Objective-C runtime-visible classes/categories/swizzling/`+load`;
+- Windows uses `IFileOpenDialog` / `IFileSaveDialog` on request-owned joinable STA workers, `ShellExecuteW` for URL launch and request-local same-STA cancellation with no GIT/process registry/raw cross-apartment dialog pointer;
+- Linux/X11 uses XDG Desktop Portal `FileChooser` / `OpenURI` through T072 only, including parent-window routing, Request.Close cancellation, missing-portal `Unsupported`, hard-quota `ResourceLimit` and no GTK/Qt/zenity/shell fallback;
+- deterministic fake-only `examples/features/t064_desktop_services.cpp --self-test`, native platform smokes and install/package integration.
+
+The final acceptance matrix and `CODE_REVIEW.md` audit are recorded in PR #240; current-main synchronized head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed all required exact-head iterative and final-candidate gates before merge.
 
 ## T066 delivered contract
 
@@ -140,7 +160,7 @@ PR #145 completes the evidence-gated pointer-capture qualification without chang
 
 ## Active platform work
 
-- **T064 / PR #240:** implementation scope is frozen across macOS/Windows/Linux on exact head `6900b0b5e9baf44963f3634d47682e0eeb2b1601`. Normal CI, T064, T060, T065, T066, T072, Package Contracts and T052 final qualification are green. T042 passed Linux/X11, Windows and Linux ASan+UBSan; its macOS job passed the explicit pre-CTest fixture sequence and then hit one nondeterministic `ILLEGAL` result when CTest immediately reran the supported multi-instance fixture. One exact-job rerun is pending before any source/test change is justified.
+The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done, and T044 is also Done for the final release gate. No additional platform-lane implementation should start unless a later qualification run exposes a concrete regression or a new explicitly scoped dependency.
 
 ## Validation policy
 
@@ -156,6 +176,6 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 ## Next actions
 
-1. Finish T064 / PR #240 after the exact-head T042 macOS recovery; if it is green, synchronize completion-only issue/status/`CONTEXT.md`/`ROADMAP.md` state and merge without another executable change.
-2. T044 is complete; do not reopen its platform semantics unless later release qualification finds a concrete regression.
-3. T068 remains dependency-gated until every explicit issue #80 dependency is Done; T069/T070/T071 remain dependency-gated.
+1. Platform prerequisite work is complete; do not open replacement platform streams unless a concrete regression requires one.
+2. T068 remains governed only by its explicit issue #80 dependencies and can proceed independently of the now-complete T064 service lane.
+3. Continue T038 -> T039 and T040 in the styling lane as capacity permits; T069/T070/T071 remain dependency-gated.
