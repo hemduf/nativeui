@@ -37,6 +37,12 @@ int self_test() {
     if (!window.set_title("T066 UTF-8 — fenêtre")) {
         return example::fail("UTF-8 title update failed");
     }
+    if (!window.set_title("")) {
+        return example::fail("empty title update failed");
+    }
+    if (!window.set_title("T066 self-test")) {
+        return example::fail("title restore failed");
+    }
     if (!window.hide() || !window.hide()) {
         return example::fail("hide was not idempotent");
     }
@@ -44,9 +50,33 @@ int self_test() {
         return example::fail("show was not idempotent");
     }
 
-    if (!window.set_min_size(ui::Size{110.0f, 85.0f})) {
-        return example::fail("valid minimum size update failed");
+    if (!window.set_size({120.0f, 100.0f})) {
+        return example::fail("baseline size update failed");
     }
+    for (int i = 0; i < 4; ++i) (void)app.poll(0.0);
+    const auto baseline = window.size();
+    if (baseline.w != 120.0f || baseline.h != 100.0f) {
+        return example::fail("baseline authoritative size was not observed");
+    }
+
+    if (!window.set_min_size(ui::Size{140.0f, 90.0f})) {
+        return example::fail("tightening minimum size failed");
+    }
+    for (int i = 0; i < 4; ++i) (void)app.poll(0.0);
+    const auto tightened = window.size();
+    if (tightened.w != 140.0f || tightened.h != 100.0f) {
+        return example::fail("tightened minimum did not clamp authoritative window size");
+    }
+
+    if (!window.set_min_size(ui::Size{110.0f, 85.0f})) {
+        return example::fail("in-range minimum size update failed");
+    }
+    for (int i = 0; i < 2; ++i) (void)app.poll(0.0);
+    const auto unchanged = window.size();
+    if (unchanged.w != tightened.w || unchanged.h != tightened.h) {
+        return example::fail("in-range minimum update unexpectedly resized window");
+    }
+
     if (!window.set_max_size(ui::Size{220.0f, 170.0f})) {
         return example::fail("valid maximum size update failed");
     }
@@ -76,7 +106,10 @@ int self_test() {
     (void)app.poll(0.0);
     if (!window.is_closed()) return example::fail("deferred close did not complete at checkpoint");
     if (closed_calls != 1) return example::fail("on_closed did not fire exactly once");
-    if (window.show() || window.hide() || window.set_title("closed")) {
+    if (window.show() || window.hide() || window.set_title("closed") ||
+        window.set_size({150.0f, 110.0f}) ||
+        window.set_min_size(ui::Size{100.0f, 80.0f}) ||
+        window.set_max_size(ui::Size{220.0f, 170.0f})) {
         return example::fail("closed window still accepted mutating operations");
     }
 
