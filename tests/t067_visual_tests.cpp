@@ -104,6 +104,7 @@ void suite() {
 
     ui::ListViewStyle virtual_style;
     virtual_style.base.surface_fill = ui::Color{0.03f, 0.07f, 0.11f, 1.0f};
+    virtual_style.disabled.surface_fill = ui::Color{0.72f, 0.44f, 0.08f, 1.0f};
     virtual_style.selected.row_fill = ui::Color{0.74f, 0.12f, 0.22f, 1.0f};
     virtual_style.hovered.row_fill = ui::Color{0.12f, 0.66f, 0.30f, 1.0f};
     virtual_style.pressed.row_fill = ui::Color{0.18f, 0.30f, 0.82f, 1.0f};
