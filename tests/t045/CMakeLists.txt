@@ -5,17 +5,22 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(t045_semantics ../t045_semantics_tests.cpp)
-target_include_directories(t045_semantics PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}/../../include
-  ${CMAKE_CURRENT_LIST_DIR}/..
-)
+function(nativeui_add_semantics_test target source)
+  add_executable(${target} ${source})
+  target_include_directories(${target} PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
+  )
 
-if(MSVC)
-  target_compile_options(t045_semantics PRIVATE /W4 /WX /permissive-)
-else()
-  target_compile_options(t045_semantics PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
+
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
 
 enable_testing()
-add_test(NAME t045_semantics COMMAND t045_semantics)
+nativeui_add_semantics_test(t045_semantics ../t045_semantics_tests.cpp)
+nativeui_add_semantics_test(t068_semantic_proxy t068_semantic_proxy_tests.cpp)
