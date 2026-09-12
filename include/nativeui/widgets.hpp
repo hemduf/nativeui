@@ -3,6 +3,7 @@
 #include <nativeui/virtual_list.hpp>
 #include <nativeui/text_input_style.hpp>
 #include <nativeui/text_area_style.hpp>
+#include <nativeui/list_tabs_style.hpp>
 
 #include <nativeui/detail/widgets_basic.inc>
 #include <nativeui/detail/widgets_text_input.inc>
