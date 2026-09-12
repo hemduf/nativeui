@@ -298,6 +298,44 @@ int self_test() {
         return example::fail("TabsStyle did not affect retained header/panel rendering");
     }
 
+    // T038 invalidation contract: paint-only interaction patches stay on the
+    // paint path, while an interaction patch that changes measured geometry
+    // must request layout + paint before the next render.
+    constexpr ui::Size invalidation_size{180.0f, 64.0f};
+    ui::ButtonStyle paint_only_style;
+    paint_only_style.hovered.fill = ui::Color{0.20f, 0.40f, 0.70f, 1.0f};
+    ui::UI paint_only_button{ui::Button{"Paint only", [] {}}.style(paint_only_style)};
+    example::Platform paint_only_platform;
+    paint_only_button.resize(invalidation_size);
+    paint_only_button.activate(paint_only_platform);
+    ui::HeadlessRenderer paint_only_renderer{invalidation_size, 1.0f};
+    if (!paint_only_renderer.render(paint_only_button)) {
+        return example::fail("paint-only invalidation baseline render failed");
+    }
+    paint_only_button.dispatch(
+        example::pointer(ui::InputType::PointerMove, 20.0f, 20.0f),
+        paint_only_platform);
+    if (paint_only_button.layout_dirty() || !paint_only_button.paint_dirty()) {
+        return example::fail("paint-only style state change invalidated layout");
+    }
+
+    ui::ButtonStyle layout_style;
+    layout_style.hovered.control_height = 52.0f;
+    ui::UI layout_button{ui::Button{"Layout", [] {}}.style(layout_style)};
+    example::Platform layout_platform;
+    layout_button.resize(invalidation_size);
+    layout_button.activate(layout_platform);
+    ui::HeadlessRenderer layout_renderer{invalidation_size, 1.0f};
+    if (!layout_renderer.render(layout_button)) {
+        return example::fail("layout invalidation baseline render failed");
+    }
+    layout_button.dispatch(
+        example::pointer(ui::InputType::PointerMove, 20.0f, 20.0f),
+        layout_platform);
+    if (!layout_button.layout_dirty()) {
+        return example::fail("layout-affecting style state change did not invalidate layout");
+    }
+
     DemoState state;
     auto tree = make_ui(state);
     tree.resize({640.0f, 320.0f});
