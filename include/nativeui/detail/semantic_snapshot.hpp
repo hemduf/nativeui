@@ -2,6 +2,8 @@
 
 #include <nativeui/semantics.hpp>
 
+#include <atomic>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -167,5 +169,31 @@ namespace semantic_snapshot_detail {
     }
     return changes;
 }
+
+class SemanticSnapshotPublisher {
+public:
+    SemanticSnapshotPublisher()
+        : current_(std::make_shared<const SemanticTreeSnapshot>()) {}
+
+    [[nodiscard]] std::shared_ptr<const SemanticTreeSnapshot> current() const noexcept {
+        return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+    }
+
+    [[nodiscard]] std::vector<SemanticChange> publish(SemanticTreeSnapshot candidate) {
+        const auto previous = current();
+        auto changes = diff_semantic_snapshots(*previous, candidate);
+        if (changes.empty()) {
+            return changes;
+        }
+
+        candidate.generation = previous->generation + 1;
+        auto published = std::make_shared<const SemanticTreeSnapshot>(std::move(candidate));
+        std::atomic_store_explicit(&current_, std::move(published), std::memory_order_release);
+        return changes;
+    }
+
+private:
+    mutable std::shared_ptr<const SemanticTreeSnapshot> current_;
+};
 
 } // namespace ui::detail
