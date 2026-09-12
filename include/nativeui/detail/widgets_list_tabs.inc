@@ -625,14 +625,17 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
-    void focus_changed(bool focused, FocusContext&) override {
+    void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = container_style(focused_);
         focused_ = focused;
         if (!focused) {
             active_index_.reset();
-            return;
+        } else {
+            active_index_ = runtime_->selected_index();
+            if (!active_index_) active_index_ = runtime_->first_enabled();
         }
-        active_index_ = runtime_->selected_index();
-        if (!active_index_) active_index_ = runtime_->first_enabled();
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -689,8 +692,10 @@ public:
                 return EventResult::Handled;
             }
             set_hovered(index, context);
+            const auto before = container_style(focused_);
             pointer_armed_ = index;
-            context.invalidate();
+            const auto after = container_style(focused_);
+            invalidate_style_transition(before, after, context);
             context.capture_pointer();
             return EventResult::Handled;
         }
@@ -699,8 +704,10 @@ public:
             set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
+            const auto before = container_style(focused_);
             pointer_armed_.reset();
-            context.invalidate();
+            const auto after = container_style(focused_);
+            invalidate_style_transition(before, after, context);
             context.release_pointer();
             if (index && *index == armed) {
                 active_index_ = armed;
@@ -710,8 +717,12 @@ public:
         }
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
-            pointer_armed_.reset();
-            context.invalidate();
+            {
+                const auto before = container_style(focused_);
+                pointer_armed_.reset();
+                const auto after = container_style(focused_);
+                invalidate_style_transition(before, after, context);
+            }
             context.release_pointer();
             return EventResult::Handled;
         default:
@@ -719,10 +730,13 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override {
+    void deactivate(LifecycleContext& context) override {
+        const auto before = container_style(focused_);
         pointer_armed_.reset();
         hovered_index_.reset();
         focused_ = false;
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     void paint(PaintContext& context) const override {
@@ -818,6 +832,19 @@ public:
     }
 
 private:
+    [[nodiscard]] bool hovered_visual_active() const noexcept {
+        if (!hovered_index_ || *hovered_index_ >= runtime_->keys.size() ||
+            !runtime_->enabled_at(*hovered_index_) || !effective_enabled()) {
+            return false;
+        }
+        return runtime_->selection->get() != runtime_->keys[*hovered_index_];
+    }
+
+    [[nodiscard]] bool pressed_visual_active() const noexcept {
+        return pointer_armed_ && hovered_visual_active() && hovered_index_ &&
+               *pointer_armed_ == *hovered_index_;
+    }
+
     [[nodiscard]] ResolvedTabsStyle container_style(bool focused) const {
         return resolve_tabs_style(
             default_tabs_style(current_theme()),
@@ -825,6 +852,8 @@ private:
             VisualState{
                 .enabled = effective_enabled(),
                 .read_only = effective_read_only(),
+                .hovered = hovered_visual_active(),
+                .pressed = pressed_visual_active(),
                 .focused = focused,
             });
     }
@@ -848,10 +877,30 @@ private:
             });
     }
 
+    [[nodiscard]] static bool same_layout(const ResolvedTabsStyle& lhs,
+                                          const ResolvedTabsStyle& rhs) noexcept {
+        return lhs.header_height == rhs.header_height && lhs.panel_gap == rhs.panel_gap;
+    }
+
+    template <class Context>
+    static void invalidate_style_transition(const ResolvedTabsStyle& before,
+                                            const ResolvedTabsStyle& after,
+                                            Context& context) {
+        if (before == after) return;
+        if (!same_layout(before, after)) {
+            context.invalidate_layout();
+            context.invalidate();
+            return;
+        }
+        context.invalidate();
+    }
+
     void set_hovered(std::optional<std::size_t> index, InputContext& context) {
         if (hovered_index_ == index) return;
+        const auto before = container_style(focused_);
         hovered_index_ = index;
-        context.invalidate();
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     [[nodiscard]] std::optional<std::size_t> tab_at(
