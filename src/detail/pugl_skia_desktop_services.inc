@@ -9,7 +9,12 @@ EmbeddedView::EmbeddedView(
 
 DesktopServices& StandaloneWindow::desktop_services() {
     if (!desktop_services_) {
-#if defined(__linux__)
+#if defined(__APPLE__)
+        if (!desktop_services_backend_ && impl_ && impl_->core) {
+            desktop_services_backend_ = detail::make_macos_desktop_services_backend(
+                impl_->core->native_handle());
+        }
+#elif defined(__linux__)
         if (!desktop_services_backend_ && impl_ && impl_->application) {
             desktop_services_backend_ = detail::make_linux_desktop_services_backend(
                 *impl_->application, dispatcher());
