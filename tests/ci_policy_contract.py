@@ -45,8 +45,9 @@ def main() -> None:
         require(text, "workflow_dispatch:", name)
         forbid(text, "  push:\n", name)
 
-    # Dedicated feature contracts must be path scoped.
+    # Dedicated subsystem contracts must be path scoped.
     for name in (
+        "package-contract.yml",
         "t045-accessibility-semantics.yml",
         "t060-application.yml",
         "t065-dispatcher-contract.yml",
@@ -54,6 +55,23 @@ def main() -> None:
     ):
         text = read(name)
         require(text, "    paths:\n", name)
+
+    package_contract = read("package-contract.yml")
+    require(
+        package_contract,
+        "      - 'cmake/NativeUIAttachPlatform.cmake'",
+        "package-contract.yml",
+    )
+    require(
+        package_contract,
+        "      - 'cmake/NativeUIApplication.cmake'",
+        "package-contract.yml",
+    )
+    require(
+        package_contract,
+        "      - 'cmake/NativeUIBinaryData.cmake'",
+        "package-contract.yml",
+    )
 
     dispatcher = read("t065-dispatcher-contract.yml")
     forbid(dispatcher, "include/nativeui/nativeui.hpp", "t065-dispatcher-contract.yml")
@@ -70,6 +88,10 @@ def main() -> None:
 
     ci = read("ci.yml")
     require(ci, "pull_request:\n    branches: [main]", "ci.yml")
+    forbid(ci, "tests/t047_package_tests.cmake", "ci.yml")
+    forbid(ci, "tests/t048_external_consumer_tests.cmake", "ci.yml")
+    forbid(ci, "tests/t054_package_tests.cmake", "ci.yml")
+    forbid(ci, "tests/t056_package_tests.cmake", "ci.yml")
 
     # Keep the policy document wired into agent recovery instructions.
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
