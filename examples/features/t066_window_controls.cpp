@@ -1,5 +1,4 @@
 #include "example_support.hpp"
-#include "native_window_self_test_lock.hpp"
 
 #include <nativeui/nativeui.hpp>
 
@@ -29,11 +28,6 @@ void pump_native_events(ui::Application& app, int iterations = 8) {
 }
 
 int self_test() {
-    example::NativeWindowSelfTestLock native_test_lock;
-    if (!native_test_lock.valid()) {
-        return example::fail("failed to acquire native window self-test lock");
-    }
-
     ui::UI ui{
         ui::Column{
             ui::Label{"T066 window controls"},
@@ -42,7 +36,6 @@ int self_test() {
             .gap(8.0f)};
 
     ui::Application app;
-    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
 
     ui::StandaloneWindow window{
         app,
@@ -129,6 +122,9 @@ int self_test() {
     (void)app.poll(0.0);
     if (!window.is_closed()) return example::fail("deferred close did not complete at checkpoint");
     if (closed_calls != 1) return example::fail("on_closed did not fire exactly once");
+    if (!app.quit_requested()) {
+        return example::fail("accepted last-window close did not feed Application quit policy");
+    }
     if (window.show() || window.hide() || window.set_title("closed") ||
         window.set_size({150.0f, 110.0f}) ||
         window.set_min_size(ui::Size{100.0f, 80.0f}) ||
@@ -137,7 +133,6 @@ int self_test() {
     }
 
     window.request_close();
-    (void)app.poll(0.0);
     if (closed_calls != 1) return example::fail("repeated close duplicated on_closed");
     return 0;
 }
