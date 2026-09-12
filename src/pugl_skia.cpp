@@ -1,5 +1,7 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
+#include "detail/window_control_state.hpp"
+
 #if defined(__APPLE__)
 #  include <CoreFoundation/CFRunLoop.h>
 #elif defined(_WIN32)

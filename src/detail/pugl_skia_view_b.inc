@@ -4,6 +4,7 @@
             return PUGL_SUCCESS;
 
         case PUGL_CONFIGURE: {
+            const float previous_scale = geometry_.last_valid_scale();
             const Size physical{static_cast<float>(event->configure.width),
                                 static_cast<float>(event->configure.height)};
             const auto logical = detail::apply_authoritative_configure(
@@ -17,6 +18,13 @@
                 // states. Preserve the last valid logical viewport until a
                 // positive configure arrives.
                 return PUGL_SUCCESS;
+            }
+
+            // Logical size constraints are DPI-independent. Re-apply their
+            // physical Pugl hints only when the authoritative view scale changes.
+            if (geometry_.last_valid_scale() != previous_scale &&
+                !apply_size_constraints()) {
+                last_error_ = "Failed to refresh logical window size constraints";
             }
 
             // refresh_focus() replays focus_changed(true) on the focused text
@@ -50,12 +58,13 @@
             return PUGL_SUCCESS;
 
         case PUGL_CLOSE:
-            // Notify an in-flight interaction immediately; destructor teardown
-            // will then be idempotent. The Application callback only updates
-            // per-Application bookkeeping; it never mutates the Pugl world.
-            (void)ui_.cancel_pointer(services_);
-            should_close_ = true;
-            if (close_callback_) close_callback_();
+            // StandaloneWindow owns T066 veto/deferred completion. Embedded or
+            // compatibility callers without a callback retain direct close.
+            if (close_callback_) {
+                close_callback_();
+            } else {
+                (void)close_native_view();
+            }
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_IN:
@@ -77,8 +86,11 @@
             input.key = tab.is_tab ? Key::Tab : translate_key(event->key.key, event->key.state);
             input.shift = tab.shift;
             if (input.type == InputType::KeyDown && input.key == Key::Quit) {
-                should_close_ = true;
-                if (close_callback_) close_callback_();
+                if (close_callback_) {
+                    close_callback_();
+                } else {
+                    (void)close_native_view();
+                }
             } else if (input.key != Key::None) {
                 ui_.dispatch(input, services_);
             }
@@ -274,10 +286,12 @@
     NativeUIImeBridge* ime_bridge_{};
     SkiaGlRenderer renderer_;
     detail::ViewGeometryState geometry_;
+    detail::WindowSizeConstraints size_constraints_;
     detail::PreferredSizeState preferred_size_state_;
     PreferredSizeCallback preferred_size_callback_;
     bool preferred_measure_dirty_{};
     bool should_close_{};
+    bool visible_{};
     bool text_input_active_{};
     Rect text_input_logical_area_{};
     float text_input_logical_cursor_offset_{};
