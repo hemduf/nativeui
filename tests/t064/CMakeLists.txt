@@ -15,6 +15,13 @@ function(t064_enable_warnings target)
   endif()
 endfunction()
 
+add_test(
+  NAME t064.root_integration_contract
+  COMMAND ${CMAKE_COMMAND}
+    "-DSOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}/../.."
+    -P "${CMAKE_CURRENT_LIST_DIR}/../t064_root_integration_contract.cmake"
+)
+
 add_executable(t064_public_contract public_contract.cpp)
 target_include_directories(t064_public_contract PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/../../include"
