@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/combo_popup_style.hpp>
 #include <nativeui/component.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/detail/theme_binding.hpp>
@@ -99,16 +100,31 @@ template <class Predicate>
     return kNoPopupIndex;
 }
 
-[[nodiscard]] inline TextStyle popup_text_style(
-    const Theme& theme, Color color, TextAlign align = TextAlign::Left) {
+[[nodiscard]] inline TextStyle combo_anchor_text_style(
+    const ResolvedComboBoxStyle& resolved,
+    TextAlign align = TextAlign::Center) {
     TextStyle style{};
-    style.size = theme.typography.control_size;
-    style.color = color;
+    style.size = resolved.text_size;
+    style.color = resolved.text;
     style.align = align;
-    style.weight = theme.typography.control_weight;
-    style.slant = theme.typography.slant;
-    style.family = theme.typography.family;
-    style.fallback_families = theme.typography.fallback_families;
+    style.weight = resolved.text_weight;
+    style.slant = resolved.text_slant;
+    style.family = resolved.font_family;
+    style.fallback_families = resolved.fallback_families;
+    return style;
+}
+
+[[nodiscard]] inline TextStyle menu_item_text_style(
+    const ResolvedMenuItemStyle& resolved,
+    TextAlign align = TextAlign::Left) {
+    TextStyle style{};
+    style.size = resolved.text_size;
+    style.color = resolved.text;
+    style.align = align;
+    style.weight = resolved.text_weight;
+    style.slant = resolved.text_slant;
+    style.family = resolved.font_family;
+    style.fallback_families = resolved.fallback_families;
     return style;
 }
 
@@ -125,6 +141,7 @@ template <class T>
 struct ComboPopupSession final {
     std::shared_ptr<ComboAnchorRuntime<T>> anchor;
     std::vector<ComboBoxOption<T>> options;
+    MenuItemStyle item_style;
     OverlayHandle handle;
     std::size_t highlighted{kNoPopupIndex};
     bool completion_queued{};
@@ -140,6 +157,7 @@ struct MenuAnchorRuntime final {
 struct MenuPopupSession final {
     std::shared_ptr<MenuAnchorRuntime> anchor;
     std::vector<PopupMenuItem> items;
+    MenuItemStyle item_style;
     OverlayHandle handle;
     std::size_t highlighted{kNoPopupIndex};
     bool completion_queued{};
@@ -156,16 +174,17 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto& theme = current_theme();
-        float width = theme.controls.minimum_width;
-        const auto style = popup_text_style(theme, theme.palette.text);
+        const auto base = base_item_style();
+        float width = current_theme().controls.minimum_width;
+        const auto text_style = menu_item_text_style(base);
         for (const auto& option : session_->options) {
             width = std::max(
                 width,
-                TextService::measure(option.label, style).width + theme.spacing.large * 2.0f);
+                TextService::measure(option.label, text_style).width +
+                    base.horizontal_padding * 2.0f);
         }
         const auto rows = std::max<std::size_t>(session_->options.size(), 1);
-        return {width, theme.controls.control_height * static_cast<float>(rows)};
+        return {width, base.row_height * static_cast<float>(rows)};
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -245,32 +264,47 @@ public:
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
         const auto& theme = current_theme();
+        const auto base = base_item_style();
         auto& painter = context.painter();
         painter.fill_rounded_rect(bounds, theme.radii.medium, theme.palette.surface);
         painter.stroke_rounded_rect(
             bounds, theme.radii.medium, theme.controls.border_width, theme.palette.border);
 
-        const float row_height = theme.controls.control_height;
+        const float row_height = base.row_height;
         for (std::size_t i = 0; i < session_->options.size(); ++i) {
+            const auto resolved = resolved_item_style(i);
             const Rect row{
                 bounds.x,
                 bounds.y + static_cast<float>(i) * row_height,
                 bounds.w,
                 row_height};
-            if (i == session_->highlighted && session_->options[i].enabled) {
-                painter.fill_rounded_rect(row, 0.0f, theme.palette.selection);
-            }
-            const auto color = session_->options[i].enabled
-                ? theme.palette.text
-                : theme.palette.disabled;
+            painter.fill_rounded_rect(row, resolved.corner_radius, resolved.fill);
             painter.text(
-                {row.x + theme.spacing.medium, row.y + row.h * 0.5f},
+                {row.x + base.horizontal_padding, row.y + row.h * 0.5f},
                 session_->options[i].label,
-                popup_text_style(theme, color));
+                menu_item_text_style(resolved));
         }
     }
 
 private:
+    [[nodiscard]] ResolvedMenuItemStyle base_item_style() const {
+        return resolve_menu_item_style(
+            default_menu_item_style(current_theme()), session_->item_style, VisualState{});
+    }
+
+    [[nodiscard]] ResolvedMenuItemStyle resolved_item_style(std::size_t index) const {
+        const bool highlighted = index == session_->highlighted;
+        return resolve_menu_item_style(
+            default_menu_item_style(current_theme()),
+            session_->item_style,
+            VisualState{
+                .enabled = session_->options[index].enabled,
+                .hovered = highlighted,
+                .pressed = highlighted && pointer_armed_,
+                .selected = highlighted,
+            });
+    }
+
     [[nodiscard]] std::size_t first_enabled() const {
         return first_popup_index(session_->options.size(), [&](std::size_t index) {
             return session_->options[index].enabled;
@@ -301,7 +335,7 @@ private:
 
     [[nodiscard]] std::size_t index_at(Point point, Rect bounds) const noexcept {
         if (!bounds.contains(point) || session_->options.empty()) return kNoPopupIndex;
-        const float row_height = current_theme().controls.control_height;
+        const float row_height = base_item_style().row_height;
         if (row_height <= 0.0f) return kNoPopupIndex;
         const auto index = static_cast<std::size_t>((point.y - bounds.y) / row_height);
         return index < session_->options.size() ? index : kNoPopupIndex;
@@ -356,21 +390,22 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto& theme = current_theme();
-        float width = theme.controls.minimum_width;
+        const auto base = base_item_style();
+        float width = current_theme().controls.minimum_width;
         float height = 0.0f;
-        const auto style = popup_text_style(theme, theme.palette.text);
+        const auto text_style = menu_item_text_style(base);
         for (const auto& item : session_->items) {
             if (item.kind == PopupMenuItem::Kind::Separator) {
-                height += theme.spacing.sm;
+                height += base.separator_height;
                 continue;
             }
             width = std::max(
                 width,
-                TextService::measure(item.label, style).width + theme.spacing.large * 2.0f);
-            height += theme.controls.control_height;
+                TextService::measure(item.label, text_style).width +
+                    base.horizontal_padding * 2.0f);
+            height += base.row_height;
         }
-        return {width, std::max(height, theme.controls.control_height)};
+        return {width, std::max(height, base.row_height)};
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -452,6 +487,7 @@ public:
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
         const auto& theme = current_theme();
+        const auto base = base_item_style();
         auto& painter = context.painter();
         painter.fill_rounded_rect(bounds, theme.radii.medium, theme.palette.surface);
         painter.stroke_rounded_rect(
@@ -461,30 +497,46 @@ public:
         for (std::size_t i = 0; i < session_->items.size(); ++i) {
             const auto& item = session_->items[i];
             if (item.kind == PopupMenuItem::Kind::Separator) {
-                const float height = theme.spacing.sm;
                 painter.line(
-                    {bounds.x + theme.spacing.sm, y + height * 0.5f},
-                    {bounds.x + bounds.w - theme.spacing.sm, y + height * 0.5f},
-                    theme.controls.border_width,
-                    theme.palette.border);
-                y += height;
+                    {bounds.x + base.separator_inset, y + base.separator_height * 0.5f},
+                    {bounds.x + bounds.w - base.separator_inset,
+                     y + base.separator_height * 0.5f},
+                    base.separator_width,
+                    base.separator);
+                y += base.separator_height;
                 continue;
             }
 
-            const Rect row{bounds.x, y, bounds.w, theme.controls.control_height};
-            if (i == session_->highlighted && item.actionable()) {
-                painter.fill_rounded_rect(row, 0.0f, theme.palette.selection);
-            }
+            const auto resolved = resolved_item_style(i);
+            const Rect row{bounds.x, y, bounds.w, base.row_height};
+            painter.fill_rounded_rect(row, resolved.corner_radius, resolved.fill);
             painter.text(
-                {row.x + theme.spacing.medium, row.y + row.h * 0.5f},
+                {row.x + base.horizontal_padding, row.y + row.h * 0.5f},
                 item.label,
-                popup_text_style(
-                    theme, item.actionable() ? theme.palette.text : theme.palette.disabled));
+                menu_item_text_style(resolved));
             y += row.h;
         }
     }
 
 private:
+    [[nodiscard]] ResolvedMenuItemStyle base_item_style() const {
+        return resolve_menu_item_style(
+            default_menu_item_style(current_theme()), session_->item_style, VisualState{});
+    }
+
+    [[nodiscard]] ResolvedMenuItemStyle resolved_item_style(std::size_t index) const {
+        const bool highlighted = index == session_->highlighted;
+        return resolve_menu_item_style(
+            default_menu_item_style(current_theme()),
+            session_->item_style,
+            VisualState{
+                .enabled = selectable(index),
+                .hovered = highlighted,
+                .pressed = highlighted && pointer_armed_,
+                .selected = highlighted,
+            });
+    }
+
     [[nodiscard]] bool selectable(std::size_t index) const noexcept {
         return index < session_->items.size() && session_->items[index].actionable();
     }
@@ -519,12 +571,12 @@ private:
 
     [[nodiscard]] std::size_t index_at(Point point, Rect bounds) const noexcept {
         if (!bounds.contains(point)) return kNoPopupIndex;
-        const auto& theme = current_theme();
+        const auto base = base_item_style();
         float y = bounds.y;
         for (std::size_t i = 0; i < session_->items.size(); ++i) {
             const float height = session_->items[i].kind == PopupMenuItem::Kind::Separator
-                ? theme.spacing.sm
-                : theme.controls.control_height;
+                ? base.separator_height
+                : base.row_height;
             if (point.y >= y && point.y < y + height) return i;
             y += height;
         }
@@ -578,11 +630,15 @@ public:
         OptionsProvider options_provider,
         std::vector<ComboBoxOption<T>> display_options,
         std::string placeholder,
+        ComboBoxStyle style,
+        MenuItemStyle item_style,
         std::shared_ptr<ComboAnchorRuntime<T>> runtime)
         : selection_(&selection),
           options_provider_(std::move(options_provider)),
           display_options_(std::move(display_options)),
           placeholder_(std::move(placeholder)),
+          style_(std::move(style)),
+          item_style_(std::move(item_style)),
           runtime_(std::move(runtime)) {
         runtime_->selection = selection_;
     }
@@ -592,12 +648,13 @@ public:
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto& theme = current_theme();
-        const auto style = popup_text_style(theme, theme.palette.text, TextAlign::Center);
-        const auto text = TextService::measure(display_text(), style);
+        const auto resolved = resolved_style(focused_);
+        const auto text = TextService::measure(
+            display_text(), combo_anchor_text_style(resolved));
         return {
-            std::max(theme.controls.minimum_width, text.width + theme.spacing.large * 2.0f),
-            theme.controls.control_height};
+            std::max(resolved.minimum_width,
+                     text.width + resolved.horizontal_padding * 2.0f),
+            resolved.control_height};
     }
 
     void mount(MountContext& context) override {
@@ -617,6 +674,7 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
+        focused_ = focused;
         if (!focused && !runtime_->handle.valid()) {
             runtime_->suppress_until_key_up = Key::None;
         }
@@ -624,6 +682,7 @@ public:
     }
 
     void deactivate(LifecycleContext& context) override {
+        focused_ = false;
         interaction_.deactivate(context);
         runtime_->suppress_until_key_up = Key::None;
     }
@@ -672,29 +731,33 @@ public:
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
-        const auto& theme = current_theme();
+        const auto resolved = resolved_style(context.focused());
         auto& painter = context.painter();
-
-        const Color fill = effective_enabled()
-            ? theme.palette.surface
-            : theme.palette.control_background;
-        const Color text = effective_enabled()
-            ? theme.palette.text
-            : theme.palette.disabled;
-        painter.fill_rounded_rect(bounds, theme.radii.medium, fill);
+        painter.fill_rounded_rect(bounds, resolved.corner_radius, resolved.fill);
         painter.stroke_rounded_rect(
-            bounds,
-            theme.radii.medium,
-            context.focused() ? theme.controls.focus_ring_width : theme.controls.border_width,
-            context.focused() ? theme.palette.focus : theme.palette.border);
-
+            bounds, resolved.corner_radius, resolved.border_width, resolved.border);
         painter.text(
             {bounds.x + bounds.w * 0.5f, bounds.y + bounds.h * 0.5f},
             display_text(),
-            popup_text_style(theme, text, TextAlign::Center));
+            combo_anchor_text_style(resolved));
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = interaction_.hovered(),
+            .pressed = interaction_.pressed(),
+            .focused = focused,
+        };
+    }
+
+    [[nodiscard]] ResolvedComboBoxStyle resolved_style(bool focused) const {
+        return resolve_combo_box_style(
+            default_combo_box_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     [[nodiscard]] std::string display_text() const {
         const auto& selected = selection_->get();
         const auto found = std::find_if(
@@ -725,6 +788,7 @@ private:
         session->anchor = runtime_;
         session->highlighted = initial_highlight(snapshot);
         session->options = std::move(snapshot);
+        session->item_style = item_style_;
 
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
@@ -751,10 +815,13 @@ private:
     OptionsProvider options_provider_;
     std::vector<ComboBoxOption<T>> display_options_;
     std::string placeholder_;
+    ComboBoxStyle style_;
+    MenuItemStyle item_style_;
     std::shared_ptr<ComboAnchorRuntime<T>> runtime_;
     typename State<T>::Subscription subscription_;
     PressActivationState interaction_;
     std::optional<OverlayComponentCommand> pending_command_;
+    bool focused_{};
 };
 
 class PopupMenuComponent final : public Component,
@@ -767,9 +834,13 @@ public:
     PopupMenuComponent(
         std::string label,
         ItemsProvider items_provider,
+        ComboBoxStyle style,
+        MenuItemStyle item_style,
         std::shared_ptr<MenuAnchorRuntime> runtime)
         : label_(std::move(label)),
           items_provider_(std::move(items_provider)),
+          style_(std::move(style)),
+          item_style_(std::move(item_style)),
           runtime_(std::move(runtime)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
@@ -777,12 +848,12 @@ public:
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return false; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto& theme = current_theme();
-        const auto style = popup_text_style(theme, theme.palette.text, TextAlign::Center);
-        const auto text = TextService::measure(label_, style);
+        const auto resolved = resolved_style(focused_);
+        const auto text = TextService::measure(label_, combo_anchor_text_style(resolved));
         return {
-            std::max(theme.controls.minimum_width, text.width + theme.spacing.large * 2.0f),
-            theme.controls.control_height};
+            std::max(resolved.minimum_width,
+                     text.width + resolved.horizontal_padding * 2.0f),
+            resolved.control_height};
     }
 
     void mount(MountContext& context) override {
@@ -799,6 +870,7 @@ public:
     }
 
     void focus_changed(bool focused, FocusContext& context) override {
+        focused_ = focused;
         if (!focused && !runtime_->handle.valid()) {
             runtime_->suppress_until_key_up = Key::None;
         }
@@ -806,6 +878,7 @@ public:
     }
 
     void deactivate(LifecycleContext& context) override {
+        focused_ = false;
         interaction_.deactivate(context);
         runtime_->suppress_until_key_up = Key::None;
     }
@@ -844,28 +917,33 @@ public:
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
-        const auto& theme = current_theme();
+        const auto resolved = resolved_style(context.focused());
         auto& painter = context.painter();
-
-        const Color fill = effective_enabled()
-            ? theme.palette.surface
-            : theme.palette.control_background;
-        const Color text = effective_enabled()
-            ? theme.palette.text
-            : theme.palette.disabled;
-        painter.fill_rounded_rect(bounds, theme.radii.medium, fill);
+        painter.fill_rounded_rect(bounds, resolved.corner_radius, resolved.fill);
         painter.stroke_rounded_rect(
-            bounds,
-            theme.radii.medium,
-            context.focused() ? theme.controls.focus_ring_width : theme.controls.border_width,
-            context.focused() ? theme.palette.focus : theme.palette.border);
+            bounds, resolved.corner_radius, resolved.border_width, resolved.border);
         painter.text(
             {bounds.x + bounds.w * 0.5f, bounds.y + bounds.h * 0.5f},
             label_,
-            popup_text_style(theme, text, TextAlign::Center));
+            combo_anchor_text_style(resolved));
     }
 
 private:
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = interaction_.hovered(),
+            .pressed = interaction_.pressed(),
+            .focused = focused,
+        };
+    }
+
+    [[nodiscard]] ResolvedComboBoxStyle resolved_style(bool focused) const {
+        return resolve_combo_box_style(
+            default_combo_box_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     [[nodiscard]] static std::size_t initial_highlight(
         const std::vector<PopupMenuItem>& items) {
         return first_popup_index(items.size(), [&](std::size_t index) {
@@ -881,6 +959,7 @@ private:
         session->anchor = runtime_;
         session->highlighted = initial_highlight(snapshot);
         session->items = std::move(snapshot);
+        session->item_style = item_style_;
 
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
@@ -905,9 +984,12 @@ private:
 
     std::string label_;
     ItemsProvider items_provider_;
+    ComboBoxStyle style_;
+    MenuItemStyle item_style_;
     std::shared_ptr<MenuAnchorRuntime> runtime_;
     PressActivationState interaction_;
     std::optional<OverlayComponentCommand> pending_command_;
+    bool focused_{};
 };
 
 } // namespace detail
@@ -933,23 +1015,39 @@ public:
         return std::move(*this);
     }
 
+    ComboBox&& style(ComboBoxStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
+    ComboBox&& item_style(MenuItemStyle value) && {
+        item_style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto* selection = selection_;
         auto provider = std::move(options_provider_);
         auto initial_options = std::move(initial_options_);
         auto placeholder = std::move(placeholder_);
+        auto style = std::move(style_);
+        auto item_style = std::move(item_style_);
         auto runtime = std::make_shared<detail::ComboAnchorRuntime<T>>();
         return Spec{
             [selection,
              provider = std::move(provider),
              initial_options = std::move(initial_options),
              placeholder = std::move(placeholder),
+             style = std::move(style),
+             item_style = std::move(item_style),
              runtime = std::move(runtime)]() mutable {
                 return std::make_unique<detail::ComboBoxComponent<T>>(
                     *selection,
                     std::move(provider),
                     std::move(initial_options),
                     std::move(placeholder),
+                    std::move(style),
+                    std::move(item_style),
                     std::move(runtime));
             },
             {}};
@@ -960,6 +1058,8 @@ private:
     std::vector<ComboBoxOption<T>> initial_options_;
     OptionsProvider options_provider_;
     std::string placeholder_{"No selection"};
+    ComboBoxStyle style_;
+    MenuItemStyle item_style_;
 };
 
 class PopupMenu {
@@ -973,16 +1073,34 @@ public:
     PopupMenu(std::string label, ItemsProvider items_provider)
         : label_(std::move(label)), items_provider_(std::move(items_provider)) {}
 
+    PopupMenu&& style(ComboBoxStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
+    PopupMenu&& item_style(MenuItemStyle value) && {
+        item_style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto provider = std::move(items_provider_);
+        auto style = std::move(style_);
+        auto item_style = std::move(item_style_);
         auto runtime = std::make_shared<detail::MenuAnchorRuntime>();
         return Spec{
             [label = std::move(label),
              provider = std::move(provider),
+             style = std::move(style),
+             item_style = std::move(item_style),
              runtime = std::move(runtime)]() mutable {
                 return std::make_unique<detail::PopupMenuComponent>(
-                    std::move(label), std::move(provider), std::move(runtime));
+                    std::move(label),
+                    std::move(provider),
+                    std::move(style),
+                    std::move(item_style),
+                    std::move(runtime));
             },
             {}};
     }
@@ -990,6 +1108,8 @@ public:
 private:
     std::string label_;
     ItemsProvider items_provider_;
+    ComboBoxStyle style_;
+    MenuItemStyle item_style_;
 };
 
 } // namespace ui
