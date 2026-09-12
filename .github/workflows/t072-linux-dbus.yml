@@ -1,0 +1,71 @@
+name: T072 Linux D-Bus Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/nativeui/window.hpp'
+      - 'src/linux_dbus.cpp'
+      - 'src/linux_dbus_codec.cpp'
+      - 'src/linux_dbus_client_operations.cpp'
+      - 'src/linux_application_backend.cpp'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/linux_dbus.hpp'
+      - 'src/detail/linux_dbus_codec.hpp'
+      - 'src/detail/linux_dbus_client_operations.hpp'
+      - 'src/detail/linux_dbus_application_transport_owner.hpp'
+      - 'src/detail/application_platform_state.hpp'
+      - 'cmake/NativeUILinuxDbus.cmake'
+      - 'cmake/NativeUIAttachPlatform.cmake'
+      - 'docs/linux-build.md'
+      - 'tests/t072/**'
+      - 'tests/t072_linux_dbus_build_contract.cmake'
+      - 'CMakeLists.txt'
+      - 'VALIDATION.md'
+      - '.github/workflows/t072-linux-dbus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t072-linux-dbus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-contract:
+    name: Linux D-Bus build contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux D-Bus build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config dbus libdbus-1-dev
+
+      - name: Static integration contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t072_linux_dbus_build_contract.cmake
+
+      - name: Missing libdbus discovery diagnostic
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty-pkgconfig"
+          if PKG_CONFIG_PATH= PKG_CONFIG_LIBDIR="$RUNNER_TEMP/empty-pkgconfig" \
+             cmake -S tests/t072 -B build-t072-no-dbus -G Ninja -DCMAKE_BUILD_TYPE=Release \
+             > "$RUNNER_TEMP/t072-no-dbus.log" 2>&1; then
+            cat "$RUNNER_TEMP/t072-no-dbus.log"
+            echo "Expected configuration to fail without dbus-1" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/t072-no-dbus.log"
+          grep -F "dbus-1" "$RUNNER_TEMP/t072-no-dbus.log"
+
+      - name: Configure isolated contract
+        run: cmake -S tests/t072 -B build-t072 -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build isolated contract
+        run: cmake --build build-t072 --parallel 2
+
+      - name: Test isolated contract in a private session bus
+        run: dbus-run-session -- ctest --test-dir build-t072 --verbose --output-on-failure --timeout 10
