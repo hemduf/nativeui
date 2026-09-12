@@ -2,11 +2,33 @@
 
 #include <nativeui/nativeui.hpp>
 
+#if defined(__APPLE__)
+#include <execinfo.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 #include <iostream>
 #include <optional>
 #include <string>
 
 namespace {
+
+#if defined(__APPLE__)
+void crash_backtrace(int signal_number) {
+    void* frames[64]{};
+    const int count = ::backtrace(frames, 64);
+    static constexpr char marker[] = "T066 macOS crash backtrace:\n";
+    (void)::write(STDERR_FILENO, marker, sizeof(marker) - 1U);
+    ::backtrace_symbols_fd(frames, count, STDERR_FILENO);
+    ::_exit(128 + signal_number);
+}
+
+void install_crash_backtrace() {
+    (void)::signal(SIGSEGV, crash_backtrace);
+    (void)::signal(SIGABRT, crash_backtrace);
+}
+#endif
 
 void trace_stage(const char* stage) {
 #if defined(__APPLE__)
@@ -35,6 +57,9 @@ void pump_native_events(ui::Application& app, int iterations = 8) {
 }
 
 int self_test() {
+#if defined(__APPLE__)
+    install_crash_backtrace();
+#endif
     trace_stage("begin");
     ui::UI ui{
         ui::Column{
