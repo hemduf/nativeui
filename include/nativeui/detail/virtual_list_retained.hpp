@@ -578,8 +578,12 @@ public:
                 runtime_->selection_state()->get() &&
                 runtime_->materialized_selected_index() &&
                 *runtime_->materialized_selected_index() == index;
-            const bool hovered = hovered_index_ && *hovered_index_ == index;
-            const bool pressed = runtime_->captured_index() && *runtime_->captured_index() == index;
+            // Preserve the pre-T038 ListView contract shared by retained and
+            // virtualized rows: once a row is selected, its selected
+            // presentation remains authoritative until selection changes.
+            const bool hovered = !selected && hovered_index_ && *hovered_index_ == index;
+            const bool pressed = !selected && runtime_->captured_index() &&
+                *runtime_->captured_index() == index;
             const auto row = resolved_style(
                 selected,
                 hovered,
