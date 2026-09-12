@@ -32,11 +32,6 @@ enum class QuitPolicy {
     ExplicitOnly,
 };
 
-/// Explicit owner of the standalone application world/event loop.
-///
-/// Construction, polling, running and destruction are confined to the
-/// platform/UI thread. The object owns exactly one standalone Pugl PROGRAM
-/// world; v1 standalone windows attach explicitly to this instance.
 class Application final {
 public:
     Application();
@@ -64,24 +59,13 @@ private:
     friend struct detail::ApplicationBackendAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
-
-    // Declared after Impl intentionally: reverse member destruction tears down
-    // source-private platform services (including Linux D-Bus) before the Pugl
-    // PROGRAM world and dispatcher backend owned by Impl are destroyed.
     std::unique_ptr<detail::ApplicationPlatformState> platform_state_;
 };
 
-/// Standalone native window for one UI instance.
-///
-/// Construction, use and destruction are confined to the platform/UI thread.
-/// The wrapper is intentionally non-movable: its platform implementation keeps
-/// a stable non-owning PlatformServices reference to this exact object.
 class StandaloneWindow final : public PlatformServices, public DispatcherProvider {
 public:
     StandaloneWindow(Application& application, UI& ui, WindowDesc desc = {});
 
-    /// Pre-v1 single-window compatibility path. T069 removes this overload
-    /// from the 1.0 public API; it never uses a hidden shared Application.
     [[deprecated("Use StandaloneWindow(Application&, UI&, WindowDesc) for the v1 standalone path")]]
     StandaloneWindow(UI& ui, WindowDesc desc = {});
     ~StandaloneWindow() override;
@@ -91,9 +75,6 @@ public:
     StandaloneWindow(StandaloneWindow&&) = delete;
     StandaloneWindow& operator=(StandaloneWindow&&) = delete;
 
-    /// Prefer Application::run()/poll() for the explicit v1 path. This method
-    /// remains only so the pre-v1 constructor can keep source compatibility
-    /// until T069 removes legacy per-window loop ownership.
     int run();
     bool poll(double timeout_seconds = -1.0);
     void request_close();
@@ -105,13 +86,9 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
-    [[nodiscard]] DesktopServices& desktop_services() noexcept;
+    [[nodiscard]] DesktopServices& desktop_services();
     bool set_size(Size logical_size);
 
-    /// Advisory logical preferred-size notification for external owners.
-    /// The callback runs on the platform/UI thread at a safe top-level
-    /// checkpoint and may synchronously call set_size() without recursive
-    /// preferred-size notification.
     void set_preferred_size_callback(PreferredSizeCallback callback);
 
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
@@ -126,14 +103,10 @@ private:
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
-/// Embedded native child view for one UI/plugin-editor instance.
-///
-/// Construction, polling, native-view mutation and destruction are confined to
-/// the host UI/main thread. `poll()` is non-blocking and this wrapper is
-/// intentionally non-movable because the implementation stores a reference to
-/// this PlatformServices object.
 class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
@@ -148,7 +121,7 @@ public:
     EmbeddedView(EmbeddedView&&) = delete;
     EmbeddedView& operator=(EmbeddedView&&) = delete;
 
-    bool poll(); // always non-blocking
+    bool poll();
     void request_close();
 
     [[nodiscard]] bool should_close() const noexcept;
@@ -157,11 +130,9 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
     [[nodiscard]] Dispatcher dispatcher() const noexcept override;
-    [[nodiscard]] DesktopServices& desktop_services() noexcept;
+    [[nodiscard]] DesktopServices& desktop_services();
     bool set_size(Size logical_size);
 
-    /// Advisory preferred logical size. NativeUI never resizes the embedding
-    /// parent; the host may ignore the callback or grant a different child size.
     void set_preferred_size_callback(PreferredSizeCallback callback);
 
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) override;
@@ -173,6 +144,8 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
+    std::unique_ptr<DesktopServices> desktop_services_;
 };
 
 } // namespace ui
