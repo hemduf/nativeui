@@ -290,15 +290,14 @@ inline void apply_menu_item_interaction_patch(ResolvedMenuItemStyle& target,
     detail::apply_menu_item_style_patch(resolved, inherited.base);
     detail::apply_menu_item_style_patch(resolved, explicit_style.base);
 
-    if (state.selected) {
-        detail::apply_menu_item_style_patch(resolved, inherited.selected);
-        detail::apply_menu_item_style_patch(resolved, explicit_style.selected);
-    }
-
     const auto interaction = resolve_interaction_state(state);
     detail::apply_menu_item_interaction_patch(resolved, inherited, interaction);
     detail::apply_menu_item_interaction_patch(resolved, explicit_style, interaction);
 
+    if (state.selected) {
+        detail::apply_menu_item_style_patch(resolved, inherited.selected);
+        detail::apply_menu_item_style_patch(resolved, explicit_style.selected);
+    }
     if (state.read_only) {
         detail::apply_menu_item_style_patch(resolved, inherited.read_only);
         detail::apply_menu_item_style_patch(resolved, explicit_style.read_only);
