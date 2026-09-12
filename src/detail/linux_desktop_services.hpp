@@ -4,11 +4,13 @@
 
 #include <nativeui/desktop_services.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace ui {
 class Application;
@@ -52,14 +54,74 @@ public:
     return parent;
 }
 
+/// Lightweight protocol decorator: it does not own another D-Bus connection or
+/// thread. It forwards to the same T072 client and only supplies the XDG Portal
+/// parent-window argument for methods whose first argument is that field.
+class LinuxPortalParentBus final : public LinuxPortalBus {
+public:
+    LinuxPortalParentBus(std::shared_ptr<LinuxPortalBus> bus,
+                         std::string parent_window)
+        : bus_(std::move(bus)), parent_window_(std::move(parent_window)) {}
+
+    [[nodiscard]] std::string unique_name() const override {
+        return bus_ ? bus_->unique_name() : std::string{};
+    }
+
+    [[nodiscard]] LinuxDbusSubscriptionResult subscribe_signal(
+        Dispatcher dispatcher,
+        const LinuxDbusSignalMatch& match,
+        LinuxDbusSignalCallback callback) override {
+        if (!bus_) return {LinuxDbusErrorCode::Shutdown, 0};
+        return bus_->subscribe_signal(
+            std::move(dispatcher), match, std::move(callback));
+    }
+
+    [[nodiscard]] bool unsubscribe_signal(LinuxDbusSubscriptionId id) override {
+        return bus_ && bus_->unsubscribe_signal(id);
+    }
+
+    [[nodiscard]] LinuxDbusRequestStartResult call_method(
+        Dispatcher dispatcher,
+        const LinuxDbusMethodCall& call,
+        LinuxDbusCompletionCallback callback) override {
+        if (!bus_) return {LinuxDbusErrorCode::Shutdown, 0};
+
+        constexpr const char* kDestination = "org.freedesktop.portal.Desktop";
+        constexpr const char* kPath = "/org/freedesktop/portal/desktop";
+        const bool parented_portal =
+            call.destination == kDestination && call.path == kPath &&
+            (call.interface == "org.freedesktop.portal.FileChooser" ||
+             call.interface == "org.freedesktop.portal.OpenURI") &&
+            !call.arguments.empty() &&
+            call.arguments.front().kind == LinuxDbusValueKind::String;
+
+        if (!parented_portal) {
+            return bus_->call_method(
+                std::move(dispatcher), call, std::move(callback));
+        }
+
+        LinuxDbusMethodCall parented = call;
+        parented.arguments.front() = LinuxDbusValue::string(parent_window_);
+        return bus_->call_method(
+            std::move(dispatcher), parented, std::move(callback));
+    }
+
+    [[nodiscard]] bool cancel_request(LinuxDbusRequestId id) override {
+        return bus_ && bus_->cancel_request(id);
+    }
+
+private:
+    std::shared_ptr<LinuxPortalBus> bus_;
+    std::string parent_window_;
+};
+
 /// Protocol-level factory used by deterministic tests and the production T072
 /// adapter. The namespace ID must be one non-zero transport-local T072 client
 /// ID so request handle tokens stay unique across windows sharing an Application.
 [[nodiscard]] std::shared_ptr<DesktopServicesBackend>
 make_linux_portal_desktop_services_backend(std::shared_ptr<LinuxPortalBus> bus,
                                            Dispatcher dispatcher,
-                                           LinuxDbusClientId token_namespace,
-                                           std::string parent_window);
+                                           LinuxDbusClientId token_namespace);
 
 #if defined(__linux__)
 /// Production standalone factory. It registers exactly one logical client on
