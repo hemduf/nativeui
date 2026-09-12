@@ -24,14 +24,14 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 | TextArea | `TextAreaStyle` | integrated | TextArea behavior/candidate-position regressions plus public compile coverage | Implemented; final qualification pending |
 | ScrollView scrollbar | `ScrollbarStyle` | integrated in `detail/scroll_view.inc` | T034/T038 scrollbar style regression coverage | Implemented on branch; exact-head qualification pending |
 | ComboBox / MenuItem | `ComboBoxStyle` / `MenuItemStyle` | integrated in `combo_popup.hpp` | existing T035 interaction contracts plus T038 style coverage | Implemented on branch; exact-head qualification pending |
-| ListView row | `ListViewStyle` | **not yet consumed by `widgets_list_tabs.inc`** | missing T038 integration tests | **Open** |
-| Tabs header | `TabsStyle` | **not yet consumed by `widgets_list_tabs.inc`** | missing T038 integration tests | **Open** |
+| ListView row | `ListViewStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` consumer/render contract | Implemented on branch; exact-head qualification pending |
+| Tabs header | `TabsStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` geometry/render contract | Implemented on branch; exact-head qualification pending |
 
 ## Cross-family acceptance criteria
 
 | Acceptance criterion | Evidence required before completion | Status |
 | --- | --- | --- |
-| Covered widgets obtain presentation through typed styles instead of hardcoded paint constants | Audit all required families after ListView/Tabs integration | Open |
+| Covered widgets obtain presentation through typed styles instead of hardcoded paint constants | Audit all required families on the integrated branch | Implemented families present; final audit pending |
 | Resolver precedence identical across families | Pure precedence matrix covering representative family resolvers | Partially covered; final matrix pending |
 | Disabled wins and pressed presentation is not retained misleadingly | Explicit disabled transition coverage | Partially covered; final integrated proof pending |
 | Focused + selected/checked combinations are representable | Orthogonal-state matrix | Partially covered; final matrix pending |
@@ -44,8 +44,8 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 
 ## Required completion artifacts
 
-- [ ] Integrate `ListViewStyle` into retained ListView row/surface presentation.
-- [ ] Integrate `TabsStyle` into retained Tabs header/panel presentation.
+- [x] Integrate `ListViewStyle` into retained ListView row/surface presentation.
+- [x] Integrate `TabsStyle` into retained Tabs header/panel presentation.
 - [ ] Add explicit equal-style/no-invalidation and paint-vs-layout invalidation tests.
 - [ ] Add default geometry-stability and two-instance explicit-style isolation tests.
 - [ ] Complete representative golden matrix for Button, Slider, TextInput and one selection widget.
@@ -58,4 +58,4 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 
 ## Current recovery note
 
-At the checkpoint that created this matrix, PR #218 is still Draft. The current source head contains the ComboBox/PopupMenu hit-test exception-safety correction, while ListView/Tabs integration and the cross-family completion gates above remain intentionally open. Do not merge from this state.
+PR #218 remains Draft. The ListView/Tabs consumer contract was added test-first at `f56b285e4d9e15f522540e0124e8d0725f88e495`; production integration followed at `45dc6abe31f1943116c3f29d4ea4d37cec494e80`, replacing the retained ListView row/surface and Tabs header/panel hard-coded presentation with instance-owned typed recipes while preserving the existing input/selection ownership model. No exact-head CI result is claimed for that source head yet. The remaining work is now primarily cross-family invalidation/geometry/isolation/golden/example completeness, final review, current-main reconciliation and final qualification. Do not merge from this state.
