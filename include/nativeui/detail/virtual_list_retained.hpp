@@ -1,9 +1,11 @@
 #pragma once
 
 #include <nativeui/detail/dynamic_source.hpp>
+#include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/virtual_list_row.hpp>
 #include <nativeui/detail/virtual_list_window.hpp>
 #include <nativeui/layout.hpp>
+#include <nativeui/list_tabs_style.hpp>
 #include <nativeui/state.hpp>
 
 #include <algorithm>
@@ -18,8 +20,6 @@
 #include <vector>
 
 namespace ui::detail {
-
-inline constexpr Color kVirtualListHoverSurface{0.145f, 0.155f, 0.175f, 1.0f};
 
 template <class Key>
 class VirtualListRetainedRuntime {
@@ -53,6 +53,14 @@ public:
 
     void set_activation_callback(ActivationCallback callback) {
         activation_callback_ = std::move(callback);
+    }
+
+    void set_style(ListViewStyle style) {
+        style_ = std::move(style);
+    }
+
+    [[nodiscard]] const ListViewStyle& style() const noexcept {
+        return style_;
     }
 
     [[nodiscard]] bool replace(std::vector<Item> items) {
@@ -229,6 +237,10 @@ public:
         refresh_window();
     }
 
+    [[nodiscard]] std::optional<std::size_t> captured_index() const noexcept {
+        return captured_index_;
+    }
+
     [[nodiscard]] std::optional<std::size_t> materialized_index_for_key(
         const Key& key) const noexcept {
         for (const auto& materialized : window_.items()) {
@@ -313,6 +325,10 @@ public:
         return child_index < items.size() ? &items[child_index] : nullptr;
     }
 
+    [[nodiscard]] std::size_t materialized_count() const noexcept {
+        return window_.items().size();
+    }
+
 private:
     [[nodiscard]] static VirtualListAlignment virtual_alignment(ScrollAlignment alignment) noexcept {
         switch (alignment) {
@@ -347,6 +363,7 @@ private:
     float viewport_height_{};
     State<std::optional<Key>>* selection_{};
     ActivationCallback activation_callback_;
+    ListViewStyle style_;
     std::optional<std::size_t> focused_index_;
     std::optional<std::size_t> captured_index_;
     std::function<void()> structure_invalidator_;
@@ -428,7 +445,7 @@ private:
 };
 
 template <class Key>
-class VirtualListViewComponent final : public Component {
+class VirtualListViewComponent final : public Component, public ThemeBinding {
 public:
     explicit VirtualListViewComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
         : runtime_(std::move(runtime)) {}
@@ -544,23 +561,39 @@ public:
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
+        const auto surface = resolved_style(
+            false,
+            false,
+            false,
+            false,
+            context.focused());
         auto& painter = context.painter();
-        painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
+        painter.fill_rounded_rect(bounds, surface.surface_corner_radius, surface.surface_fill);
 
-        const auto selected = runtime_->materialized_selected_index();
-        if (selected) {
-            paint_row_highlight(painter, bounds, *selected, colors::selection, true);
-        }
-        if (effective_enabled() && hovered_index_ && runtime_->enabled_at(*hovered_index_) &&
-            (!selected || *selected != *hovered_index_)) {
-            paint_row_highlight(painter, bounds, *hovered_index_, kVirtualListHoverSurface, false);
+        for (std::size_t child_index = 0; child_index < runtime_->materialized_count(); ++child_index) {
+            const auto* materialized = runtime_->materialized_at(child_index);
+            if (!materialized) continue;
+            const auto index = materialized->index;
+            const bool selected = runtime_->selection_state() &&
+                runtime_->selection_state()->get() &&
+                runtime_->materialized_selected_index() &&
+                *runtime_->materialized_selected_index() == index;
+            const bool hovered = hovered_index_ && *hovered_index_ == index;
+            const bool pressed = runtime_->captured_index() && *runtime_->captured_index() == index;
+            const auto row = resolved_style(
+                selected,
+                hovered,
+                pressed,
+                runtime_->enabled_at(index),
+                context.focused());
+            paint_row(painter, bounds, index, row, selected);
         }
 
         painter.stroke_rounded_rect(
             bounds,
-            9.0f,
-            context.focused() ? 1.5f : 1.0f,
-            context.focused() ? colors::borderFocus : colors::border);
+            surface.surface_corner_radius,
+            surface.surface_border_width,
+            surface.surface_border);
     }
 
 private:
@@ -569,6 +602,25 @@ private:
         // runtime tests intentionally leave it null because they exercise only
         // materialization/scroll ownership.
         return runtime_->selection_state();
+    }
+
+    [[nodiscard]] ResolvedListViewStyle resolved_style(
+        bool selected,
+        bool hovered,
+        bool pressed,
+        bool row_enabled,
+        bool focused) const {
+        return resolve_list_view_style(
+            default_list_view_style(current_theme()),
+            runtime_->style(),
+            VisualState{
+                .enabled = effective_enabled() && row_enabled,
+                .read_only = effective_read_only(),
+                .hovered = hovered,
+                .pressed = pressed,
+                .focused = focused,
+                .selected = selected,
+            });
     }
 
     void set_hovered(std::optional<std::size_t> index, InputContext& context) {
@@ -592,11 +644,11 @@ private:
         return static_cast<std::size_t>(index_value);
     }
 
-    void paint_row_highlight(
+    void paint_row(
         Painter& painter,
         Rect bounds,
         std::size_t index,
-        Color color,
+        const ResolvedListViewStyle& style,
         bool selected) const {
         const double local_y = static_cast<double>(index) *
                                    static_cast<double>(runtime_->row_height()) -
@@ -604,21 +656,37 @@ private:
         if (!std::isfinite(local_y)) return;
 
         const Rect highlight{
-            bounds.x + 4.0f,
-            bounds.y + static_cast<float>(local_y) + 2.0f,
-            std::max(0.0f, bounds.w - 8.0f),
-            std::max(0.0f, runtime_->row_height() - 4.0f)};
+            bounds.x + style.row_horizontal_inset,
+            bounds.y + static_cast<float>(local_y) + style.row_vertical_inset,
+            std::max(0.0f, bounds.w - style.row_horizontal_inset * 2.0f),
+            std::max(0.0f, runtime_->row_height() - style.row_vertical_inset * 2.0f)};
         const auto visible = intersect(highlight, bounds);
         if (visible.empty()) return;
-        painter.fill_rounded_rect(visible, 6.0f, color);
-        if (selected && visible.w > 6.0f && visible.h > 14.0f) {
-            painter.fill_rounded_rect(
-                {visible.x + 3.0f,
-                 visible.y + 7.0f,
-                 3.0f,
-                 std::max(0.0f, visible.h - 14.0f)},
-                1.5f,
-                colors::accent);
+
+        painter.fill_rounded_rect(visible, style.row_corner_radius, style.row_fill);
+        if (selected && style.row_accent_width > 0.0f) {
+            const Rect accent{
+                visible.x + style.row_accent_horizontal_inset,
+                visible.y + style.row_accent_vertical_inset,
+                style.row_accent_width,
+                std::max(0.0f, visible.h - style.row_accent_vertical_inset * 2.0f)};
+            if (!accent.empty()) {
+                painter.fill_rounded_rect(
+                    accent,
+                    std::max(0.0f, style.row_accent_width * 0.5f),
+                    style.row_accent);
+            }
+        }
+
+        if (index + 1 < runtime_->size() &&
+            style.separator_width > 0.0f &&
+            visible.w > style.separator_inset * 2.0f) {
+            const float y = visible.y + visible.h - style.separator_width * 0.5f;
+            painter.line(
+                {visible.x + style.separator_inset, y},
+                {visible.x + visible.w - style.separator_inset, y},
+                style.separator_width,
+                style.separator);
         }
     }
 
