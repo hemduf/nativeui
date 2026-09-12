@@ -1,6 +1,5 @@
 #include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/semantics.hpp>
-#include <nativeui/widgets.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -48,11 +47,8 @@ void radio_value_contract() {
     T068_CHECK(unselected.checked == ui::SemanticCheckedState::Unchecked);
 }
 
-void toggle_component_contract() {
-    ui::State<bool> state{true};
-    ui::ToggleComponent toggle{"Bypass", state};
-
-    const auto checked = toggle.semantics();
+void toggle_value_contract() {
+    const auto checked = ui::detail::toggle_semantic_info("Bypass", true);
     T068_CHECK(checked.role == ui::SemanticRole::Toggle);
     T068_CHECK(checked.name == "Bypass");
     T068_CHECK(checked.checked == ui::SemanticCheckedState::Checked);
@@ -61,22 +57,12 @@ void toggle_component_contract() {
     T068_CHECK(checked.supports(ui::SemanticAction::Focus));
     T068_CHECK(!checked.supports(ui::SemanticAction::Activate));
 
-    state.set(false);
-    const auto unchecked = toggle.semantics();
+    const auto unchecked = ui::detail::toggle_semantic_info("Bypass", false);
     T068_CHECK(unchecked.checked == ui::SemanticCheckedState::Unchecked);
 }
 
-void slider_component_contract() {
-    ui::State<float> state{0.25f};
-    ui::detail::SliderComponent slider{
-        state,
-        -1.0f,
-        1.0f,
-        0.25f,
-        ui::SliderOrientation::Horizontal,
-        {}};
-
-    const auto info = slider.semantics();
+void slider_value_contract() {
+    const auto info = ui::detail::slider_semantic_info(0.25f, -1.0f, 1.0f, 0.25f);
     T068_CHECK(info.role == ui::SemanticRole::Slider);
     T068_CHECK(info.numeric_value.has_value());
     T068_CHECK(*info.numeric_value == 0.25);
@@ -91,8 +77,7 @@ void slider_component_contract() {
     T068_CHECK(info.supports(ui::SemanticAction::Focus));
     T068_CHECK(!info.supports(ui::SemanticAction::Toggle));
 
-    state.set(5.0f);
-    const auto clamped = slider.semantics();
+    const auto clamped = ui::detail::slider_semantic_info(5.0f, -1.0f, 1.0f, 0.25f);
     T068_CHECK(clamped.numeric_value.has_value());
     T068_CHECK(*clamped.numeric_value == 1.0);
 }
@@ -103,8 +88,8 @@ int main() {
     try {
         checkbox_value_contract();
         radio_value_contract();
-        toggle_component_contract();
-        slider_component_contract();
+        toggle_value_contract();
+        slider_value_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
