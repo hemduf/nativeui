@@ -54,11 +54,13 @@ void state_is_per_ui_and_snapshot_is_value_based() {
 }
 
 void snapshot_reports_runtime_hierarchy_bounds_and_child_order() {
-    ui::UI ui{ui::Padding{8.0f, ui::Label{"Hierarchy"}}};
+    ui::UI ui{ui::Padding{
+        8.0f,
+        ui::Stack{ui::Label{"First child"}, ui::Label{"Second child"}}}};
     ui.resize({160.0f, 100.0f});
 
     const auto snapshot = ui::debug::inspector_snapshot(ui);
-    NUI_CHECK(snapshot.nodes.size() >= 3);
+    NUI_CHECK(snapshot.nodes.size() >= 4);
 
     const auto& root = snapshot.nodes.front();
     NUI_CHECK(root.id != ui::kInvalidNodeId);
@@ -68,6 +70,7 @@ void snapshot_reports_runtime_hierarchy_bounds_and_child_order() {
     NUI_CHECK(same_rect(root.bounds, {0.0f, 0.0f, 160.0f, 100.0f}));
 
     bool saw_nested_node = false;
+    bool saw_nonzero_child_order = false;
     for (std::size_t index = 0; index < snapshot.nodes.size(); ++index) {
         const auto& node = snapshot.nodes[index];
         NUI_CHECK(node.id != ui::kInvalidNodeId);
@@ -85,8 +88,10 @@ void snapshot_reports_runtime_hierarchy_bounds_and_child_order() {
         }
         NUI_CHECK(node.child_order == earlier_siblings);
         saw_nested_node = saw_nested_node || node.depth >= 2;
+        saw_nonzero_child_order = saw_nonzero_child_order || node.child_order > 0;
     }
     NUI_CHECK(saw_nested_node);
+    NUI_CHECK(saw_nonzero_child_order);
 }
 
 void destroyed_node_ids_disappear_without_stale_access() {
@@ -132,12 +137,14 @@ void enable_and_selection_changes_request_only_one_repaint_each() {
     ui::HeadlessRenderer renderer{{160.0f, 100.0f}};
     NUI_CHECK(renderer.render(ui));
     NUI_CHECK(!ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
 
     int invalidations = 0;
     ui.set_invalidation_callback([&](ui::Rect) { ++invalidations; });
 
     ui::debug::set_inspector_enabled(ui, true);
     NUI_CHECK(ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
     NUI_CHECK(invalidations == 1);
 
     ui::debug::set_inspector_enabled(ui, true);
@@ -145,9 +152,11 @@ void enable_and_selection_changes_request_only_one_repaint_each() {
 
     NUI_CHECK(renderer.render(ui));
     NUI_CHECK(!ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
 
     ui::debug::set_inspector_selected_node(ui, 1);
     NUI_CHECK(ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
     NUI_CHECK(invalidations == 2);
 
     ui::debug::set_inspector_selected_node(ui, 1);
@@ -184,10 +193,18 @@ void query_reports_layout_dirty_and_exact_dirty_regions() {
     for (std::size_t index = 0; index < normal_dirty.size(); ++index) {
         NUI_CHECK(same_rect(snapshot.dirty_regions[index], normal_dirty[index]));
     }
+    bool saw_paint_dirty = false;
+    for (const auto& node : snapshot.nodes) {
+        saw_paint_dirty = saw_paint_dirty || node.paint_dirty;
+    }
+    NUI_CHECK(saw_paint_dirty);
 
     NUI_CHECK(renderer.render(ui));
     const auto clean = ui::debug::inspector_snapshot(ui);
-    for (const auto& node : clean.nodes) NUI_CHECK(!node.layout_dirty);
+    for (const auto& node : clean.nodes) {
+        NUI_CHECK(!node.layout_dirty);
+        NUI_CHECK(!node.paint_dirty);
+    }
 }
 
 void snapshot_reports_focus_capture_and_effective_clip() {
@@ -267,13 +284,12 @@ void snapshot_reports_effective_availability() {
     NUI_CHECK(saw_collapsed_disabled);
 }
 
-void overlay_draws_focus_and_capture_markers() {
+void overlay_draws_selection_focus_and_capture_markers() {
     const auto info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     auto surface = SkSurfaces::Raster(info);
     NUI_CHECK(static_cast<bool>(surface));
     auto* canvas = surface->getCanvas();
     NUI_CHECK(canvas != nullptr);
-    canvas->clear(SK_ColorBLACK);
 
     ui::debug::InspectorSnapshot snapshot;
     snapshot.nodes.push_back(ui::debug::InspectorNode{
@@ -282,13 +298,22 @@ void overlay_draws_focus_and_capture_markers() {
         .debug_name = {},
         .bounds = {10.0f, 10.0f, 40.0f, 30.0f},
         .clip_bounds = {10.0f, 10.0f, 40.0f, 30.0f},
-        .focusable = true,
-        .focused = true,
-        .pointer_capture_owner = true});
+        .focusable = true});
 
-    ui::detail::paint_inspector_overlay(*canvas, snapshot, ui::kInvalidNodeId);
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::paint_inspector_overlay(*canvas, snapshot, 7);
 
     SkPixmap pixmap;
+    NUI_CHECK(surface->peekPixels(&pixmap));
+    const auto selected = pixmap.getColor(10, 25);
+    NUI_CHECK(SkColorGetG(selected) > 180);
+    NUI_CHECK(SkColorGetG(selected) > SkColorGetR(selected) + 40);
+    NUI_CHECK(SkColorGetG(selected) > SkColorGetB(selected) + 40);
+
+    snapshot.nodes[0].focused = true;
+    snapshot.nodes[0].pointer_capture_owner = true;
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::paint_inspector_overlay(*canvas, snapshot, ui::kInvalidNodeId);
     NUI_CHECK(surface->peekPixels(&pixmap));
     const auto focus = pixmap.getColor(11, 30);
     const auto capture = pixmap.getColor(45, 15);
@@ -314,6 +339,7 @@ void inspector_changes_headless_pixels_without_persistent_redraw() {
     NUI_CHECK(baseline.size() == inspected.size());
     NUI_CHECK(!std::equal(baseline.begin(), baseline.end(), inspected.begin()));
     NUI_CHECK(!ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
 }
 
 void inspector_does_not_intercept_focus_or_keyboard_input() {
@@ -391,7 +417,7 @@ void suite() {
     query_reports_layout_dirty_and_exact_dirty_regions();
     snapshot_reports_focus_capture_and_effective_clip();
     snapshot_reports_effective_availability();
-    overlay_draws_focus_and_capture_markers();
+    overlay_draws_selection_focus_and_capture_markers();
     inspector_changes_headless_pixels_without_persistent_redraw();
     inspector_does_not_intercept_focus_or_keyboard_input();
     inspector_does_not_intercept_pointer_input();
