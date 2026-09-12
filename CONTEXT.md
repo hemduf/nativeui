@@ -40,6 +40,8 @@ T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a
 
 T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation and final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete Outcome A/B, acceptance and `CODE_REVIEW.md` matrices with no Blocking/Important finding.
 
+T050 / issue #50 / PR #238 delivers the opt-in debug inspector on top of the current T044/T064/T066 baseline. Frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` is reconciled with current `main`, is zero commits behind, and passed exact-head normal CI, Package Contracts, T066 Window Controls, T072 Linux D-Bus and the dedicated inspector OFF/ON matrix. The inspector-ON configuration also compiled the full headless tree and passed all 65 registered tests.
+
 Current convergence:
 
 ```text
@@ -78,6 +80,7 @@ The owned v1 platform prerequisite lane T065/T072/T043/T064/T066 is complete. T0
 - T044 / PR #145: evidence-gated native pointer capture qualification; macOS Outcome A, Windows Outcome B, Linux/X11 Outcome B with per-view ownership and no widget/platform leakage.
 - T045 / PR #210: accessibility semantic architecture and immutable virtual collection contract.
 - T047 / PR #92 + T048 / PR #99: relocatable package and external-consumer qualification.
+- T050 / PR #238: build-default-OFF per-UI debug inspector with value snapshots, selected-node diagnostics, passive post-content rendering and deterministic headless qualification.
 - T051 / PR #116 + T052 / PR #120: reproducible performance policy and v0.1 developer-preview release gate.
 - T054 / PR #119, T056 / PR #111, T057 / PR #126: application/package/resource helpers.
 - T058 / PR #154: bounded retained dynamic composition with one per-tree structural reconciliation queue.
@@ -157,6 +160,21 @@ PR #145 completes the evidence-gated pointer-capture qualification without chang
 - widgets/components remain platform-neutral and use only the existing `InputContext` capture API;
 - Linux ASan+UBSan, normal CI and final T042/T052 qualification are green;
 - no Objective-C runtime-visible class/category/swizzle/+load is introduced.
+
+## T050 delivered contract
+
+PR #238 adds a passive diagnostic consumer of the retained tree without creating a second runtime model:
+
+- `NATIVEUI_ENABLE_INSPECTOR` defaults OFF; the runtime inspector activation path and per-UI inspector state exist only in inspector-enabled builds;
+- enabled/selected state is owned by each `ui::UI`, with deterministic two-UI isolation and no process-global current inspector;
+- snapshots are owned values only: NodeId, parent/depth/order, stable debug label, logical bounds, effective clip, layout/paint dirty state, focus/capture and T059 effective availability; no raw retained pointers escape;
+- stale/destroyed NodeId queries return absent safely while previously copied snapshots remain valid;
+- the selected NodeId only affects diagnostic emphasis; enabling/disabling or changing selection requests one paint invalidation and never dirties layout;
+- normal root/application-overlay content is painted first, then a dedicated diagnostic pass draws node/clip/dirty/focus/capture information while preserving incoming Painter/SkCanvas state;
+- the diagnostic pass is not a T061 application overlay, receives no hit testing/focus/input and does not consume overlay stack slots;
+- static inspector state creates no timer/tick/continuous redraw; normal repaint naturally refreshes diagnostics;
+- deterministic model/runtime/headless tests cover hierarchy/order, dirty regions, stale IDs, focus/capture/clip/availability, selected-node rendering, pointer/keyboard non-interception, canvas-state preservation, idle behavior and instance isolation;
+- frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` passed the inspector OFF/ON matrix, full 65-test inspector-ON headless suite, normal macOS/Windows/Linux CI, Linux ASan+UBSan, Package Contracts, T066 and T072 checks with no Blocking/Important review finding.
 
 ## Active platform work
 
