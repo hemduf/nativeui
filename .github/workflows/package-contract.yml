@@ -102,9 +102,6 @@ jobs:
       - name: T048 external consumer source contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t048_external_consumer_contract_tests.cmake
 
-      - name: T054 application contract
-        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_application_contract_tests.cmake
-
       - name: T054 application argument contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_argument_boundary_tests.cmake
 
@@ -157,6 +154,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - name: T054 application contract
+        if: runner.os == 'Linux'
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_application_contract_tests.cmake
 
       - name: Configure Unix package producer
         if: runner.os != 'Windows'
