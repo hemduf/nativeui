@@ -1,4 +1,5 @@
 #include <nativeui/detail/semantic_widget_info.hpp>
+#include <nativeui/nativeui.hpp>
 #include <nativeui/semantics.hpp>
 
 #include <cstdlib>
@@ -82,6 +83,34 @@ void slider_value_contract() {
     T068_CHECK(*clamped.numeric_value == 1.0);
 }
 
+void production_widget_projection_contract() {
+    ui::State<bool> toggle_state{true};
+    ui::detail::ToggleComponent toggle{"Bypass", toggle_state};
+    const auto toggle_info = toggle.semantics();
+    T068_CHECK(toggle_info.role == ui::SemanticRole::Toggle);
+    T068_CHECK(toggle_info.name == "Bypass");
+    T068_CHECK(toggle_info.checked == ui::SemanticCheckedState::Checked);
+    T068_CHECK(toggle_info.supports(ui::SemanticAction::Toggle));
+
+    ui::State<float> slider_state{5.0f};
+    ui::detail::SliderComponent slider{
+        slider_state,
+        -1.0f,
+        1.0f,
+        0.25f,
+        ui::SliderOrientation::Horizontal,
+        {}};
+    const auto slider_info = slider.semantics();
+    T068_CHECK(slider_info.role == ui::SemanticRole::Slider);
+    T068_CHECK(slider_info.numeric_value.has_value());
+    T068_CHECK(*slider_info.numeric_value == 1.0);
+    T068_CHECK(slider_info.value_range.has_value());
+    T068_CHECK(slider_info.value_range->minimum == -1.0);
+    T068_CHECK(slider_info.value_range->maximum == 1.0);
+    T068_CHECK(slider_info.value_range->step == 0.25);
+    T068_CHECK(slider_info.supports(ui::SemanticAction::SetValue));
+}
+
 } // namespace
 
 int main() {
@@ -90,6 +119,7 @@ int main() {
         radio_value_contract();
         toggle_value_contract();
         slider_value_contract();
+        production_widget_projection_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
