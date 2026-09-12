@@ -52,9 +52,6 @@ public:
         puglSetSizeHint(view_, PUGL_DEFAULT_SIZE,
                         to_pugl_span(initial_physical->w),
                         to_pugl_span(initial_physical->h));
-        if (!apply_size_constraints()) {
-            cleanup_and_throw(PUGL_BAD_PARAMETER, "failed to apply window size constraints");
-        }
         puglSetViewHint(view_, PUGL_RESIZABLE, desc.resizable ? PUGL_TRUE : PUGL_FALSE);
         // Request a portable modern baseline. On macOS this maps to the native
         // 3.2 Core profile instead of Pugl's legacy 2.0 default.
@@ -82,6 +79,15 @@ public:
 
         record_scale_observation(
             geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
+        // Apply logical min/max only after realization. In particular, Pugl's
+        // macOS realize path builds wrapper-view Auto Layout constraints directly
+        // from pre-realize size hints even though those hints are physical pixels.
+        // Deferring the hints until the native view exists makes Pugl route them
+        // through the platform runtime setters, which convert them to Cocoa points
+        // and avoids a conflicting backing-size constraint during visible resize.
+        if (!apply_size_constraints()) {
+            cleanup_and_throw(PUGL_BAD_PARAMETER, "failed to apply window size constraints");
+        }
         // Initial layout uses the requested logical size so synchronous focus
         // and IME callbacks during show have valid bounds. Subsequent size
         // changes are driven only by authoritative configure snapshots.
