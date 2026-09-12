@@ -668,7 +668,7 @@ public:
             return EventResult::Handled;
         }
 
-        const auto geometry = container_style(context.focused());
+        const auto geometry = container_style(focused_);
         switch (event.type) {
         case InputType::PointerMove: {
             const auto index = tab_at(event.position, context.bounds(), geometry.header_height);
