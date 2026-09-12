@@ -7,6 +7,26 @@
 
 namespace {
 
+bool same_size(ui::Size actual, ui::Size expected) {
+    return actual.w == expected.w && actual.h == expected.h;
+}
+
+bool wait_for_size(ui::Application& app,
+                   const ui::StandaloneWindow& window,
+                   ui::Size expected) {
+    // T043 makes native Configure authoritative. Do not assume a fixed number
+    // of zero-time polls is enough for the window manager to echo a resize.
+    for (int i = 0; i < 64; ++i) {
+        if (same_size(window.size(), expected)) return true;
+        (void)app.poll(0.01);
+    }
+    return same_size(window.size(), expected);
+}
+
+void pump_native_events(ui::Application& app, int iterations = 8) {
+    for (int i = 0; i < iterations; ++i) (void)app.poll(0.005);
+}
+
 int self_test() {
     ui::UI ui{
         ui::Column{
@@ -53,25 +73,22 @@ int self_test() {
     if (!window.set_size({120.0f, 100.0f})) {
         return example::fail("baseline size update failed");
     }
-    for (int i = 0; i < 4; ++i) (void)app.poll(0.0);
-    const auto baseline = window.size();
-    if (baseline.w != 120.0f || baseline.h != 100.0f) {
+    if (!wait_for_size(app, window, {120.0f, 100.0f})) {
         return example::fail("baseline authoritative size was not observed");
     }
 
     if (!window.set_min_size(ui::Size{140.0f, 90.0f})) {
         return example::fail("tightening minimum size failed");
     }
-    for (int i = 0; i < 4; ++i) (void)app.poll(0.0);
-    const auto tightened = window.size();
-    if (tightened.w != 140.0f || tightened.h != 100.0f) {
+    if (!wait_for_size(app, window, {140.0f, 100.0f})) {
         return example::fail("tightened minimum did not clamp authoritative window size");
     }
+    const auto tightened = window.size();
 
     if (!window.set_min_size(ui::Size{110.0f, 85.0f})) {
         return example::fail("in-range minimum size update failed");
     }
-    for (int i = 0; i < 2; ++i) (void)app.poll(0.0);
+    pump_native_events(app);
     const auto unchanged = window.size();
     if (unchanged.w != tightened.w || unchanged.h != tightened.h) {
         return example::fail("in-range minimum update unexpectedly resized window");
