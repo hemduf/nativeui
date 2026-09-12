@@ -155,7 +155,12 @@ public:
         NSWindow* native_window = view ? [view window] : nil;
         if (!native_window) return false;
         [native_window makeKeyAndOrderFront:nil];
-        return true;
+        [native_window orderFrontRegardless];
+        for (int attempt = 0; attempt < 20 && ![native_window isKeyWindow]; ++attempt) {
+            [[NSRunLoop currentRunLoop]
+                runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+        return [native_window isVisible] && [native_window isKeyWindow];
 #elif defined(_WIN32)
         HWND native_window = hwnd(window);
         if (!native_window) return false;
@@ -179,8 +184,15 @@ public:
 
     bool pointer_down(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
-        return post_mouse(window, kCGEventMouseMoved, false, false) &&
-               post_mouse(window, kCGEventLeftMouseDown, false, true);
+        if (!post_mouse(window, kCGEventMouseMoved, false, false)) return false;
+        // Deliver the positioning event before the press. On hosted macOS a
+        // freshly ordered third window can otherwise receive the key transition
+        // after the synthetic down has already been routed to the previous
+        // front window, making the destruction fixture test the runner timing
+        // instead of capture semantics.
+        [[NSRunLoop currentRunLoop]
+            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        return post_mouse(window, kCGEventLeftMouseDown, false, true);
 #elif defined(_WIN32)
         return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTDOWN);
 #elif defined(__linux__)
