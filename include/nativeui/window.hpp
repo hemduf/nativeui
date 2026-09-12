@@ -11,6 +11,11 @@
 
 namespace ui {
 
+namespace detail {
+struct ApplicationPlatformState;
+struct ApplicationBackendAccess;
+} // namespace detail
+
 using NativeParentHandle = std::uintptr_t;
 using NativeViewHandle = std::uintptr_t;
 using PreferredSizeCallback = std::function<void(Size)>;
@@ -55,8 +60,14 @@ public:
 
 private:
     friend class StandaloneWindow;
+    friend struct detail::ApplicationBackendAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    // Declared after Impl intentionally: reverse member destruction tears down
+    // source-private platform services (including Linux D-Bus) before the Pugl
+    // PROGRAM world and dispatcher backend owned by Impl are destroyed.
+    std::unique_ptr<detail::ApplicationPlatformState> platform_state_;
 };
 
 /// Standalone native window for one UI instance.
@@ -64,7 +75,7 @@ private:
 /// Construction, use and destruction are confined to the platform/UI thread.
 /// The wrapper is intentionally non-movable: its platform implementation keeps
 /// a stable non-owning PlatformServices reference to this exact object.
-class StandaloneWindow final : public PlatformServices {
+class StandaloneWindow final : public PlatformServices, public DispatcherProvider {
 public:
     StandaloneWindow(Application& application, UI& ui, WindowDesc desc = {});
 
@@ -92,7 +103,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
-    [[nodiscard]] Dispatcher dispatcher() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override;
     bool set_size(Size logical_size);
 
     /// Advisory logical preferred-size notification for external owners.
@@ -121,7 +132,7 @@ private:
 /// the host UI/main thread. `poll()` is non-blocking and this wrapper is
 /// intentionally non-movable because the implementation stores a reference to
 /// this PlatformServices object.
-class EmbeddedView final : public PlatformServices {
+class EmbeddedView final : public PlatformServices, public DispatcherProvider {
 public:
     EmbeddedView(UI& ui, NativeParentHandle parent, Size size);
     ~EmbeddedView() override;
@@ -139,7 +150,7 @@ public:
     [[nodiscard]] float scale_factor() const noexcept;
     [[nodiscard]] NativeViewHandle native_handle() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
-    [[nodiscard]] Dispatcher dispatcher() const noexcept;
+    [[nodiscard]] Dispatcher dispatcher() const noexcept override;
     bool set_size(Size logical_size);
 
     /// Advisory preferred logical size. NativeUI never resizes the embedding

@@ -3,7 +3,10 @@
 #include <nativeui/component_base.hpp>
 #include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/focus_group.hpp>
+#include <nativeui/detail/interaction_observer.hpp>
+#include <nativeui/detail/overlay_service.hpp>
 #include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/detail/transient_presentation.hpp>
 #include <nativeui/theme.hpp>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
 #include <nativeui/inspector.hpp>
@@ -32,6 +35,7 @@ private:
     friend class UI;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
+#include <nativeui/detail/tree_transient.inc>
 #include <nativeui/detail/tree_layout.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>

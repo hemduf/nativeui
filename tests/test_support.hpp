@@ -35,10 +35,14 @@ inline void check_near(float actual, float expected, float epsilon,
                   std::to_string(expected));
 }
 
-class MockPlatform final : public ui::PlatformServices {
+class MockPlatform final : public ui::PlatformServices, public ui::DispatcherProvider {
 public:
     float text_width(std::string_view text, float size) override {
         return static_cast<float>(text.size()) * size * 0.5f;
+    }
+
+    [[nodiscard]] ui::Dispatcher dispatcher() const noexcept override {
+        return dispatcher_value;
     }
 
     void set_text_input(bool active, ui::Rect area, float cursor_offset) override {
@@ -70,6 +74,7 @@ public:
         ++drop_reject_count;
     }
 
+    ui::Dispatcher dispatcher_value;
     bool text_input_active{};
     bool paste_requested{};
     float text_input_cursor_offset{};
@@ -117,6 +122,7 @@ struct ProbeState {
     int focus_in{};
     int focus_out{};
     int key_events{};
+    bool focused{};
     ui::EventResult input_result{ui::EventResult::Ignored};
     std::vector<ui::Rect> focus_bounds;
 };
@@ -131,6 +137,7 @@ public:
     }
 
     void focus_changed(bool focused, ui::FocusContext& context) override {
+        state_->focused = focused;
         focused ? ++state_->focus_in : ++state_->focus_out;
         state_->focus_bounds.push_back(context.bounds());
     }

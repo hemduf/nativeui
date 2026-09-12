@@ -40,14 +40,15 @@ At the beginning of every work session, read in this order:
 
 1. `AGENTS.md`
 2. `CODE_REVIEW.md`
-3. `CONTEXT.md`
-4. `ROADMAP.md`
-5. the [GitHub issue index](https://github.com/hemduf/nativeui/issues?q=is%3Aissue), including open and closed tickets
-6. the selected GitHub issue, including its latest comments and dependencies
-7. `DESIGN.md` when the ticket changes architecture/platform/rendering
-8. `VALIDATION.md` when the ticket touches build/platform integration
+3. `CI_POLICY.md`
+4. `CONTEXT.md`
+5. `ROADMAP.md`
+6. the [GitHub issue index](https://github.com/hemduf/nativeui/issues?q=is%3Aissue), including open and closed tickets
+7. the selected GitHub issue, including its latest comments and dependencies
+8. `DESIGN.md` when the ticket changes architecture/platform/rendering
+9. `VALIDATION.md` when the ticket touches build/platform integration
 
-`CODE_REVIEW.md` is a mandatory merge/Done gate for every code-changing ticket. Its plug-in-host rules apply even though NativeUI itself does not implement VST3/CLAP/AU DSP APIs.
+`CODE_REVIEW.md` is a mandatory merge/Done gate for every code-changing ticket. Its plug-in-host rules apply even though NativeUI itself does not implement VST3/CLAP/AU DSP APIs. `CI_POLICY.md` is the mandatory source of truth for **when** remote validation runs; it changes CI cadence, never required coverage.
 
 Then run the current baseline tests before editing code:
 
@@ -177,6 +178,21 @@ Requirements:
 - keep examples concise and feature-focused rather than turning them into hidden integration tests.
 
 Infrastructure-only tickets (build refactors, header splitting, CI plumbing) are not feature tickets and may update an existing example instead of adding a meaningless new executable. If uncertain, treat the ticket as a feature and add the example.
+
+## 4.2 CI execution cadence — mandatory
+
+Follow [`CI_POLICY.md`](CI_POLICY.md).
+
+- Keep implementation PRs in Draft while source/build/tests are changing.
+- Intermediate commits run normal `CI` plus only dedicated workflows whose subsystem `paths` filters match.
+- `T042 Lifecycle Stress` and `T052 v0.1 Release Gate` are heavyweight final-candidate gates and run on the Draft -> Ready for review transition, not every PR commit.
+- Every dedicated workflow must cancel superseded runs for the same PR.
+- Do not create an always-on per-ticket workflow when the test can live in the normal CTest/CI graph.
+- Do not use umbrella headers or root `CMakeLists.txt` as broad path-filter proxies when normal CI already owns generic integration coverage.
+- Any production source, test/fixture/example, build/dependency or workflow change after final qualification invalidates the candidate: convert the PR back to Draft before editing, then mark it Ready again after normal/relevant CI is green.
+- Pure project-state/completion documentation does not by itself invalidate an already qualified executable candidate; release/API documentation consumed by tests or defining shipped behavior does.
+
+This rule changes when expensive checks run; it does not weaken required test or review coverage.
 
 ## 5. Review workflow
 
@@ -360,6 +376,7 @@ A ticket is `Done` only when:
 - NativeUI-owned targets build with the default empty `NATIVEUI_ALLOWED_WARNINGS` and emit no compiler warnings; any explicitly approved exception is recorded in the ticket/PR and requires the corresponding CMake opt-in;
 - all applicable review passes are complete;
 - the mandatory `CODE_REVIEW.md` review record is present in the issue or PR and all blocking findings are corrected;
+- the final candidate has the green normal, relevant path-scoped and heavyweight qualification evidence required by `CI_POLICY.md`;
 - multi-instance/global-state impact is explicitly assessed for every code change;
 - Objective-C runtime naming/prefix strategy is recorded whenever Objective-C/Objective-C++ code is touched;
 - docs/API examples are updated when behavior changed;
@@ -391,10 +408,12 @@ Do not turn `CONTEXT.md` into a changelog. Move durable decisions to `DESIGN.md`
 For each ticket:
 
 - branch/commit scope should match one ticket or one independently reviewable sub-unit;
+- keep the PR in Draft during active source/build/test iteration;
 - commit tests with the implementation they validate;
 - avoid drive-by formatting or unrelated refactors;
-- before merge, run the complete relevant test set;
-- perform and record the mandatory `CODE_REVIEW.md` review before merge;
+- before final qualification, run the complete relevant local test set and complete the mandatory review;
+- mark the frozen candidate Ready for review to trigger heavyweight qualification according to `CI_POLICY.md`;
+- if source/build/tests/workflows must change afterward, convert the PR back to Draft before editing and repeat the final-candidate transition after CI is green;
 - update the GitHub issue, `CONTEXT.md` and `ROADMAP.md` in the final merge/completion cycle;
 - do not merge/close the ticket with a stale roadmap.
 
@@ -432,7 +451,7 @@ At the end of every completed iteration:
 
 1. finish the ticket completion protocol;
 2. update the GitHub issue, `ROADMAP.md` and `CONTEXT.md`; the roadmap update is mandatory for every merged ticket, not only when milestone scope changes;
-3. include `AGENTS.md`, `CODE_REVIEW.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
+3. include `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
 4. exclude build directories, downloaded dependencies and generated binaries;
 5. create a versioned/recoverable ZIP named with the completed ticket, for example `nativeui_T011.zip`;
 6. provide that ZIP to the user as the recovery snapshot for that iteration.
