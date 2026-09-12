@@ -53,7 +53,7 @@ jobs:
       - name: Install headless inspector dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libfontconfig1-dev
+          sudo apt-get install -y ninja-build libfontconfig1-dev libdbus-1-dev
       - name: Configure inspector ${{ matrix.inspector }}
         run: >-
           cmake -S . -B build-t050-${{ matrix.inspector }} -G Ninja
@@ -67,9 +67,10 @@ jobs:
         run: |
           targets="nativeui_t050_inspector_model_tests nativeui_header_inspector_compile nativeui_header_ui_compile"
           if [[ "${{ matrix.inspector }}" == "ON" ]]; then
-            targets="$targets nativeui_t050_inspector_runtime_tests"
+            cmake --build build-t050-${{ matrix.inspector }} --parallel
+          else
+            cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel
           fi
-          cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel
       - name: Run inspector tests
         shell: bash
         run: |
