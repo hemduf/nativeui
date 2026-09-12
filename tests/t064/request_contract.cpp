@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -124,6 +125,7 @@ int main() {
     ui::detail::DispatcherOwner owner;
     auto backend = std::make_shared<FakeBackend>();
     ui::DesktopServices services{owner.dispatcher(), backend};
+    const auto ui_thread = std::this_thread::get_id();
 
     bool invalid_called = false;
     ui::OpenFileOptions invalid;
@@ -155,6 +157,43 @@ int main() {
     }
     drain(owner);
     if (!bad_url_called) return fail();
+
+    // A backend operational start failure still has the same public asynchronous
+    // completion boundary and carries the required non-empty diagnostic.
+    backend->next_start_status = ui::DesktopServiceStatus::Error;
+    bool backend_error_called = false;
+    std::thread::id backend_error_thread;
+    if (services.open_file({}, [&](ui::FileDialogResult result) {
+            backend_error_called = result.status == ui::DesktopServiceStatus::Error &&
+                                   result.paths.empty() && !result.error.empty();
+            backend_error_thread = std::this_thread::get_id();
+        }) != ui::kInvalidDesktopRequestId || backend_error_called) {
+        return fail();
+    }
+    drain(owner);
+    if (!backend_error_called || backend_error_thread != ui_thread) return fail();
+
+    // Completion originating from a backend worker must not execute application
+    // code on that worker. T065 owns the final callback checkpoint.
+    bool worker_file_called = false;
+    std::thread::id worker_file_thread;
+    const auto worker_file_id = services.open_file({}, [&](ui::FileDialogResult result) {
+        worker_file_called = result.status == ui::DesktopServiceStatus::Accepted &&
+                             result.paths == std::vector<std::filesystem::path>{"worker.wav"};
+        worker_file_thread = std::this_thread::get_id();
+    });
+    if (worker_file_id == ui::kInvalidDesktopRequestId) return fail();
+    std::thread worker{[&] {
+        backend->complete_file(worker_file_id, {
+            .status = ui::DesktopServiceStatus::Accepted,
+            .paths = {"worker.wav"},
+            .error = {},
+        });
+    }};
+    worker.join();
+    if (worker_file_called) return fail();
+    drain(owner);
+    if (!worker_file_called || worker_file_thread != ui_thread) return fail();
 
     bool first_done = false;
     ui::DesktopRequestId replacement = ui::kInvalidDesktopRequestId;
