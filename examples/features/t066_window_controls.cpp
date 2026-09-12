@@ -23,8 +23,6 @@ bool same_size(ui::Size actual, ui::Size expected) {
 bool wait_for_size(ui::Application& app,
                    const ui::StandaloneWindow& window,
                    ui::Size expected) {
-    // T043 makes native Configure authoritative. Do not assume a fixed number
-    // of zero-time polls is enough for the window manager to echo a resize.
     for (int i = 0; i < 64; ++i) {
         if (same_size(window.size(), expected)) return true;
         (void)app.poll(0.01);
@@ -58,28 +56,35 @@ int self_test() {
                        .max_size = ui::Size{240.0f, 180.0f}}};
     trace_stage("window-created");
     if (!window.valid()) return example::fail("standalone window creation failed");
+    trace_stage("window-valid");
 
     const auto initial = window.size();
+    trace_stage("initial-size-read");
     if (initial.w < 100.0f || initial.h < 80.0f ||
         initial.w > 240.0f || initial.h > 180.0f) {
         return example::fail("initial size was not clamped into constraints");
     }
+    trace_stage("initial-size-valid");
 
     if (!window.set_title("T066 UTF-8 — fenêtre")) {
         return example::fail("UTF-8 title update failed");
     }
+    trace_stage("utf8-title-ok");
     if (!window.set_title("")) {
         return example::fail("empty title update failed");
     }
+    trace_stage("empty-title-ok");
     if (!window.set_title("T066 self-test")) {
         return example::fail("title restore failed");
     }
-    if (!window.hide() || !window.hide()) {
-        return example::fail("hide was not idempotent");
-    }
-    if (!window.show() || !window.show()) {
-        return example::fail("show was not idempotent");
-    }
+    trace_stage("title-restore-ok");
+    if (!window.hide()) return example::fail("first hide failed");
+    trace_stage("first-hide-ok");
+    if (!window.hide()) return example::fail("second hide failed");
+    trace_stage("second-hide-ok");
+    if (!window.show()) return example::fail("first show failed");
+    trace_stage("first-show-ok");
+    if (!window.show()) return example::fail("second show failed");
     trace_stage("runtime-controls-ok");
 
     if (!window.set_size({120.0f, 100.0f})) {
@@ -128,8 +133,6 @@ int self_test() {
     });
     window.on_closed([&] { ++closed_calls; });
 
-    // Programmatic close bypasses veto and must expose accepted close intent
-    // immediately while native teardown/callback completion remains deferred.
     window.request_close();
     trace_stage("close-requested");
     if (!window.should_close() || window.is_closed()) {
