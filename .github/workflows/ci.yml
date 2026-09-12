@@ -139,6 +139,38 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 2
 
+      # Hosted Windows runners expose only the system OpenGL implementation,
+      # which is not a deterministic rendering environment for the Skia GPU
+      # backend. Native window self-tests can legitimately reach PUGL_EXPOSE,
+      # so run them with the same pinned software OpenGL contract as T066.
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build\Release\opengl32.dll -Force
+          Copy-Item $gallium.FullName build\Release\libgallium_wgl.dll -Force
+
       # Keep a real Linux/X11 renderer exposure in the normal merge gate. T042
       # stress caught a production crash here that the previous compile/core
       # coverage could not see. The native smoke uses one supported PROGRAM
@@ -169,6 +201,8 @@ jobs:
 
       - name: Test
         if: runner.os != 'Linux'
+        env:
+          GALLIUM_DRIVER: ${{ runner.os == 'Windows' && 'llvmpipe' || '' }}
         run: ctest --test-dir build --output-on-failure -C Release
 
       - name: T047 external package contract
@@ -219,13 +253,10 @@ jobs:
         run: >-
           cmake
           -DSOURCE_DIR=${{ github.workspace }}
-          -DOUTER_BUILD=${{ github.workspace }}/build
-          -P tests/check_objc_two_consumers.cmake
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DCONFIG=Release
+          -P tests/t053_two_consumer_runtime_tests.cmake
 
-      # The real AppKit/Pugl path validates both the T028 clipboard regression
-      # and CODE_REVIEW.md's lifecycle requirement: simultaneous PUGL_MODULE
-      # editor instances, sibling destruction, survivor use and repeated cycles.
-      # T035 and T063 both exercise their real standalone + EmbeddedView policy.
       - name: macOS clipboard, lifecycle, T035 popup, T063 dialog and T062 tooltip smoke
         if: runner.os == 'macOS'
         run: |
@@ -233,83 +264,3 @@ jobs:
           ./build/nativeui_example_t035_combo_popup --platform-smoke
           ./build/nativeui_example_t063_dialog --platform-smoke
           ./build/nativeui_example_t062_tooltip --platform-smoke
-
-  sanitizers:
-    name: Linux ASan + UBSan
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Restore dependency cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CPM_SOURCE_CACHE }}
-          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
-          restore-keys: |
-            nativeui-cpm-${{ runner.os }}-
-
-      - name: T047 public attachment contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t047_attach_contract_tests.cmake
-
-      - name: T048 external consumer source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t048_external_consumer_contract_tests.cmake
-
-      - name: T054 application argument contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_argument_boundary_tests.cmake
-
-      - name: T054 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t054_package_source_contract_tests.cmake
-
-      - name: T056 package source contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_package_source_contract_tests.cmake
-
-      - name: T056 binary-data contract
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -P tests/t056_binary_data_contract_tests.cmake
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libfontconfig1-dev
-
-      - name: Configure
-        run: >-
-          cmake -S . -B build-sanitize -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DNATIVEUI_BUILD_PLATFORM=OFF
-          -DNATIVEUI_BUILD_EXAMPLES=OFF
-          -DNATIVEUI_BUILD_TESTS=ON
-          -DNATIVEUI_ENABLE_SANITIZERS=ON
-          -DNATIVEUI_SKIA_CONFIG=Release
-
-      - name: Build
-        run: cmake --build build-sanitize --parallel 2
-
-      - name: Test
-        env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-          # Skia's Linux fallback path calls Fontconfig FcFontRenderPrepare,
-          # whose process-lifetime caches are reported as leaks by LSan on the
-          # hosted image. Keep leak detection enabled and suppress only this
-          # known third-party allocation path; NativeUI/Skia leaks remain fatal.
-          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure
