@@ -1,5 +1,7 @@
 #include "example_support.hpp"
 
+#include <optional>
+
 namespace {
 
 [[nodiscard]] bool same_color(ui::Color a, ui::Color b) noexcept {
@@ -237,6 +239,63 @@ int self_test() {
     }
     if (tabs_hovered.header_height != 42.0f || tabs_disabled.header_height != 42.0f) {
         return example::fail("TabsStyle paint states changed header geometry");
+    }
+
+    // T038 consumer contract: retained ListView rows and Tabs headers must
+    // consume their typed recipes rather than leaving the old hard-coded paint.
+    ui::State<std::optional<int>> list_selection{1};
+    ui::ListViewStyle consumer_list_style;
+    consumer_list_style.base.surface_fill = ui::Color{0.03f, 0.05f, 0.08f, 1.0f};
+    consumer_list_style.selected.row_fill = ui::Color{0.86f, 0.16f, 0.24f, 1.0f};
+    ui::UI styled_list{ui::ListView<int>{list_selection}
+        .item(1, ui::Spacer{120.0f, 30.0f})
+        .item(2, ui::Spacer{120.0f, 30.0f})
+        .style(consumer_list_style)};
+    styled_list.resize({120.0f, 60.0f});
+    ui::HeadlessRenderer styled_list_renderer{{120.0f, 60.0f}, 1.0f};
+    if (!styled_list_renderer.render(styled_list)) {
+        return example::fail("styled ListView render failed");
+    }
+
+    ui::State<std::optional<int>> default_list_selection{1};
+    ui::UI default_list{ui::ListView<int>{default_list_selection}
+        .item(1, ui::Spacer{120.0f, 30.0f})
+        .item(2, ui::Spacer{120.0f, 30.0f})};
+    default_list.resize({120.0f, 60.0f});
+    ui::HeadlessRenderer default_list_renderer{{120.0f, 60.0f}, 1.0f};
+    if (!default_list_renderer.render(default_list) ||
+        styled_list_renderer.rgba_pixels() == default_list_renderer.rgba_pixels()) {
+        return example::fail("ListViewStyle did not affect retained row rendering");
+    }
+
+    ui::State<int> tabs_selection{1};
+    ui::TabsStyle consumer_tabs_style;
+    consumer_tabs_style.base.header_height = 46.0f;
+    consumer_tabs_style.selected.tab_fill = ui::Color{0.12f, 0.72f, 0.42f, 1.0f};
+    consumer_tabs_style.base.panel_fill = ui::Color{0.03f, 0.05f, 0.08f, 1.0f};
+    ui::UI styled_tabs{ui::Tabs<int>{tabs_selection}
+        .tab(1, "One", ui::Spacer{180.0f, 60.0f})
+        .tab(2, "Two", ui::Spacer{180.0f, 60.0f})
+        .style(consumer_tabs_style)};
+    const auto styled_tabs_metrics = styled_tabs.measure();
+    if (styled_tabs_metrics.preferred.h != 116.0f) {
+        return example::fail("TabsStyle header geometry was not consumed");
+    }
+    styled_tabs.resize({180.0f, 116.0f});
+    ui::HeadlessRenderer styled_tabs_renderer{{180.0f, 116.0f}, 1.0f};
+    if (!styled_tabs_renderer.render(styled_tabs)) {
+        return example::fail("styled Tabs render failed");
+    }
+
+    ui::State<int> default_tabs_selection{1};
+    ui::UI default_tabs{ui::Tabs<int>{default_tabs_selection}
+        .tab(1, "One", ui::Spacer{180.0f, 60.0f})
+        .tab(2, "Two", ui::Spacer{180.0f, 60.0f})};
+    default_tabs.resize({180.0f, 110.0f});
+    ui::HeadlessRenderer default_tabs_renderer{{180.0f, 110.0f}, 1.0f};
+    if (!default_tabs_renderer.render(default_tabs) ||
+        styled_tabs_renderer.rgba_pixels() == default_tabs_renderer.rgba_pixels()) {
+        return example::fail("TabsStyle did not affect retained header/panel rendering");
     }
 
     DemoState state;
