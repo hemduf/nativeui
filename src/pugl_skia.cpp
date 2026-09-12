@@ -34,6 +34,7 @@ namespace detail {
 using ViewCore = detail::ViewCore;
 
 #include "detail/pugl_skia_windows.inc"
+#include "detail/pugl_skia_desktop_services.inc"
 
 } // namespace ui
 
