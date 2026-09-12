@@ -3,6 +3,7 @@
 #include <nativeui/semantics.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
 
 namespace ui::detail {
@@ -66,6 +67,25 @@ namespace ui::detail {
         SemanticAction::Decrement,
         SemanticAction::SetValue,
         SemanticAction::Focus,
+    };
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo bounded_display_semantic_info(
+    float value,
+    float minimum,
+    float maximum,
+    bool meter) {
+    SemanticInfo info;
+    info.role = meter ? SemanticRole::Meter : SemanticRole::ProgressBar;
+    const float effective = std::isfinite(value)
+        ? std::clamp(value, minimum, maximum)
+        : minimum;
+    info.numeric_value = static_cast<double>(effective);
+    info.value_range = SemanticValueRange{
+        static_cast<double>(minimum),
+        static_cast<double>(maximum),
+        0.0,
     };
     return info;
 }

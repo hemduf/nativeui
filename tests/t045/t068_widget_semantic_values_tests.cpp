@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -82,6 +83,35 @@ void slider_value_contract() {
     T068_CHECK(*clamped.numeric_value == 1.0);
 }
 
+void bounded_display_value_contract() {
+    const auto progress = ui::detail::bounded_display_semantic_info(
+        0.25f, 0.0f, 1.0f, false);
+    T068_CHECK(progress.role == ui::SemanticRole::ProgressBar);
+    T068_CHECK(progress.numeric_value.has_value());
+    T068_CHECK(*progress.numeric_value == 0.25);
+    T068_CHECK(progress.value_range.has_value());
+    T068_CHECK(progress.value_range->minimum == 0.0);
+    T068_CHECK(progress.value_range->maximum == 1.0);
+    T068_CHECK(progress.value_range->step == 0.0);
+    T068_CHECK(!progress.focusable);
+    T068_CHECK(progress.actions.empty());
+
+    const auto meter = ui::detail::bounded_display_semantic_info(
+        4.0f, -1.0f, 1.0f, true);
+    T068_CHECK(meter.role == ui::SemanticRole::Meter);
+    T068_CHECK(meter.numeric_value.has_value());
+    T068_CHECK(*meter.numeric_value == 1.0);
+    T068_CHECK(meter.value_range.has_value());
+    T068_CHECK(meter.value_range->minimum == -1.0);
+    T068_CHECK(meter.value_range->maximum == 1.0);
+    T068_CHECK(meter.actions.empty());
+
+    const auto non_finite = ui::detail::bounded_display_semantic_info(
+        std::numeric_limits<float>::quiet_NaN(), -2.0f, 2.0f, false);
+    T068_CHECK(non_finite.numeric_value.has_value());
+    T068_CHECK(*non_finite.numeric_value == -2.0);
+}
+
 } // namespace
 
 int main() {
@@ -90,6 +120,7 @@ int main() {
         radio_value_contract();
         toggle_value_contract();
         slider_value_contract();
+        bounded_display_value_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
