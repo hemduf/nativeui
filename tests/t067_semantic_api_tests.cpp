@@ -33,6 +33,41 @@ private:
     ui::ComponentAvailability availability_;
 };
 
+class VirtualSemanticProbe final : public ui::Component,
+                                   public ui::detail::VirtualSemanticChildrenSource {
+public:
+    explicit VirtualSemanticProbe(ui::VirtualSemanticChildren::MetadataSnapshot metadata)
+        : metadata_(std::move(metadata)) {}
+
+    [[nodiscard]] ui::SemanticInfo semantics() const override {
+        ui::SemanticInfo result;
+        result.role = ui::SemanticRole::ListView;
+        result.name = "Items";
+        result.focusable = true;
+        result.actions = {ui::SemanticAction::Focus};
+        return result;
+    }
+
+    [[nodiscard]] ui::VirtualSemanticChildren virtual_semantic_children(
+        ui::Rect semantic_bounds) const override {
+        return ui::VirtualSemanticChildren::from_metadata(
+            9,
+            metadata_,
+            ui::VirtualSemanticItemToken{20},
+            semantic_bounds,
+            20.0f,
+            5.0f);
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata_;
+};
+
 ui::SemanticInfo semantic_info(ui::SemanticRole role, std::string name = {}) {
     ui::SemanticInfo result;
     result.role = role;
@@ -136,6 +171,57 @@ void retained_tree_semantics_flatten_wrappers_and_honor_availability() {
     }
 }
 
+void retained_tree_semantics_attach_virtual_collection_without_metadata_copy() {
+    auto metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    metadata->push_back({
+        10,
+        "Ten",
+        "",
+        true,
+        false,
+        ui::SemanticCheckedState::NotApplicable,
+        {ui::SemanticAction::Select, ui::SemanticAction::Focus},
+    });
+    metadata->push_back({
+        20,
+        "Twenty",
+        "",
+        true,
+        false,
+        ui::SemanticCheckedState::NotApplicable,
+        {ui::SemanticAction::Select, ui::SemanticAction::Focus},
+    });
+
+    auto root = std::make_unique<ui::Node>();
+    root->id = 7;
+    root->bounds = {10.0f, 20.0f, 120.0f, 40.0f};
+    root->component = std::make_unique<VirtualSemanticProbe>(metadata);
+
+    ui::Node* root_ptr = root.get();
+    ui::Tree tree{std::move(root)};
+    tree.mount();
+
+    const auto snapshot = ui::detail::build_semantic_tree_snapshot(*root_ptr, 7);
+    NUI_CHECK(snapshot.root == 7);
+    NUI_CHECK(snapshot.nodes.size() == 1);
+
+    const auto& list = require_semantic_node(snapshot, 7);
+    NUI_CHECK(list.info.role == ui::SemanticRole::ListView);
+    NUI_CHECK(list.virtual_children.has_value());
+    NUI_CHECK(list.virtual_children->metadata_snapshot().get() == metadata.get());
+    NUI_CHECK(list.virtual_children->size() == 2);
+
+    const auto item = list.virtual_children->item_at(1);
+    NUI_CHECK(item.has_value());
+    NUI_CHECK(item->token == 20);
+    NUI_CHECK(item->info.name == "Twenty");
+    NUI_CHECK(item->info.selected);
+    NUI_CHECK_NEAR(item->logical_bounds.x, 10.0f, 0.0001f);
+    NUI_CHECK_NEAR(item->logical_bounds.y, 35.0f, 0.0001f);
+    NUI_CHECK_NEAR(item->logical_bounds.w, 120.0f, 0.0001f);
+    NUI_CHECK_NEAR(item->logical_bounds.h, 20.0f, 0.0001f);
+}
+
 void suite() {
     using VirtualState = ui::VirtualListState<int>;
 
@@ -229,6 +315,7 @@ void suite() {
     NUI_CHECK(reader_ok.load(std::memory_order_relaxed));
 
     retained_tree_semantics_flatten_wrappers_and_honor_availability();
+    retained_tree_semantics_attach_virtual_collection_without_metadata_copy();
 }
 
 } // namespace
