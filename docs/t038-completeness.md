@@ -1,63 +1,67 @@
 # T038 completion matrix
 
-This file is the live requirement -> implementation -> test/evidence matrix for issue #38. It is intentionally conservative: a row is complete only when the required widget/API is implemented, covered by deterministic tests, and represented in the final exact-head qualification evidence.
+This file is the requirement -> implementation -> deterministic evidence matrix for issue #38. T038 is now in closure-only mode: no additional widget family or styling scope belongs in this ticket.
+
+Pre-reconciliation proof head: `d799c9a0141b7713734a061a9a11fa9cde79ac5d`.
 
 ## Fixed state model and resolver
 
 | Requirement | Implementation | Test/evidence | Status |
 | --- | --- | --- | --- |
-| One shared `VisualState` with enabled/read-only/hovered/pressed/focused/selected/checked flags | `include/nativeui/style.hpp` | Public umbrella compile coverage and family resolver tests in the T038 branch | Implemented; final exact-head evidence pending |
-| Interaction precedence `disabled > pressed > hovered > normal` | Shared resolver in `style.hpp` | Existing family resolver coverage | Implemented; final exact-head evidence pending |
-| Focused/selected/checked/read-only remain orthogonal | Shared resolver plus typed family patches | Existing family resolver coverage | Implemented; final exact-head evidence pending |
-| T039-compatible inherited-base seam without scoped traversal | Typed `resolve_*_style(inherited, explicit, state)` APIs | Public-header compile coverage | Implemented; final exact-head evidence pending |
+| One shared `VisualState` with enabled/read-only/hovered/pressed/focused/selected/checked flags | `include/nativeui/style.hpp` | Public umbrella compile coverage plus family resolver tests | Complete before final `main` reconciliation |
+| Interaction precedence `disabled > pressed > hovered > normal` | Shared `resolve_interaction_state()` in `style.hpp` | Button/choice/slider/TextInput/TextArea family tests plus `t038_widget_styles --self-test` | Complete before final `main` reconciliation |
+| Focused/selected/checked/read-only remain orthogonal | Shared resolver plus typed family patches | Choice/Tabs/MenuItem/TextInput coverage and `t038_widget_styles --self-test` | Complete before final `main` reconciliation |
+| T039-compatible inherited-base seam without scoped traversal | Typed `resolve_*_style(inherited, explicit, state)` APIs | `tests/headers/nativeui.cpp` and family resolver tests | Complete before final `main` reconciliation |
 
 ## Widget-family coverage
 
-| Family required by #38 | Typed style/resolver | Widget consumption | Deterministic tests | Final status |
+| Family required by #38 | Typed style/resolver | Widget consumption | Deterministic evidence | Status |
 | --- | --- | --- | --- | --- |
-| Button | `ButtonStyle` | integrated | button tests / public compile coverage / T038 feature invalidation slice | Implemented; final qualification pending |
-| Checkbox / Radio | `CheckboxStyle` / `RadioStyle` | integrated | choice tests / public compile coverage / T038 paint-vs-layout interaction regression | Implemented; latest GREEN exact-head qualification pending |
-| Slider / RangeSlider | `SliderStyle` | integrated | slider visual tests / public compile coverage / T038 equal-style + layout invalidation regression | Implemented; final qualification pending |
-| ProgressBar / Meter | `ProgressBarStyle` / `MeterStyle` | integrated | progress/meter branch coverage / public compile coverage | Implemented; final qualification pending |
-| Toggle | `ToggleStyle` | integrated | existing Toggle golden/regression coverage | Implemented; final qualification pending |
-| TextInput | `TextInputStyle` | integrated | existing TextInput behavior plus public compile coverage | Implemented; representative T038 golden still pending |
-| TextArea | `TextAreaStyle` | integrated | TextArea behavior/candidate-position regressions plus public compile coverage | Implemented; final qualification pending |
-| ScrollView scrollbar | `ScrollbarStyle` | integrated in `detail/scroll_view.inc` | T034/T038 scrollbar style regression coverage | Implemented on branch; exact-head qualification pending |
-| ComboBox / MenuItem | `ComboBoxStyle` / `MenuItemStyle` | integrated in `combo_popup.hpp` | existing T035 interaction contracts plus T038 style coverage | Implemented on branch; exact-head qualification pending |
-| ListView row | `ListViewStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` consumer/render contract | Implemented on branch; exact-head qualification pending |
-| Tabs header | `TabsStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` geometry/render contract | Implemented on branch; exact-head qualification pending |
+| Button | `ButtonStyle` | integrated | `button_tests.cpp`, `t038_style_invariants --self-test`, T038 golden matrix | Complete |
+| Checkbox / Radio | `CheckboxStyle` / `RadioStyle` | integrated | `checkbox_radio_tests.cpp`, T038 golden selection slice | Complete |
+| Slider / RangeSlider | `SliderStyle` | integrated | `t032_slider_visual_tests.cpp`, invalidation regression, T038 golden matrix | Complete |
+| ProgressBar / Meter | `ProgressBarStyle` / `MeterStyle` | integrated | family tests/public compile coverage | Complete |
+| Toggle | `ToggleStyle` | integrated | existing golden plus `t038_toggle_invalidation --self-test` | Complete |
+| TextInput | `TextInputStyle` | integrated | existing behavior tests, `t038_text_input_invalidation --self-test`, T038 golden matrix | Complete |
+| TextArea | `TextAreaStyle` | integrated | TextArea behavior/candidate-position tests plus `t038_text_area_invalidation --self-test` | Complete |
+| ScrollView scrollbar | `ScrollbarStyle` | integrated in `detail/scroll_view.inc` | T034/T038 scrollbar regression coverage and resolver self-test | Complete |
+| ComboBox / MenuItem | `ComboBoxStyle` / `MenuItemStyle` | integrated in `combo_popup.hpp` | T035 interaction contracts plus `t038_widget_styles --self-test` | Complete |
+| ListView row | `ListViewStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` retained consumer/render contract | Complete |
+| Tabs header | `TabsStyle` | integrated in `detail/widgets_list_tabs.inc` | `t038_widget_styles --self-test` geometry/render contract plus invariants | Complete |
 
-## Cross-family acceptance criteria
+## Acceptance criteria
 
-| Acceptance criterion | Evidence required before completion | Status |
+| Acceptance criterion | Deterministic evidence | Status |
 | --- | --- | --- |
-| Covered widgets obtain presentation through typed styles instead of hardcoded paint constants | Audit all required families on the integrated branch | Implemented families present; final audit pending |
-| Resolver precedence identical across families | Pure precedence matrix covering representative family resolvers | Partially covered; final matrix pending |
-| Disabled wins and pressed presentation is not retained misleadingly | Explicit disabled transition coverage | Partially covered; final integrated proof pending |
-| Focused + selected/checked combinations are representable | Orthogonal-state matrix | Partially covered; final matrix pending |
-| Equal resolved style causes no invalidation | Dedicated invalidation regression | Slider interaction slice covered; broader representative proof pending |
-| Paint-only changes do not invalidate layout | Dedicated invalidation regression | Button, Slider/RangeSlider, Checkbox/Radio, TextInput and TextArea interaction slices covered; final representative proof/evidence pending |
-| Layout-affecting explicit style changes invalidate layout + paint | Dedicated invalidation regression | Button, Slider/RangeSlider, Checkbox/Radio, TextInput and TextArea interaction slices use allocation-free layout classification; final representative proof/evidence pending |
-| Default normal/hover/pressed/focused variants preserve geometry | Cross-family geometry-stability matrix | `t038_style_invariants --self-test` now covers Button, Slider, TextInput and Tabs default layout fields; exact-head CI pending |
-| Two instances can carry independent explicit overrides | Two-instance isolation regression | `t038_style_invariants --self-test` now measures two independently styled Button instances; exact-head CI pending |
-| Public API is strongly typed and backend-neutral | Public-header compile audit across all families | In progress; final audit pending |
+| Covered widgets obtain presentation through typed styles rather than hardcoded widget-specific state paint | Required-family consumption audit above | Complete |
+| Resolver precedence is identical across families | Shared `resolve_interaction_state()` plus representative family resolver assertions | Complete |
+| Disabled wins over hover/pressed interaction presentation | Resolver precedence tests and disabled family state coverage | Complete |
+| Focused + selected/checked/read-only combinations remain representable | Orthogonal overlays exercised by choice/MenuItem/Tabs/TextInput resolver tests | Complete |
+| Equal resolved style causes no invalidation | Button and Slider regressions plus Toggle/TextInput/TextArea dedicated invalidation self-tests | Complete |
+| Paint-only changes do not invalidate layout | Button, Slider/RangeSlider, Checkbox/Radio, TextInput and TextArea regressions | Complete |
+| Layout-affecting explicit/state style changes invalidate layout + paint | Same representative families exercise geometry-affecting variants | Complete |
+| Default normal/hover/pressed/focused variants preserve geometry | `examples/features/t038_style_invariants.cpp --self-test` covers Button, Slider, TextInput and Tabs | Complete; exact-head normal CI was green at `90e1da69f2e3691178e36021281e9598d9552060` |
+| Two instances carry independent explicit overrides | `t038_style_invariants --self-test` measures/renders two independently styled Button instances | Complete; exact-head normal CI was green at `90e1da69f2e3691178e36021281e9598d9552060` |
+| Public API is strongly typed and backend-neutral | `style.hpp` + family typed style headers + `tests/headers/nativeui.cpp`; no platform/backend types in the style surface | Complete |
 
-## Required completion artifacts
+## Required tests and artifacts
 
-- [x] Integrate `ListViewStyle` into retained ListView row/surface presentation.
-- [x] Integrate `TabsStyle` into retained Tabs header/panel presentation.
-- [ ] Complete explicit equal-style/no-invalidation and paint-vs-layout invalidation tests across the representative families. Button, Slider/RangeSlider, Checkbox/Radio, TextInput and TextArea interaction slices are now present, but the criterion is not yet complete.
-- [ ] Qualify the new default geometry-stability and two-instance explicit-style isolation regression on an exact head. Test source is present in `examples/features/t038_style_invariants.cpp` at `4f0ab3d08105e5e14ff6fb1f736d04b04f79a5b1`; CI evidence is still pending.
-- [ ] Complete representative golden matrix for Button, Slider, TextInput and one selection widget.
-- [ ] Finish `examples/features/t038_widget_styles.cpp` state-matrix demo and deterministic `--self-test` acceptance coverage.
-- [ ] Reconcile the canonical branch with current `main` before final qualification.
-- [ ] Run latest normal/path-relevant CI on the frozen executable candidate.
+- [x] Pure style-resolution precedence coverage.
+- [x] Orthogonal focused/selected/checked/read-only coverage.
+- [x] Disabled transition/state precedence coverage.
+- [x] Paint-vs-layout invalidation coverage.
+- [x] Equal-style no-invalidation coverage across representative families.
+- [x] Default geometry-stability regression.
+- [x] Two-instance explicit-style isolation regression.
+- [x] Representative golden matrix for Button, Slider, TextInput and Checkbox selection state in `tests/golden/baselines/t038_widget_state_matrix.ppm`.
+- [x] Dedicated `examples/features/t038_widget_styles.cpp` state/resolver/consumer demo with deterministic `--self-test`.
+- [x] Pre-reconciliation normal CI on golden head `d799c9a0141b7713734a061a9a11fa9cde79ac5d`: CI run 1531 passed on macOS, Windows, Linux X11 and Linux ASan/UBSan.
+- [ ] Reconcile the canonical branch with current `main`.
+- [ ] Re-run normal plus path-relevant CI on the integrated candidate.
 - [ ] Perform final `CODE_REVIEW.md` audit with no Blocking/Important finding.
-- [ ] Transition Draft -> Ready and obtain required T042/T052 final-candidate qualification.
 - [ ] Synchronize issue status, `CONTEXT.md` and `ROADMAP.md` in the completion cycle.
+- [ ] Freeze the executable candidate, transition Draft -> Ready, then obtain T042/T052 qualification.
 
-## Current recovery note
+## Closure boundary
 
-PR #218 remains Draft. All required standard widget families have typed resolver + concrete consumption on the branch, including virtualized ListView style propagation. The bounded cross-family invalidation phase now has explicit TDD slices for Button, Slider/RangeSlider, Checkbox/Radio, TextInput and TextArea. The latest exact source head before this matrix is `4f0ab3d08105e5e14ff6fb1f736d04b04f79a5b1`, which adds deterministic public-API acceptance coverage for default interaction geometry stability across Button/Slider/TextInput/Tabs plus two-instance explicit Button-style isolation. No exact-head CI result is claimed for that new source head yet.
-
-The canonical branch still requires final reconciliation with current `main`. Broader equal-resolved-style proof, representative goldens, final example acceptance, final review and final qualification remain open. Do not merge from this state.
+Functional acceptance is closed on the pre-reconciliation branch. Remaining work is integration and release discipline only: current-main reconciliation, exact-head requalification, final review, status/docs synchronization, freeze, Ready/T042/T052, then merge. No new widget, state, styling capability, inheritance behavior or animation work is permitted in T038; T039/T040 own later styling scope.
