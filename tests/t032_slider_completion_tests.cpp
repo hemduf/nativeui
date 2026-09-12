@@ -277,6 +277,30 @@ void formatter_is_display_only_and_uses_effective_value() {
     NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
 }
 
+void slider_semantics_follow_effective_state() {
+    ui::State<float> value{5.0f};
+    ui::detail::SliderComponent slider{
+        value,
+        -1.0f,
+        1.0f,
+        0.25f,
+        ui::SliderOrientation::Horizontal,
+        {}};
+
+    const auto info = slider.semantics();
+    NUI_CHECK(info.role == ui::SemanticRole::Slider);
+    NUI_CHECK(info.numeric_value.has_value());
+    NUI_CHECK_NEAR(static_cast<float>(*info.numeric_value), 1.0f, 0.0001f);
+    NUI_CHECK(info.value_range.has_value());
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->minimum), -1.0f, 0.0001f);
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->maximum), 1.0f, 0.0001f);
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->step), 0.25f, 0.0001f);
+    NUI_CHECK(info.supports(ui::SemanticAction::Increment));
+    NUI_CHECK(info.supports(ui::SemanticAction::Decrement));
+    NUI_CHECK(info.supports(ui::SemanticAction::SetValue));
+    NUI_CHECK(info.supports(ui::SemanticAction::Focus));
+}
+
 void suite() {
     external_invalid_state_is_render_only();
     observer_reentrancy_does_not_duplicate_widget_writes();
@@ -285,6 +309,7 @@ void suite() {
     pointer_mapping_matches_rendered_thumb_axis();
     extreme_finite_range_interaction_is_stable();
     formatter_is_display_only_and_uses_effective_value();
+    slider_semantics_follow_effective_state();
 }
 
 } // namespace
