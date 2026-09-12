@@ -86,8 +86,6 @@ jobs:
           }
           Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
           Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
-          Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
-          Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
 
       - name: Run pure state contract (Unix)
         if: runner.os != 'Windows'
