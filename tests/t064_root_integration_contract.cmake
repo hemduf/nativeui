@@ -5,12 +5,17 @@ if(NOT DEFINED SOURCE_DIR)
 endif()
 
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/cmake/Dependencies.cmake" _dependencies)
+file(READ "${SOURCE_DIR}/cmake/NativeUIConsumerPlatform.cmake" _consumer_platform)
 file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
 file(READ "${SOURCE_DIR}/include/nativeui/window.hpp" _window_header)
 file(READ "${SOURCE_DIR}/src/pugl_skia.cpp" _platform_source)
+file(READ "${SOURCE_DIR}/src/detail/pugl_skia_desktop_services.inc" _desktop_services_ownership)
 set(_header_fixture "${SOURCE_DIR}/tests/headers/desktop_services.cpp")
 set(_window_fixture "${SOURCE_DIR}/tests/headers/window.cpp")
 set(_feature_example "${SOURCE_DIR}/examples/features/t064_desktop_services.cpp")
+set(_macos_backend "${SOURCE_DIR}/src/macos_desktop_services_backend.mm")
+set(_macos_backend_header "${SOURCE_DIR}/src/detail/macos_desktop_services.hpp")
 
 function(require_text haystack needle description)
   string(FIND "${haystack}" "${needle}" _index)
@@ -26,6 +31,20 @@ require_text("${_umbrella}" "#include <nativeui/desktop_services.hpp>" "DesktopS
 require_text("${_window_header}" "DesktopServices& desktop_services();" "view-owned DesktopServices accessor")
 require_text("${_window_header}" "std::shared_ptr<DesktopServicesBackend> desktop_services_backend" "explicit EmbeddedView backend injection")
 require_text("${_platform_source}" "detail/pugl_skia_desktop_services.inc" "platform ownership implementation seam")
+
+# A backend contract compiled only by tests is not a production backend. The
+# macOS implementation must be reachable from the real StandaloneWindow path,
+# included in the consumer-scoped bridge and present in installed package
+# sources so source-tree and relocated consumers exercise the same backend.
+if(NOT EXISTS "${_macos_backend}" OR NOT EXISTS "${_macos_backend_header}")
+  message(FATAL_ERROR "T064 root integration contract: missing macOS DesktopServices backend sources")
+endif()
+require_text("${_dependencies}" "enable_language(OBJCXX)" "Objective-C++ language for macOS backend")
+require_text("${_consumer_platform}" "src/macos_desktop_services_backend.mm" "macOS backend in consumer-scoped platform bridge")
+require_text("${_consumer_platform}" "UniformTypeIdentifiers" "macOS backend UniformTypeIdentifiers framework linkage")
+require_text("${_platform_source}" "detail/macos_desktop_services.hpp" "macOS backend factory visibility in platform implementation")
+require_text("${_desktop_services_ownership}" "make_macos_desktop_services_backend" "StandaloneWindow macOS backend construction")
+require_text("${_root_cmake}" "src/macos_desktop_services_backend.mm" "installed macOS backend source")
 
 if(NOT EXISTS "${_header_fixture}")
   message(FATAL_ERROR "T064 root integration contract: missing isolated public-header fixture: ${_header_fixture}")
