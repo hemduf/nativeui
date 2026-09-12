@@ -14,6 +14,11 @@ DesktopServices& StandaloneWindow::desktop_services() {
             desktop_services_backend_ = detail::make_macos_desktop_services_backend(
                 impl_->core->native_handle());
         }
+#elif defined(_WIN32)
+        if (!desktop_services_backend_ && impl_ && impl_->core) {
+            desktop_services_backend_ = detail::make_windows_desktop_services_backend(
+                impl_->core->native_handle());
+        }
 #elif defined(__linux__)
         if (!desktop_services_backend_ && impl_ && impl_->application) {
             desktop_services_backend_ = detail::make_linux_desktop_services_backend(
