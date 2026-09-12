@@ -16,6 +16,7 @@ set(_window_fixture "${SOURCE_DIR}/tests/headers/window.cpp")
 set(_feature_example "${SOURCE_DIR}/examples/features/t064_desktop_services.cpp")
 set(_macos_backend "${SOURCE_DIR}/src/macos_desktop_services_backend.mm")
 set(_macos_backend_header "${SOURCE_DIR}/src/detail/macos_desktop_services.hpp")
+set(_windows_backend_header "${SOURCE_DIR}/src/detail/windows_desktop_services.hpp")
 
 function(require_text haystack needle description)
   string(FIND "${haystack}" "${needle}" _index)
@@ -34,17 +35,26 @@ require_text("${_platform_source}" "detail/pugl_skia_desktop_services.inc" "plat
 
 # A backend contract compiled only by tests is not a production backend. The
 # macOS implementation must be reachable from the real StandaloneWindow path,
-# included in the consumer-scoped bridge and present in installed package
-# sources so source-tree and relocated consumers exercise the same backend.
+# built by the platform target/package machinery and shipped with installed
+# platform sources so source-tree and relocated consumers exercise it.
 if(NOT EXISTS "${_macos_backend}" OR NOT EXISTS "${_macos_backend_header}")
   message(FATAL_ERROR "T064 root integration contract: missing macOS DesktopServices backend sources")
 endif()
 require_text("${_dependencies}" "enable_language(OBJCXX)" "Objective-C++ language for macOS backend")
-require_text("${_consumer_platform}" "src/macos_desktop_services_backend.mm" "macOS backend in consumer-scoped platform bridge")
+require_text("${_consumer_platform}" "src/macos_desktop_services_backend.mm" "macOS backend in packaged platform target")
 require_text("${_consumer_platform}" "UniformTypeIdentifiers" "macOS backend UniformTypeIdentifiers framework linkage")
 require_text("${_platform_source}" "detail/macos_desktop_services.hpp" "macOS backend factory visibility in platform implementation")
 require_text("${_desktop_services_ownership}" "make_macos_desktop_services_backend" "StandaloneWindow macOS backend construction")
-require_text("${_root_cmake}" "src/macos_desktop_services_backend.mm" "installed macOS backend source")
+require_text("${_root_cmake}" "src/macos_desktop_services_backend.mm" "source-tree/installed macOS backend source")
+
+# Windows stays source-private but must be compiled from the normal platform TU,
+# reachable from StandaloneWindow and shipped under src/detail for relocated
+# consumers. EmbeddedView deliberately does not construct either built-in backend.
+if(NOT EXISTS "${_windows_backend_header}")
+  message(FATAL_ERROR "T064 root integration contract: missing Windows DesktopServices backend")
+endif()
+require_text("${_platform_source}" "detail/windows_desktop_services.hpp" "Windows backend factory visibility in platform implementation")
+require_text("${_desktop_services_ownership}" "make_windows_desktop_services_backend" "StandaloneWindow Windows backend construction")
 
 if(NOT EXISTS "${_header_fixture}")
   message(FATAL_ERROR "T064 root integration contract: missing isolated public-header fixture: ${_header_fixture}")
