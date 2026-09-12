@@ -24,6 +24,18 @@ bool same_pixel(ui::Rgba8 a, ui::Rgba8 b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
+void semantic_projection() {
+    ui::detail::ButtonComponent button{"Apply", [] {}};
+    const auto info = button.semantics();
+
+    NUI_CHECK(info.role == ui::SemanticRole::Button);
+    NUI_CHECK(info.name == "Apply");
+    NUI_CHECK(info.focusable);
+    NUI_CHECK(info.supports(ui::SemanticAction::Activate));
+    NUI_CHECK(info.supports(ui::SemanticAction::Focus));
+    NUI_CHECK(!info.supports(ui::SemanticAction::Toggle));
+}
+
 void pointer_and_keyboard_activation() {
     int activations = 0;
     ui::UI tree{ui::Button{"Run", [&activations] { ++activations; }}};
@@ -240,6 +252,7 @@ void custom_theme_controls_presentation_and_measurement() {
 }
 
 void suite() {
+    semantic_projection();
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
     visual_state_goldens();
