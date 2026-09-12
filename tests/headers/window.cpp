@@ -1,5 +1,6 @@
 #include <nativeui/window.hpp>
 
+#include <memory>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -21,10 +22,22 @@ static_assert(!std::is_move_constructible_v<ui::StandaloneWindow>);
 static_assert(!std::is_move_assignable_v<ui::StandaloneWindow>);
 static_assert(std::is_constructible_v<ui::StandaloneWindow, ui::Application&, ui::UI&, ui::WindowDesc>);
 static_assert(std::is_same_v<decltype(std::declval<const ui::StandaloneWindow&>().valid()), bool>);
+static_assert(std::is_same_v<
+              decltype(std::declval<ui::StandaloneWindow&>().desktop_services()),
+              ui::DesktopServices&>);
 
 static_assert(!std::is_copy_constructible_v<ui::EmbeddedView>);
 static_assert(!std::is_copy_assignable_v<ui::EmbeddedView>);
 static_assert(!std::is_move_constructible_v<ui::EmbeddedView>);
 static_assert(!std::is_move_assignable_v<ui::EmbeddedView>);
+static_assert(std::is_constructible_v<
+              ui::EmbeddedView,
+              ui::UI&,
+              ui::NativeParentHandle,
+              ui::Size,
+              std::shared_ptr<ui::DesktopServicesBackend>>);
+static_assert(std::is_same_v<
+              decltype(std::declval<ui::EmbeddedView&>().desktop_services()),
+              ui::DesktopServices&>);
 
 void nativeui_header_compile_window() {}
