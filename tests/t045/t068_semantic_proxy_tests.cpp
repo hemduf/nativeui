@@ -53,9 +53,12 @@ void ordinary_proxy_reads_current_snapshot_and_keeps_old_read_alive() {
 
     auto changed = ordinary_snapshot("Apply now");
     changed.nodes[0].bounds.x = 12.0f;
-    T068_CHECK(publisher->publish(std::move(changed)) ==
-               std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged,
-                                               ui::SemanticChange::BoundsChanged});
+    const auto changes = publisher->publish(std::move(changed));
+    const std::vector<ui::SemanticChange> expected_changes{
+        ui::SemanticChange::ValueChanged,
+        ui::SemanticChange::BoundsChanged,
+    };
+    T068_CHECK(changes == expected_changes);
 
     const auto second = proxy.read();
     T068_CHECK(second.has_value());
