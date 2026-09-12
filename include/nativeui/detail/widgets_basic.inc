@@ -135,9 +135,6 @@ public:
         auto& painter = context.painter();
         painter.push_clip(context.bounds());
         {
-            // Canvas callbacks always operate in local component coordinates.
-            // Protect this base translation so user restore() calls cannot cross
-            // the local coordinate frame established by the widget.
             auto local_scope = painter.scoped_state();
             painter.translate(context.bounds().x, context.bounds().y);
             CanvasContext2D canvas_context{
@@ -283,10 +280,7 @@ private:
 class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
     ToggleComponent(std::string label, State<bool>& state, ToggleStyle style)
-        : label_(std::move(label)),
-          state_(state),
-          value_(state.get()),
-          style_(std::move(style)) {}
+        : label_(std::move(label)), state_(state), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
@@ -295,23 +289,19 @@ public:
     }
 
     void mount(MountContext& ctx) override {
+        const bool checked_changes_layout = patch_affects_layout(style_.checked);
         auto invalidate = ctx.invalidator();
         auto invalidate_layout = ctx.layout_invalidator();
         subscription_ = state_.observe(
-            [this,
+            [checked_changes_layout,
              invalidate = std::move(invalidate),
-             invalidate_layout = std::move(invalidate_layout)](const bool& value) {
-                const auto before = presentation_signature(focused_);
-                value_ = value;
-                const auto after = presentation_signature(focused_);
-                if (same_presentation(before, after)) return;
-                if (!same_layout(before, after)) {
-                    invalidate_layout();
-                    return;
-                }
+             invalidate_layout = std::move(invalidate_layout)](const bool&) {
+                if (checked_changes_layout) invalidate_layout();
                 invalidate();
             });
     }
+
+    void unmount(LifecycleContext&) override { subscription_.reset(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
         const auto before = presentation_signature(focused_);
@@ -352,11 +342,14 @@ public:
             }
 
             const auto outcome = interaction_.input(event, ctx, false, false);
+            const auto after_interaction = presentation_signature(focused_);
+            invalidate_style_transition(before, after_interaction, ctx);
             if (event.type == InputType::PointerDown && !effective_read_only()) {
-                state_.set(!value_);
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return outcome.result;
             }
-            const auto after = presentation_signature(focused_);
-            invalidate_style_transition(before, after, ctx);
             return outcome.result;
         }
 
@@ -364,9 +357,12 @@ public:
             if (effective_read_only()) return EventResult::Handled;
             if (!space_pressed_) {
                 space_pressed_ = true;
-                state_.set(!value_);
-                const auto after = presentation_signature(focused_);
-                invalidate_style_transition(before, after, ctx);
+                const auto after_interaction = presentation_signature(focused_);
+                invalidate_style_transition(before, after_interaction, ctx);
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return EventResult::Handled;
             }
             return EventResult::Handled;
         }
@@ -374,9 +370,12 @@ public:
             if (effective_read_only()) return EventResult::Handled;
             if (!enter_pressed_) {
                 enter_pressed_ = true;
-                state_.set(!value_);
-                const auto after = presentation_signature(focused_);
-                invalidate_style_transition(before, after, ctx);
+                const auto after_interaction = presentation_signature(focused_);
+                invalidate_style_transition(before, after_interaction, ctx);
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return EventResult::Handled;
             }
             return EventResult::Handled;
         }
@@ -429,7 +428,7 @@ public:
         dl.fill_rounded_rect(track, track_radius, resolved.track);
 
         const float thumb_radius = resolved.thumb_diameter * 0.5f;
-        const float thumb_x = value_
+        const float thumb_x = state_.get()
             ? track.x + track.w - track_radius
             : track.x + track_radius;
         dl.circle(Point{thumb_x, track.y + track_radius}, thumb_radius, resolved.thumb);
@@ -457,6 +456,13 @@ private:
         std::string_view font_family;
         const std::vector<std::string>* fallback_families{};
     };
+
+    [[nodiscard]] static bool patch_affects_layout(const ToggleStylePatch& patch) noexcept {
+        return patch.control_width || patch.control_height || patch.leading_padding ||
+               patch.trailing_padding || patch.track_width || patch.track_height ||
+               patch.thumb_diameter || patch.text_size || patch.text_weight ||
+               patch.text_slant || patch.font_family || patch.fallback_families;
+    }
 
     static void apply_patch(PresentationSignature& target,
                             const ToggleStylePatch& patch) noexcept {
@@ -589,6 +595,7 @@ private:
         if (same_presentation(before, after)) return;
         if (!same_layout(before, after)) {
             context.invalidate_layout();
+            context.invalidate();
             return;
         }
         context.invalidate();
@@ -601,7 +608,7 @@ private:
             .hovered = interaction_.hovered(),
             .pressed = interaction_.pressed() || space_pressed_ || enter_pressed_,
             .focused = focused,
-            .checked = value_,
+            .checked = state_.get(),
         };
     }
 
@@ -612,7 +619,6 @@ private:
 
     std::string label_;
     State<bool>& state_;
-    bool value_{};
     ToggleStyle style_;
     detail::PressActivationState interaction_;
     bool focused_{};
@@ -620,4 +626,3 @@ private:
     bool enter_pressed_{};
     State<bool>::Subscription subscription_;
 };
-
