@@ -198,7 +198,10 @@ int interactive() {
                 ui::Button{"Select directory", [&] {
                     if (!services) return;
                     (void)services->select_directory(
-                        ui::DirectoryOptions{.title = "Select directory"},
+                        ui::DirectoryOptions{
+                            .title = "Select directory",
+                            .initial_directory = std::nullopt,
+                        },
                         [&status](ui::FileDialogResult result) {
                             status.set("Directory: " + status_text(result.status));
                         });
