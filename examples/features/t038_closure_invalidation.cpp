@@ -174,11 +174,113 @@ int button_availability_contract() {
     return 0;
 }
 
+int choice_availability_contract() {
+    constexpr ui::Size size{320.0f, 120.0f};
+    example::Platform platform;
+
+    {
+        ui::State<bool> checked{false};
+        ui::State<bool> enabled{true};
+        ui::CheckboxStyle style;
+        style.disabled.control_height = 72.0f;
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Checkbox{checked, "Choice"}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Checkbox availability-layout baseline render failed");
+        }
+
+        enabled.set(false);
+        if (!tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "layout-affecting Checkbox disabled style did not invalidate layout + paint");
+        }
+    }
+
+    {
+        ui::State<bool> checked{false};
+        ui::State<bool> enabled{true};
+        ui::CheckboxStyle style;
+        style.disabled.box_fill = ui::Color{0.12f, 0.18f, 0.24f, 1.0f};
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Checkbox{checked, "Choice"}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Checkbox paint-only availability baseline render failed");
+        }
+
+        enabled.set(false);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "paint-only Checkbox disabled style invalidated layout or missed repaint");
+        }
+    }
+
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::State<bool> enabled{true};
+        ui::RadioStyle style;
+        style.disabled.control_height = 72.0f;
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::RadioButton{group, 1, "Choice"}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Radio availability-layout baseline render failed");
+        }
+
+        enabled.set(false);
+        if (!tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "layout-affecting Radio disabled style did not invalidate layout + paint");
+        }
+    }
+
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::State<bool> enabled{true};
+        ui::RadioStyle style;
+        style.disabled.outer_fill = ui::Color{0.12f, 0.18f, 0.24f, 1.0f};
+
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::RadioButton{group, 1, "Choice"}.style(style)}};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Radio paint-only availability baseline render failed");
+        }
+
+        enabled.set(false);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "paint-only Radio disabled style invalidated layout or missed repaint");
+        }
+    }
+
+    return 0;
+}
+
 int self_test() {
     if (const int result = combo_anchor_contract(); result != 0) return result;
     if (const int result = tabs_contract(); result != 0) return result;
     if (const int result = availability_contract(); result != 0) return result;
     if (const int result = button_availability_contract(); result != 0) return result;
+    if (const int result = choice_availability_contract(); result != 0) return result;
     return 0;
 }
 
