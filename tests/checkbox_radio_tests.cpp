@@ -387,6 +387,77 @@ void explicit_styles_control_checkbox_and_radio_presentation_and_measurement() {
     NUI_CHECK(pixel_near(renderer.pixel(16, 32), radio_selected));
 }
 
+void choice_style_state_invalidation_contract() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    test::MockPlatform platform;
+
+    // Paint-only interaction variants repaint without requesting layout.
+    {
+        ui::State<bool> checked{false};
+        ui::CheckboxStyle style;
+        style.hovered.box_fill = ui::Color{0.18f, 0.46f, 0.72f, 1.0f};
+        ui::UI tree{ui::Checkbox{checked, "Paint only"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    // Checkbox hover may override measured box geometry, so the transition must
+    // invalidate layout rather than relying on paint-only interaction invalidation.
+    {
+        ui::State<bool> checked{false};
+        ui::CheckboxStyle style;
+        style.hovered.box_size = 30.0f;
+        ui::UI tree{ui::Checkbox{checked, "Layout hover"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    // Radio buttons share the same classification contract.
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::RadioStyle style;
+        style.hovered.outer_fill = ui::Color{0.62f, 0.24f, 0.18f, 1.0f};
+        ui::UI tree{ui::RadioButton{group, 1, "Paint only"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::RadioStyle style;
+        style.hovered.outer_radius = 16.0f;
+        ui::UI tree{ui::RadioButton{group, 1, "Layout hover"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+}
+
 void visual_state_goldens() {
     constexpr ui::Size size{180.0f, 64.0f};
     ui::HeadlessRenderer renderer{size, 1.0f};
@@ -451,6 +522,7 @@ void suite() {
     radio_group_isolation_and_remount();
     observer_reentrancy_is_single_activation();
     explicit_styles_control_checkbox_and_radio_presentation_and_measurement();
+    choice_style_state_invalidation_contract();
     visual_state_goldens();
 }
 
