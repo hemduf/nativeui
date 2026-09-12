@@ -915,6 +915,7 @@ public:
     Spec spec() && {
         if (virtual_state_) {
             virtual_state_->runtime()->set_activation_callback(std::move(activation_callback_));
+            virtual_state_->runtime()->set_style(std::move(style_));
             return detail::make_virtual_list_retained_spec(virtual_state_->runtime());
         }
 
