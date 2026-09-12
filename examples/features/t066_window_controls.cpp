@@ -2,10 +2,19 @@
 
 #include <nativeui/nativeui.hpp>
 
+#include <iostream>
 #include <optional>
 #include <string>
 
 namespace {
+
+void trace_stage(const char* stage) {
+#if defined(__APPLE__)
+    std::cerr << "T066 self-test: " << stage << std::endl;
+#else
+    (void)stage;
+#endif
+}
 
 bool same_size(ui::Size actual, ui::Size expected) {
     return actual.w == expected.w && actual.h == expected.h;
@@ -28,6 +37,7 @@ void pump_native_events(ui::Application& app, int iterations = 8) {
 }
 
 int self_test() {
+    trace_stage("begin");
     ui::UI ui{
         ui::Column{
             ui::Label{"T066 window controls"},
@@ -36,6 +46,7 @@ int self_test() {
             .gap(8.0f)};
 
     ui::Application app;
+    trace_stage("application-created");
 
     ui::StandaloneWindow window{
         app,
@@ -45,6 +56,7 @@ int self_test() {
                        .resizable = true,
                        .min_size = ui::Size{100.0f, 80.0f},
                        .max_size = ui::Size{240.0f, 180.0f}}};
+    trace_stage("window-created");
     if (!window.valid()) return example::fail("standalone window creation failed");
 
     const auto initial = window.size();
@@ -68,6 +80,7 @@ int self_test() {
     if (!window.show() || !window.show()) {
         return example::fail("show was not idempotent");
     }
+    trace_stage("runtime-controls-ok");
 
     if (!window.set_size({120.0f, 100.0f})) {
         return example::fail("baseline size update failed");
@@ -75,6 +88,7 @@ int self_test() {
     if (!wait_for_size(app, window, {120.0f, 100.0f})) {
         return example::fail("baseline authoritative size was not observed");
     }
+    trace_stage("baseline-size-observed");
 
     if (!window.set_min_size(ui::Size{140.0f, 90.0f})) {
         return example::fail("tightening minimum size failed");
@@ -83,6 +97,7 @@ int self_test() {
         return example::fail("tightened minimum did not clamp authoritative window size");
     }
     const auto tightened = window.size();
+    trace_stage("tightened-size-observed");
 
     if (!window.set_min_size(ui::Size{110.0f, 85.0f})) {
         return example::fail("in-range minimum size update failed");
@@ -92,6 +107,7 @@ int self_test() {
     if (unchanged.w != tightened.w || unchanged.h != tightened.h) {
         return example::fail("in-range minimum update unexpectedly resized window");
     }
+    trace_stage("relaxed-min-ok");
 
     if (!window.set_max_size(ui::Size{220.0f, 170.0f})) {
         return example::fail("valid maximum size update failed");
@@ -102,6 +118,7 @@ int self_test() {
     if (window.set_max_size(ui::Size{100.0f, 70.0f})) {
         return example::fail("invalid maximum/minimum pair was accepted");
     }
+    trace_stage("constraint-validation-ok");
 
     int veto_calls = 0;
     int closed_calls = 0;
@@ -114,12 +131,15 @@ int self_test() {
     // Programmatic close bypasses veto and must expose accepted close intent
     // immediately while native teardown/callback completion remains deferred.
     window.request_close();
+    trace_stage("close-requested");
     if (!window.should_close() || window.is_closed()) {
         return example::fail("programmatic close did not enter pending state");
     }
     if (veto_calls != 0) return example::fail("programmatic close invoked veto callback");
 
+    trace_stage("before-close-poll");
     (void)app.poll(0.0);
+    trace_stage("after-close-poll");
     if (!window.is_closed()) return example::fail("deferred close did not complete at checkpoint");
     if (closed_calls != 1) return example::fail("on_closed did not fire exactly once");
     if (!app.quit_requested()) {
@@ -134,6 +154,7 @@ int self_test() {
 
     window.request_close();
     if (closed_calls != 1) return example::fail("repeated close duplicated on_closed");
+    trace_stage("returning-success");
     return 0;
 }
 
