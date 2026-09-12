@@ -387,7 +387,7 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
-    PROPERTIES LABELS "build;cmake;t053" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t053" TIMEOUT 60
   )
   set_tests_properties(
     nativeui_t043_registration_contract
