@@ -567,15 +567,18 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_sanitizers(nativeui_header_${_header}_compile)
   endforeach()
 
-  # Every completed feature ships an executable example. Compile every
-  # example source against the core even in platform-less CI so public API
-  # regressions are caught without requiring a display server.
+  # Every completed feature ships an executable example. In display-less builds
+  # compile every example source directly against Core so public API breakage is
+  # still caught. Platform builds already compile the same source into the real
+  # example executable, so do not compile it a second time as an OBJECT target.
   foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)
-    add_library(nativeui_feature_example_${_example}_compile OBJECT examples/features/${_example}.cpp)
-    target_include_directories(nativeui_feature_example_${_example}_compile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
-    target_link_libraries(nativeui_feature_example_${_example}_compile PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(nativeui_feature_example_${_example}_compile)
-    nativeui_enable_sanitizers(nativeui_feature_example_${_example}_compile)
+    if(NOT NATIVEUI_BUILD_EXAMPLES)
+      add_library(nativeui_feature_example_${_example}_compile OBJECT examples/features/${_example}.cpp)
+      target_include_directories(nativeui_feature_example_${_example}_compile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
+      target_link_libraries(nativeui_feature_example_${_example}_compile PRIVATE NativeUI::Core)
+      nativeui_enable_project_warnings(nativeui_feature_example_${_example}_compile)
+      nativeui_enable_sanitizers(nativeui_feature_example_${_example}_compile)
+    endif()
 
     if(NATIVEUI_BUILD_EXAMPLES AND NATIVEUI_BUILD_PLATFORM)
       add_test(NAME nativeui_example_${_example}_self_test
@@ -583,12 +586,14 @@ if(NATIVEUI_BUILD_TESTS)
     endif()
   endforeach()
 
-  # Compile the existing demo source against the umbrella header without
-  # linking a platform backend. This guards the public source-level API.
-  add_library(nativeui_demo_consumer_compile OBJECT examples/standalone.cpp)
-  target_link_libraries(nativeui_demo_consumer_compile PRIVATE NativeUI::Core)
-  nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
-  nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
+  # The real demo executable already compiles standalone.cpp when examples are
+  # enabled. Keep the Core-only source contract only for display-less builds.
+  if(NOT NATIVEUI_BUILD_EXAMPLES)
+    add_library(nativeui_demo_consumer_compile OBJECT examples/standalone.cpp)
+    target_link_libraries(nativeui_demo_consumer_compile PRIVATE NativeUI::Core)
+    nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
+    nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
+  endif()
 endif()
 
 # T072 is Linux/X11-only infrastructure. macOS and Windows never discover or
