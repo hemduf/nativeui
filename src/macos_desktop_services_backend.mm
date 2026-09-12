@@ -208,7 +208,7 @@ private:
         const std::vector<FileFilter>& filters) {
         NSString* native_title = utf8_string(title);
         if (!native_title && !title.empty()) return false;
-        [panel setTitle:native_title ?: @""];
+        [panel setTitle:native_title != nil ? native_title : @""];
 
         if (initial_directory) {
             NSURL* url = directory_url(initial_directory);
