@@ -9,9 +9,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define NATIVEUI_STRINGIFY_IMPL(value) #value
+#define NATIVEUI_STRINGIFY(value) NATIVEUI_STRINGIFY_IMPL(value)
+
 struct NativeUIImeBridge {
   NSView* view;
   Class originalClass;
+  id windowDelegate;
+  Class originalWindowDelegateClass;
   void* userData;
   NativeUIImeCallback callback;
   bool active;
@@ -155,6 +160,22 @@ callSuperUnmarkText(id self, SEL selector)
 {
   struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
   ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superInfo, selector);
+}
+
+static BOOL
+nativeuiWindowShouldClose(id self, SEL selector, id sender)
+{
+  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  (void)((BOOL (*)(struct objc_super*, SEL, id))objc_msgSendSuper)(
+    &superInfo, selector, sender);
+
+  // Pugl's delegate dispatches PUGL_CLOSE and then returns YES, which lets
+  // AppKit close the NSWindow immediately. NativeUI owns the v1 close policy:
+  // the PUGL_CLOSE callback may veto and accepted closes are completed only at
+  // the dispatcher checkpoint. Prevent AppKit from racing that policy; the
+  // accepted path later calls puglUnrealize(), whose direct -[NSWindow close]
+  // teardown does not consult windowShouldClose:.
+  return NO;
 }
 
 static void
@@ -334,6 +355,50 @@ bridgeSubclass(Class original)
   return subclass;
 }
 
+static Class
+closeGuardSubclass(Class original)
+{
+#if defined(PuglWindowDelegate)
+  // Only NativeUI's consumer-prefixed Pugl top-level delegate is eligible.
+  // Embedded views live inside host-owned NSWindows and must never mutate or
+  // retain the host's window delegate.
+  const char* const originalName = class_getName(original);
+  if (strcmp(originalName, NATIVEUI_STRINGIFY(PuglWindowDelegate)) != 0) {
+    return original;
+  }
+
+  const size_t nameSize = strlen(originalName) + sizeof("_NativeUICloseGuard");
+  char* const name = (char*)calloc(nameSize, 1U);
+  if (!name) {
+    return Nil;
+  }
+  snprintf(name, nameSize, "%s_NativeUICloseGuard", originalName);
+
+  Class subclass = objc_lookUpClass(name);
+  if (subclass) {
+    free(name);
+    return class_getSuperclass(subclass) == original ? subclass : Nil;
+  }
+
+  subclass = objc_allocateClassPair(original, name, 0U);
+  free(name);
+  if (!subclass) {
+    return Nil;
+  }
+
+  if (!addOverride(
+        subclass, original, "windowShouldClose:", (IMP)nativeuiWindowShouldClose)) {
+    objc_disposeClassPair(subclass);
+    return Nil;
+  }
+
+  objc_registerClassPair(subclass);
+  return subclass;
+#else
+  return original;
+#endif
+}
+
 NativeUIImeBridge*
 nativeuiImeCreate(PuglWorld* world,
                   PuglView* puglView,
@@ -356,6 +421,20 @@ nativeuiImeCreate(PuglWorld* world,
     return NULL;
   }
 
+  NSWindow* const window = [view window];
+  id const candidateDelegate = window ? [window delegate] : nil;
+  Class const candidateDelegateClass =
+    candidateDelegate ? object_getClass(candidateDelegate) : Nil;
+  Class const closeGuard = candidateDelegateClass
+    ? closeGuardSubclass(candidateDelegateClass)
+    : Nil;
+  if (candidateDelegateClass && !closeGuard) {
+    return NULL;
+  }
+
+  const bool installCloseGuard =
+    candidateDelegate && closeGuard && closeGuard != candidateDelegateClass;
+
   NativeUIImeBridge* const bridge =
     (NativeUIImeBridge*)calloc(1U, sizeof(NativeUIImeBridge));
   if (!bridge) {
@@ -364,10 +443,16 @@ nativeuiImeCreate(PuglWorld* world,
 
   bridge->view = view;
   bridge->originalClass = original;
+  bridge->windowDelegate = installCloseGuard ? candidateDelegate : nil;
+  bridge->originalWindowDelegateClass =
+    installCloseGuard ? candidateDelegateClass : Nil;
   bridge->userData = userData;
   bridge->callback = callback;
 
   object_setClass(view, subclass);
+  if (installCloseGuard) {
+    object_setClass(candidateDelegate, closeGuard);
+  }
   setBridgeForObject(view, bridge);
   return bridge;
 }
@@ -383,6 +468,10 @@ nativeuiImeDestroy(NativeUIImeBridge* bridge)
   if (bridge->view) {
     setBridgeForObject(bridge->view, NULL);
     object_setClass(bridge->view, bridge->originalClass);
+  }
+  if (bridge->windowDelegate && bridge->originalWindowDelegateClass) {
+    object_setClass(
+      bridge->windowDelegate, bridge->originalWindowDelegateClass);
   }
   free(bridge);
 }
