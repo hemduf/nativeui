@@ -1,4 +1,5 @@
 #include "example_support.hpp"
+#include "native_window_self_test_lock.hpp"
 
 #include <iostream>
 #include <memory>
@@ -24,6 +25,11 @@ int run_self_test() {
     b_enabled.set(true);
     return b_enabled.get() ? 0 : example::fail("state mutation failed");
 #else
+    example::NativeWindowSelfTestLock native_test_lock;
+    if (!native_test_lock.valid()) {
+        return example::fail("failed to acquire native window self-test lock");
+    }
+
     ui::Application application;
     if (!application.valid()) {
         return example::fail(application.last_error().empty()
