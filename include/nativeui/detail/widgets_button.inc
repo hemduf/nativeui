@@ -147,6 +147,12 @@ private:
     }
 
     [[nodiscard]] PresentationSignature presentation_signature(bool focused) const noexcept {
+        return presentation_signature(effective_availability(), focused);
+    }
+
+    [[nodiscard]] PresentationSignature presentation_signature(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
         const auto& theme = current_theme();
         PresentationSignature result{
             .fill = theme.palette.surface,
@@ -165,7 +171,7 @@ private:
         };
         apply_patch(result, style_.base);
 
-        const auto state = current_visual_state(focused);
+        const auto state = current_visual_state(availability, focused);
         switch (resolve_interaction_state(state)) {
             case InteractionVisualState::Normal:
                 break;
@@ -238,10 +244,24 @@ private:
         context.invalidate();
     }
 
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const override {
+        return !same_layout(
+            presentation_signature(before, focused_),
+            presentation_signature(after, focused_));
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return current_visual_state(effective_availability(), focused);
+    }
+
+    [[nodiscard]] VisualState current_visual_state(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
         return VisualState{
-            .enabled = effective_enabled(),
-            .read_only = effective_read_only(),
+            .enabled = availability.enabled,
+            .read_only = availability.read_only,
             .hovered = interaction_.hovered(),
             .pressed = interaction_.pressed(),
             .focused = focused,
