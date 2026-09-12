@@ -235,7 +235,8 @@ public:
                 if (!pointer_armed_) return EventResult::Handled;
                 pointer_armed_ = false;
                 context.release_pointer();
-                const auto index = index_at(event.position, context.bounds());
+                const auto base = base_item_style();
+                const auto index = index_at(event.position, context.bounds(), base.row_height);
                 if (index != kNoPopupIndex && session_->options[index].enabled) {
                     set_highlight(index, context);
                     queue_commit(Key::None);
@@ -333,16 +334,18 @@ private:
         context.invalidate();
     }
 
-    [[nodiscard]] std::size_t index_at(Point point, Rect bounds) const noexcept {
-        if (!bounds.contains(point) || session_->options.empty()) return kNoPopupIndex;
-        const float row_height = base_item_style().row_height;
-        if (row_height <= 0.0f) return kNoPopupIndex;
+    [[nodiscard]] std::size_t index_at(
+        Point point, Rect bounds, float row_height) const noexcept {
+        if (!bounds.contains(point) || session_->options.empty() || row_height <= 0.0f) {
+            return kNoPopupIndex;
+        }
         const auto index = static_cast<std::size_t>((point.y - bounds.y) / row_height);
         return index < session_->options.size() ? index : kNoPopupIndex;
     }
 
     void update_pointer_highlight(Point point, InputContext& context) {
-        const auto index = index_at(point, context.bounds());
+        const auto base = base_item_style();
+        const auto index = index_at(point, context.bounds(), base.row_height);
         const auto next = index != kNoPopupIndex && session_->options[index].enabled
             ? index
             : kNoPopupIndex;
@@ -445,7 +448,9 @@ public:
 
         switch (event.type) {
             case InputType::PointerDown: {
-                const auto index = index_at(event.position, context.bounds());
+                const auto base = base_item_style();
+                const auto index = index_at(
+                    event.position, context.bounds(), base.row_height, base.separator_height);
                 pointer_armed_ = index != kNoPopupIndex && selectable(index);
                 if (pointer_armed_) context.capture_pointer();
                 update_pointer_highlight(event.position, context);
@@ -458,7 +463,9 @@ public:
                 const bool armed = pointer_armed_;
                 pointer_armed_ = false;
                 if (armed) context.release_pointer();
-                const auto index = index_at(event.position, context.bounds());
+                const auto base = base_item_style();
+                const auto index = index_at(
+                    event.position, context.bounds(), base.row_height, base.separator_height);
                 if (armed && index != kNoPopupIndex && selectable(index)) {
                     set_highlight(index, context);
                     queue_action(Key::None);
@@ -569,14 +576,17 @@ private:
         context.invalidate();
     }
 
-    [[nodiscard]] std::size_t index_at(Point point, Rect bounds) const noexcept {
+    [[nodiscard]] std::size_t index_at(
+        Point point,
+        Rect bounds,
+        float row_height,
+        float separator_height) const noexcept {
         if (!bounds.contains(point)) return kNoPopupIndex;
-        const auto base = base_item_style();
         float y = bounds.y;
         for (std::size_t i = 0; i < session_->items.size(); ++i) {
             const float height = session_->items[i].kind == PopupMenuItem::Kind::Separator
-                ? base.separator_height
-                : base.row_height;
+                ? separator_height
+                : row_height;
             if (point.y >= y && point.y < y + height) return i;
             y += height;
         }
@@ -584,7 +594,9 @@ private:
     }
 
     void update_pointer_highlight(Point point, InputContext& context) {
-        const auto index = index_at(point, context.bounds());
+        const auto base = base_item_style();
+        const auto index = index_at(
+            point, context.bounds(), base.row_height, base.separator_height);
         set_highlight(index != kNoPopupIndex && selectable(index) ? index : kNoPopupIndex, context);
     }
 
