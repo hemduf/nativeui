@@ -82,6 +82,8 @@ env:
   CMAKE_BUILD_PARALLEL_LEVEL: '4'
   CMAKE_C_COMPILER_LAUNCHER: sccache
   CMAKE_CXX_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJC_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJCXX_COMPILER_LAUNCHER: sccache
 
 jobs:
   source-contracts:
@@ -99,6 +101,9 @@ jobs:
 
       - name: T048 external consumer source contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t048_external_consumer_contract_tests.cmake
+
+      - name: T054 application contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_application_contract_tests.cmake
 
       - name: T054 application argument contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t054_argument_boundary_tests.cmake

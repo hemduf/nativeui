@@ -336,53 +336,69 @@ function(_nativeui_attach_consumer_platform)
     _nativeui_prepare_macos_platform_common()
     _nativeui_platform_source_roots(_pugl_root _nativeui_root)
 
-    string(SHA256 _nativeui_bridge_digest
-      "${NUI_TARGET}\n${NUI_CONSUMER_ID}")
+    # CI builds execute every feature example in its own process, so those
+    # executables do not need distinct Objective-C class namespaces. Sharing one
+    # bridge avoids compiling the same Cocoa/Pugl sources once per example while
+    # leaving the default production/package behavior unchanged. Smokes and
+    # arbitrary consumer targets never enter this opt-in path.
+    set(_nativeui_bridge_identity "${NUI_CONSUMER_ID}")
+    set(_nativeui_bridge_target_key "${NUI_TARGET}\n${NUI_CONSUMER_ID}")
+    if(NATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE AND
+       NUI_TARGET MATCHES "^nativeui_example_")
+      set(_nativeui_bridge_identity "org.nativeui.ci.shared-example-bridge")
+      set(_nativeui_bridge_target_key "${_nativeui_bridge_identity}")
+      nativeui_compute_objc_runtime_prefix(
+        _nativeui_objc_prefix "${_nativeui_bridge_identity}")
+    endif()
+
+    string(SHA256 _nativeui_bridge_digest "${_nativeui_bridge_target_key}")
     string(SUBSTRING "${_nativeui_bridge_digest}" 0 16 _nativeui_bridge_key)
     set(_nativeui_bridge "nativeui_macos_bridge_${_nativeui_bridge_key}")
 
-    add_library("${_nativeui_bridge}" STATIC
-      "${_pugl_root}/src/mac.m"
-      "${_pugl_root}/src/mac_gl.m"
-      "${_nativeui_root}/src/detail/native_ime_macos.m"
-    )
-    set_target_properties("${_nativeui_bridge}" PROPERTIES
-      POSITION_INDEPENDENT_CODE ON
-      C_VISIBILITY_PRESET hidden
-      CXX_VISIBILITY_PRESET hidden
-      OBJC_VISIBILITY_PRESET hidden
-      VISIBILITY_INLINES_HIDDEN YES
-    )
-    target_compile_features("${_nativeui_bridge}" PRIVATE c_std_99)
-    target_include_directories("${_nativeui_bridge}"
-      PUBLIC "${_pugl_root}/include"
-      PRIVATE "${_pugl_root}/src"
-    )
-    target_compile_definitions("${_nativeui_bridge}"
-      PUBLIC PUGL_STATIC
-      PRIVATE
-        PUGL_INTERNAL
-        GL_SILENCE_DEPRECATION
-        "PuglWindow=${_nativeui_objc_prefix}PuglWindow"
-        "PuglWindowDelegate=${_nativeui_objc_prefix}PuglWindowDelegate"
-        "PuglWrapperView=${_nativeui_objc_prefix}PuglWrapperView"
-        "PuglOpenGLView=${_nativeui_objc_prefix}PuglOpenGLView"
-    )
-    target_compile_options("${_nativeui_bridge}" PRIVATE -Wno-deprecated-declarations)
-    target_link_libraries("${_nativeui_bridge}" PUBLIC nativeui_pugl_common)
-
-    if(COMMAND nativeui_enable_project_warnings)
-      nativeui_enable_project_warnings("${_nativeui_bridge}")
-    endif()
-
-    # Xcode's Foundation MIN/MAX macros use GNU statement expressions. Pugl's
-    # mac.m calls those system macros with side-effect-free arguments, so keep
-    # the project-wide pedantic warning policy and disable only Clang's narrow
-    # macro-expansion diagnostic for this Objective-C bridge.
-    if(CMAKE_OBJC_COMPILER_ID MATCHES "Clang")
-      target_compile_options("${_nativeui_bridge}" PRIVATE
-        -Wno-gnu-statement-expression-from-macro-expansion
+    if(NOT TARGET "${_nativeui_bridge}")
+      add_library("${_nativeui_bridge}" STATIC
+        "${_pugl_root}/src/mac.m"
+        "${_pugl_root}/src/mac_gl.m"
+        "${_nativeui_root}/src/detail/native_ime_macos.m"
       )
+      set_target_properties("${_nativeui_bridge}" PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        OBJC_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+      )
+      target_compile_features("${_nativeui_bridge}" PRIVATE c_std_99)
+      target_include_directories("${_nativeui_bridge}"
+        PUBLIC "${_pugl_root}/include"
+        PRIVATE "${_pugl_root}/src"
+      )
+      target_compile_definitions("${_nativeui_bridge}"
+        PUBLIC PUGL_STATIC
+        PRIVATE
+          PUGL_INTERNAL
+          GL_SILENCE_DEPRECATION
+          "PuglWindow=${_nativeui_objc_prefix}PuglWindow"
+          "PuglWindowDelegate=${_nativeui_objc_prefix}PuglWindowDelegate"
+          "PuglWrapperView=${_nativeui_objc_prefix}PuglWrapperView"
+          "PuglOpenGLView=${_nativeui_objc_prefix}PuglOpenGLView"
+      )
+      target_compile_options("${_nativeui_bridge}" PRIVATE -Wno-deprecated-declarations)
+      target_link_libraries("${_nativeui_bridge}" PUBLIC nativeui_pugl_common)
+
+      if(COMMAND nativeui_enable_project_warnings)
+        nativeui_enable_project_warnings("${_nativeui_bridge}")
+      endif()
+
+      # Xcode's Foundation MIN/MAX macros use GNU statement expressions. Pugl's
+      # mac.m calls those system macros with side-effect-free arguments, so keep
+      # the project-wide pedantic warning policy and disable only Clang's narrow
+      # macro-expansion diagnostic for this Objective-C bridge.
+      if(CMAKE_OBJC_COMPILER_ID MATCHES "Clang")
+        target_compile_options("${_nativeui_bridge}" PRIVATE
+          -Wno-gnu-statement-expression-from-macro-expansion
+        )
+      endif()
     endif()
   endif()
 
