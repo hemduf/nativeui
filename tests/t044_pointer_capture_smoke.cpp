@@ -15,7 +15,6 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
-#  include <windowsx.h>
 #elif defined(__linux__)
 #  include <X11/Xlib.h>
 #  include <X11/extensions/XTest.h>
@@ -183,10 +182,7 @@ public:
         return post_mouse(window, kCGEventMouseMoved, false, false) &&
                post_mouse(window, kCGEventLeftMouseDown, false, true);
 #elif defined(_WIN32)
-        const HWND native_window = hwnd(window);
-        if (!native_window) return false;
-        return PostMessageW(native_window, WM_MOUSEMOVE, 0, MAKELPARAM(24, 24)) != FALSE &&
-               PostMessageW(native_window, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(24, 24)) != FALSE;
+        return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTDOWN);
 #elif defined(__linux__)
         Geometry geometry{};
         if (!geometry_for(window, geometry)) return false;
@@ -206,12 +202,7 @@ public:
 #if defined(__APPLE__)
         return post_mouse(window, kCGEventLeftMouseDragged, true, true, extra);
 #elif defined(_WIN32)
-        RECT rect{};
-        const HWND native_window = hwnd(window);
-        if (!native_window || !GetClientRect(native_window, &rect)) return false;
-        const int x = (rect.right - rect.left) + 48 + extra;
-        const int y = (rect.bottom - rect.top) + 48 + extra;
-        return PostMessageW(native_window, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(x, y)) != FALSE;
+        return move_cursor_outside(window, 48 + extra);
 #elif defined(__linux__)
         Geometry geometry{};
         if (!geometry_for(window, geometry)) return false;
@@ -233,12 +224,7 @@ public:
 #if defined(__APPLE__)
         return post_mouse(window, kCGEventLeftMouseUp, true, false, 64);
 #elif defined(_WIN32)
-        RECT rect{};
-        const HWND native_window = hwnd(window);
-        if (!native_window || !GetClientRect(native_window, &rect)) return false;
-        const int x = (rect.right - rect.left) + 64;
-        const int y = (rect.bottom - rect.top) + 64;
-        return PostMessageW(native_window, WM_LBUTTONUP, 0, MAKELPARAM(x, y)) != FALSE;
+        return move_cursor_outside(window, 64) && send_left_button(MOUSEEVENTF_LEFTUP);
 #elif defined(__linux__)
         (void)window;
         if (!display_) return false;
@@ -255,9 +241,7 @@ public:
 #if defined(__APPLE__)
         return post_mouse(window, kCGEventLeftMouseDragged, false, true);
 #elif defined(_WIN32)
-        const HWND native_window = hwnd(window);
-        return native_window &&
-               PostMessageW(native_window, WM_MOUSEMOVE, MK_LBUTTON, MAKELPARAM(24, 24)) != FALSE;
+        return move_cursor_inside(window);
 #elif defined(__linux__)
         Geometry geometry{};
         if (!geometry_for(window, geometry)) return false;
@@ -276,8 +260,7 @@ public:
 #if defined(__APPLE__)
         return post_mouse(window, kCGEventLeftMouseUp, false, false);
 #elif defined(_WIN32)
-        const HWND native_window = hwnd(window);
-        return native_window && PostMessageW(native_window, WM_LBUTTONUP, 0, MAKELPARAM(24, 24)) != FALSE;
+        return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTUP);
 #elif defined(__linux__)
         (void)window;
         if (!display_) return false;
@@ -350,6 +333,54 @@ private:
 #elif defined(_WIN32)
     [[nodiscard]] static HWND hwnd(const ui::StandaloneWindow& window) noexcept {
         return reinterpret_cast<HWND>(window.native_handle());
+    }
+
+    [[nodiscard]] static bool send_left_button(DWORD flags) noexcept {
+        INPUT input{};
+        input.type = INPUT_MOUSE;
+        input.mi.dwFlags = flags;
+        return SendInput(1, &input, sizeof(input)) == 1;
+    }
+
+    [[nodiscard]] static bool move_cursor_inside(const ui::StandaloneWindow& window) noexcept {
+        const HWND native_window = hwnd(window);
+        if (!native_window) return false;
+        POINT point{24, 24};
+        if (!ClientToScreen(native_window, &point)) return false;
+        return SetCursorPos(point.x, point.y) != FALSE;
+    }
+
+    [[nodiscard]] static bool move_cursor_outside(const ui::StandaloneWindow& window,
+                                                  int margin) noexcept {
+        const HWND native_window = hwnd(window);
+        if (!native_window) return false;
+
+        RECT client{};
+        if (!GetClientRect(native_window, &client)) return false;
+        POINT top_left{client.left, client.top};
+        POINT bottom_right{client.right, client.bottom};
+        if (!ClientToScreen(native_window, &top_left) ||
+            !ClientToScreen(native_window, &bottom_right)) {
+            return false;
+        }
+
+        const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        const int virtual_right = virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1;
+        const int virtual_bottom = virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
+
+        POINT target{};
+        if (bottom_right.x + margin <= virtual_right) {
+            target.x = bottom_right.x + margin;
+        } else if (top_left.x - margin >= virtual_left) {
+            target.x = top_left.x - margin;
+        } else {
+            return false;
+        }
+
+        const int client_mid_y = top_left.y + (bottom_right.y - top_left.y) / 2;
+        target.y = std::clamp(client_mid_y, virtual_top, virtual_bottom);
+        return SetCursorPos(target.x, target.y) != FALSE;
     }
 #elif defined(__linux__)
     struct Geometry final {
