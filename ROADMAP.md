@@ -20,7 +20,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` is `c0140e725ac33b0a3ca315124a3d20091b96a173`. It includes completed T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060. This completion cycle adds T044 / PR #145 without changing the already-qualified T044 implementation/test candidate.
+Current `main` includes T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+
+T064 / issue #76 / PR #240 is complete and merged. Frozen current-main-synchronized executable head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed normal CI, T064 Desktop Services, T072 Linux D-Bus, T066 Window Controls, T065 Platform Dispatcher, T060 Application, T044 Native Pointer Capture, Package Contracts, T042 Lifecycle Stress and T052 v0.1 Release Gate. The final requirement-to-implementation/test review and current-main composition re-certification report no Blocking/Important finding.
 
 T072 / issue #84 / PR #185 is complete and merged. Its final executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
 
@@ -28,7 +30,7 @@ T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea
 
 T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a3d20091b96a173`. Its frozen executable candidate passed normal/path-scoped validation plus final-candidate T042/T052 qualification, and the final requirement-to-implementation/test review recorded no Blocking/Important finding.
 
-T044 / issue #44 / PR #145 is completion-qualified on frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a`, synchronized with current `main`. Exact-head iterative validation is green: CI `34690800986`, T044 Native Pointer Capture `34690800974`, T060 `34690800996`, T065 `34690800981`, T066 `34690800987`, T072 `34690800985` and Package Contracts `34690801000`. Final-candidate T042 `34692128302` and T052 `34692128310` are green. Reviews `5185659103` and `5186332658` record the complete #44 Outcome A/B and `CODE_REVIEW.md` evidence matrix with no Blocking/Important finding.
+T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation plus final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete #44 Outcome A/B and `CODE_REVIEW.md` evidence matrix with no Blocking/Important finding.
 
 Current dependency frontier:
 
@@ -51,7 +53,7 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
                                        +-> T056(done) + T022(done) -> T057(done)
 
-critical platform: T060(done) -> T065(done) -> T072(done) -> T064(active PR #240)
+critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
                                       |-------> T068
 
@@ -59,7 +61,7 @@ release:            T044(done) -------------------------------> T071
                     all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 is the remaining primary platform prerequisite on merged/Done T072. T044 is complete as an independent T071 release dependency.
+The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T044 is also complete as an independent T071 release dependency.
 
 ## Milestone 0 — Baseline hardening
 
@@ -132,7 +134,7 @@ All capture bookkeeping remains per view, widgets stay platform-neutral, exactly
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T072 Linux D-Bus transport and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture.
 
 ### Build/example registration hardening
 
@@ -171,7 +173,19 @@ Delivered foundations include T047/T048 package consumption, T051 performance qu
 
 ### T064 — Cross-platform DesktopServices
 
-**Active in PR #240 / issue #76.** Public coordinator semantics, fixed native macOS/Windows/Linux backends, T072-only Linux portal integration, 1 chooser / 16 URL owner-local capacity and the fake-only deterministic feature self-test are implemented. Exact head `6900b0b5e9baf44963f3634d47682e0eeb2b1601` has green normal CI, T064, T060, T065, T066, T072, Package Contracts and T052 final qualification. T042 passed Linux/X11, Windows and Linux ASan+UBSan; its macOS job passed the explicit pre-CTest fixture sequence but hit one nondeterministic `ILLEGAL` result when CTest immediately reran the supported multi-instance fixture. A single exact-job recovery run is pending before any code change is justified.
+**Complete in PR #240 / issue #76, merged as `5e9798f6637af8d6275379002fa8116f167115f7`.** The delivered bounded service contract is:
+
+- callback-only open-file, open-files, save-file, select-directory and absolute HTTP(S) URL operations;
+- callbacks always cross the owning T065 Dispatcher, including immediate Busy/ResourceLimit/Unsupported/InvalidArgument failures and accepted inline backend completion;
+- exact one active chooser and sixteen active URL requests per DesktopServices owner, monotonic non-zero owner-local IDs, stale/cross-owner cancellation isolation, exactly-once completion and capacity release before application callback;
+- exact filter/suggested-filename/cardinality/path/URL validation with no hidden request queue;
+- `StandaloneWindow::desktop_services()` is lazy and view-owned; built-in EmbeddedView remains side-effect-free/Unsupported unless an embedding owner injects a backend;
+- macOS uses `NSOpenPanel` / `NSSavePanel` + `NSWorkspace`, with no new NativeUI Objective-C runtime-visible class/category/swizzle/+load;
+- Windows uses `IFileOpenDialog` / `IFileSaveDialog` on request-owned joinable STA workers, `ShellExecuteW` for URL launch and request-local same-STA cancellation without GIT/process registry/raw cross-apartment dialog state;
+- Linux/X11 uses XDG Desktop Portal FileChooser/OpenURI through T072 only, preserves T072 hard-quota `ResourceLimit`, uses parent-window routing and Request.Close, and adds no GTK/Qt/zenity/shell fallback or overflow transport;
+- native macOS/Windows/Linux qualification, package integration and `examples/features/t064_desktop_services.cpp --self-test` are complete.
+
+Frozen current-main-synchronized head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed exact-head normal/path-scoped validation and final-candidate T042/T052. The final requirement-to-implementation/test matrix and `CODE_REVIEW.md` audit report zero remaining Blocking/Important findings.
 
 ### T068 convergence
 
@@ -183,7 +197,7 @@ T068 starts only after **all** explicit issue #80 dependencies are Done. It impl
 T036(done) -> T045(done) -> T067(done) ---------------------\
 T058(done) -> T061(done) -> T035(done) -> T063(done) --------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
                          \-> T062(done) ---------------------/
-T065(done) -> T072(done) -> T064 ---------------------------+
+T065(done) -> T072(done) -> T064(done) ---------------------+
 T043(done) ---------------------> T066(done) ----------------/
 T044(done) --------------------------------------------------> T071
 other explicit T069 dependencies ---------------------------/
@@ -193,10 +207,10 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 
 ## Immediate cross-lane plan
 
-1. Finish T064 / PR #240 after the exact-head T042 macOS recovery; if it is green, complete final project-state synchronization and merge without another executable change.
-2. With T044 complete, keep the platform lane focused on T064; no additional pointer-capture work is justified unless later release validation finds a concrete regression.
-3. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
-4. Start T068 only when every explicit issue #80 dependency is genuinely Done; keep T069/T070/T071 dependency-gated.
+1. The platform prerequisite lane is complete; do not reopen T044/T064/T066/T072/T043/T065 unless a concrete regression appears.
+2. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
+3. Continue T068 according to its own explicit issue #80 dependencies; T064 is no longer a platform blocker.
+4. Keep T069/T070/T071 dependency-gated until their explicit prerequisite sets are genuinely Done.
 
 ## Prioritization rule
 
