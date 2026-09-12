@@ -132,8 +132,6 @@ int self_test() {
 
     // T038 consumer contract: the T035 anchor and popup-row families must
     // consume the typed recipes, not merely expose standalone resolver helpers.
-    // Anchor geometry proves ComboBox/PopupMenu style consumption; rendering an
-    // open ComboBox proves the MenuItem recipe reaches retained popup rows.
     ui::State<int> combo_selection{1};
     ui::ComboBoxStyle consumer_anchor_style;
     consumer_anchor_style.base.minimum_width = 181.0f;
@@ -149,8 +147,8 @@ int self_test() {
         .style(consumer_anchor_style)
         .item_style(consumer_item_style)};
     const auto styled_combo_metrics = styled_combo.measure();
-    if (styled_combo_metrics.preferred.width != 181.0f ||
-        styled_combo_metrics.preferred.height != 47.0f) {
+    if (styled_combo_metrics.preferred.w != 181.0f ||
+        styled_combo_metrics.preferred.h != 47.0f) {
         return example::fail("ComboBox did not consume typed anchor geometry");
     }
 
@@ -160,24 +158,35 @@ int self_test() {
         .style(consumer_anchor_style)
         .item_style(consumer_item_style)};
     const auto styled_menu_metrics = styled_menu.measure();
-    if (styled_menu_metrics.preferred.width != 181.0f ||
-        styled_menu_metrics.preferred.height != 47.0f) {
+    if (styled_menu_metrics.preferred.w != 181.0f ||
+        styled_menu_metrics.preferred.h != 47.0f) {
         return example::fail("PopupMenu did not consume typed anchor geometry");
     }
 
-    test::MockPlatform styled_platform;
+    example::Platform styled_platform;
     styled_combo.resize({240.0f, 180.0f});
     styled_combo.activate(styled_platform);
     ui::HeadlessRenderer styled_renderer{{240.0f, 180.0f}, 1.0f};
-    if (!styled_renderer.render(styled_combo)) {
-        return example::fail("styled ComboBox closed render failed");
-    }
-    const auto closed_combo = styled_renderer.rgba_pixels();
-    if (!ui::handled(styled_combo.dispatch(test::key(ui::Key::Down), styled_platform)) ||
+    if (!ui::handled(styled_combo.dispatch(example::key(ui::Key::Down), styled_platform)) ||
         !styled_renderer.render(styled_combo)) {
         return example::fail("styled ComboBox popup render failed");
     }
-    if (styled_renderer.rgba_pixels() == closed_combo) {
+    const auto styled_open = styled_renderer.rgba_pixels();
+
+    ui::State<int> default_item_selection{1};
+    ui::UI default_item_combo{ui::ComboBox<int>{
+        default_item_selection,
+        {{1, "One", true}, {2, "Two", true}}}
+        .style(consumer_anchor_style)};
+    example::Platform default_item_platform;
+    default_item_combo.resize({240.0f, 180.0f});
+    default_item_combo.activate(default_item_platform);
+    ui::HeadlessRenderer default_item_renderer{{240.0f, 180.0f}, 1.0f};
+    if (!ui::handled(default_item_combo.dispatch(example::key(ui::Key::Down), default_item_platform)) ||
+        !default_item_renderer.render(default_item_combo)) {
+        return example::fail("default MenuItem popup render failed");
+    }
+    if (styled_open == default_item_renderer.rgba_pixels()) {
         return example::fail("MenuItemStyle did not affect retained ComboBox popup rendering");
     }
 
