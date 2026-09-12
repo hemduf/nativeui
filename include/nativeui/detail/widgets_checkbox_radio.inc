@@ -235,9 +235,15 @@ public:
 
 private:
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return current_visual_state(effective_availability(), focused);
+    }
+
+    [[nodiscard]] VisualState current_visual_state(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
         return VisualState{
-            .enabled = effective_enabled(),
-            .read_only = effective_read_only(),
+            .enabled = availability.enabled,
+            .read_only = availability.read_only,
             .hovered = interaction_.hovered(),
             .pressed = interaction_.pressed(),
             .focused = focused,
@@ -246,8 +252,24 @@ private:
     }
 
     [[nodiscard]] ResolvedCheckboxStyle resolved_style(bool focused) const {
+        return resolved_style(effective_availability(), focused);
+    }
+
+    [[nodiscard]] ResolvedCheckboxStyle resolved_style(
+        ComponentAvailability availability,
+        bool focused) const {
         return resolve_checkbox_style(
-            default_checkbox_style(current_theme()), style_, current_visual_state(focused));
+            default_checkbox_style(current_theme()),
+            style_,
+            current_visual_state(availability, focused));
+    }
+
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const override {
+        return !checkbox_layout_equal(
+            resolved_style(before, focused_),
+            resolved_style(after, focused_));
     }
 
     template <class Context>
@@ -429,9 +451,15 @@ public:
 
 private:
     [[nodiscard]] VisualState current_visual_state(bool focused) const {
+        return current_visual_state(effective_availability(), focused);
+    }
+
+    [[nodiscard]] VisualState current_visual_state(
+        ComponentAvailability availability,
+        bool focused) const {
         return VisualState{
-            .enabled = effective_enabled(),
-            .read_only = effective_read_only(),
+            .enabled = availability.enabled,
+            .read_only = availability.read_only,
             .hovered = interaction_.hovered(),
             .pressed = interaction_.pressed(),
             .focused = focused,
@@ -440,8 +468,24 @@ private:
     }
 
     [[nodiscard]] ResolvedRadioStyle resolved_style(bool focused) const {
+        return resolved_style(effective_availability(), focused);
+    }
+
+    [[nodiscard]] ResolvedRadioStyle resolved_style(
+        ComponentAvailability availability,
+        bool focused) const {
         return resolve_radio_style(
-            default_radio_style(current_theme()), style_, current_visual_state(focused));
+            default_radio_style(current_theme()),
+            style_,
+            current_visual_state(availability, focused));
+    }
+
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const override {
+        return !radio_layout_equal(
+            resolved_style(before, focused_),
+            resolved_style(after, focused_));
     }
 
     template <class Context>
