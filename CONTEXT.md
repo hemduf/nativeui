@@ -28,13 +28,15 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-The pre-T066 merge baseline is current `main` at `c6575cf8fe4301086af088642fc93ba21e61f5e5`. It includes completed T072, T062 (plus its post-merge completeness fix), T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations. This completion cycle adds T066 / PR #237 without changing the already-qualified T066 executable candidate.
+Current `main` is `c0140e725ac33b0a3ca315124a3d20091b96a173`. It includes completed T072, T066, T062 plus its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060 foundations. This completion cycle adds T044 / PR #145 without changing the frozen qualified implementation/test candidate.
 
 T072 / issue #84 / PR #185 is complete and merged. Its final current-main-synchronized executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate, with final `CODE_REVIEW.md` re-certification reporting no Blocking/Important finding.
 
 T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; post-merge completeness gaps were closed by PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5`. Tooltip is no longer a convergence blocker.
 
-T066 / issue #78 / PR #237 is completion-qualified. Frozen executable candidate `d6da7c472d7819269e87f0cdbccf6ac99ebfb174` is synchronized with `main` `c6575cf8fe4301086af088642fc93ba21e61f5e5`; current completion head `9822c79ff02e6cecddd42a2ecf0c0fa129492508` adds only release/document contract synchronization after the executable freeze. Exact-head normal/path-scoped validation is green (CI `34686088854`, T066 `34686088812`, T060 `34686088852`, T065 `34686088808`, T072 `34686088814`, Package Contracts `34686088902`) and final-candidate T042 Lifecycle Stress `34686364025` plus T052 v0.1 Release Gate `34686364059` are green. Final requirement-to-implementation/test review is recorded in PR reviews `5185850366` and `5186026531`, with no Blocking/Important finding.
+T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a3d20091b96a173`. Its frozen executable candidate passed normal/path-scoped validation plus final-candidate T042/T052 qualification, and its final requirement-to-implementation/test review reported no Blocking/Important finding.
+
+T044 / issue #44 / PR #145 is completion-qualified. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` is synchronized with current `main`. Exact-head iterative validation is green: CI `34690800986`, T044 Native Pointer Capture `34690800974`, T060 `34690800996`, T065 `34690800981`, T066 `34690800987`, T072 `34690800985` and Package Contracts `34690801000`. Final-candidate T042 `34692128302` and T052 `34692128310` are green. Reviews `5185659103` and `5186332658` record the complete Outcome A/B, acceptance and `CODE_REVIEW.md` matrices with no Blocking/Important finding.
 
 Current convergence:
 
@@ -51,13 +53,14 @@ style:             T037(done) -> T038 -> T039
                                 +-> T040 with T065(done)
 
 critical platform: T065(done) -> T072(done) -> T064(active PR #240)
-                   T041(done) -> T043(done) -> T066(done, PR #237)
+                   T041(done) -> T043(done) -> T066(done)
                                       |-------> T068
 
-release:            convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
+release:            T044(done) -------------------------------> T071
+                    convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
 ```
 
-T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 / issue #44 / PR #145 is an independent T071 release dependency and may be qualified opportunistically when T064 is waiting on external gates.
+T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 is complete as an independent T071 release dependency.
 
 ## Completed foundations relevant to v1
 
@@ -70,6 +73,7 @@ T064 / issue #76 / PR #240 is the remaining primary platform prerequisite. T044 
 - #212 / PR #213: deterministic ListView/Tabs hover presentation and retained pointer-leave lifetime.
 - T037 / PR #151: typed per-UI theme tokens and representative widget theme binding.
 - T043 / PR #142: resize/scale negotiation with logical public geometry, per-view scale state, authoritative configure snapshots and non-recursive native size requests.
+- T044 / PR #145: evidence-gated native pointer capture qualification; macOS Outcome A, Windows Outcome B, Linux/X11 Outcome B with per-view ownership and no widget/platform leakage.
 - T045 / PR #210: accessibility semantic architecture and immutable virtual collection contract.
 - T047 / PR #92 + T048 / PR #99: relocatable package and external-consumer qualification.
 - T051 / PR #116 + T052 / PR #120: reproducible performance policy and v0.1 developer-preview release gate.
@@ -120,10 +124,23 @@ PR #237 completes only the v1 standalone-window control surface:
 - per-window state only, with native two-window destroy-A/survivor-B qualification;
 - macOS/Windows/Linux native min/max/title/show-hide/close qualification, pure deterministic state tests and `examples/features/t066_window_controls.cpp --self-test`.
 
+## T044 delivered contract
+
+PR #145 completes the evidence-gated pointer-capture qualification without changing widget APIs:
+
+- macOS is Outcome A: pinned Pugl already preserves required outside-view motion/up; no native T044 capture extension is added;
+- Windows is Outcome B: acquisition remains Pugl-owned, while retained cancellation releases only the concrete captured HWND; the native fixture uses real system cursor/input injection rather than direct HWND messages;
+- Linux/X11 is Outcome B: retained cancellation releases the active X11 pointer grab and a narrow per-view focus proxy exposes the focus transitions consumed internally by pinned Pugl so capture cancellation on focus loss is observable;
+- native capture mirrors only real retained none<->owner transitions and produces no duplicate PointerUp/PointerCancel;
+- focus loss, destruction, capturing-subtree removal, repeated acquire/release and two-view isolation are qualified;
+- bookkeeping is per concrete view/PlatformServices instance with no current-drag singleton, process registry or `thread_local` instance state;
+- widgets/components remain platform-neutral and use only the existing `InputContext` capture API;
+- Linux ASan+UBSan, normal CI and final T042/T052 qualification are green;
+- no Objective-C runtime-visible class/category/swizzle/+load is introduced.
+
 ## Active platform work
 
-- **T064 / PR #240:** implementation scope is frozen across macOS/Windows/Linux. Exact-head normal/T060/T065/T072/package gates are green on the pre-smoke-recovery candidate. A concrete Windows native-dialog smoke timeout was isolated to the qualification fixture; exact head `0ce66349d84483c22ca4d9b1c7f98c47a8b76e6e` now uses a real owner HWND, owner-aware modal discovery and message pumping while preserving the four required chooser variants and HTTP(S) checks. New exact-head validation is running; keep Draft until it is green and the final completeness review is re-certified.
-- **T044 / PR #145:** tertiary release qualification. The branch is synchronized with current main at `608de6c2fce6f960b92c6534699b599fbc318863`; the T044 capture implementation tree is unchanged by that synchronization. Exact-head normal/path-scoped requalification is running before a new Ready transition and heavyweight final-candidate gates.
+- **T064 / PR #240:** implementation scope is frozen across macOS/Windows/Linux on exact head `6900b0b5e9baf44963f3634d47682e0eeb2b1601`. Normal CI, T064, T060, T065, T066, T072, Package Contracts and T052 final qualification are green. T042 passed Linux/X11, Windows and Linux ASan+UBSan; its macOS job passed the explicit pre-CTest fixture sequence and then hit one nondeterministic `ILLEGAL` result when CTest immediately reran the supported multi-instance fixture. One exact-job rerun is pending before any source/test change is justified.
 
 ## Validation policy
 
@@ -139,7 +156,6 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 ## Next actions
 
-1. Merge T066 / PR #237 after this same-cycle project-state synchronization; its normal/path and T042/T052 final-candidate gates are green with a complete review matrix.
-2. Finish T064 / PR #240: validate the owner-aware Windows native smoke, re-run the final completeness/CODE_REVIEW pass, then Ready -> T042/T052 -> merge.
-3. Re-qualify T044 / PR #145 on current main, then Ready -> T042/T052 and merge when its already-recorded Outcome A/B matrix is re-certified on the exact head.
-4. T068 remains dependency-gated until every explicit issue #80 dependency is Done; T069/T070/T071 remain dependency-gated.
+1. Finish T064 / PR #240 after the exact-head T042 macOS recovery; if it is green, synchronize completion-only issue/status/`CONTEXT.md`/`ROADMAP.md` state and merge without another executable change.
+2. T044 is complete; do not reopen its platform semantics unless later release qualification finds a concrete regression.
+3. T068 remains dependency-gated until every explicit issue #80 dependency is Done; T069/T070/T071 remain dependency-gated.

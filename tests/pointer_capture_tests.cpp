@@ -68,6 +68,8 @@ void suite() {
 
     // Captured motion remains authoritative outside bounds and PointerUp always
     // terminates capture even when the component forgets to release explicitly.
+    // T044 additionally requires exactly one platform-boundary acquire/release
+    // for the corresponding toolkit capture lifetime.
     {
         auto state = std::make_shared<CaptureState>();
         ui::UI tree{CaptureProbe{state}};
@@ -77,15 +79,21 @@ void suite() {
         NUI_CHECK(tree.dispatch(
                       test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
                   ui::EventResult::Handled);
+        NUI_CHECK(platform.pointer_capture_begin_count == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 0);
         NUI_CHECK(tree.dispatch(
                       test::pointer(ui::InputType::PointerMove, 500.0f, 500.0f), platform) ==
                   ui::EventResult::Handled);
         NUI_CHECK(state->move == 1);
+        NUI_CHECK(platform.pointer_capture_begin_count == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 0);
 
         NUI_CHECK(tree.dispatch(
                       test::pointer(ui::InputType::PointerUp, 500.0f, 500.0f), platform) ==
                   ui::EventResult::Handled);
         NUI_CHECK(state->up == 1);
+        NUI_CHECK(platform.pointer_capture_begin_count == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 1);
 
         NUI_CHECK(tree.dispatch(
                       test::pointer(ui::InputType::PointerMove, 500.0f, 500.0f), platform) ==
@@ -93,7 +101,8 @@ void suite() {
         NUI_CHECK(state->move == 1);
     }
 
-    // Explicit component release and tree auto-release are idempotent.
+    // Explicit component release and tree auto-release are idempotent at both
+    // toolkit and platform boundaries.
     {
         auto state = std::make_shared<CaptureState>();
         state->release_on_up = true;
@@ -101,10 +110,13 @@ void suite() {
         tree.resize({120.0f, 80.0f});
         tree.activate(platform);
         tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == 2);
         tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
         NUI_CHECK(state->up == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 2);
         NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
         NUI_CHECK(state->cancel == 0);
+        NUI_CHECK(platform.pointer_capture_end_count == 2);
     }
 
     // Deactivate/focus-loss delivers exactly one cancellation while the tree is
@@ -115,11 +127,14 @@ void suite() {
         tree.resize({120.0f, 80.0f});
         tree.activate(platform);
         tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == 3);
 
         tree.deactivate(platform);
         NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 3);
         tree.deactivate(platform);
         NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 3);
 
         tree.activate(platform);
         NUI_CHECK(tree.dispatch(
@@ -129,22 +144,28 @@ void suite() {
     }
 
     // A second PointerDown cancels a missing-up interaction before beginning a
-    // new one, preventing ownership from silently leaking across gestures.
+    // new one. The platform capture lifetime follows the same end->begin handoff
+    // and cannot silently leak across gestures.
     {
         auto state = std::make_shared<CaptureState>();
         ui::UI tree{CaptureProbe{state}};
         tree.resize({120.0f, 80.0f});
         tree.activate(platform);
         tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == 4);
         tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 20.0f), platform);
         NUI_CHECK(state->down == 2);
         NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_begin_count == 5);
+        NUI_CHECK(platform.pointer_capture_end_count == 4);
         tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 20.0f), platform);
         NUI_CHECK(state->up == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 5);
     }
 
     // Cancellation handlers cannot accidentally resurrect capture. This also
-    // guarantees a host-close/focus-loss cancellation is terminal.
+    // guarantees a host-close/focus-loss cancellation is terminal at the
+    // platform boundary.
     {
         auto state = std::make_shared<CaptureState>();
         state->recapture_on_cancel = true;
@@ -152,10 +173,14 @@ void suite() {
         tree.resize({120.0f, 80.0f});
         tree.activate(platform);
         tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == 6);
         NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
         NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == 6);
         NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
         NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_begin_count == 6);
+        NUI_CHECK(platform.pointer_capture_end_count == 6);
     }
 }
 
