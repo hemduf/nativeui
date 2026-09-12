@@ -88,7 +88,7 @@ if(APPLE)
   enable_language(OBJCXX)
   add_executable(t064_macos_backend_contract
     macos_backend_contract.mm
-    "${CMAKE_CURRENT_LIST_DIR}/../../src/macos_desktop_services_backend.mm"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/detail/macos_desktop_services_backend.mm"
   )
   target_include_directories(t064_macos_backend_contract PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../include"
