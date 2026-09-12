@@ -1,5 +1,6 @@
 #include <nativeui/detail/semantic_snapshot.hpp>
 #include <nativeui/semantics.hpp>
+#include <nativeui/widgets.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -37,6 +38,18 @@ void semantic_role_and_action_contract() {
     T045_CHECK(info.supports(ui::SemanticAction::Activate));
     T045_CHECK(info.supports(ui::SemanticAction::Focus));
     T045_CHECK(!info.supports(ui::SemanticAction::SetValue));
+}
+
+void standard_button_semantics_follow_t045_contract() {
+    ui::detail::ButtonComponent button{"Apply", [] {}};
+    const auto info = button.semantics();
+
+    T045_CHECK(info.role == ui::SemanticRole::Button);
+    T045_CHECK(info.name == "Apply");
+    T045_CHECK(info.focusable);
+    T045_CHECK(info.supports(ui::SemanticAction::Activate));
+    T045_CHECK(info.supports(ui::SemanticAction::Focus));
+    T045_CHECK(!info.supports(ui::SemanticAction::Toggle));
 }
 
 void semantic_snapshot_owns_data() {
@@ -348,6 +361,7 @@ void semantic_snapshot_publisher_reuses_virtual_metadata_for_scalar_changes() {
 int main() {
     try {
         semantic_role_and_action_contract();
+        standard_button_semantics_follow_t045_contract();
         semantic_snapshot_owns_data();
         virtual_collection_is_lazy_and_metadata_shared();
         virtual_metadata_is_immutable_after_publication();
