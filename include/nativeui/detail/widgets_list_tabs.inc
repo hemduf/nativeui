@@ -832,7 +832,7 @@ public:
     }
 
 private:
-    [[nodiscard]] bool hovered_visual_active() const noexcept {
+    [[nodiscard]] bool hovered_visual_active() const {
         if (!hovered_index_ || *hovered_index_ >= runtime_->keys.size() ||
             !runtime_->enabled_at(*hovered_index_) || !effective_enabled()) {
             return false;
@@ -840,7 +840,7 @@ private:
         return runtime_->selection->get() != runtime_->keys[*hovered_index_];
     }
 
-    [[nodiscard]] bool pressed_visual_active() const noexcept {
+    [[nodiscard]] bool pressed_visual_active() const {
         return pointer_armed_ && hovered_visual_active() && hovered_index_ &&
                *pointer_armed_ == *hovered_index_;
     }
