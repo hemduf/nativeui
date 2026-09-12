@@ -176,7 +176,11 @@ public:
         : current_(std::make_shared<const SemanticTreeSnapshot>()) {}
 
     [[nodiscard]] std::shared_ptr<const SemanticTreeSnapshot> current() const noexcept {
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+        return current_.load(std::memory_order_acquire);
+#else
         return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+#endif
     }
 
     [[nodiscard]] std::vector<SemanticChange> publish(SemanticTreeSnapshot candidate) {
@@ -188,12 +192,23 @@ public:
 
         candidate.generation = previous->generation + 1;
         auto published = std::make_shared<const SemanticTreeSnapshot>(std::move(candidate));
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+        current_.store(std::move(published), std::memory_order_release);
+#else
         std::atomic_store_explicit(&current_, std::move(published), std::memory_order_release);
+#endif
         return changes;
     }
 
 private:
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
+    std::atomic<std::shared_ptr<const SemanticTreeSnapshot>> current_;
+#else
+    // Some supported libc++ versions still lack the C++20 atomic<shared_ptr<T>>
+    // specialization. Keep the same immutable snapshot publication contract via
+    // the standard shared_ptr atomic access functions on those toolchains.
     mutable std::shared_ptr<const SemanticTreeSnapshot> current_;
+#endif
 };
 
 } // namespace ui::detail
