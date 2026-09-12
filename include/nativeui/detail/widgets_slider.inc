@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/slider_value.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/state.hpp>
@@ -140,6 +141,14 @@ public:
           formatter_(std::move(formatter)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return slider_semantic_info(
+            domain_.effective_external(state_.get()),
+            domain_.minimum(),
+            domain_.maximum(),
+            domain_.step());
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto& theme = current_theme();
