@@ -16,8 +16,8 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 | Family required by #38 | Typed style/resolver | Widget consumption | Deterministic tests | Final status |
 | --- | --- | --- | --- | --- |
 | Button | `ButtonStyle` | integrated | button tests / public compile coverage / T038 feature invalidation slice | Implemented; final qualification pending |
-| Checkbox / Radio | `CheckboxStyle` / `RadioStyle` | integrated | choice tests / public compile coverage | Implemented; final qualification pending |
-| Slider / RangeSlider | `SliderStyle` | integrated | slider visual tests / public compile coverage | Implemented; final qualification pending |
+| Checkbox / Radio | `CheckboxStyle` / `RadioStyle` | integrated | choice tests / public compile coverage / T038 paint-vs-layout interaction regression | Implemented; latest GREEN exact-head qualification pending |
+| Slider / RangeSlider | `SliderStyle` | integrated | slider visual tests / public compile coverage / T038 equal-style + layout invalidation regression | Implemented; final qualification pending |
 | ProgressBar / Meter | `ProgressBarStyle` / `MeterStyle` | integrated | progress/meter branch coverage / public compile coverage | Implemented; final qualification pending |
 | Toggle | `ToggleStyle` | integrated | existing Toggle golden/regression coverage | Implemented; final qualification pending |
 | TextInput | `TextInputStyle` | integrated | existing TextInput behavior plus public compile coverage | Implemented; representative T038 golden still pending |
@@ -35,9 +35,9 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 | Resolver precedence identical across families | Pure precedence matrix covering representative family resolvers | Partially covered; final matrix pending |
 | Disabled wins and pressed presentation is not retained misleadingly | Explicit disabled transition coverage | Partially covered; final integrated proof pending |
 | Focused + selected/checked combinations are representable | Orthogonal-state matrix | Partially covered; final matrix pending |
-| Equal resolved style causes no invalidation | Dedicated invalidation regression | Open |
-| Paint-only changes do not invalidate layout | Dedicated invalidation regression | Button hover slice added; cross-family proof and exact-head evidence pending |
-| Layout-affecting explicit style changes invalidate layout + paint | Dedicated invalidation regression | Button hover slice added with allocation-free layout-signature comparison; cross-family proof and exact-head evidence pending |
+| Equal resolved style causes no invalidation | Dedicated invalidation regression | Slider interaction slice covered; broader representative proof pending |
+| Paint-only changes do not invalidate layout | Dedicated invalidation regression | Button, Slider/RangeSlider and Checkbox/Radio interaction slices covered; final representative proof/evidence pending |
+| Layout-affecting explicit style changes invalidate layout + paint | Dedicated invalidation regression | Button, Slider/RangeSlider and Checkbox/Radio interaction slices use allocation-free layout classification; final representative proof/evidence pending |
 | Default normal/hover/pressed/focused variants preserve geometry | Cross-family geometry-stability matrix | Open |
 | Two instances can carry independent explicit overrides | Two-instance isolation regression | Open |
 | Public API is strongly typed and backend-neutral | Public-header compile audit across all families | In progress; final audit pending |
@@ -46,7 +46,7 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 
 - [x] Integrate `ListViewStyle` into retained ListView row/surface presentation.
 - [x] Integrate `TabsStyle` into retained Tabs header/panel presentation.
-- [ ] Complete explicit equal-style/no-invalidation and paint-vs-layout invalidation tests across the representative families. The Button hover paint-vs-layout slice is now present, but the criterion is not yet complete.
+- [ ] Complete explicit equal-style/no-invalidation and paint-vs-layout invalidation tests across the representative families. Button, Slider/RangeSlider and Checkbox/Radio interaction slices are now present, but the criterion is not yet complete.
 - [ ] Add default geometry-stability and two-instance explicit-style isolation tests.
 - [ ] Complete representative golden matrix for Button, Slider, TextInput and one selection widget.
 - [ ] Finish `examples/features/t038_widget_styles.cpp` state-matrix demo and deterministic `--self-test` acceptance coverage.
@@ -58,4 +58,10 @@ This file is the live requirement -> implementation -> test/evidence matrix for 
 
 ## Current recovery note
 
-PR #218 remains Draft. All required standard widget families now have typed resolver + concrete consumption on the branch, including the virtualized ListView style propagation added after the retained ListView/Tabs slice. The current bounded cross-family phase has started with a Button invalidation contract: test-first commit `51ec9d350c3a68789b642232859e575838e1491a` requires paint-only hover variants to remain paint-only and geometry-changing hover variants to dirty layout; implementation `fb8a6cc965cf6d8838e6f10fa27db67dc3405525` added the first layout-aware transition, and review correction `ebffc44b65e9f2d73b477598b5536b8c7d519ab8` replaced allocation-capable resolved-style comparisons on the hot input/focus path with an allocation-free layout signature. No exact-head CI result is claimed for this slice: the canonical branch is still behind current `main` and the PR is presently non-mergeable, so final/iterative executable qualification must follow a safe reconciliation. Equal-resolved-style suppression, broader cross-family invalidation, geometry/isolation, representative goldens, final example acceptance, final review and final qualification remain open. Do not merge from this state.
+PR #218 remains Draft. All required standard widget families have typed resolver + concrete consumption on the branch, including virtualized ListView style propagation. The bounded cross-family invalidation phase now has three explicit TDD slices:
+
+- Button: RED `51ec9d350c3a68789b642232859e575838e1491a` -> GREEN `fb8a6cc965cf6d8838e6f10fa27db67dc3405525`, followed by review correction `ebffc44b65e9f2d73b477598b5536b8c7d519ab8` replacing allocation-capable hot-path resolved-style comparison with an allocation-free layout signature.
+- Slider/RangeSlider: RED `4c799ca9` -> GREEN `539a91ae1ee4c9ac9696eddb6cf71dc3a32d6b47`, covering equal effective presentation suppression plus layout-aware hover transitions.
+- Checkbox/Radio: RED `af73b2f93fee22238c2a8e9f5702aaf5f51a4025` was observed on Linux X11 with only `nativeui_checkbox_radio_tests` failing at the expected layout-dirty assertion; GREEN `70668928c94b6ea6b79de17755c0873402d77142` adds allocation-free layout signatures for interaction/focus/deactivate transitions and keeps paint-only variants paint-only. Exact-head CI for this GREEN was queued/running when this checkpoint was written, so no GREEN result is claimed yet.
+
+The canonical branch still requires final reconciliation with current `main`. Broader equal-resolved-style proof, geometry/isolation, representative goldens, final example acceptance, final review and final qualification remain open. Do not merge from this state.
