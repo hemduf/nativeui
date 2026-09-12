@@ -180,11 +180,18 @@ public:
     Toggle(std::string label, State<bool>& state)
         : label_(std::move(label)), state_(&state) {}
 
+    Toggle&& style(ToggleStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto* state = state_;
-        return Spec{[label = std::move(label), state]() mutable {
-                        return std::make_unique<ToggleComponent>(std::move(label), *state);
+        auto style = std::move(style_);
+        return Spec{[label = std::move(label), state, style = std::move(style)]() mutable {
+                        return std::make_unique<ToggleComponent>(
+                            std::move(label), *state, std::move(style));
                     },
                     {}};
     }
@@ -192,6 +199,7 @@ public:
 private:
     std::string label_;
     State<bool>* state_{};
+    ToggleStyle style_;
 };
 
 
@@ -217,16 +225,23 @@ public:
         return std::move(*this);
     }
 
+    TextInput&& style(TextInputStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto placeholder = std::move(placeholder_);
         auto callback = std::move(on_submit_);
+        auto style = std::move(style_);
         auto* state = state_;
         const auto max_length = max_length_;
         return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
-                     max_length, callback = std::move(callback)]() mutable {
+                     max_length, callback = std::move(callback), style = std::move(style)]() mutable {
                         return std::make_unique<TextInputComponent>(
-                            std::move(label), *state, std::move(placeholder), max_length, std::move(callback));
+                            std::move(label), *state, std::move(placeholder), max_length,
+                            std::move(callback), std::move(style));
                     },
                     {}};
     }
@@ -237,6 +252,7 @@ private:
     std::string placeholder_;
     std::size_t max_length_{256};
     SubmitCallback on_submit_;
+    TextInputStyle style_;
 };
 
 
@@ -255,15 +271,22 @@ public:
         return std::move(*this);
     }
 
+    TextArea&& style(TextAreaStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto placeholder = std::move(placeholder_);
+        auto style = std::move(style_);
         auto* state = state_;
         const auto max_length = max_length_;
         return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
-                     max_length]() mutable {
+                     max_length, style = std::move(style)]() mutable {
                         return std::make_unique<TextAreaComponent>(
-                            std::move(label), *state, std::move(placeholder), max_length);
+                            std::move(label), *state, std::move(placeholder), max_length,
+                            std::move(style));
                     },
                     {}};
     }
@@ -273,6 +296,7 @@ private:
     State<std::string>* state_{};
     std::string placeholder_;
     std::size_t max_length_{};
+    TextAreaStyle style_;
 };
 
 

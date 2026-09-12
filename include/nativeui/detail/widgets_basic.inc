@@ -1,9 +1,12 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
+#include <nativeui/toggle_style.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -132,9 +135,6 @@ public:
         auto& painter = context.painter();
         painter.push_clip(context.bounds());
         {
-            // Canvas callbacks always operate in local component coordinates.
-            // Protect this base translation so user restore() calls cannot cross
-            // the local coordinate frame established by the widget.
             auto local_scope = painter.scoped_state();
             painter.translate(context.bounds().x, context.bounds().y);
             CanvasContext2D canvas_context{
@@ -277,55 +277,352 @@ private:
 };
 
 
-class ToggleComponent final : public Component {
+class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
-    ToggleComponent(std::string label, State<bool>& state)
-        : label_(std::move(label)), state_(state), value_(state.get()) {}
+    ToggleComponent(std::string label, State<bool>& state, ToggleStyle style)
+        : label_(std::move(label)), state_(state), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        return Size{210.0f, 54.0f};
+        const auto resolved = resolved_style(focused_);
+        return Size{resolved.control_width, resolved.control_height};
     }
 
     void mount(MountContext& ctx) override {
+        const bool checked_changes_layout = patch_affects_layout(style_.checked);
         auto invalidate = ctx.invalidator();
-        subscription_ = state_.observe([this, invalidate = std::move(invalidate)](const bool& value) {
-            value_ = value;
-            invalidate();
-        });
+        auto invalidate_layout = ctx.layout_invalidator();
+        subscription_ = state_.observe(
+            [checked_changes_layout,
+             invalidate = std::move(invalidate),
+             invalidate_layout = std::move(invalidate_layout)](const bool&) {
+                if (checked_changes_layout) invalidate_layout();
+                invalidate();
+            });
+    }
+
+    void unmount(LifecycleContext&) override { subscription_.reset(); }
+
+    void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = presentation_signature(focused_);
+        focused_ = focused;
+        interaction_.focus_changed(focused, context, false);
+        if (!focused) {
+            space_pressed_ = false;
+            enter_pressed_ = false;
+        }
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, context);
+    }
+
+    void deactivate(LifecycleContext& context) override {
+        const auto before = presentation_signature(focused_);
+        focused_ = false;
+        interaction_.deactivate(context, false);
+        space_pressed_ = false;
+        enter_pressed_ = false;
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     EventResult input(const InputEvent& event, InputContext& ctx) override {
-        const bool keyboard_toggle = event.type == InputType::KeyDown &&
-            (event.key == Key::Space || event.key == Key::Enter);
-        const bool pointer_toggle = event.type == InputType::PointerDown;
-        if (!keyboard_toggle && !pointer_toggle) return EventResult::Ignored;
+        const auto before = presentation_signature(focused_);
+        const bool pointer_event = event.type == InputType::PointerDown ||
+            event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
+            event.type == InputType::PointerCancel;
 
-        if (!effective_read_only()) {
-            state_.set(!value_);
-            ctx.invalidate();
+        if (pointer_event) {
+            const bool mutating_pointer = event.type == InputType::PointerDown ||
+                interaction_.pressed();
+            if (effective_read_only() && mutating_pointer) {
+                interaction_.cancel_pending_mutation(ctx, false);
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
+                return EventResult::Handled;
+            }
+
+            const auto outcome = interaction_.input(event, ctx, false, false);
+            const auto after_interaction = presentation_signature(focused_);
+            invalidate_style_transition(before, after_interaction, ctx);
+            if (event.type == InputType::PointerDown && !effective_read_only()) {
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return outcome.result;
+            }
+            return outcome.result;
         }
-        return EventResult::Handled;
+
+        if (event.type == InputType::KeyDown && event.key == Key::Space) {
+            if (effective_read_only()) return EventResult::Handled;
+            if (!space_pressed_) {
+                space_pressed_ = true;
+                const auto after_interaction = presentation_signature(focused_);
+                invalidate_style_transition(before, after_interaction, ctx);
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return EventResult::Handled;
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyDown && event.key == Key::Enter) {
+            if (effective_read_only()) return EventResult::Handled;
+            if (!enter_pressed_) {
+                enter_pressed_ = true;
+                const auto after_interaction = presentation_signature(focused_);
+                invalidate_style_transition(before, after_interaction, ctx);
+                auto* state = &state_;
+                const bool next = !state->get();
+                state->set(next);
+                return EventResult::Handled;
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyUp && event.key == Key::Space) {
+            if (space_pressed_) {
+                space_pressed_ = false;
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
+            }
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::KeyUp && event.key == Key::Enter) {
+            if (enter_pressed_) {
+                enter_pressed_ = false;
+                const auto after = presentation_signature(focused_);
+                invalidate_style_transition(before, after, ctx);
+            }
+            return EventResult::Handled;
+        }
+
+        return EventResult::Ignored;
     }
 
     void paint(PaintContext& p) const override {
         const auto b = p.bounds();
+        const auto resolved = resolved_style(p.focused());
         auto& dl = p.painter();
-        dl.fill_rounded_rect(b, 12.0f, colors::panel);
-        dl.stroke_rounded_rect(b, 12.0f, p.focused() ? 2.0f : 1.0f,
-                               p.focused() ? colors::borderFocus : colors::border);
-        dl.text(Point{b.x + 18.0f, b.y + b.h * 0.5f}, label_, 13.0f, colors::text, TextAlign::Left);
-        const Rect track{b.x + b.w - 62.0f, b.y + 14.0f, 44.0f, 26.0f};
-        dl.fill_rounded_rect(track, 13.0f, value_ ? colors::accent : colors::toggleOff);
-        const float knob_x = value_ ? track.x + track.w - 13.0f : track.x + 13.0f;
-        dl.circle(Point{knob_x, track.y + 13.0f}, 9.0f, colors::text);
+
+        TextStyle text_style{};
+        text_style.size = resolved.text_size;
+        text_style.color = resolved.text;
+        text_style.align = TextAlign::Left;
+        text_style.weight = resolved.text_weight;
+        text_style.slant = resolved.text_slant;
+        text_style.family = resolved.font_family;
+        text_style.fallback_families = resolved.fallback_families;
+
+        dl.fill_rounded_rect(b, resolved.corner_radius, resolved.fill);
+        dl.stroke_rounded_rect(
+            b, resolved.corner_radius, resolved.border_width, resolved.border);
+        dl.text(Point{b.x + resolved.leading_padding, b.y + b.h * 0.5f},
+                label_, text_style);
+
+        const Rect track{
+            b.x + b.w - resolved.trailing_padding - resolved.track_width,
+            b.y + (resolved.control_height - resolved.track_height) * 0.5f,
+            resolved.track_width,
+            resolved.track_height};
+        const float track_radius = resolved.track_height * 0.5f;
+        dl.fill_rounded_rect(track, track_radius, resolved.track);
+
+        const float thumb_radius = resolved.thumb_diameter * 0.5f;
+        const float thumb_x = state_.get()
+            ? track.x + track.w - track_radius
+            : track.x + track_radius;
+        dl.circle(Point{thumb_x, track.y + track_radius}, thumb_radius, resolved.thumb);
     }
 
 private:
+    struct PresentationSignature {
+        Color fill{};
+        Color border{};
+        Color text{};
+        Color track{};
+        Color thumb{};
+        float border_width{};
+        float corner_radius{};
+        float control_width{};
+        float control_height{};
+        float leading_padding{};
+        float trailing_padding{};
+        float track_width{};
+        float track_height{};
+        float thumb_diameter{};
+        float text_size{};
+        FontWeight text_weight{FontWeight::Regular};
+        FontSlant text_slant{FontSlant::Upright};
+        std::string_view font_family;
+        const std::vector<std::string>* fallback_families{};
+    };
+
+    [[nodiscard]] static bool patch_affects_layout(const ToggleStylePatch& patch) noexcept {
+        return patch.control_width || patch.control_height || patch.leading_padding ||
+               patch.trailing_padding || patch.track_width || patch.track_height ||
+               patch.thumb_diameter || patch.text_size || patch.text_weight ||
+               patch.text_slant || patch.font_family || patch.fallback_families;
+    }
+
+    static void apply_patch(PresentationSignature& target,
+                            const ToggleStylePatch& patch) noexcept {
+        if (patch.fill) target.fill = *patch.fill;
+        if (patch.border) target.border = *patch.border;
+        if (patch.text) target.text = *patch.text;
+        if (patch.track) target.track = *patch.track;
+        if (patch.thumb) target.thumb = *patch.thumb;
+        if (patch.border_width) target.border_width = *patch.border_width;
+        if (patch.corner_radius) target.corner_radius = *patch.corner_radius;
+        if (patch.control_width) target.control_width = *patch.control_width;
+        if (patch.control_height) target.control_height = *patch.control_height;
+        if (patch.leading_padding) target.leading_padding = *patch.leading_padding;
+        if (patch.trailing_padding) target.trailing_padding = *patch.trailing_padding;
+        if (patch.track_width) target.track_width = *patch.track_width;
+        if (patch.track_height) target.track_height = *patch.track_height;
+        if (patch.thumb_diameter) target.thumb_diameter = *patch.thumb_diameter;
+        if (patch.text_size) target.text_size = *patch.text_size;
+        if (patch.text_weight) target.text_weight = *patch.text_weight;
+        if (patch.text_slant) target.text_slant = *patch.text_slant;
+        if (patch.font_family) target.font_family = *patch.font_family;
+        if (patch.fallback_families) target.fallback_families = &*patch.fallback_families;
+    }
+
+    [[nodiscard]] PresentationSignature presentation_signature(bool focused) const noexcept {
+        const auto& theme = current_theme();
+        PresentationSignature result{
+            .fill = theme.palette.surface,
+            .border = theme.palette.border,
+            .text = theme.palette.text,
+            .track = colors::toggleOff,
+            .thumb = theme.palette.text,
+            .border_width = theme.controls.border_width,
+            .corner_radius = theme.radii.large,
+            .control_width = 210.0f,
+            .control_height = 54.0f,
+            .leading_padding = 18.0f,
+            .trailing_padding = 18.0f,
+            .track_width = 44.0f,
+            .track_height = 26.0f,
+            .thumb_diameter = 18.0f,
+            .text_size = theme.typography.control_size,
+            .text_weight = theme.typography.control_weight,
+            .text_slant = theme.typography.slant,
+            .font_family = theme.typography.family,
+            .fallback_families = &theme.typography.fallback_families,
+        };
+        apply_patch(result, style_.base);
+
+        const auto state = current_visual_state(focused);
+        if (state.checked) {
+            result.track = theme.palette.accent;
+            apply_patch(result, style_.checked);
+        }
+
+        switch (resolve_interaction_state(state)) {
+            case InteractionVisualState::Normal:
+                break;
+            case InteractionVisualState::Hovered:
+                result.border = theme.palette.control_hover;
+                apply_patch(result, style_.hovered);
+                break;
+            case InteractionVisualState::Pressed:
+                result.border = theme.palette.accent;
+                result.thumb = theme.palette.active_highlight;
+                apply_patch(result, style_.pressed);
+                break;
+            case InteractionVisualState::Disabled:
+                result.fill = theme.palette.control_background;
+                result.border = theme.palette.disabled;
+                result.text = theme.palette.disabled;
+                apply_patch(result, style_.disabled);
+                break;
+        }
+        if (state.read_only) {
+            result.border = theme.palette.track;
+            result.text = theme.palette.muted_text;
+            apply_patch(result, style_.read_only);
+        }
+        if (state.focused) {
+            result.border = theme.palette.focus;
+            result.border_width = theme.controls.focus_ring_width;
+            apply_patch(result, style_.focused);
+        }
+        return result;
+    }
+
+    [[nodiscard]] static bool same_color(Color lhs, Color rhs) noexcept {
+        return lhs.r == rhs.r && lhs.g == rhs.g && lhs.b == rhs.b && lhs.a == rhs.a;
+    }
+
+    [[nodiscard]] static bool same_fallbacks(const PresentationSignature& lhs,
+                                             const PresentationSignature& rhs) {
+        return lhs.fallback_families == rhs.fallback_families ||
+            (lhs.fallback_families != nullptr && rhs.fallback_families != nullptr &&
+             *lhs.fallback_families == *rhs.fallback_families);
+    }
+
+    [[nodiscard]] static bool same_layout(const PresentationSignature& lhs,
+                                          const PresentationSignature& rhs) {
+        return lhs.control_width == rhs.control_width &&
+               lhs.control_height == rhs.control_height &&
+               lhs.leading_padding == rhs.leading_padding &&
+               lhs.trailing_padding == rhs.trailing_padding &&
+               lhs.track_width == rhs.track_width &&
+               lhs.track_height == rhs.track_height &&
+               lhs.thumb_diameter == rhs.thumb_diameter &&
+               lhs.text_size == rhs.text_size &&
+               lhs.text_weight == rhs.text_weight &&
+               lhs.text_slant == rhs.text_slant &&
+               lhs.font_family == rhs.font_family && same_fallbacks(lhs, rhs);
+    }
+
+    [[nodiscard]] static bool same_presentation(const PresentationSignature& lhs,
+                                                const PresentationSignature& rhs) {
+        return same_color(lhs.fill, rhs.fill) &&
+               same_color(lhs.border, rhs.border) &&
+               same_color(lhs.text, rhs.text) &&
+               same_color(lhs.track, rhs.track) &&
+               same_color(lhs.thumb, rhs.thumb) &&
+               lhs.border_width == rhs.border_width &&
+               lhs.corner_radius == rhs.corner_radius &&
+               same_layout(lhs, rhs);
+    }
+
+    template <class Context>
+    static void invalidate_style_transition(const PresentationSignature& before,
+                                            const PresentationSignature& after,
+                                            Context& context) {
+        if (same_presentation(before, after)) return;
+        if (!same_layout(before, after)) {
+            context.invalidate_layout();
+            context.invalidate();
+            return;
+        }
+        context.invalidate();
+    }
+
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return VisualState{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = interaction_.hovered(),
+            .pressed = interaction_.pressed() || space_pressed_ || enter_pressed_,
+            .focused = focused,
+            .checked = state_.get(),
+        };
+    }
+
+    [[nodiscard]] ResolvedToggleStyle resolved_style(bool focused) const {
+        return resolve_toggle_style(
+            default_toggle_style(current_theme()), style_, current_visual_state(focused));
+    }
+
     std::string label_;
     State<bool>& state_;
-    bool value_{};
+    ToggleStyle style_;
+    detail::PressActivationState interaction_;
+    bool focused_{};
+    bool space_pressed_{};
+    bool enter_pressed_{};
     State<bool>::Subscription subscription_;
 };
-
-

@@ -41,6 +41,12 @@ public:
         return static_cast<float>(text.size()) * size * 0.5f;
     }
 
+    ui::TextMetrics text_metrics(std::string_view text, const ui::TextStyle& style) override {
+        auto metrics = ui::TextService::measure(text, style);
+        metrics.width = text_width(text, style.size);
+        return metrics;
+    }
+
     [[nodiscard]] ui::Dispatcher dispatcher() const noexcept override {
         return dispatcher_value;
     }

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/layout.hpp>
+#include <nativeui/list_tabs_style.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/virtual_list.hpp>
 
@@ -19,8 +21,6 @@ namespace ui {
 
 namespace detail {
 
-inline constexpr Color kListTabsHoverSurface{0.145f, 0.155f, 0.175f, 1.0f};
-
 class OwnedSpec final {
 public:
     explicit OwnedSpec(Spec spec) : spec_(std::move(spec)) {}
@@ -34,8 +34,8 @@ template <class T>
 struct ListViewRuntime final {
     using ActivationCallback = std::function<void(const T&)>;
 
-    explicit ListViewRuntime(State<std::optional<T>>& selection)
-        : selection(&selection), scroll(ScrollAxis::Vertical) {}
+    ListViewRuntime(State<std::optional<T>>& selection, ListViewStyle style)
+        : selection(&selection), scroll(ScrollAxis::Vertical), style(std::move(style)) {}
 
     [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
         return index < enabled.size() && enabled[index];
@@ -100,14 +100,17 @@ struct ListViewRuntime final {
 
     State<std::optional<T>>* selection{};
     ScrollState scroll;
+    ListViewStyle style;
     std::vector<T> keys;
     std::vector<bool> enabled;
     std::vector<Rect> row_bounds;
+    std::optional<std::size_t> hovered_index;
+    std::optional<std::size_t> pressed_index;
     ActivationCallback activation_callback;
 };
 
 template <class T>
-class ListRowComponent final : public Component {
+class ListRowComponent final : public Component, public ThemeBinding {
 public:
     ListRowComponent(std::shared_ptr<ListViewRuntime<T>> runtime, std::size_t index)
         : runtime_(std::move(runtime)), index_(index) {}
@@ -157,33 +160,62 @@ public:
         if (index_ >= runtime_->keys.size()) return;
         const auto bounds = context.bounds();
         auto& painter = context.painter();
-        const auto& selected = runtime_->selection->get();
-        if (selected && *selected == runtime_->keys[index_]) {
-            const Rect highlight{
-                bounds.x + 4.0f,
-                bounds.y + 2.0f,
-                std::max(0.0f, bounds.w - 8.0f),
-                std::max(0.0f, bounds.h - 4.0f)};
-            painter.fill_rounded_rect(highlight, 6.0f, colors::selection);
-            painter.fill_rounded_rect(
-                {highlight.x + 3.0f,
-                 highlight.y + 7.0f,
-                 3.0f,
-                 std::max(0.0f, highlight.h - 14.0f)},
-                1.5f,
-                colors::accent);
+        const bool selected = runtime_->selection->get() &&
+            *runtime_->selection->get() == runtime_->keys[index_];
+        const auto resolved = resolved_style(selected);
+
+        const Rect highlight{
+            bounds.x + resolved.row_horizontal_inset,
+            bounds.y + resolved.row_vertical_inset,
+            std::max(0.0f, bounds.w - resolved.row_horizontal_inset * 2.0f),
+            std::max(0.0f, bounds.h - resolved.row_vertical_inset * 2.0f)};
+        if (!highlight.empty()) {
+            painter.fill_rounded_rect(highlight, resolved.row_corner_radius, resolved.row_fill);
         }
-        if (index_ + 1 < runtime_->keys.size() && bounds.w > 24.0f) {
-            const float y = bounds.y + bounds.h - 0.5f;
+
+        if (selected && resolved.row_accent_width > 0.0f) {
+            const Rect accent{
+                highlight.x + resolved.row_accent_horizontal_inset,
+                highlight.y + resolved.row_accent_vertical_inset,
+                resolved.row_accent_width,
+                std::max(0.0f, highlight.h - resolved.row_accent_vertical_inset * 2.0f)};
+            if (!accent.empty()) {
+                painter.fill_rounded_rect(
+                    accent,
+                    std::max(0.0f, resolved.row_accent_width * 0.5f),
+                    resolved.row_accent);
+            }
+        }
+
+        if (index_ + 1 < runtime_->keys.size() &&
+            resolved.separator_width > 0.0f &&
+            bounds.w > resolved.separator_inset * 2.0f) {
+            const float y = bounds.y + bounds.h - resolved.separator_width * 0.5f;
             painter.line(
-                {bounds.x + 12.0f, y},
-                {bounds.x + bounds.w - 12.0f, y},
-                1.0f,
-                Color{0.20f, 0.22f, 0.25f, 0.7f});
+                {bounds.x + resolved.separator_inset, y},
+                {bounds.x + bounds.w - resolved.separator_inset, y},
+                resolved.separator_width,
+                resolved.separator);
         }
     }
 
 private:
+    [[nodiscard]] ResolvedListViewStyle resolved_style(bool selected) const {
+        const bool hovered = !selected && runtime_->hovered_index &&
+            *runtime_->hovered_index == index_;
+        const bool pressed = !selected && runtime_->pressed_index &&
+            *runtime_->pressed_index == index_;
+        const VisualState state{
+            .enabled = effective_enabled(),
+            .read_only = effective_read_only(),
+            .hovered = hovered,
+            .pressed = pressed,
+            .selected = selected,
+        };
+        return resolve_list_view_style(
+            default_list_view_style(current_theme()), runtime_->style, state);
+    }
+
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::size_t index_{};
     typename State<std::optional<T>>::Subscription subscription_;
@@ -241,7 +273,7 @@ private:
 };
 
 template <class T>
-class ListViewComponent final : public Component {
+class ListViewComponent final : public Component, public ThemeBinding {
 public:
     explicit ListViewComponent(std::shared_ptr<ListViewRuntime<T>> runtime)
         : runtime_(std::move(runtime)) {}
@@ -340,6 +372,8 @@ public:
             }
             set_hovered(index, context);
             pointer_armed_ = index;
+            runtime_->pressed_index = index;
+            context.invalidate();
             context.capture_pointer();
             return EventResult::Handled;
         }
@@ -349,6 +383,8 @@ public:
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
+            runtime_->pressed_index.reset();
+            context.invalidate();
             context.release_pointer();
             if (index && *index == armed) {
                 active_index_ = armed;
@@ -359,6 +395,8 @@ public:
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
             pointer_armed_.reset();
+            runtime_->pressed_index.reset();
+            context.invalidate();
             context.release_pointer();
             return EventResult::Handled;
         default:
@@ -368,45 +406,37 @@ public:
 
     void deactivate(LifecycleContext&) override {
         pointer_armed_.reset();
-        hovered_index_.reset();
+        runtime_->pressed_index.reset();
+        runtime_->hovered_index.reset();
     }
 
     void paint(PaintContext& context) const override {
         const auto bounds = context.bounds();
+        const auto resolved = resolved_style(context.focused());
         auto& painter = context.painter();
-        painter.fill_rounded_rect(bounds, 9.0f, colors::panel);
-        if (effective_enabled() && hovered_index_ &&
-            runtime_->enabled_at(*hovered_index_) &&
-            *hovered_index_ < runtime_->row_bounds.size()) {
-            const auto& selected = runtime_->selection->get();
-            const bool hovered_selected = selected &&
-                *hovered_index_ < runtime_->keys.size() &&
-                *selected == runtime_->keys[*hovered_index_];
-            if (!hovered_selected) {
-                const auto row = runtime_->row_bounds[*hovered_index_];
-                const auto offset = runtime_->scroll.offset();
-                const Rect highlight{
-                    bounds.x + 4.0f,
-                    bounds.y + row.y - offset.y + 2.0f,
-                    std::max(0.0f, bounds.w - 8.0f),
-                    std::max(0.0f, row.h - 4.0f)};
-                const auto visible = intersect(highlight, bounds);
-                if (!visible.empty()) {
-                    painter.fill_rounded_rect(visible, 6.0f, kListTabsHoverSurface);
-                }
-            }
-        }
+        painter.fill_rounded_rect(bounds, resolved.surface_corner_radius, resolved.surface_fill);
         painter.stroke_rounded_rect(
             bounds,
-            9.0f,
-            context.focused() ? 1.5f : 1.0f,
-            context.focused() ? colors::borderFocus : colors::border);
+            resolved.surface_corner_radius,
+            resolved.surface_border_width,
+            resolved.surface_border);
     }
 
 private:
+    [[nodiscard]] ResolvedListViewStyle resolved_style(bool focused) const {
+        return resolve_list_view_style(
+            default_list_view_style(current_theme()),
+            runtime_->style,
+            VisualState{
+                .enabled = effective_enabled(),
+                .read_only = effective_read_only(),
+                .focused = focused,
+            });
+    }
+
     void set_hovered(std::optional<std::size_t> index, InputContext& context) {
-        if (hovered_index_ == index) return;
-        hovered_index_ = index;
+        if (runtime_->hovered_index == index) return;
+        runtime_->hovered_index = index;
         context.invalidate();
     }
 
@@ -425,12 +455,12 @@ private:
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
-    std::optional<std::size_t> hovered_index_;
 };
 
 template <class T>
 struct TabsRuntime final {
-    explicit TabsRuntime(State<T>& selection) : selection(&selection) {}
+    TabsRuntime(State<T>& selection, TabsStyle style)
+        : selection(&selection), style(std::move(style)) {}
 
     [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
         return index < enabled.size() && enabled[index];
@@ -484,6 +514,7 @@ struct TabsRuntime final {
     }
 
     State<T>* selection{};
+    TabsStyle style;
     std::vector<T> keys;
     std::vector<std::string> labels;
     std::vector<bool> enabled;
@@ -538,7 +569,7 @@ private:
 };
 
 template <class T>
-class TabsComponent final : public Component {
+class TabsComponent final : public Component, public ThemeBinding {
 public:
     explicit TabsComponent(std::shared_ptr<TabsRuntime<T>> runtime)
         : runtime_(std::move(runtime)) {}
@@ -547,19 +578,25 @@ public:
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
-        Size result{120.0f, kHeaderHeight};
+        const auto resolved = container_style(focused_);
+        Size result{120.0f, resolved.header_height};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.preferred.w);
-            result.h = std::max(result.h, kHeaderHeight + kPanelGap + child.preferred.h);
+            result.h = std::max(
+                result.h,
+                resolved.header_height + resolved.panel_gap + child.preferred.h);
         }
         return result;
     }
 
     [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
-        Size result{0.0f, kHeaderHeight};
+        const auto resolved = container_style(focused_);
+        Size result{0.0f, resolved.header_height};
         for (const auto& child : children) {
             result.w = std::max(result.w, child.minimum.w);
-            result.h = std::max(result.h, kHeaderHeight + kPanelGap + child.minimum.h);
+            result.h = std::max(
+                result.h,
+                resolved.header_height + resolved.panel_gap + child.minimum.h);
         }
         return result;
     }
@@ -568,9 +605,10 @@ public:
         Rect bounds,
         const std::vector<ChildMetrics>&,
         std::vector<ChildPlacement>& placements) const override {
-        const float header_height = std::min(bounds.h, kHeaderHeight);
+        const auto resolved = container_style(focused_);
+        const float header_height = std::min(bounds.h, resolved.header_height);
         const float remaining = std::max(0.0f, bounds.h - header_height);
-        const float gap = std::min(remaining, kPanelGap);
+        const float gap = std::min(remaining, resolved.panel_gap);
         const Rect panel{
             bounds.x,
             bounds.y + header_height + gap,
@@ -587,13 +625,17 @@ public:
 
     void unmount(LifecycleContext&) override { subscription_.reset(); }
 
-    void focus_changed(bool focused, FocusContext&) override {
+    void focus_changed(bool focused, FocusContext& context) override {
+        const auto before = container_style(focused_);
+        focused_ = focused;
         if (!focused) {
             active_index_.reset();
-            return;
+        } else {
+            active_index_ = runtime_->selected_index();
+            if (!active_index_) active_index_ = runtime_->first_enabled();
         }
-        active_index_ = runtime_->selected_index();
-        if (!active_index_) active_index_ = runtime_->first_enabled();
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -629,9 +671,10 @@ public:
             return EventResult::Handled;
         }
 
+        const auto geometry = container_style(focused_);
         switch (event.type) {
         case InputType::PointerMove: {
-            const auto index = tab_at(event.position, context.bounds());
+            const auto index = tab_at(event.position, context.bounds(), geometry.header_height);
             set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             return EventResult::Ignored;
         }
@@ -639,7 +682,7 @@ public:
             set_hovered(std::nullopt, context);
             return EventResult::Ignored;
         case InputType::PointerDown: {
-            const auto index = tab_at(event.position, context.bounds());
+            const auto index = tab_at(event.position, context.bounds(), geometry.header_height);
             if (!index) {
                 set_hovered(std::nullopt, context);
                 return EventResult::Ignored;
@@ -649,16 +692,22 @@ public:
                 return EventResult::Handled;
             }
             set_hovered(index, context);
+            const auto before = container_style(focused_);
             pointer_armed_ = index;
+            const auto after = container_style(focused_);
+            invalidate_style_transition(before, after, context);
             context.capture_pointer();
             return EventResult::Handled;
         }
         case InputType::PointerUp: {
-            const auto index = tab_at(event.position, context.bounds());
+            const auto index = tab_at(event.position, context.bounds(), geometry.header_height);
             set_hovered(index && runtime->enabled_at(*index) ? index : std::nullopt, context);
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
+            const auto before = container_style(focused_);
             pointer_armed_.reset();
+            const auto after = container_style(focused_);
+            invalidate_style_transition(before, after, context);
             context.release_pointer();
             if (index && *index == armed) {
                 active_index_ = armed;
@@ -668,7 +717,12 @@ public:
         }
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
-            pointer_armed_.reset();
+            {
+                const auto before = container_style(focused_);
+                pointer_armed_.reset();
+                const auto after = container_style(focused_);
+                invalidate_style_transition(before, after, context);
+            }
             context.release_pointer();
             return EventResult::Handled;
         default:
@@ -676,25 +730,30 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override {
+    void deactivate(LifecycleContext& context) override {
+        const auto before = container_style(focused_);
         pointer_armed_.reset();
         hovered_index_.reset();
+        focused_ = false;
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
     }
 
     void paint(PaintContext& context) const override {
         if (runtime_->keys.empty()) return;
         const auto bounds = context.bounds();
-        const float header_height = std::min(bounds.h, kHeaderHeight);
+        const auto container = container_style(context.focused());
+        const float header_height = std::min(bounds.h, container.header_height);
         if (!(header_height > 0.0f) || !(bounds.w > 0.0f)) return;
 
         auto& painter = context.painter();
         const Rect header{bounds.x, bounds.y, bounds.w, header_height};
-        painter.fill_rounded_rect(header, kCornerRadius, colors::panel);
+        painter.fill_rounded_rect(header, container.header_corner_radius, container.header_fill);
         painter.stroke_rounded_rect(
             header,
-            kCornerRadius,
-            context.focused() ? 1.5f : 1.0f,
-            context.focused() ? colors::borderFocus : colors::border);
+            container.header_corner_radius,
+            container.header_border_width,
+            container.header_border);
 
         const float width = bounds.w / static_cast<float>(runtime_->keys.size());
         for (std::size_t index = 0; index < runtime_->keys.size(); ++index) {
@@ -709,72 +768,148 @@ public:
             const bool enabled = runtime_->enabled_at(index);
             const bool hovered = effective_enabled() && enabled && !selected &&
                 hovered_index_ && *hovered_index_ == index;
+            const bool pressed = hovered && pointer_armed_ && *pointer_armed_ == index;
+            const auto resolved = tab_style(index, selected, hovered, pressed, context.focused());
 
-            if (hovered) {
-                painter.fill_rounded_rect(
-                    {tab.x + 3.0f, tab.y + 3.0f,
-                     std::max(0.0f, tab.w - 6.0f), std::max(0.0f, tab.h - 6.0f)},
-                    6.0f,
-                    kListTabsHoverSurface);
+            const Rect fill{
+                tab.x + resolved.tab_inset,
+                tab.y + resolved.tab_inset,
+                std::max(0.0f, tab.w - resolved.tab_inset * 2.0f),
+                std::max(0.0f, tab.h - resolved.tab_inset * 2.0f)};
+            if (!fill.empty()) {
+                painter.fill_rounded_rect(fill, resolved.tab_corner_radius, resolved.tab_fill);
             }
+
             if (selected) {
-                painter.fill_rounded_rect(
-                    {tab.x + 3.0f, tab.y + 3.0f,
-                     std::max(0.0f, tab.w - 6.0f), std::max(0.0f, tab.h - 6.0f)},
-                    6.0f,
-                    colors::input);
-                const float underline_width = std::max(0.0f, tab.w - 28.0f);
-                if (underline_width > 0.0f) {
+                const float underline_width =
+                    std::max(0.0f, tab.w - resolved.underline_inset * 2.0f);
+                if (underline_width > 0.0f && resolved.underline_height > 0.0f) {
                     painter.fill_rounded_rect(
-                        {tab.x + 14.0f, tab.y + tab.h - 4.0f, underline_width, 2.0f},
-                        1.0f,
-                        colors::accent);
+                        {tab.x + resolved.underline_inset,
+                         tab.y + tab.h - resolved.underline_height - 2.0f,
+                         underline_width,
+                         resolved.underline_height},
+                        std::max(0.0f, resolved.underline_height * 0.5f),
+                        resolved.underline);
                 }
             }
-            if (index > 0) {
+
+            if (index > 0 && resolved.separator_width > 0.0f &&
+                tab.h > resolved.separator_inset * 2.0f) {
                 const float x = tab.x;
                 painter.line(
-                    {x, tab.y + 10.0f},
-                    {x, tab.y + tab.h - 10.0f},
-                    1.0f,
-                    Color{0.20f, 0.22f, 0.25f, 0.75f});
+                    {x, tab.y + resolved.separator_inset},
+                    {x, tab.y + tab.h - resolved.separator_inset},
+                    resolved.separator_width,
+                    resolved.separator);
             }
+
             if (index < runtime_->labels.size()) {
-                const Color text_color = !enabled
-                    ? Color{0.39f, 0.42f, 0.47f, 1.0f}
-                    : ((selected || hovered) ? colors::text : colors::textMuted);
                 painter.text(
                     Point{tab.x + tab.w * 0.5f, tab.y + tab.h * 0.5f},
                     runtime_->labels[index],
-                    13.0f,
-                    text_color,
+                    resolved.text_size,
+                    resolved.text,
                     TextAlign::Center);
             }
         }
 
         const float remaining = std::max(0.0f, bounds.h - header_height);
-        const float gap = std::min(remaining, kPanelGap);
+        const float gap = std::min(remaining, container.panel_gap);
         const Rect panel{
             bounds.x,
             bounds.y + header_height + gap,
             bounds.w,
             std::max(0.0f, bounds.h - header_height - gap)};
         if (!panel.empty()) {
-            painter.fill_rounded_rect(panel, 10.0f, colors::panel);
-            painter.stroke_rounded_rect(panel, 10.0f, 1.0f, colors::border);
+            painter.fill_rounded_rect(panel, container.panel_corner_radius, container.panel_fill);
+            painter.stroke_rounded_rect(
+                panel,
+                container.panel_corner_radius,
+                container.panel_border_width,
+                container.panel_border);
         }
     }
 
 private:
-    void set_hovered(std::optional<std::size_t> index, InputContext& context) {
-        if (hovered_index_ == index) return;
-        hovered_index_ = index;
+    [[nodiscard]] bool hovered_visual_active() const {
+        if (!hovered_index_ || *hovered_index_ >= runtime_->keys.size() ||
+            !runtime_->enabled_at(*hovered_index_) || !effective_enabled()) {
+            return false;
+        }
+        return runtime_->selection->get() != runtime_->keys[*hovered_index_];
+    }
+
+    [[nodiscard]] bool pressed_visual_active() const {
+        return pointer_armed_ && hovered_visual_active() && hovered_index_ &&
+               *pointer_armed_ == *hovered_index_;
+    }
+
+    [[nodiscard]] ResolvedTabsStyle container_style(bool focused) const {
+        return resolve_tabs_style(
+            default_tabs_style(current_theme()),
+            runtime_->style,
+            VisualState{
+                .enabled = effective_enabled(),
+                .read_only = effective_read_only(),
+                .hovered = hovered_visual_active(),
+                .pressed = pressed_visual_active(),
+                .focused = focused,
+            });
+    }
+
+    [[nodiscard]] ResolvedTabsStyle tab_style(
+        std::size_t index,
+        bool selected,
+        bool hovered,
+        bool pressed,
+        bool focused) const {
+        return resolve_tabs_style(
+            default_tabs_style(current_theme()),
+            runtime_->style,
+            VisualState{
+                .enabled = effective_enabled() && runtime_->enabled_at(index),
+                .read_only = effective_read_only(),
+                .hovered = hovered,
+                .pressed = pressed,
+                .focused = focused,
+                .selected = selected,
+            });
+    }
+
+    [[nodiscard]] static bool same_layout(const ResolvedTabsStyle& lhs,
+                                          const ResolvedTabsStyle& rhs) noexcept {
+        return lhs.header_height == rhs.header_height && lhs.panel_gap == rhs.panel_gap;
+    }
+
+    template <class Context>
+    static void invalidate_style_transition(const ResolvedTabsStyle& before,
+                                            const ResolvedTabsStyle& after,
+                                            Context& context) {
+        if (before == after) return;
+        if (!same_layout(before, after)) {
+            context.invalidate_layout();
+            context.invalidate();
+            return;
+        }
         context.invalidate();
     }
 
-    [[nodiscard]] std::optional<std::size_t> tab_at(Point position, Rect bounds) const noexcept {
+    void set_hovered(std::optional<std::size_t> index, InputContext& context) {
+        if (hovered_index_ == index) return;
+        const auto before = container_style(focused_);
+        hovered_index_ = index;
+        const auto after = container_style(focused_);
+        invalidate_style_transition(before, after, context);
+    }
+
+    [[nodiscard]] std::optional<std::size_t> tab_at(
+        Point position,
+        Rect bounds,
+        float header_height) const noexcept {
         if (runtime_->keys.empty() || !(bounds.w > 0.0f) ||
-            position.y < bounds.y || position.y >= bounds.y + std::min(bounds.h, kHeaderHeight) ||
+            position.y < bounds.y ||
+            position.y >= bounds.y + std::min(bounds.h, header_height) ||
             position.x < bounds.x || position.x >= bounds.x + bounds.w) {
             return std::nullopt;
         }
@@ -786,14 +921,11 @@ private:
         return index;
     }
 
-    static constexpr float kHeaderHeight = 40.0f;
-    static constexpr float kPanelGap = 10.0f;
-    static constexpr float kCornerRadius = 8.0f;
-
     std::shared_ptr<TabsRuntime<T>> runtime_;
     std::optional<std::size_t> active_index_;
     std::optional<std::size_t> pointer_armed_;
     std::optional<std::size_t> hovered_index_;
+    bool focused_{};
     typename State<T>::Subscription subscription_;
 };
 
@@ -824,13 +956,20 @@ public:
         return std::move(*this);
     }
 
+    ListView&& style(ListViewStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         if (virtual_state_) {
             virtual_state_->runtime()->set_activation_callback(std::move(activation_callback_));
+            virtual_state_->runtime()->set_style(std::move(style_));
             return detail::make_virtual_list_retained_spec(virtual_state_->runtime());
         }
 
-        auto runtime = std::make_shared<detail::ListViewRuntime<T>>(*selection_);
+        auto runtime = std::make_shared<detail::ListViewRuntime<T>>(
+            *selection_, std::move(style_));
         runtime->keys.reserve(items_.size());
         runtime->enabled.reserve(items_.size());
         runtime->activation_callback = std::move(activation_callback_);
@@ -884,6 +1023,7 @@ private:
     VirtualListState<T>* virtual_state_{};
     std::vector<Item> items_;
     ActivationCallback activation_callback_;
+    ListViewStyle style_;
 };
 
 template <class T>
@@ -900,8 +1040,14 @@ public:
         return std::move(*this);
     }
 
+    Tabs&& style(TabsStyle value) && {
+        style_ = std::move(value);
+        return std::move(*this);
+    }
+
     Spec spec() && {
-        auto runtime = std::make_shared<detail::TabsRuntime<T>>(*selection_);
+        auto runtime = std::make_shared<detail::TabsRuntime<T>>(
+            *selection_, std::move(style_));
         runtime->keys.reserve(tabs_.size());
         runtime->labels.reserve(tabs_.size());
         runtime->enabled.reserve(tabs_.size());
@@ -946,6 +1092,7 @@ private:
 
     State<T>* selection_{};
     std::vector<Tab> tabs_;
+    TabsStyle style_;
 };
 
 } // namespace ui

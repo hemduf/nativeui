@@ -89,6 +89,51 @@ void suite() {
     NUI_CHECK(tree.dispatch(leave, platform) == ui::EventResult::Handled);
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(pixel_matches(renderer.pixel(20, 50), selected_surface));
+
+    // T038: the public ListView style recipe must apply identically to the
+    // virtualized T067 specialization instead of being silently ignored.
+    ui::State<std::optional<int>> styled_selected{0};
+    VirtualState styled_state{
+        styled_selected,
+        20.0f,
+        [](const VirtualState::Item&) { return ui::Spacer{100.0f, 20.0f}; }};
+    NUI_CHECK(styled_state.replace({
+        VirtualState::Item{0, "zero"},
+        VirtualState::Item{1, "one"},
+    }));
+
+    ui::ListViewStyle virtual_style;
+    virtual_style.base.surface_fill = ui::Color{0.03f, 0.07f, 0.11f, 1.0f};
+    virtual_style.disabled.surface_fill = ui::Color{0.72f, 0.44f, 0.08f, 1.0f};
+    virtual_style.selected.row_fill = ui::Color{0.74f, 0.12f, 0.22f, 1.0f};
+    virtual_style.hovered.row_fill = ui::Color{0.12f, 0.66f, 0.30f, 1.0f};
+    virtual_style.pressed.row_fill = ui::Color{0.18f, 0.30f, 0.82f, 1.0f};
+
+    ui::UI styled_tree{ui::ListView<int>{styled_state}.style(virtual_style)};
+    test::MockPlatform styled_platform;
+    styled_tree.resize({100.0f, 40.0f});
+    styled_tree.activate(styled_platform);
+    ui::HeadlessRenderer styled_renderer{{100.0f, 40.0f}, 1.0f};
+
+    NUI_CHECK(styled_renderer.render(styled_tree));
+    NUI_CHECK(pixel_matches(
+        styled_renderer.pixel(20, 10),
+        source_over(*virtual_style.selected.row_fill, *virtual_style.base.surface_fill)));
+
+    (void)styled_tree.dispatch(
+        test::pointer(ui::InputType::PointerMove, 20.0f, 30.0f), styled_platform);
+    NUI_CHECK(styled_renderer.render(styled_tree));
+    NUI_CHECK(pixel_matches(
+        styled_renderer.pixel(20, 30),
+        source_over(*virtual_style.hovered.row_fill, *virtual_style.base.surface_fill)));
+
+    NUI_CHECK(styled_tree.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 20.0f, 30.0f), styled_platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(styled_renderer.render(styled_tree));
+    NUI_CHECK(pixel_matches(
+        styled_renderer.pixel(20, 30),
+        source_over(*virtual_style.pressed.row_fill, *virtual_style.base.surface_fill)));
 }
 
 } // namespace
