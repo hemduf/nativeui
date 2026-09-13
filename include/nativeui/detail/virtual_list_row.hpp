@@ -42,14 +42,17 @@ public:
     using BeginCapture = std::function<bool()>;
     using EndCapture = std::function<void()>;
     using Activate = std::function<bool()>;
+    using PresentationChanged = std::function<bool(bool, bool)>;
 
     VirtualListRowInteractionComponent(
         BeginCapture begin_capture,
         EndCapture end_capture,
-        Activate activate)
+        Activate activate,
+        PresentationChanged presentation_changed = {})
         : begin_capture_(std::move(begin_capture)),
           end_capture_(std::move(end_capture)),
-          activate_(std::move(activate)) {}
+          activate_(std::move(activate)),
+          presentation_changed_(std::move(presentation_changed)) {}
 
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
@@ -74,27 +77,36 @@ public:
             if (armed_) return EventResult::Handled;
             auto begin_capture = begin_capture_;
             if (!begin_capture || !begin_capture()) return EventResult::Handled;
+            const bool presentation_changed =
+                presentation_changed_ && presentation_changed_(false, true);
             armed_ = true;
+            if (presentation_changed) context.invalidate();
             context.capture_pointer();
             return EventResult::Handled;
         }
         case InputType::PointerUp: {
             if (!armed_) return EventResult::Ignored;
             const bool activate = context.bounds().contains(event.position);
+            const bool presentation_changed =
+                presentation_changed_ && presentation_changed_(true, false);
             armed_ = false;
             auto end_capture = end_capture_;
             auto activation = activate_;
             context.release_pointer();
             if (end_capture) end_capture();
+            if (presentation_changed) context.invalidate();
             if (activate && activation) (void)activation();
             return EventResult::Handled;
         }
         case InputType::PointerCancel: {
             if (!armed_) return EventResult::Ignored;
+            const bool presentation_changed =
+                presentation_changed_ && presentation_changed_(true, false);
             armed_ = false;
             auto end_capture = end_capture_;
             context.release_pointer();
             if (end_capture) end_capture();
+            if (presentation_changed) context.invalidate();
             return EventResult::Handled;
         }
         default:
@@ -102,11 +114,14 @@ public:
         }
     }
 
-    void deactivate(LifecycleContext&) override {
+    void deactivate(LifecycleContext& context) override {
         if (!armed_) return;
+        const bool presentation_changed =
+            presentation_changed_ && presentation_changed_(true, false);
         armed_ = false;
         auto end_capture = end_capture_;
         if (end_capture) end_capture();
+        if (presentation_changed) context.invalidate();
     }
 
     void paint(PaintContext&) const override {}
@@ -115,6 +130,7 @@ private:
     BeginCapture begin_capture_;
     EndCapture end_capture_;
     Activate activate_;
+    PresentationChanged presentation_changed_;
     bool armed_{};
 };
 
