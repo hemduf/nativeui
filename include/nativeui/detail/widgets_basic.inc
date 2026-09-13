@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
@@ -46,6 +47,10 @@ public:
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto metrics = TextService::measure(text_, style_);
         return Size{metrics.width, metrics.height};
+    }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::label_semantic_info(text_);
     }
 
     void paint(PaintContext& context) const override {
@@ -287,6 +292,10 @@ public:
         return Size{210.0f, 54.0f};
     }
 
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::toggle_semantic_info(label_, value_);
+    }
+
     void mount(MountContext& ctx) override {
         auto invalidate = ctx.invalidator();
         subscription_ = state_.observe([this, invalidate = std::move(invalidate)](const bool& value) {
@@ -327,5 +336,4 @@ private:
     bool value_{};
     State<bool>::Subscription subscription_;
 };
-
 

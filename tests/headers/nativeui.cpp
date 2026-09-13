@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,39 @@ void nativeui_header_compile_nativeui() {
     ui::SemanticNodeSnapshot snapshot;
     snapshot.info = std::move(info);
 }
+
+class NativeUIHeaderT068SemanticComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::SemanticInfo semantics() const override {
+        ui::SemanticInfo info;
+        info.role = ui::SemanticRole::Custom;
+        info.name = "Semantic probe";
+        info.focusable = true;
+        info.actions = {ui::SemanticAction::Focus};
+        return info;
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
+void nativeui_header_compile_t068_custom_semantics() {
+    NativeUIHeaderT068SemanticComponent component;
+    const auto info = component.semantics();
+    (void)info;
+}
+
+using NativeUIHeaderT068ComboBoxComponent = ui::detail::ComboBoxComponent<int>;
+using NativeUIHeaderT068ComboBoxSemantics =
+    ui::SemanticInfo (NativeUIHeaderT068ComboBoxComponent::*)() const;
+static_assert(
+    std::is_same_v<
+        decltype(&NativeUIHeaderT068ComboBoxComponent::semantics),
+        NativeUIHeaderT068ComboBoxSemantics>,
+    "ComboBoxComponent must expose its own semantic value/expanded-state snapshot");
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});

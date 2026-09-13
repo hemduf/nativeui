@@ -2,6 +2,7 @@
 
 #include <nativeui/component.hpp>
 #include <nativeui/detail/focus_group.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/state.hpp>
 
@@ -29,6 +30,10 @@ public:
         : state_(state), label_(std::move(label)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return checkbox_semantic_info(label_, state_.get());
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto text = TextService::measure(label_, 13.0f);
@@ -152,6 +157,11 @@ public:
           observe_(std::move(observe)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return radio_button_semantic_info(
+            label_, is_selected_ && is_selected_());
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto text = TextService::measure(label_, 13.0f);
