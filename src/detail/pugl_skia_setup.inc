@@ -5,6 +5,7 @@
 #include <pugl/gl.h>
 #include <pugl/pugl.h>
 
+#include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkSurface.h"
 #include "include/gpu/ganesh/GrBackendSurface.h"
