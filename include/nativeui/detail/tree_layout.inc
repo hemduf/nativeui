@@ -381,7 +381,11 @@
 
     void mount_node(Node& node) {
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
-            binding->bind_theme(theme_);
+            binding->bind_theme(node.parent ? inherited_theme_for(node) : theme_);
+            binding->set_theme_change_invalidator(
+                [this, id = node.id](ThemeInvalidation invalidation) {
+                    apply_scoped_theme_change(id, invalidation);
+                });
         }
         if (dynamic_source(node)) register_dynamic_node(node);
         MountContext context{
@@ -419,6 +423,9 @@
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
         node.component->unmount(context);
+        if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
+            binding->set_theme_change_invalidator({});
+        }
         if (auto* source = dynamic_source(node)) {
             source->set_structure_invalidator({});
             unregister_dynamic_node(node.id);

@@ -2,21 +2,38 @@
 
 #include <nativeui/theme.hpp>
 
+#include <functional>
+
 namespace ui {
 
 struct ComponentAvailability;
 
 namespace detail {
 
-// Internal per-component borrowed view of the owning tree's Theme. The Theme
-// object is owned by Tree and is declared before the retained root, so this
-// pointer remains valid for the complete component lifetime. There is no
-// process-global mutable theme state.
+// Internal per-component borrowed view of the owning tree's effective Theme.
+// The pointed-to Theme is owned either by Tree or by a retained lexical scope
+// ancestor. Both outlive descendants for their complete mounted lifetime, so
+// normal widgets keep a cheap borrowed view with no process-global mutable state.
 class ThemeBinding {
 public:
     virtual ~ThemeBinding() = default;
 
-    void bind_theme(const Theme& theme) noexcept { theme_ = &theme; }
+    virtual void bind_theme(const Theme& theme) noexcept { theme_ = &theme; }
+
+    // Most components simply pass their inherited theme through to descendants.
+    // T039 StyleScope overrides this seam with its instance-owned resolved Theme,
+    // allowing Tree ancestry to remain the single source of lexical inheritance.
+    [[nodiscard]] virtual const Theme& descendant_theme() const noexcept {
+        return current_theme();
+    }
+
+    // T039 scopes opt into this retained-tree callback. Ordinary style-aware
+    // components intentionally ignore it. The callback is installed/cleared at
+    // mount/unmount and receives the already-classified effective theme delta.
+    virtual void set_theme_change_invalidator(
+        std::function<void(ThemeInvalidation)> callback) {
+        (void)callback;
+    }
 
     // T038 availability reconciliation asks style-aware components whether an
     // Enabled/ReadOnly transition changes their fully resolved presentation.
