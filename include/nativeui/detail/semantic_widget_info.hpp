@@ -128,4 +128,13 @@ namespace ui::detail {
     return info;
 }
 
+[[nodiscard]] inline SemanticInfo dialog_semantic_info(std::string_view title) {
+    SemanticInfo info;
+    info.role = SemanticRole::Dialog;
+    info.name = title;
+    info.focusable = true;
+    info.actions = {SemanticAction::Focus};
+    return info;
+}
+
 } // namespace ui::detail
