@@ -85,6 +85,40 @@ namespace semantic_snapshot_detail {
            lhs.row_height() == rhs.row_height() && lhs.scroll_y() == rhs.scroll_y();
 }
 
+// A virtual dataset replacement can intentionally carry identical exposed
+// semantic values while still replacing the immutable T067 metadata object.
+// Native readers must observe the new backing generation, but the semantic
+// generation must not advance when the exposed accessibility data is unchanged.
+[[nodiscard]] inline bool virtual_storage_refresh_required(
+    const SemanticTreeSnapshot& before,
+    const SemanticTreeSnapshot& after) noexcept {
+    for (const auto& after_node : after.nodes) {
+        const SemanticNodeSnapshot* before_node = nullptr;
+        for (const auto& candidate : before.nodes) {
+            if (candidate.id == after_node.id) {
+                before_node = &candidate;
+                break;
+            }
+        }
+
+        if (before_node == nullptr ||
+            before_node->virtual_children.has_value() != after_node.virtual_children.has_value()) {
+            continue;
+        }
+        if (!before_node->virtual_children || !after_node.virtual_children) {
+            continue;
+        }
+
+        const auto& before_virtual = *before_node->virtual_children;
+        const auto& after_virtual = *after_node.virtual_children;
+        if (before_virtual.dataset_generation() != after_virtual.dataset_generation() ||
+            before_virtual.metadata_snapshot().get() != after_virtual.metadata_snapshot().get()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace semantic_snapshot_detail
 
 [[nodiscard]] inline std::vector<SemanticChange> diff_semantic_snapshots(
@@ -198,20 +232,32 @@ public:
         const auto previous = current();
         auto changes = diff_semantic_snapshots(*previous, candidate);
         if (changes.empty()) {
+            if (!semantic_snapshot_detail::virtual_storage_refresh_required(*previous, candidate)) {
+                return changes;
+            }
+
+            // Replace only the immutable backing storage. The exposed semantic
+            // data did not change, so keep the semantic generation stable while
+            // allowing new readers to retain the current T067 dataset object.
+            candidate.generation = previous->generation;
+            store(std::make_shared<const SemanticTreeSnapshot>(std::move(candidate)));
             return changes;
         }
 
         candidate.generation = previous->generation + 1;
-        auto published = std::make_shared<const SemanticTreeSnapshot>(std::move(candidate));
+        store(std::make_shared<const SemanticTreeSnapshot>(std::move(candidate)));
+        return changes;
+    }
+
+private:
+    void store(std::shared_ptr<const SemanticTreeSnapshot> published) noexcept {
 #if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
         current_.store(std::move(published), std::memory_order_release);
 #else
         std::atomic_store_explicit(&current_, std::move(published), std::memory_order_release);
 #endif
-        return changes;
     }
 
-private:
 #if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
     std::atomic<std::shared_ptr<const SemanticTreeSnapshot>> current_;
 #else
