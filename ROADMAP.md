@@ -20,13 +20,15 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` includes T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+Current `main` includes T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+
+T039 / issue #39 / PR #260 is complete and merged. Frozen executable head `3cf0c8e33cb472648cef880ece780dbda6b3fd38` passed normal CI `34778524773`, T066 Window Controls `34778524854`, then final-candidate T042 Lifecycle Stress `34779287474` and T052 v0.1 Release Gate `34779287449`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered scoped-style contract provides typed lexical `StyleScope` inheritance, retained-ancestry resolution, exact outer/inner/component precedence, bounded paint-vs-layout invalidation, structural removal/restoration/reinsertion, T058 dynamic ancestry, sibling/two-UI isolation and deterministic headless acceptance evidence.
 
 T040 / issue #40 / PR #259 is complete and merged. Frozen executable head `9bf6b9a49bf68ef4fe2bb38e1a602a0181aea39f` passed normal CI plus T051 Release Benchmarks, T064 Desktop Services, both T065 Dispatcher workflows and T066 Window Controls, then final-candidate T042 Lifecycle Stress `34770340801` and T052 v0.1 Release Gate `34770340828`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered animation layer provides exact cubic easing, deterministic semi-implicit spring integration, one coalesced T065 wake per active context, explicit retained Paint-vs-Layout invalidation targets, per-context reduced motion, finite/invalid configuration rejection, teardown-safe cancellation and zero idle timer/redraw behavior.
 
 T049 / issue #49 / PR #258 is complete and merged. Frozen executable head `58bad47cdc7095f261a812cd34fb38e23e2c5af2` passed normal CI `34765491619`, T066 Window Controls `34765491618`, then final-candidate T042 Lifecycle Stress `34767252432` and T052 v0.1 Release Gate `34767252389`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered gallery is one standalone public-API-only visual catalogue covering required layout, text, standard controls, values, collections/navigation, Canvas/Image/SVG resources and representative interaction/style states, with deterministic self-test, static public/private boundary guards and instance-owned demo state.
 
-T038 / issue #38 / PR #218 is complete and merged. Frozen executable head `401ff95808b96636b3edb644ef8dd5902f0db749` passed normal CI, T044 Native Pointer Capture, T066 Window Controls and T067 Virtual List Contract, then final-candidate T042 Lifecycle Stress `34758523505` and T052 v0.1 Release Gate `34758523484`. Independent final `CODE_REVIEW.md` review `5190751522` reported zero Blocking/Important findings. T039 is now the remaining direct style source work on the T069 path; T040 is complete.
+T038 / issue #38 / PR #218 is complete and merged. Frozen executable head `401ff95808b96636b3edb644ef8dd5902f0db749` passed normal CI, T044 Native Pointer Capture, T066 Window Controls and T067 Virtual List Contract, then final-candidate T042 Lifecycle Stress `34758523505` and T052 v0.1 Release Gate `34758523484`. Independent final `CODE_REVIEW.md` review `5190751522` reported zero Blocking/Important findings. T038/T039/T040 styling work is now complete and no longer blocks the v1 release frontier.
 
 T064 / issue #76 / PR #240 is complete and merged. Frozen current-main-synchronized executable head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed normal CI, T064 Desktop Services, T072 Linux D-Bus, T066 Window Controls, T065 Platform Dispatcher, T060 Application, T044 Native Pointer Capture, Package Contracts, T042 Lifecycle Stress and T052 v0.1 Release Gate. The final requirement-to-implementation/test review and current-main composition re-certification report no Blocking/Important finding.
 
@@ -43,7 +45,7 @@ T050 / issue #50 / PR #238 delivers the opt-in retained-tree debug inspector. Fr
 Current dependency frontier:
 
 ```text
-style:             T037(done) -> T038(done) -> T039(Doing)
+style:             T037(done) -> T038(done) -> T039(done)
                                       +-------> T040(done) with T065(done)
 
 gallery/release:   T038(done) -> T049(done) -----------------> T071
@@ -55,14 +57,14 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
 
-release:            T039 + T040(done) -> T069 -> T070 -> T071 -> v1.0.0
-                    T049(done) ---------------------------> T071
-                    T044(done) ---------------------------> T071
+release:            T039(done) + T040(done) -> T069 -> T070 -> T071 -> v1.0.0
+                    T049(done) ------------------------------- > T071
+                    T044(done) ------------------------------- > T071
 
 post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T040, T044 and T049 are also complete release-path dependencies. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
+The v1 platform prerequisite lane and styling prerequisite lane are complete. T069 is the next P0 public-API freeze frontier after completed-dependency metadata revalidation. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -98,9 +100,9 @@ The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 a
 
 ## Milestone 6 — Styling, theme and animation
 
-**T037, T038 and T040 complete; T039 remains active Doing work.**
+**Complete. T037, T038, T039 and T040 are Done.**
 
-T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 / PR #218 provides the typed shared `VisualState`, per-widget style families, deterministic interaction precedence, state-aware paint-vs-layout invalidation, geometry stability/isolation evidence, representative goldens and dedicated self-tests. T039 owns scoped style inheritance. T040 / PR #259 provides the deterministic tween/spring animation layer over T065, explicit retained Paint/Layout invalidation routes and per-context reduced-motion policy without introducing another scheduler.
+T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 / PR #218 provides the typed shared `VisualState`, per-widget style families, deterministic interaction precedence, state-aware paint-vs-layout invalidation, geometry stability/isolation evidence, representative goldens and dedicated self-tests. T039 / PR #260 provides typed lexical retained `StyleScope` inheritance, ancestry-authoritative dynamic insertion/removal, structural restoration evidence and scoped invalidation. T040 / PR #259 provides the deterministic tween/spring animation layer over T065, explicit retained Paint/Layout invalidation routes and per-context reduced-motion policy without introducing another scheduler.
 
 ## Milestone 7 — Platform and embedded robustness
 
@@ -214,22 +216,22 @@ T068 is explicitly deferred to NativeUI 1.2 and no longer blocks T069, T070, T07
 ### Final v1 release path
 
 ```text
-T038(done) -> T039(Doing) -----------+-> T069 -> T070 -> T071 -> v1.0.0
+T038(done) -> T039(done) ------------+-> T069 -> T070 -> T071 -> v1.0.0
               T040(done) ------------/
 T049(done) ---------------------------------------> T071
 T044(done) ----------------------------------------> T071
 other explicit T069/T071 dependencies ------------------------/
 ```
 
-T069 is the final v1 public API freeze and cannot start until every explicit live issue #81 dependency is coherently complete. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
+T039 is complete. T069 is the final v1 public API freeze and is semantically unlocked once its product issue metadata is coherently Ready. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
 
 ## Immediate cross-lane plan
 
-1. T040 and T049 are Done and merged; neither consumes a source lane.
-2. Prioritize completion of T039 because it is now the remaining direct source gate for T069.
-3. Use otherwise-free Delivery capacity for T069 preflight/peer-review only while T069 remains dependency-blocked; no source claim before coherent Ready.
-4. Repair direct completed dependency metadata that would prevent T069/T070/T071 readiness, without delaying current-head T039 qualification or merge work.
-5. Keep T068/PR #241 parked for 1.2.
+1. Transition T069/#81 to coherent Ready after final live dependency revalidation, then let the reserved Delivery lane claim it atomically.
+2. Give any T069 SOURCE_READY/qualification/merge closeout priority over background metadata cleanup.
+3. Repair T056/#68 to coherent Done before T070 readiness; repair T043/#43 and T052/#52 before T071 readiness.
+4. Keep T068/PR #241 parked for 1.2.
+5. Continue through T069 -> T070 -> T071; release gates do not end automation.
 
 ## Prioritization rule
 
