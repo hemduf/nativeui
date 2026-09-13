@@ -13,7 +13,6 @@
 
 namespace ui {
 
-/// Exact cubic easing functions supported by NativeUI v1 animations.
 enum class Easing {
     Linear,
     EaseIn,
@@ -21,13 +20,11 @@ enum class Easing {
     EaseInOut,
 };
 
-/// Explicit retained invalidation policy attached to every animation.
 enum class AnimationInvalidation {
     Paint,
     Layout,
 };
 
-/// Parameters for the v1 semi-implicit damped spring solver.
 struct SpringOptions {
     float stiffness{170.0f};
     float damping{26.0f};
@@ -37,7 +34,41 @@ struct SpringOptions {
     DispatcherDuration max_dt{1.0 / 30.0};
 };
 
-/// Opaque active-animation identity scoped to exactly one AnimationContext.
+/// Lifetime-safe retained invalidation routes for one animation target.
+///
+/// Paint and Layout are supplied as distinct callbacks so AnimationContext owns
+/// the policy mapping and a caller cannot accidentally route Paint through a
+/// layout invalidator (or omit invalidation entirely). Component owners pass
+/// their retained node-bounded paint invalidator and ancestor layout invalidator
+/// as the two routes; no whole-window Paint fallback is introduced.
+class AnimationInvalidationTarget final {
+public:
+    AnimationInvalidationTarget() = default;
+
+    AnimationInvalidationTarget(std::function<void()> paint_invalidator,
+                                std::function<void()> layout_invalidator)
+        : paint_(std::move(paint_invalidator)),
+          layout_(std::move(layout_invalidator)) {}
+
+    [[nodiscard]] bool valid() const noexcept {
+        return static_cast<bool>(paint_) && static_cast<bool>(layout_);
+    }
+
+private:
+    void invalidate(AnimationInvalidation kind) const {
+        if (kind == AnimationInvalidation::Layout) {
+            layout_();
+        } else {
+            paint_();
+        }
+    }
+
+    std::function<void()> paint_;
+    std::function<void()> layout_;
+
+    friend class AnimationContext;
+};
+
 class AnimationHandle final {
 public:
     AnimationHandle() = default;
@@ -67,13 +98,13 @@ inline const AnimationHandle kInvalidAnimationHandle{};
 /// and spring math use the owning Dispatcher's injected monotonic clock, so
 /// delayed callbacks use real elapsed time without replaying hidden substeps.
 ///
-/// The caller supplies the retained write and invalidation callbacks. This keeps
-/// animation policy independent from a specific Component while allowing Paint
-/// invalidation to remain bounded to the caller's owner/region.
+/// Every animation also carries an AnimationInvalidationTarget. The animation
+/// layer itself dispatches Paint versus Layout after each write, so the declared
+/// invalidation kind is an enforced retained-tree behavior rather than optional
+/// caller convention.
 class AnimationContext final {
 public:
     using ValueCallback = std::function<void(float)>;
-    using InvalidationCallback = std::function<void(AnimationInvalidation)>;
     using CompletionCallback = std::function<void()>;
 
     explicit AnimationContext(Dispatcher dispatcher)
@@ -92,18 +123,18 @@ public:
         DispatcherDuration duration,
         Easing easing,
         AnimationInvalidation invalidation,
+        AnimationInvalidationTarget target,
         ValueCallback write,
-        InvalidationCallback invalidate = {},
         CompletionCallback completion = {}) {
         const auto state = state_;
         if (!state || state->closing || !state->dispatcher.valid() || !write ||
-            !valid_tween(from, to, duration, easing)) {
+            !target.valid() || !valid_tween(from, to, duration, easing)) {
             return {};
         }
 
         if (duration == DispatcherDuration::zero() || state->reduced_motion) {
-            apply_immediate(state, to, invalidation, std::move(write),
-                            std::move(invalidate), std::move(completion));
+            apply_immediate(state, to, invalidation, std::move(target),
+                            std::move(write), std::move(completion));
             return {};
         }
 
@@ -121,8 +152,8 @@ public:
         entry.start_time = now;
         entry.previous_time = now;
         entry.invalidation = invalidation;
+        entry.target_invalidation = std::move(target);
         entry.write = std::move(write);
-        entry.invalidate = std::move(invalidate);
         entry.completion = std::move(completion);
         state->entries.push_back(std::move(entry));
 
@@ -139,18 +170,19 @@ public:
         float target,
         SpringOptions options,
         AnimationInvalidation invalidation,
+        AnimationInvalidationTarget invalidation_target,
         ValueCallback write,
-        InvalidationCallback invalidate = {},
         CompletionCallback completion = {}) {
         const auto state = state_;
         if (!state || state->closing || !state->dispatcher.valid() || !write ||
-            !valid_spring(value, target, options)) {
+            !invalidation_target.valid() || !valid_spring(value, target, options)) {
             return {};
         }
 
         if (state->reduced_motion) {
-            apply_immediate(state, target, invalidation, std::move(write),
-                            std::move(invalidate), std::move(completion));
+            apply_immediate(state, target, invalidation,
+                            std::move(invalidation_target), std::move(write),
+                            std::move(completion));
             return {};
         }
 
@@ -167,8 +199,8 @@ public:
         entry.start_time = now;
         entry.previous_time = now;
         entry.invalidation = invalidation;
+        entry.target_invalidation = std::move(invalidation_target);
         entry.write = std::move(write);
-        entry.invalidate = std::move(invalidate);
         entry.completion = std::move(completion);
         state->entries.push_back(std::move(entry));
 
@@ -214,15 +246,15 @@ public:
             if (!entry) continue;
             const float target = entry->target;
             const auto invalidation = entry->invalidation;
+            auto target_invalidation = entry->target_invalidation;
             auto write = entry->write;
-            auto invalidate = entry->invalidate;
             auto completion = entry->completion;
             entry->value = target;
             entry->velocity = 0.0f;
 
             write(target);
             if (state->closing) return;
-            if (invalidate) invalidate(invalidation);
+            target_invalidation.invalidate(invalidation);
             if (state->closing) return;
 
             if (!erase_entry(state, id)) continue;
@@ -242,10 +274,7 @@ public:
     }
 
 private:
-    enum class EntryKind {
-        Tween,
-        Spring,
-    };
+    enum class EntryKind { Tween, Spring };
 
     struct Entry {
         std::uint64_t id{};
@@ -260,8 +289,8 @@ private:
         std::chrono::steady_clock::time_point start_time{};
         std::chrono::steady_clock::time_point previous_time{};
         AnimationInvalidation invalidation{AnimationInvalidation::Paint};
+        AnimationInvalidationTarget target_invalidation;
         ValueCallback write;
-        InvalidationCallback invalidate;
         CompletionCallback completion;
     };
 
@@ -280,9 +309,7 @@ private:
 
     inline static constexpr DispatcherDuration kWakeCadence{0.016};
 
-    [[nodiscard]] static bool finite(float value) noexcept {
-        return std::isfinite(value);
-    }
+    [[nodiscard]] static bool finite(float value) noexcept { return std::isfinite(value); }
 
     [[nodiscard]] static bool valid_easing(Easing easing) noexcept {
         switch (easing) {
@@ -295,32 +322,29 @@ private:
         return false;
     }
 
-    [[nodiscard]] static bool valid_tween(float from,
-                                          float to,
+    [[nodiscard]] static bool valid_tween(float from, float to,
                                           DispatcherDuration duration,
                                           Easing easing) noexcept {
         return finite(from) && finite(to) && std::isfinite(duration.count()) &&
             duration >= DispatcherDuration::zero() && valid_easing(easing);
     }
 
-    [[nodiscard]] static bool valid_spring(float value,
-                                           float target,
+    [[nodiscard]] static bool valid_spring(float value, float target,
                                            const SpringOptions& options) noexcept {
         return finite(value) && finite(target) && finite(options.stiffness) &&
             finite(options.damping) && finite(options.initial_velocity) &&
             finite(options.distance_epsilon) && finite(options.velocity_epsilon) &&
             std::isfinite(options.max_dt.count()) && options.stiffness >= 0.0f &&
             options.damping >= 0.0f && options.distance_epsilon >= 0.0f &&
-            options.velocity_epsilon >= 0.0f && options.max_dt > DispatcherDuration::zero();
+            options.velocity_epsilon >= 0.0f &&
+            options.max_dt > DispatcherDuration::zero();
     }
 
     [[nodiscard]] static float easing_value(Easing easing, float t) noexcept {
         t = std::clamp(t, 0.0f, 1.0f);
         switch (easing) {
-        case Easing::Linear:
-            return t;
-        case Easing::EaseIn:
-            return t * t * t;
+        case Easing::Linear: return t;
+        case Easing::EaseIn: return t * t * t;
         case Easing::EaseOut: {
             const float u = 1.0f - t;
             return 1.0f - u * u * u;
@@ -373,15 +397,14 @@ private:
         return true;
     }
 
-    static void apply_immediate(const std::shared_ptr<State>& state,
-                                float target,
+    static void apply_immediate(const std::shared_ptr<State>& state, float target,
                                 AnimationInvalidation invalidation,
+                                AnimationInvalidationTarget target_invalidation,
                                 ValueCallback write,
-                                InvalidationCallback invalidate,
                                 CompletionCallback completion) {
         write(target);
         if (state->closing) return;
-        if (invalidate) invalidate(invalidation);
+        target_invalidation.invalidate(invalidation);
         if (state->closing) return;
         if (completion) completion();
     }
@@ -402,8 +425,8 @@ private:
             bool completed = false;
             if (entry->kind == EntryKind::Tween) {
                 const double elapsed = std::max(
-                    0.0,
-                    std::chrono::duration_cast<DispatcherDuration>(now - entry->start_time).count());
+                    0.0, std::chrono::duration_cast<DispatcherDuration>(
+                             now - entry->start_time).count());
                 const double duration = entry->duration.count();
                 const float t = duration > 0.0
                     ? static_cast<float>(std::clamp(elapsed / duration, 0.0, 1.0))
@@ -411,11 +434,12 @@ private:
                 completed = t >= 1.0f;
                 next_value = completed
                     ? entry->target
-                    : entry->from + (entry->target - entry->from) * easing_value(entry->easing, t);
+                    : entry->from + (entry->target - entry->from) *
+                          easing_value(entry->easing, t);
             } else {
                 const double elapsed = std::max(
-                    0.0,
-                    std::chrono::duration_cast<DispatcherDuration>(now - entry->previous_time).count());
+                    0.0, std::chrono::duration_cast<DispatcherDuration>(
+                             now - entry->previous_time).count());
                 const float dt = static_cast<float>(
                     std::min(elapsed, entry->spring.max_dt.count()));
                 const float acceleration =
@@ -434,13 +458,13 @@ private:
 
             entry->value = next_value;
             const auto invalidation = entry->invalidation;
+            auto target_invalidation = entry->target_invalidation;
             auto write = entry->write;
-            auto invalidate = entry->invalidate;
             auto completion = entry->completion;
 
             write(next_value);
             if (state->closing) return;
-            if (invalidate) invalidate(invalidation);
+            target_invalidation.invalidate(invalidation);
             if (state->closing) return;
 
             if (!completed || !find_entry(state, id)) continue;
@@ -450,9 +474,6 @@ private:
         }
 
         if (!state->entries.empty() && !ensure_wake(state)) {
-            // The owning dispatcher can become unavailable while callbacks run.
-            // Treat unschedulable residual entries as cancelled: never retain a
-            // logically active animation that has no future wake source.
             state->entries.clear();
         }
     }
