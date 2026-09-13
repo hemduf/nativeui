@@ -1,0 +1,84 @@
+name: T050 Inspector Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/t050-inspector.yml'
+      - 'CMakeLists.txt'
+      - 'include/nativeui/component_tree.hpp'
+      - 'include/nativeui/detail/inspector_paint.hpp'
+      - 'include/nativeui/detail/tree_inspector_public.inc'
+      - 'include/nativeui/inspector.hpp'
+      - 'include/nativeui/ui.hpp'
+      - 'tests/headers/inspector.cpp'
+      - 'tests/t050_inspector_*'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/t050-inspector.yml'
+      - 'CMakeLists.txt'
+      - 'include/nativeui/component_tree.hpp'
+      - 'include/nativeui/detail/inspector_paint.hpp'
+      - 'include/nativeui/detail/tree_inspector_public.inc'
+      - 'include/nativeui/inspector.hpp'
+      - 'include/nativeui/ui.hpp'
+      - 'tests/headers/inspector.cpp'
+      - 'tests/t050_inspector_*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCCACHE_GHA_ENABLED: 'true'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
+
+jobs:
+  inspector-build-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        inspector: [OFF, ON]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Install headless inspector dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libfontconfig1-dev libdbus-1-dev
+      - name: Configure inspector ${{ matrix.inspector }}
+        run: >-
+          cmake -S . -B build-t050-${{ matrix.inspector }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_ENABLE_INSPECTOR=${{ matrix.inspector }}
+      - name: Build inspector contract
+        shell: bash
+        run: |
+          targets="nativeui_t050_inspector_model_tests nativeui_header_inspector_compile nativeui_header_ui_compile"
+          if [[ "${{ matrix.inspector }}" == "ON" ]]; then
+            cmake --build build-t050-${{ matrix.inspector }} --parallel
+          else
+            cmake --build build-t050-${{ matrix.inspector }} --target $targets --parallel
+          fi
+      - name: Run inspector tests
+        shell: bash
+        run: |
+          ctest --test-dir build-t050-${{ matrix.inspector }} \
+            --output-on-failure \
+            -R "^nativeui_t050_inspector_"
+          if [[ "${{ matrix.inspector }}" == "ON" ]]; then
+            ctest --test-dir build-t050-${{ matrix.inspector }} \
+              --output-on-failure \
+              --parallel 4
+          fi
