@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-12
+**Updated:** 2026-09-13
 
 NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -20,36 +20,29 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` includes T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+Current `main` includes T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+
+T038 / issue #38 / PR #218 is complete and merged. Frozen executable head `401ff95808b96636b3edb644ef8dd5902f0db749` passed normal CI, T044 Native Pointer Capture, T066 Window Controls and T067 Virtual List Contract, then final-candidate T042 Lifecycle Stress `34758523505` and T052 v0.1 Release Gate `34758523484`. Independent final `CODE_REVIEW.md` review `5190751522` reported zero Blocking/Important findings. T039, T040 and T049 are now Ready after live dependency revalidation.
 
 T064 / issue #76 / PR #240 is complete and merged. Frozen current-main-synchronized executable head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed normal CI, T064 Desktop Services, T072 Linux D-Bus, T066 Window Controls, T065 Platform Dispatcher, T060 Application, T044 Native Pointer Capture, Package Contracts, T042 Lifecycle Stress and T052 v0.1 Release Gate. The final requirement-to-implementation/test review and current-main composition re-certification report no Blocking/Important finding.
 
 T072 / issue #84 / PR #185 is complete and merged. Its final executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
 
-T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5` closes its post-merge completeness gaps. It is no longer a T068 blocker.
+T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5` closes its post-merge completeness gaps.
 
 T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a3d20091b96a173`. Its frozen executable candidate passed normal/path-scoped validation plus final-candidate T042/T052 qualification, and the final requirement-to-implementation/test review recorded no Blocking/Important finding.
 
 T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation plus final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete #44 Outcome A/B and `CODE_REVIEW.md` evidence matrix with no Blocking/Important finding.
 
-T050 / issue #50 / PR #238 delivers the opt-in retained-tree debug inspector. Frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` is synchronized with current `main`, preserves the T044/T064/T066 baseline, and passed normal macOS/Windows/Linux CI, Linux ASan+UBSan, Package Contracts, T066, T072 and the dedicated inspector OFF/ON matrix; the inspector-ON build also passed all 65 registered headless tests.
+T050 / issue #50 / PR #238 delivers the opt-in retained-tree debug inspector. Frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` is synchronized with its qualified baseline, preserves the T044/T064/T066 contracts, and passed normal macOS/Windows/Linux CI, Linux ASan+UBSan, Package Contracts, T066, T072 and the dedicated inspector OFF/ON matrix; the inspector-ON build also passed all 65 registered headless tests.
 
 Current dependency frontier:
 
 ```text
-critical UI:       T034(done) -> T036(done) -> T045(done) -> T067(done) -> T068
-                                                   T058(done) ------------^
+style:             T037(done) -> T038(done) -> T039(Ready)
+                                      +-------> T040(Ready) with T065(done)
 
-dynamic/overlay:   T058(done) -> T061(done)
-                                      |-> T035(done) --------------------> T068
-                                      |-> T063(done) --------------------> T068
-                                      +-> T062(done) --------------------> T068
-
-style:             T037(done) -> T038 -> T039
-                                +-> T040 with T065(done)
-
-lifecycle/release: #64(done) -> T060(done) -> #139(done) -> T052(done)
-                   T042(done) -> T051(done) ---------------------> T052(done)
+gallery/release:   T038(done) -> T049(Ready) -----------------> T071
 
 platform/package:  T053(done) -> T047(done) -> T048(done)
                                        |-> T054(done)
@@ -57,13 +50,15 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 
 critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
-                                      |-------> T068
 
-release:            T044(done) -------------------------------> T071
-                    all explicit convergence -> T068 -> T069 -> T070 -> T071 -> v1.0.0
+release:            T039 + T040 -> T069 -> T070 -> T071 -> v1.0.0
+                    T049 -------------------------------> T071
+                    T044(done) -------------------------> T071
+
+post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T044 is also complete as an independent T071 release dependency.
+The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T044 is also complete as an independent T071 release dependency. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -99,9 +94,9 @@ The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 a
 
 ## Milestone 6 — Styling, theme and animation
 
-**T037 complete; T038/T039/T040 remain.**
+**T037 and T038 complete; T039/T040 remain and are Ready.**
 
-T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 owns typed widget variants, T039 scoped style inheritance, and T040 animation must reuse T065 instead of introducing another scheduler.
+T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 / PR #218 provides the typed shared `VisualState`, per-widget style families, deterministic interaction precedence, state-aware paint-vs-layout invalidation, geometry stability/isolation evidence, representative goldens and dedicated self-tests. T039 owns scoped style inheritance, and T040 animation must reuse T065 instead of introducing another scheduler.
 
 ## Milestone 7 — Platform and embedded robustness
 
@@ -136,7 +131,7 @@ All capture bookkeeping remains per view, widgets stay platform-neutral, exactly
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture. T049 is now Ready after T038 completion.
 
 ### T050 — Debug inspector / overlay
 
@@ -175,7 +170,7 @@ PR #238 / issue #50 adds a passive, opt-in diagnostic layer rather than a second
 
 ### T072 — Bounded Linux D-Bus transport
 
-**Complete in PR #185 / issue #84.** It provides the sole Linux D-Bus layer for T064 and T068:
+**Complete in PR #185 / issue #84.** It provides the sole Linux D-Bus layer for T064 and future T068 1.2 integration:
 
 - system `libdbus-1` only, no public D-Bus API/type leakage;
 - one private session connection + one joinable I/O thread per transport;
@@ -184,7 +179,7 @@ PR #238 / issue #50 adds a passive, opt-in diagnostic layer rather than a second
 - exactly-once request terminal states and T065-only UI callback marshalling;
 - teardown-safe queued callback suppression;
 - bounded signal/object-path services and a closed owned C++ value codec;
-- immutable T068 provider reads on the D-Bus thread, with mutation/actions marshalled to UI;
+- immutable provider-read boundary for future T068 read-only queries, with mutation/actions marshalled to UI;
 - one lazy shared transport per T060 Application and the independently owned EmbeddedView boundary required by T068;
 - package/install integration and Linux prerequisite documentation.
 
@@ -204,30 +199,28 @@ PR #238 / issue #50 adds a passive, opt-in diagnostic layer rather than a second
 
 Frozen current-main-synchronized head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed exact-head normal/path-scoped validation and final-candidate T042/T052. The final requirement-to-implementation/test matrix and `CODE_REVIEW.md` audit report zero remaining Blocking/Important findings.
 
-### T068 convergence
+### T068 — Native accessibility bridges (post-1.0)
 
-T068 starts only after **all** explicit issue #80 dependencies are Done. It implements T045 semantics through immutable per-view snapshots and native NSAccessibility/UIA/AT-SPI2 bridges, shares T067 virtual metadata, routes mutations through T065 and uses T072 as the sole Linux D-Bus transport.
+T068 is explicitly deferred to NativeUI 1.2 and no longer blocks T069, T070, T071 or the NativeUI 1.0 release. Preserve the existing canonical Draft PR #241; do not consume a v1 delivery lane unless the ticket is explicitly reprioritized.
 
 ### Final v1 release path
 
 ```text
-T036(done) -> T045(done) -> T067(done) ---------------------\
-T058(done) -> T061(done) -> T035(done) -> T063(done) --------+--> T068 -> T069 -> T070 -> T071 -> v1.0.0
-                         \-> T062(done) ---------------------/
-T065(done) -> T072(done) -> T064(done) ---------------------+
-T043(done) ---------------------> T066(done) ----------------/
-T044(done) --------------------------------------------------> T071
-other explicit T069 dependencies ---------------------------/
+T038(done) -> T039(Ready) ---\
+              T040(Ready) ----+-> T069 -> T070 -> T071 -> v1.0.0
+T049(Ready) ---------------------------------------> T071
+T044(done) ----------------------------------------> T071
+other explicit T069/T071 dependencies ------------------------/
 ```
 
-T069 is the final v1 public API freeze and cannot start until every explicit issue #81 dependency is complete. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
+T069 is the final v1 public API freeze and cannot start until every explicit live issue #81 dependency is coherently complete. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
 
 ## Immediate cross-lane plan
 
-1. The platform prerequisite lane is complete; do not reopen T044/T064/T066/T072/T043/T065 unless a concrete regression appears.
-2. Continue T038 -> T039 and T040 in the styling lane as capacity permits.
-3. Continue T068 according to its own explicit issue #80 dependencies; T064 is no longer a platform blocker.
-4. Keep T069/T070/T071 dependency-gated until their explicit prerequisite sets are genuinely Done.
+1. T038 is Done and merged. Use the available three-lane fan-out: T040, T039 and T049 are all coherent Ready after live dependency revalidation.
+2. Prioritize T040 and T039 because both directly unblock T069; T049 is required by T071 and can use the third lane without delaying the API-freeze path.
+3. Keep T068/PR #241 parked for 1.2.
+4. Keep T069/T070/T071 dependency-gated until their explicit prerequisite sets are genuinely and coherently Done.
 
 ## Prioritization rule
 
@@ -235,7 +228,7 @@ T069 is the final v1 public API freeze and cannot start until every explicit iss
 core correctness
   -> layout/input/render/text foundations
   -> widgets/styles/overlays/platform services
-  -> accessibility convergence and public API freeze
+  -> public API freeze
   -> reference package/release
 ```
 
