@@ -30,20 +30,22 @@ Non-negotiable rules:
 
 T038 / issue #38 / PR #218 is complete and squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`. Frozen executable head `401ff95808b96636b3edb644ef8dd5902f0db749` passed normal CI plus T044/T066/T067 path-scoped contracts, then final-candidate T042 Lifecycle Stress `34758523505` and T052 v0.1 Release Gate `34758523484`. Independent final review `5190751522` recorded zero Blocking/Important findings. The completion delivers typed widget style/state families, deterministic shared interaction precedence, orthogonal focused/selected/checked/read-only state, equal-resolved no-invalidation, paint-vs-layout classification, geometry stability, instance isolation, representative goldens and deterministic feature self-tests.
 
+T049 / issue #49 / PR #258 is complete and squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`. Frozen executable head `58bad47cdc7095f261a812cd34fb38e23e2c5af2` passed normal CI `34765491619`, T066 `34765491618`, final-candidate T042 Lifecycle Stress `34767252432` and T052 v0.1 Release Gate `34767252389`. Independent final review recorded zero Blocking/Important findings. The delivered gallery is a single-window public-API-only visual catalogue with deterministic self-test coverage, public/private include guards, focused-example indexing, representative interaction/style-state surfaces and instance-owned demo state.
+
 The immediate v1 frontier is now:
 
 ```text
-T037(done) -> T038(done) -> T039(Ready) ---\
-                         \-> T040(Ready) ----+-> T069 -> T070 -> T071 -> v1.0.0
-T049(Ready) -----------------------------------------------> T071
+T037(done) -> T038(done) -> T039(Doing) ---\
+                         \-> T040(Doing) ----+-> T069 -> T070 -> T071 -> v1.0.0
+T049(done) -----------------------------------------------> T071
 T044(done) ------------------------------------------------> T071
 ```
 
-T039, T040 and T049 were transitioned to coherent Ready only after live dependency revalidation following the T038 merge. T040 and T039 are the direct T069 critical-path work; T049 is a T071 prerequisite and can use the third source lane.
+T039 and T040 are the remaining direct T069 critical-path source work. T049 is now a completed T071 prerequisite and no longer consumes a source lane.
 
 T068 / issue #80 / PR #241 is explicitly deferred to NativeUI 1.2. It is P2/Blocked and does **not** block T069, T070, T071 or the NativeUI 1.0 release. Preserve its canonical Draft PR and do not consume a v1 source lane unless explicitly reprioritized.
 
-The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T044 is also complete as an independent T071 release prerequisite. Completed retained/dynamic/widget foundations include T034, T035, T036, T037, T045, T058, T059, T060, T061, T062, T063 and T067.
+The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 are Done. T044 is also complete as an independent T071 release prerequisite. Completed retained/dynamic/widget foundations include T034, T035, T036, T037, T045, T049, T058, T059, T060, T061, T062, T063 and T067.
 
 ## Completed foundations relevant to v1
 
@@ -54,6 +56,7 @@ The v1 platform prerequisite lane is complete: T065, T072, T043, T064 and T066 a
 - T044 / PR #145: evidence-gated native pointer-capture qualification.
 - T045 / PR #210: backend-neutral accessibility semantic architecture and virtual collection contract.
 - T047/T048: relocatable package and external-consumer qualification.
+- T049 / PR #258: single-window public component gallery, merged as `24d5b2265360917a37e1ab7d5846a0348b305485`.
 - T050 / PR #238: opt-in per-UI retained-tree debug inspector.
 - T051/T052: performance regression policy and v0.1 qualification gate.
 - T053: consumer-scoped macOS Objective-C runtime identity.
@@ -75,11 +78,11 @@ T064 provides callback-only file/directory/save/HTTP(S) operations with bounded 
 
 ## Styling completion and next work
 
-T038 is now Done. Do not reopen it for T039 scoped inheritance or T040 animation; those scopes remain separate tickets.
+T038 is Done. Do not reopen it for T039 scoped inheritance or T040 animation; those scopes remain separate tickets.
 
-- **T039 Ready:** explicit lexical/subtree StyleScope inheritance with typed inheritable overrides and bounded descendant invalidation.
-- **T040 Ready:** deterministic cubic tweens + semi-implicit spring solver, using T065 timers only while active and per-context reduced-motion policy.
-- **T049 Ready:** single-window public-API component gallery and deterministic self-test.
+- **T039 Doing:** explicit lexical/subtree StyleScope inheritance with typed inheritable overrides and bounded descendant invalidation.
+- **T040 Doing:** deterministic cubic tweens + semi-implicit spring solver, using T065 timers only while active and per-context reduced-motion policy.
+- **T049 Done:** single-window public-API component gallery with deterministic self-test and public-boundary qualification.
 
 T069 remains the final v1 public API freeze. It starts only when all of its explicit live dependencies, including T039 and T040, are coherently Done. T070 validates the external reference application and Getting Started against that frozen API. T071 is validation/release-only on one exact RC SHA; defects discovered there return to focused product tickets rather than being fixed inside the release gate.
 
@@ -99,20 +102,12 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 GitHub live state is authoritative. `#250` is Scheduler-only control state; current `AUTOMATION CYCLE — GNNN` issue comments are the Worker → Scheduler event bus. Delivery W1/W2/W3 are interchangeable with at most three source-changing lanes. Integration owns independent final review, exact-head CI diagnosis, qualification, merge and completion/unlock bookkeeping; it never implements product features. Reporter is read-only.
 
-After T038 merge, the verified unlock reservation is:
-
-```text
-W2 -> T040
-W3 -> T039
-W1 -> T049
-```
-
-subject to live coherent Ready state and the global three-lane cap.
+T049 is merged and no new source ticket is unlocked by that merge. Current source-changing capacity remains focused on T040 and T039. The next major unlock is T069 after both are coherently Done and direct completed dependency metadata is coherent.
 
 ## Next actions
 
-1. Claim and execute T040, T039 and T049 through the scheduler/Delivery workers from their coherent Ready states.
-2. Prioritize T040/T039 closeout because both unblock T069.
-3. Repair remaining unambiguous completed-ticket metadata drift in the Integration queue without delaying critical-path qualification/merge work.
+1. Complete T040 and T039 closeout because both directly unblock T069.
+2. Repair remaining unambiguous completed-ticket metadata drift for direct T069/T070/T071 prerequisites without delaying current-head qualification/merge work.
+3. Claim T069 only after T039/T040 and all explicit dependencies are coherently Done and issue #81 becomes coherent Ready.
 4. Keep T068/PR #241 parked for NativeUI 1.2.
 5. Continue through T069 -> T070 -> T071 after dependencies are genuinely and coherently Done; automation continues beyond release gates into the post-1.0 backlog.
