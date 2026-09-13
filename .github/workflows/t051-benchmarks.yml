@@ -8,6 +8,8 @@ on:
       - 'tests/t051_benchmarks.cpp'
       - 'tests/t051_workload_contract_tests.cpp'
       - 'tests/benchmarks/**'
+      - 'include/nativeui/animation.hpp'
+      - 'examples/features/t040_animation.cpp'
       - '.github/workflows/t051-benchmarks.yml'
   workflow_dispatch:
 

@@ -390,4 +390,17 @@ bool Dispatcher::valid() const noexcept {
     return !state->closing;
 }
 
+std::chrono::steady_clock::time_point Dispatcher::current_time() const noexcept {
+    const auto state = state_.lock();
+    if (!state) return {};
+
+    std::shared_ptr<detail::DispatcherClock> clock;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing) return {};
+        clock = state->clock;
+    }
+    return clock ? clock->now() : std::chrono::steady_clock::time_point{};
+}
+
 } // namespace ui
