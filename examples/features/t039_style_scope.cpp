@@ -31,6 +31,70 @@ ui::StyleScopeOverrides inner_scope() {
     return result;
 }
 
+int verify_retained_scope_invalidation() {
+    ui::StyleScopeOverrides initial;
+    initial.palette.control_background = ui::Color{0.12f, 0.18f, 0.25f, 1.0f};
+    ui::State<ui::StyleScopeOverrides> scoped{initial};
+
+    ui::UI tree{ui::Row{
+        ui::StyleScope{scoped, ui::Button{"Scoped", [] {}}},
+        ui::Button{"Sibling", [] {}}
+    }.gap(40.0f)};
+    const ui::Size size{600.0f, 160.0f};
+    tree.resize(size);
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    if (!renderer.render(tree)) return example::fail("retained scope baseline render failed");
+    if (tree.dirty()) return example::fail("baseline render left retained scope dirty");
+
+    auto paint_only = scoped.get();
+    paint_only.palette.control_background = ui::Color{0.36f, 0.16f, 0.10f, 1.0f};
+    scoped.set(paint_only);
+    if (tree.layout_dirty() || !tree.paint_dirty()) {
+        return example::fail("paint-only scope replacement did not stay paint-only");
+    }
+    if (tree.dirty_regions().empty()) {
+        return example::fail("paint-only scope replacement produced no scoped dirty region");
+    }
+    for (const auto rect : tree.dirty_regions()) {
+        if (rect.w >= size.w && rect.h >= size.h) {
+            return example::fail("paint-only scope replacement dirtied the whole UI");
+        }
+    }
+
+    if (!renderer.render(tree)) return example::fail("paint-only scope rerender failed");
+    scoped.set(paint_only);
+    if (tree.dirty()) return example::fail("equal scope replacement invalidated the tree");
+
+    auto layout = scoped.get();
+    layout.controls.control_height = 82.0f;
+    scoped.set(layout);
+    if (!tree.layout_dirty() || !tree.paint_dirty()) {
+        return example::fail("layout-affecting scope replacement missed layout+paint invalidation");
+    }
+    return 0;
+}
+
+int verify_nested_retained_precedence() {
+    ui::StyleScopeOverrides outer;
+    outer.palette.control_background = ui::Color{0.14f, 0.20f, 0.28f, 1.0f};
+    outer.controls.control_height = 48.0f;
+
+    ui::StyleScopeOverrides inner;
+    inner.controls.control_height = 86.0f;
+
+    ui::UI outer_only{ui::StyleScope{outer, ui::Button{"Outer", [] {}}}};
+    ui::UI nested{ui::StyleScope{
+        outer,
+        ui::StyleScope{inner, ui::Button{"Nested", [] {}}}}};
+
+    const auto outer_metrics = outer_only.measure();
+    const auto nested_metrics = nested.measure();
+    if (nested_metrics.preferred.h <= outer_metrics.preferred.h) {
+        return example::fail("nearest retained scope did not override inherited control geometry");
+    }
+    return 0;
+}
+
 int self_test() {
     static_assert(!HasWidthMember<ui::StyleScopeOverrides>);
     static_assert(!HasEnabledMember<ui::StyleScopeOverrides>);
@@ -87,19 +151,25 @@ int self_test() {
         return example::fail("component/state precedence did not follow the T038 resolver seam");
     }
 
+    if (const auto retained = verify_retained_scope_invalidation(); retained != 0) return retained;
+    if (const auto retained = verify_nested_retained_precedence(); retained != 0) return retained;
     return 0;
 }
 
 ui::UI make_demo() {
-    auto theme = ui::apply_style_scope_overrides(ui::default_theme(), outer_scope());
-    theme = ui::apply_style_scope_overrides(std::move(theme), inner_scope());
-    return ui::UI{
-        ui::Column{
-            ui::Header{"T039 — Scoped Style Resolution"},
-            ui::Label{"Typed lexical overrides compose outer to inner; component styles and visual state remain T038-owned."},
-            ui::Button{"Resolved inherited theme", [] {}}
-        }.gap(theme.spacing.large),
-        std::move(theme)};
+    auto outer = outer_scope();
+    auto inner = inner_scope();
+    return ui::UI{ui::Column{
+        ui::Header{"T039 — Scoped Style Resolution"},
+        ui::Label{"Outer/inner lexical scopes affect only their retained descendants."},
+        ui::StyleScope{
+            outer,
+            ui::Column{
+                ui::Button{"Outer scope", [] {}},
+                ui::StyleScope{inner, ui::Button{"Nearest inner scope", [] {}}}
+            }.gap(outer.spacing.large.value_or(12.0f))},
+        ui::Button{"Unscoped sibling", [] {}}
+    }.gap(14.0f)};
 }
 
 } // namespace
@@ -107,5 +177,5 @@ ui::UI make_demo() {
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
     auto ui = make_demo();
-    return example::run_window(ui, "NativeUI T039 Style Scope", {720.0f, 300.0f});
+    return example::run_window(ui, "NativeUI T039 Style Scope", {720.0f, 360.0f});
 }
