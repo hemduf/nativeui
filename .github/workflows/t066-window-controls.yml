@@ -1,0 +1,123 @@
+name: T066 Window Controls
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t066-window-controls-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-window-controls:
+    name: T066 ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15-intel
+          - name: Windows
+            os: windows-latest
+          - name: Linux X11
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S tests/t066 -B build-t066 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S tests/t066 -B build-t066 -A x64
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build contracts
+        run: >-
+          cmake --build build-t066 --config Release
+          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests nativeui_t066_window_controls_example
+          --parallel 2
+
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build-t066\Release\opengl32.dll -Force
+          Copy-Item $gallium.FullName build-t066\Release\libgallium_wgl.dll -Force
+
+      - name: Run pure state contract (Unix)
+        if: runner.os != 'Windows'
+        run: ./build-t066/nativeui_t066_window_control_state_tests
+
+      - name: Run pure state contract (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build-t066/Release/nativeui_t066_window_control_state_tests.exe
+
+      - name: Run Linux X11 contract
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_window_controls_platform_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_destroy_survivor_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24 +extension GLX +render -noreset" ./build-t066/nativeui_t066_window_controls_example --self-test
+
+      - name: Run macOS contract
+        if: runner.os == 'macOS'
+        run: |
+          ./build-t066/nativeui_t066_window_controls_platform_tests
+          ./build-t066/nativeui_t066_destroy_survivor_tests
+          ./build-t066/nativeui_t066_window_controls_example --self-test
+
+      - name: Run Windows contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GALLIUM_DRIVER = 'llvmpipe'
+          ./build-t066/Release/nativeui_t066_window_controls_platform_tests.exe
+          ./build-t066/Release/nativeui_t066_destroy_survivor_tests.exe
+          ./build-t066/Release/nativeui_t066_window_controls_example.exe --self-test

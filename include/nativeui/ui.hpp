@@ -6,6 +6,10 @@
 #include <nativeui/detail/overlay_service.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+#include <nativeui/detail/inspector_paint.hpp>
+#include <nativeui/inspector.hpp>
+#endif
 
 #include <cstdint>
 #include <functional>
@@ -293,12 +297,17 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
-        if (overlay_state_->entries.empty()) {
-            tree_.paint(canvas, platform);
+        if (!overlay_state_->entries.empty()) {
+            prepare_overlay_layout();
+            enforce_new_modal_capture_barrier(platform);
+        }
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+        if (inspector_enabled_) {
+            auto snapshot = tree_.paint_with_inspector_snapshot(canvas, platform);
+            detail::paint_inspector_overlay(canvas, snapshot, inspector_selected_node_);
             return;
         }
-        prepare_overlay_layout();
-        enforce_new_modal_capture_barrier(platform);
+#endif
         tree_.paint(canvas, platform);
     }
 
@@ -324,6 +333,13 @@ public:
 
 private:
     friend class Dialog;
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+    friend bool debug::inspector_enabled(const UI& ui) noexcept;
+    friend void debug::set_inspector_enabled(UI& ui, bool enabled);
+    friend NodeId debug::inspector_selected_node(const UI& ui) noexcept;
+    friend void debug::set_inspector_selected_node(UI& ui, NodeId id);
+    friend debug::InspectorSnapshot debug::inspector_snapshot(UI& ui);
+#endif
 
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
@@ -604,7 +620,41 @@ private:
     Tree tree_;
     Size viewport_{};
     std::uint64_t last_modal_capture_barrier_id_{};
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+    bool inspector_enabled_{};
+    NodeId inspector_selected_node_{kInvalidNodeId};
+#endif
 };
+
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+namespace debug {
+
+inline bool inspector_enabled(const UI& ui) noexcept {
+    return ui.inspector_enabled_;
+}
+
+inline void set_inspector_enabled(UI& ui, bool enabled) {
+    if (ui.inspector_enabled_ == enabled) return;
+    ui.inspector_enabled_ = enabled;
+    ui.tree_.invalidate();
+}
+
+inline NodeId inspector_selected_node(const UI& ui) noexcept {
+    return ui.inspector_selected_node_;
+}
+
+inline void set_inspector_selected_node(UI& ui, NodeId id) {
+    if (ui.inspector_selected_node_ == id) return;
+    ui.inspector_selected_node_ = id;
+    ui.tree_.invalidate();
+}
+
+inline InspectorSnapshot inspector_snapshot(UI& ui) {
+    return ui.tree_.inspector_snapshot();
+}
+
+} // namespace debug
+#endif
 
 using PluginUI = UI; // compatibility alias for the original POC
 
