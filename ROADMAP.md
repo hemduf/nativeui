@@ -58,13 +58,13 @@ critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
 
 release:            T039(done) + T040(done) -> T069 -> T070 -> T071 -> v1.0.0
-                    T049(done) ------------------------------- > T071
-                    T044(done) ------------------------------- > T071
+                    T049(done) -------------------------------> T071
+                    T044(done) -------------------------------> T071
 
 post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The v1 platform prerequisite lane and styling prerequisite lane are complete. T069 is the next P0 public-API freeze frontier after completed-dependency metadata revalidation. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
+The v1 platform prerequisite lane and styling prerequisite lane are complete. T069 is the next P0 public-API freeze frontier after completed-dependency metadata revalidation. Completed-ticket drift on T047, T059, T056, T043 and T052 has been repaired to coherent Done. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -228,8 +228,8 @@ T039 is complete. T069 is the final v1 public API freeze and is semantically unl
 ## Immediate cross-lane plan
 
 1. Transition T069/#81 to coherent Ready after final live dependency revalidation, then let the reserved Delivery lane claim it atomically.
-2. Give any T069 SOURCE_READY/qualification/merge closeout priority over background metadata cleanup.
-3. Repair T056/#68 to coherent Done before T070 readiness; repair T043/#43 and T052/#52 before T071 readiness.
+2. Give any T069 SOURCE_READY/qualification/merge closeout priority over background cleanup.
+3. After T069 completes, re-evaluate T070 directly; completed prerequisite metadata including T056/#68 is coherent. After T070, re-evaluate T071; T043/#43 and T052/#52 are now also coherent Done.
 4. Keep T068/PR #241 parked for 1.2.
 5. Continue through T069 -> T070 -> T071; release gates do not end automation.
 
