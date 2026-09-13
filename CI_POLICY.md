@@ -4,9 +4,12 @@ This document defines **when** validation runs. It does not reduce the test/revi
 
 ## 1. Goals
 
-- keep TDD feedback fast while a pull request is changing frequently;
-- avoid starting unrelated platform matrices for every commit;
-- cancel obsolete runs for the same pull request;
+- keep TDD feedback fast by keeping RED/GREEN iteration local whenever possible;
+- use GitHub Actions as remote qualification, not as the inner development loop;
+- batch related corrections into validation-worthy heads instead of triggering a matrix for every micro-change;
+- avoid starting unrelated platform matrices for every pushed batch;
+- avoid superseding a useful in-progress exact-head run without a concrete reason;
+- cancel obsolete runs for genuinely superseded heads;
 - preserve one complete final-candidate qualification before merge;
 - keep dedicated workflows owned by the subsystem they validate.
 
@@ -16,15 +19,44 @@ This document defines **when** validation runs. It does not reduce the test/revi
 
 Keep implementation pull requests in Draft while code is still changing.
 
-Every source/build/test change must run:
+Local development may contain many fine-grained TDD steps. Those steps do **not** require one Git commit or remote CI run each.
+
+A **qualification batch** is a coherent set of tests + implementation + refactor that closes one bounded acceptance slice, one related family of review findings, or another independently reviewable unit. Before publishing such a batch:
+
+1. reproduce the relevant RED locally when the environment permits it;
+2. complete the GREEN/refactor locally;
+3. build the affected production surface locally;
+4. run the targeted tests for the whole batch;
+5. run the relevant broader local suite when practical for the touched surface;
+6. fold/squash temporary local RED/GREEN/fixup commits when they do not represent independently useful rollback units.
+
+Every **pushed qualification batch** must then run:
 
 - the normal `CI` workflow;
-- any dedicated workflow whose `paths` filter matches the changed subsystem;
-- the smallest targeted local tests required by the ticket.
+- any dedicated workflow whose `paths` filter matches the changed subsystem.
 
-Heavy whole-project qualification workflows must **not** run on every Draft commit.
+Do **not** use remote CI as the default way to discover the next small local failure. Do **not** publish a known RED merely to create evidence when it can be reproduced locally.
 
-### 2.2 Final candidate — Ready for review
+An intentional RED may be pushed only when the required failure depends on a remote-only platform/environment that cannot be reproduced locally, or when the RED itself is an independently useful diagnostic checkpoint. Record that reason in the PR/ticket.
+
+While an exact-head remote run is queued or running, do not push another small correction to the same PR merely because another potential gap was noticed. Collect and validate additional compatible local findings, then publish the next coherent batch only after the current run has produced useful evidence or is already known to be obsolete.
+
+Heavy whole-project qualification workflows must **not** run on every Draft batch.
+
+### 2.2 Closeout batching
+
+When a ticket enters closeout/finalization:
+
+1. audit the complete ticket against all acceptance criteria and required tests in one pass;
+2. collect all current actionable Blocking/Important review findings before editing;
+3. group compatible corrections into one bounded closeout batch;
+4. run targeted/local validation for the whole batch;
+5. publish one qualification head for that closeout batch;
+6. repeat only if the resulting evidence reveals a genuinely new defect.
+
+Do not intentionally run a remote sequence of “one widget/finding -> one push -> one matrix” when those findings could have been discovered and fixed in the same complete audit.
+
+### 2.3 Final candidate — Ready for review
 
 Before changing a PR from Draft to Ready for review:
 
@@ -36,7 +68,7 @@ Before changing a PR from Draft to Ready for review:
 
 The Draft -> Ready for review transition is the explicit final-candidate trigger for heavyweight qualification. `T042 Lifecycle Stress` and `T052 v0.1 Release Gate` run on that transition and remain available through `workflow_dispatch` for recovery/manual requalification.
 
-### 2.3 Changes after final qualification
+### 2.4 Changes after final qualification
 
 A change to any of the following invalidates the final candidate:
 
@@ -50,7 +82,20 @@ If one of those changes is required after the PR is Ready, convert the PR back t
 
 Pure project-state/completion documentation such as `CONTEXT.md`, `ROADMAP.md`, `AGENTS.md`, `CODE_REVIEW.md`, `VALIDATION.md`, `DESIGN.md` and `THIRD_PARTY.md` does not invalidate an already qualified source/build/test candidate when it changes no executable contract. Do not rerun heavyweight platform/release gates solely because such bookkeeping changed the Git head.
 
-## 3. Workflow authoring rules
+## 3. Commit/push cadence
+
+The remote branch should describe meaningful development checkpoints, not every local edit.
+
+- Prefer one coherent implementation commit for a bounded acceptance slice.
+- A ticket may use an additional consolidated review-fix commit when the final review finds actionable issues.
+- Completion/docs bookkeeping may be separate when it does not alter executable behavior.
+- More commits are acceptable when they are independently meaningful rollback, architecture, platform or diagnostic units.
+- Avoid published `RED -> GREEN -> next RED -> next GREEN` micro-history for one logical slice; keep that detail local and squash/fold it before push.
+- Never create a no-op or metadata-only source commit just to retrigger CI; use supported rerun/manual qualification mechanisms when the candidate itself is unchanged.
+
+The policy controls remote cadence, not local TDD granularity.
+
+## 4. Workflow authoring rules
 
 For every dedicated workflow:
 
@@ -70,7 +115,7 @@ concurrency:
 - prefer adding a test to the normal CI/CTest graph over creating another always-on per-ticket matrix;
 - a new dedicated workflow requires a clear ownership boundary that normal CI cannot cover efficiently.
 
-## 4. Merge evidence
+## 5. Merge evidence
 
 A code-changing PR is mergeable only when the evidence applicable to its final candidate is green:
 
@@ -79,4 +124,4 @@ A code-changing PR is mergeable only when the evidence applicable to its final c
 - heavyweight final-candidate workflows required by the ticket/project (`T042` and `T052` by default for final qualification);
 - mandatory `CODE_REVIEW.md` record with no remaining Blocking/Important finding.
 
-The purpose of this policy is to change **cadence**, not quality: validation is concentrated where it provides useful information instead of being repeated on every intermediate commit.
+The purpose of this policy is to change **cadence**, not quality: validation is concentrated on coherent qualification batches and the final candidate instead of being repeated for every micro-step.

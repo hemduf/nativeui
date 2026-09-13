@@ -32,6 +32,8 @@ T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a
 
 T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation plus final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete #44 Outcome A/B and `CODE_REVIEW.md` evidence matrix with no Blocking/Important finding.
 
+T050 / issue #50 / PR #238 delivers the opt-in retained-tree debug inspector. Frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` is synchronized with current `main`, preserves the T044/T064/T066 baseline, and passed normal macOS/Windows/Linux CI, Linux ASan+UBSan, Package Contracts, T066, T072 and the dedicated inspector OFF/ON matrix; the inspector-ON build also passed all 65 registered headless tests.
+
 Current dependency frontier:
 
 ```text
@@ -134,7 +136,22 @@ All capture bookkeeping remains per view, widgets stay platform-neutral, exactly
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture.
+
+### T050 — Debug inspector / overlay
+
+PR #238 / issue #50 adds a passive, opt-in diagnostic layer rather than a second retained-tree system:
+
+- build option `NATIVEUI_ENABLE_INSPECTOR` defaults OFF, with runtime activation and per-UI inspector state compiled only when enabled;
+- each `ui::UI` owns enabled/selected state independently; no current-inspector singleton, mutable process registry or `thread_local` instance state is introduced;
+- immutable value snapshots expose NodeId, parent/depth/order, stable debug label, logical bounds, effective clip, layout/paint dirty state, focus/capture and effective T059 availability without leaking raw runtime pointers;
+- stale/destroyed NodeId queries are safe and previously copied snapshots remain self-contained;
+- enabling/disabling or changing the selected NodeId requests one paint invalidation only and never creates layout dirtiness or a timer/tick loop;
+- normal root and T061 application overlay content paint first; the diagnostic pass then draws node/clip/dirty/selection/focus/capture information and restores Painter/SkCanvas state;
+- the inspector receives no hit testing, pointer/keyboard input or focus and does not consume T061 overlay slots;
+- deterministic tests cover hierarchy/child order, dirty state/regions, stale IDs, focus/capture/clip/availability, selected-node emphasis, keyboard/pointer non-interception, canvas-state preservation, no-continuous-redraw behavior and two-UI isolation;
+- infrastructure scope intentionally requires deterministic inspector/headless fixtures rather than a new normal feature API example;
+- frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` passed inspector OFF/ON, the full 65-test inspector-ON headless suite, normal CI on macOS/Windows/Linux, Linux ASan+UBSan, Package Contracts, T066 and T072 with no Blocking/Important review finding.
 
 ### Build/example registration hardening
 
