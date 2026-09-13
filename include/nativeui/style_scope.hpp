@@ -24,8 +24,6 @@ struct StyleScopePaletteOverrides {
     std::optional<Color> control_hover;
     std::optional<Color> active_highlight;
     std::optional<Color> track;
-
-    [[nodiscard]] bool operator==(const StyleScopePaletteOverrides&) const = default;
 };
 
 /// Typed inheritable typography overrides. These are style defaults only;
@@ -86,8 +84,6 @@ struct StyleScopeOverrides {
     StyleScopeSpacingOverrides spacing;
     StyleScopeRadiiOverrides radii;
     StyleScopeControlOverrides controls;
-
-    [[nodiscard]] bool operator==(const StyleScopeOverrides&) const = default;
 };
 
 namespace detail {
