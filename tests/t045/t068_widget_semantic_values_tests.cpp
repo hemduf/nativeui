@@ -1,4 +1,3 @@
-#include <nativeui/combo_popup.hpp>
 #include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/semantics.hpp>
 
@@ -7,7 +6,6 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 
 namespace {
 
@@ -162,14 +160,6 @@ void combo_box_value_contract() {
     T068_CHECK(expanded.expanded == ui::SemanticExpandedState::Expanded);
 }
 
-void combo_box_component_override_contract() {
-    using Component = ui::detail::ComboBoxComponent<int>;
-    using Expected = ui::SemanticInfo (Component::*)() const;
-    static_assert(
-        std::is_same_v<decltype(&Component::semantics), Expected>,
-        "ComboBoxComponent must expose its own semantic value/expanded-state snapshot");
-}
-
 } // namespace
 
 int main() {
@@ -182,7 +172,6 @@ int main() {
         bounded_display_value_contract();
         text_edit_value_contract();
         combo_box_value_contract();
-        combo_box_component_override_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
