@@ -41,6 +41,55 @@ public:
         return snapshot_->nodes[node_index_].bounds;
     }
 
+    [[nodiscard]] SemanticId parent_id() const noexcept {
+        if (virtual_item_) {
+            return node_id_;
+        }
+        return snapshot_->nodes[node_index_].parent;
+    }
+
+    [[nodiscard]] std::size_t child_count() const noexcept {
+        if (virtual_item_) {
+            return 0;
+        }
+        return snapshot_->nodes[node_index_].children.size();
+    }
+
+    [[nodiscard]] std::optional<SemanticId> child_at(std::size_t index) const noexcept {
+        if (virtual_item_) {
+            return std::nullopt;
+        }
+        const auto& children = snapshot_->nodes[node_index_].children;
+        if (index >= children.size()) {
+            return std::nullopt;
+        }
+        return children[index];
+    }
+
+    [[nodiscard]] std::size_t virtual_child_count() const noexcept {
+        if (virtual_item_) {
+            return 0;
+        }
+        const auto& virtual_children = snapshot_->nodes[node_index_].virtual_children;
+        return virtual_children ? virtual_children->size() : 0;
+    }
+
+    [[nodiscard]] std::optional<VirtualSemanticItemToken> virtual_child_token_at(
+        std::size_t index) const noexcept {
+        if (virtual_item_) {
+            return std::nullopt;
+        }
+        const auto& virtual_children = snapshot_->nodes[node_index_].virtual_children;
+        if (!virtual_children) {
+            return std::nullopt;
+        }
+        const auto& metadata = virtual_children->metadata_snapshot();
+        if (!metadata || index >= metadata->size()) {
+            return std::nullopt;
+        }
+        return (*metadata)[index].token;
+    }
+
 private:
     friend class SemanticSnapshotProxy;
 
