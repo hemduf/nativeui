@@ -1,13 +1,32 @@
 #pragma once
 
+#include <nativeui/component_base.hpp>
+#include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/state.hpp>
 #include <nativeui/theme.hpp>
 
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace ui {
+
+namespace detail {
+
+[[nodiscard]] inline bool style_scope_color_equal(Color a, Color b) noexcept {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+[[nodiscard]] inline bool style_scope_optional_color_equal(
+    const std::optional<Color>& a, const std::optional<Color>& b) noexcept {
+    if (a.has_value() != b.has_value()) return false;
+    return !a || style_scope_color_equal(*a, *b);
+}
+
+} // namespace detail
 
 /// Typed inheritable palette overrides for one lexical style scope.
 struct StyleScopePaletteOverrides {
@@ -24,6 +43,23 @@ struct StyleScopePaletteOverrides {
     std::optional<Color> control_hover;
     std::optional<Color> active_highlight;
     std::optional<Color> track;
+
+    [[nodiscard]] bool operator==(const StyleScopePaletteOverrides& other) const noexcept {
+        return detail::style_scope_optional_color_equal(background, other.background) &&
+            detail::style_scope_optional_color_equal(surface, other.surface) &&
+            detail::style_scope_optional_color_equal(text, other.text) &&
+            detail::style_scope_optional_color_equal(muted_text, other.muted_text) &&
+            detail::style_scope_optional_color_equal(border, other.border) &&
+            detail::style_scope_optional_color_equal(accent, other.accent) &&
+            detail::style_scope_optional_color_equal(disabled, other.disabled) &&
+            detail::style_scope_optional_color_equal(selection, other.selection) &&
+            detail::style_scope_optional_color_equal(focus, other.focus) &&
+            detail::style_scope_optional_color_equal(
+                control_background, other.control_background) &&
+            detail::style_scope_optional_color_equal(control_hover, other.control_hover) &&
+            detail::style_scope_optional_color_equal(active_highlight, other.active_highlight) &&
+            detail::style_scope_optional_color_equal(track, other.track);
+    }
 };
 
 /// Typed inheritable typography overrides. These are style defaults only;
@@ -84,6 +120,8 @@ struct StyleScopeOverrides {
     StyleScopeSpacingOverrides spacing;
     StyleScopeRadiiOverrides radii;
     StyleScopeControlOverrides controls;
+
+    [[nodiscard]] bool operator==(const StyleScopeOverrides&) const = default;
 };
 
 namespace detail {
@@ -168,5 +206,147 @@ inline void apply_scope_value(T& target, const std::optional<T>& value) {
         apply_style_scope_overrides(inherited, before),
         apply_style_scope_overrides(inherited, after));
 }
+
+namespace detail {
+
+class StyleScopeComponent final : public Component, public ThemeBinding {
+public:
+    explicit StyleScopeComponent(StyleScopeOverrides overrides)
+        : overrides_(std::move(overrides)), resolved_(default_theme()) {}
+
+    explicit StyleScopeComponent(State<StyleScopeOverrides>& state)
+        : state_(&state), overrides_(state.get()), resolved_(default_theme()) {}
+
+    void bind_theme(const Theme& theme) noexcept override {
+        ThemeBinding::bind_theme(theme);
+        inherited_theme_ = &theme;
+        resolved_ = apply_style_scope_overrides(theme, overrides_);
+    }
+
+    [[nodiscard]] const Theme& descendant_theme() const noexcept override {
+        return resolved_;
+    }
+
+    void set_theme_change_invalidator(
+        std::function<void(ThemeInvalidation)> callback) override {
+        change_invalidator_ = std::move(callback);
+    }
+
+    [[nodiscard]] bool availability_change_affects_paint(
+        const ComponentAvailability&,
+        const ComponentAvailability&) const noexcept override {
+        return false;
+    }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().minimum;
+    }
+
+    [[nodiscard]] Constraints child_constraints(
+        const Constraints& constraints, std::size_t, std::size_t) const override {
+        return constraints;
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void mount(MountContext&) override {
+        if (!state_) return;
+        observer_ = std::make_shared<ObserverState>();
+        observer_->apply = [this](const StyleScopeOverrides& value) {
+            replace_overrides(value);
+        };
+        subscription_ = state_->observe(
+            [weak = std::weak_ptr<ObserverState>{observer_}](const StyleScopeOverrides& value) {
+                if (const auto observer = weak.lock(); observer && observer->apply) {
+                    observer->apply(value);
+                }
+            });
+    }
+
+    void unmount(LifecycleContext&) override {
+        subscription_.reset();
+        if (observer_) observer_->apply = {};
+        observer_.reset();
+        change_invalidator_ = {};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    struct ObserverState {
+        std::function<void(const StyleScopeOverrides&)> apply;
+    };
+
+    void replace_overrides(const StyleScopeOverrides& value) {
+        if (!inherited_theme_) {
+            overrides_ = value;
+            return;
+        }
+        auto next = apply_style_scope_overrides(*inherited_theme_, value);
+        const auto invalidation = classify_theme_change(resolved_, next);
+        overrides_ = value;
+        resolved_ = std::move(next);
+        if (invalidation != ThemeInvalidation::None && change_invalidator_) {
+            change_invalidator_(invalidation);
+        }
+    }
+
+    State<StyleScopeOverrides>* state_{};
+    StyleScopeOverrides overrides_;
+    const Theme* inherited_theme_{};
+    Theme resolved_;
+    std::function<void(ThemeInvalidation)> change_invalidator_;
+    std::shared_ptr<ObserverState> observer_;
+    State<StyleScopeOverrides>::Subscription subscription_;
+};
+
+} // namespace detail
+
+/// One explicit lexical style scope. The value form is immutable for the
+/// retained lifetime; the State-backed form supports UI-thread replacement with
+/// exact effective no-op/paint/layout invalidation classification.
+class StyleScope {
+public:
+    template <class Child>
+    StyleScope(StyleScopeOverrides overrides, Child&& child)
+        : overrides_(std::move(overrides)) {
+        children_.push_back(make_spec(std::forward<Child>(child)));
+    }
+
+    template <class Child>
+    StyleScope(State<StyleScopeOverrides>& overrides, Child&& child)
+        : state_(&overrides) {
+        children_.push_back(make_spec(std::forward<Child>(child)));
+    }
+
+    Spec spec() && {
+        if (state_) {
+            auto* state = state_;
+            return Spec{
+                [state] { return std::make_unique<detail::StyleScopeComponent>(*state); },
+                std::move(children_)};
+        }
+        auto overrides = std::move(overrides_);
+        return Spec{
+            [overrides = std::move(overrides)]() mutable {
+                return std::make_unique<detail::StyleScopeComponent>(std::move(overrides));
+            },
+            std::move(children_)};
+    }
+
+private:
+    State<StyleScopeOverrides>* state_{};
+    StyleScopeOverrides overrides_;
+    std::vector<Spec> children_;
+};
 
 } // namespace ui
