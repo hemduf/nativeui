@@ -25,6 +25,13 @@ ui::ToggleStyle resizing_toggle_style() {
     return style;
 }
 
+ui::ToggleStyle availability_toggle_style() {
+    ui::ToggleStyle style;
+    style.disabled.control_height = 72.0f;
+    style.read_only.thumb = ui::Color{0.73f, 0.28f, 0.61f, 1.0f};
+    return style;
+}
+
 ui::UI make_ui(DemoState& state) {
     return ui::UI{ui::Column{
         ui::Header{"T038 — Toggle Style Invalidation"},
@@ -99,6 +106,49 @@ int self_test() {
         value.set(true);
         if (!tree.layout_dirty()) {
             return example::fail("layout-affecting Toggle checked style did not invalidate layout");
+        }
+    }
+
+    // Inherited Enabled/ReadOnly changes are visual-state transitions too. A
+    // disabled variant that changes intrinsic geometry must dirty layout, while
+    // a paint-only read-only variant must not.
+    {
+        ui::State<bool> value{false};
+        ui::State<bool> enabled{true};
+        ui::UI tree{ui::Enabled{
+            enabled,
+            ui::Toggle{"Disabled layout", value}.style(availability_toggle_style())
+        }};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Toggle disabled-layout baseline render failed");
+        }
+
+        enabled.set(false);
+        if (!tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "layout-affecting Toggle disabled style did not invalidate layout + paint");
+        }
+    }
+
+    {
+        ui::State<bool> value{false};
+        ui::State<bool> read_only{false};
+        ui::UI tree{ui::ReadOnly{
+            read_only,
+            ui::Toggle{"Read-only paint", value}.style(availability_toggle_style())
+        }};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) {
+            return example::fail("Toggle read-only baseline render failed");
+        }
+
+        read_only.set(true);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail(
+                "paint-only Toggle read-only style did not remain paint-only");
         }
     }
 
