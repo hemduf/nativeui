@@ -12,6 +12,7 @@
 #include <nativeui/text_edit.hpp>
 #include <nativeui/text.hpp>
 #include <nativeui/theme.hpp>
+#include <nativeui/style_scope.hpp>
 #include <nativeui/style.hpp>
 #include <nativeui/slider_style.hpp>
 #include <nativeui/progress_style.hpp>
