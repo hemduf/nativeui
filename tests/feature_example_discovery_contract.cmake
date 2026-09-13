@@ -38,11 +38,12 @@ if(NOT "${_discovered_examples}" STREQUAL "${_expected_examples}")
 endif()
 
 foreach(_required IN ITEMS
+    t049_gallery
     t060_multi_window_application
     t065_ui_dispatcher)
   if(NOT "${_required}" IN_LIST _discovered_examples)
     message(FATAL_ERROR
-      "Feature example discovery contract: missing previously omitted example ${_required}")
+      "Feature example discovery contract: missing required example ${_required}")
   endif()
 endforeach()
 
@@ -75,6 +76,61 @@ if(NOT _manual_list_index EQUAL -1)
   message(FATAL_ERROR
     "Feature example discovery contract: root CMake still contains a manually maintained feature example list")
 endif()
+
+set(_gallery_source "${_features_dir}/t049_gallery.cpp")
+if(NOT EXISTS "${_gallery_source}")
+  message(FATAL_ERROR "Feature example discovery contract: missing T049 gallery source")
+endif()
+file(READ "${_gallery_source}" _gallery)
+
+foreach(_forbidden IN ITEMS
+    "nativeui/detail/"
+    "#include <pugl/"
+    "#include <Sk"
+    "#include <windows.h>"
+    "#include <AppKit/"
+    "#include <X11/")
+  string(FIND "${_gallery}" "${_forbidden}" _forbidden_index)
+  if(NOT _forbidden_index EQUAL -1)
+    message(FATAL_ERROR
+      "Feature example discovery contract: T049 gallery uses private/platform surface ${_forbidden}")
+  endif()
+endforeach()
+
+foreach(_token IN ITEMS
+    "ui::Row{"
+    "ui::Column{"
+    "ui::Stack{"
+    "ui::Grid{"
+    "ui::Padding{"
+    "ui::Flex{"
+    "ui::Clip{"
+    "ui::TextInput{"
+    "ui::TextArea{"
+    "ui::Button{"
+    "ui::Toggle{"
+    "ui::Checkbox{"
+    "ui::RadioButton{"
+    "ui::Knob{"
+    "ui::Slider{"
+    "ui::RangeSlider{"
+    "ui::ProgressBar{"
+    "ui::Meter{"
+    "ui::ScrollView{"
+    "ui::ComboBox<int>{"
+    "ui::PopupMenu{"
+    "ui::ListView<int>{"
+    "ui::Tabs<int>{"
+    "draw_image"
+    "draw_svg"
+    "ui::ButtonStyle"
+    "example::self_test_requested")
+  string(FIND "${_gallery}" "${_token}" _token_index)
+  if(_token_index EQUAL -1)
+    message(FATAL_ERROR
+      "Feature example discovery contract: T049 gallery missing required public surface ${_token}")
+  endif()
+endforeach()
 
 message(STATUS
   "Feature example discovery contract passed (${_expected_examples})")
