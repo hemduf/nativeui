@@ -110,4 +110,22 @@ namespace ui::detail {
     return info;
 }
 
+[[nodiscard]] inline SemanticInfo combo_box_semantic_info(
+    std::string_view selected_label,
+    bool expanded) {
+    SemanticInfo info;
+    info.role = SemanticRole::ComboBox;
+    info.text_value = std::string{selected_label};
+    info.expanded = expanded ? SemanticExpandedState::Expanded
+                             : SemanticExpandedState::Collapsed;
+    info.focusable = true;
+    info.actions = {
+        SemanticAction::Expand,
+        SemanticAction::Collapse,
+        SemanticAction::Select,
+        SemanticAction::Focus,
+    };
+    return info;
+}
+
 } // namespace ui::detail
