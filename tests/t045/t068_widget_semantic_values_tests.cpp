@@ -142,6 +142,24 @@ void text_edit_value_contract() {
     T068_CHECK(multiline.supports(ui::SemanticAction::Focus));
 }
 
+void combo_box_value_contract() {
+    const auto collapsed = ui::detail::combo_box_semantic_info("Mode A", false);
+    T068_CHECK(collapsed.role == ui::SemanticRole::ComboBox);
+    T068_CHECK(collapsed.text_value.has_value());
+    T068_CHECK(*collapsed.text_value == "Mode A");
+    T068_CHECK(collapsed.expanded == ui::SemanticExpandedState::Collapsed);
+    T068_CHECK(collapsed.focusable);
+    T068_CHECK(collapsed.supports(ui::SemanticAction::Expand));
+    T068_CHECK(collapsed.supports(ui::SemanticAction::Collapse));
+    T068_CHECK(collapsed.supports(ui::SemanticAction::Select));
+    T068_CHECK(collapsed.supports(ui::SemanticAction::Focus));
+
+    const auto expanded = ui::detail::combo_box_semantic_info("Mode B", true);
+    T068_CHECK(expanded.text_value.has_value());
+    T068_CHECK(*expanded.text_value == "Mode B");
+    T068_CHECK(expanded.expanded == ui::SemanticExpandedState::Expanded);
+}
+
 } // namespace
 
 int main() {
@@ -153,6 +171,7 @@ int main() {
         slider_value_contract();
         bounded_display_value_contract();
         text_edit_value_contract();
+        combo_box_value_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
