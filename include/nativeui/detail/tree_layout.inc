@@ -75,6 +75,39 @@
         };
     }
 
+    [[nodiscard]] static bool measured_availability_change_affects_layout(
+        Node& node,
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) {
+        if (before.enabled == after.enabled && before.read_only == after.read_only) return false;
+        if (dynamic_cast<detail::ThemeBinding*>(node.component.get()) == nullptr) return false;
+
+        // T038 style-aware components may expose availability variants that alter
+        // intrinsic measurement without needing a bespoke tree hook. Reuse the
+        // already-laid-out child extents as stable inputs so this fallback stays
+        // bounded and does not recursively remeasure an entire subtree.
+        std::vector<ChildMetrics> children;
+        children.reserve(node.children.size());
+        for (const auto& child : node.children) {
+            const Size current{
+                std::isfinite(child->bounds.w) ? std::max(0.0f, child->bounds.w) : 0.0f,
+                std::isfinite(child->bounds.h) ? std::max(0.0f, child->bounds.h) : 0.0f};
+            children.emplace_back(current, current, child->component->flex_factors());
+        }
+
+        const auto before_size = node.component->measure(children);
+        node.component->set_effective_availability(after);
+        Size after_size{};
+        try {
+            after_size = node.component->measure(children);
+        } catch (...) {
+            node.component->set_effective_availability(before);
+            throw;
+        }
+        node.component->set_effective_availability(before);
+        return before_size.w != after_size.w || before_size.h != after_size.h;
+    }
+
     void apply_pending_availability(
         const std::vector<PendingAvailability>& pending,
         bool& layout_changed,
@@ -86,10 +119,25 @@
 
             const bool old_collapsed = old.visibility == VisibilityMode::Collapsed;
             const bool new_collapsed = change.value.visibility == VisibilityMode::Collapsed;
-            layout_changed = layout_changed || old_collapsed != new_collapsed;
+            bool style_layout_changed =
+                change.node->component->availability_change_affects_layout(old, change.value);
+            if (!style_layout_changed) {
+                style_layout_changed = measured_availability_change_affects_layout(
+                    *change.node, old, change.value);
+            }
+            layout_changed = layout_changed || old_collapsed != new_collapsed ||
+                style_layout_changed;
             focus_changed = focus_changed ||
                 old.visibility != change.value.visibility || old.enabled != change.value.enabled;
-            paint_changed = true;
+
+            bool style_paint_changed = true;
+            if (const auto* binding =
+                    dynamic_cast<const detail::ThemeBinding*>(change.node->component.get())) {
+                style_paint_changed =
+                    binding->availability_change_affects_paint(old, change.value);
+            }
+            paint_changed = paint_changed ||
+                old.visibility != change.value.visibility || style_paint_changed;
             change.node->component->set_effective_availability(change.value);
         }
     }

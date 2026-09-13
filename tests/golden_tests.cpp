@@ -295,6 +295,159 @@ bool verify_t035_combo_popup(bool update) {
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+ui::Color byte_color(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    constexpr float scale = 1.0f / 255.0f;
+    return {static_cast<float>(r) * scale,
+            static_cast<float>(g) * scale,
+            static_cast<float>(b) * scale,
+            1.0f};
+}
+
+void append_sample(test::golden::Image& state, ui::Rgba8 pixel) {
+    state.rgb.push_back(pixel.r);
+    state.rgb.push_back(pixel.g);
+    state.rgb.push_back(pixel.b);
+}
+
+bool verify_t038_widget_state_matrix(bool update) {
+    test::golden::Image state{16, 1, {}};
+    state.rgb.reserve(16U * 3U);
+
+    // Button: normal, hovered, pressed, disabled.
+    {
+        constexpr ui::Size size{180.0f, 64.0f};
+        ui::ButtonStyle style;
+        style.base.fill = byte_color(65, 66, 67);
+        style.hovered.fill = byte_color(68, 69, 70);
+        style.pressed.fill = byte_color(71, 72, 73);
+        style.disabled.fill = byte_color(74, 75, 76);
+
+        ui::UI tree{ui::Button{"T038", [] {}}.style(style)};
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(20, 20));
+
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(20, 20));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(20, 20));
+
+        ui::State<bool> enabled{false};
+        ui::UI disabled_tree{
+            ui::Enabled{enabled, ui::Button{"T038", [] {}}.style(style)}};
+        if (!renderer.render(disabled_tree)) return false;
+        append_sample(state, renderer.pixel(20, 20));
+    }
+
+    // Slider: normal, hovered, pressed, disabled thumb interiors.
+    {
+        constexpr ui::Size size{200.0f, 60.0f};
+        ui::SliderStyle style;
+        style.base.thumb = byte_color(77, 78, 79);
+        style.hovered.thumb = byte_color(80, 81, 82);
+        style.pressed.thumb = byte_color(83, 84, 85);
+        style.disabled.thumb = byte_color(86, 87, 88);
+
+        ui::State<float> value{0.5f};
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f).style(style)};
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(100, 30));
+
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(100, 30));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 100.0f, 30.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(100, 30));
+
+        ui::State<float> disabled_value{0.5f};
+        ui::State<bool> enabled{false};
+        ui::UI disabled_tree{ui::Enabled{
+            enabled,
+            ui::Slider{disabled_value}.range(0.0f, 1.0f).style(style)}};
+        if (!renderer.render(disabled_tree)) return false;
+        append_sample(state, renderer.pixel(100, 30));
+    }
+
+    // TextInput: sample a solid field interior away from glyphs/caret.
+    {
+        constexpr ui::Size size{420.0f, 90.0f};
+        ui::TextInputStyle style;
+        style.base.field_fill = byte_color(97, 98, 99);
+        style.hovered.field_fill = byte_color(100, 101, 102);
+        style.pressed.field_fill = byte_color(103, 104, 105);
+        style.disabled.field_fill = byte_color(106, 107, 108);
+
+        ui::State<std::string> value{""};
+        ui::UI tree{ui::TextInput{"", value}.style(style)};
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(200, 50));
+
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 200.0f, 50.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(200, 50));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 200.0f, 50.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(200, 50));
+
+        ui::State<std::string> disabled_value{""};
+        ui::State<bool> enabled{false};
+        ui::UI disabled_tree{
+            ui::Enabled{enabled, ui::TextInput{"", disabled_value}.style(style)}};
+        if (!renderer.render(disabled_tree)) return false;
+        append_sample(state, renderer.pixel(200, 50));
+    }
+
+    // Checkbox is the required representative selection widget.
+    {
+        constexpr ui::Size size{180.0f, 64.0f};
+        ui::CheckboxStyle style;
+        style.base.box_fill = byte_color(109, 110, 111);
+        style.hovered.box_fill = byte_color(112, 113, 114);
+        style.pressed.box_fill = byte_color(115, 116, 117);
+        style.checked.box_fill = byte_color(118, 119, 120);
+
+        ui::State<bool> checked{false};
+        ui::UI tree{ui::Checkbox{checked, "T038"}.style(style)};
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(12, 32));
+
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(12, 32));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 12.0f, 32.0f), platform);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(12, 32));
+        tree.dispatch(test::pointer(ui::InputType::PointerCancel, 12.0f, 32.0f), platform);
+        checked.set(true);
+        if (!renderer.render(tree)) return false;
+        append_sample(state, renderer.pixel(18, 36));
+    }
+
+    CompareOptions options;
+    options.channel_tolerance = 1;
+    return test::golden::verify(
+        "t038_widget_state_matrix", state,
+        NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
+}
+
 bool verify_overlay_portal(bool update) {
     // The retained root owns a deliberately small nested clip. T061 overlays
     // are siblings in the per-UI overlay host, so the lower red surface must
@@ -354,6 +507,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_paths(update));
     NUI_CHECK(verify_label(update));
     NUI_CHECK(verify_t035_combo_popup(update));
+    NUI_CHECK(verify_t038_widget_state_matrix(update));
     NUI_CHECK(verify_overlay_portal(update));
     return 0;
 }

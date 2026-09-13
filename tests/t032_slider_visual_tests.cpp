@@ -136,6 +136,113 @@ void deterministic_headless_orientation_and_two_thumbs() {
     }
 }
 
+void explicit_slider_styles_apply_to_slider_and_range_slider() {
+    const ui::Color track{0.12f, 0.61f, 0.27f, 1.0f};
+    const ui::Color thumb{0.83f, 0.18f, 0.67f, 1.0f};
+    const ui::Color hovered{0.91f, 0.72f, 0.11f, 1.0f};
+
+    ui::SliderStyle style;
+    style.base.track = track;
+    style.base.active = ui::Color{0.22f, 0.35f, 0.88f, 1.0f};
+    style.base.thumb = thumb;
+    style.hovered.thumb = hovered;
+    style.hovered.active = hovered;
+
+    {
+        ui::State<float> value{0.5f};
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f).style(style)};
+        test::MockPlatform platform;
+        tree.resize({200.0f, 60.0f});
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
+
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 30), thumb));
+        NUI_CHECK(pixel_matches(renderer.pixel(170, 30), track));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(100, 30), hovered));
+    }
+
+    {
+        ui::State<ui::RangeValue> value{ui::RangeValue{0.25f, 0.75f}};
+        ui::UI tree{ui::RangeSlider{value}.range(0.0f, 1.0f).style(style)};
+        ui::HeadlessRenderer renderer{{200.0f, 60.0f}, 1.0f};
+
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(pixel_matches(renderer.pixel(54, 30), thumb));
+        NUI_CHECK(pixel_matches(renderer.pixel(170, 30), track));
+    }
+}
+
+void style_state_invalidation_contract() {
+    constexpr ui::Size size{200.0f, 60.0f};
+
+    // Equal effective presentation must not dirty either layout or paint just
+    // because the logical hover flag changed.
+    {
+        ui::State<float> value{0.5f};
+        const ui::Color stable{0.31f, 0.47f, 0.63f, 1.0f};
+        ui::SliderStyle style;
+        style.base.active = stable;
+        style.base.thumb = stable;
+        style.hovered.active = stable;
+        style.hovered.thumb = stable;
+
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f).style(style)};
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(!tree.paint_dirty());
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(!tree.paint_dirty());
+    }
+
+    // A visual-state variant that changes measured thumb geometry must request
+    // layout + paint rather than only paint.
+    {
+        ui::State<float> value{0.5f};
+        ui::SliderStyle style;
+        style.hovered.thumb_diameter = 38.0f;
+
+        ui::UI tree{ui::Slider{value}.range(0.0f, 1.0f).style(style)};
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    // RangeSlider shares the same typed style contract and must classify the
+    // same interaction-driven geometry change identically.
+    {
+        ui::State<ui::RangeValue> value{ui::RangeValue{0.25f, 0.75f}};
+        ui::SliderStyle style;
+        style.hovered.focus_ring_width = 8.0f;
+
+        ui::UI tree{ui::RangeSlider{value}.range(0.0f, 1.0f).style(style)};
+        test::MockPlatform platform;
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 30.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+}
+
 void custom_theme_slider_palette() {
     ui::State<float> value{0.5f};
     auto theme = ui::default_theme();
@@ -168,6 +275,8 @@ void suite() {
     deterministic_headless_slider_states();
     deterministic_headless_interaction_states();
     deterministic_headless_orientation_and_two_thumbs();
+    explicit_slider_styles_apply_to_slider_and_range_slider();
+    style_state_invalidation_contract();
     custom_theme_slider_palette();
     default_theme_preserves_slider_measurement();
 }

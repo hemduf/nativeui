@@ -97,8 +97,6 @@ void checkbox_availability_contract() {
         NUI_CHECK(writes == 0);
     }
 
-    // T059 owns the cancellation caused by becoming unavailable. T031 must not
-    // leave a second capture/cancel behind.
     {
         ui::State<bool> checked{false};
         ui::State<bool> enabled{true};
@@ -226,9 +224,6 @@ void radio_read_only_contract() {
     tree.resize({220.0f, 140.0f});
     tree.activate(platform);
 
-    // Column has 24 px default padding, so target an actual option rather than
-    // the wrapper padding. The previous (20,20) probe correctly hit no focusable
-    // child and exposed a test-coordinate error on every platform.
     NUI_CHECK(tree.dispatch(
                   test::pointer(ui::InputType::PointerDown, 40.0f, 40.0f), platform) ==
               ui::EventResult::Handled);
@@ -327,12 +322,148 @@ void observer_reentrancy_is_single_activation() {
     }
 }
 
+void explicit_styles_control_checkbox_and_radio_presentation_and_measurement() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    test::MockPlatform platform;
+
+    ui::CheckboxStyle checkbox_style{};
+    const ui::Color checkbox_normal{0.10f, 0.22f, 0.34f, 1.0f};
+    const ui::Color checkbox_hovered{0.16f, 0.32f, 0.48f, 1.0f};
+    const ui::Color checkbox_pressed{0.62f, 0.16f, 0.20f, 1.0f};
+    const ui::Color checkbox_checked{0.18f, 0.62f, 0.28f, 1.0f};
+    checkbox_style.base.box_fill = checkbox_normal;
+    checkbox_style.base.minimum_width = 140.0f;
+    checkbox_style.base.control_height = 48.0f;
+    checkbox_style.hovered.box_fill = checkbox_hovered;
+    checkbox_style.pressed.box_fill = checkbox_pressed;
+    checkbox_style.checked.box_fill = checkbox_checked;
+
+    ui::State<bool> checked{false};
+    ui::UI checkbox{ui::Checkbox{checked, "Styled checkbox"}.style(checkbox_style)};
+    const auto checkbox_metrics = checkbox.measure();
+    NUI_CHECK_NEAR(checkbox_metrics.preferred.h, 48.0f, 0.0001f);
+    NUI_CHECK(checkbox_metrics.preferred.w >= 140.0f);
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), checkbox_normal));
+
+    checkbox.resize(size);
+    checkbox.activate(platform);
+    checkbox.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), checkbox_hovered));
+    checkbox.dispatch(test::pointer(ui::InputType::PointerDown, 12.0f, 32.0f), platform);
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(12, 32), checkbox_pressed));
+    checkbox.dispatch(test::pointer(ui::InputType::PointerCancel, 12.0f, 32.0f), platform);
+
+    checked.set(true);
+    NUI_CHECK(renderer.render(checkbox));
+    NUI_CHECK(pixel_near(renderer.pixel(18, 36), checkbox_checked));
+
+    ui::RadioStyle radio_style{};
+    const ui::Color radio_outer{0.24f, 0.36f, 0.54f, 1.0f};
+    const ui::Color radio_selected{0.70f, 0.28f, 0.18f, 1.0f};
+    radio_style.base.outer_fill = radio_outer;
+    radio_style.base.outer_radius = 12.0f;
+    radio_style.base.inner_radius = 5.0f;
+    radio_style.base.mark_radius = 3.0f;
+    radio_style.base.leading_padding = 4.0f;
+    radio_style.base.minimum_width = 150.0f;
+    radio_style.base.control_height = 50.0f;
+    radio_style.selected.mark_fill = radio_selected;
+
+    ui::State<int> selected{2};
+    ui::RadioGroup<int> group{selected};
+    ui::UI radio{ui::RadioButton{group, 1, "Styled radio"}.style(radio_style)};
+    const auto radio_metrics = radio.measure();
+    NUI_CHECK_NEAR(radio_metrics.preferred.h, 50.0f, 0.0001f);
+    NUI_CHECK(radio_metrics.preferred.w >= 150.0f);
+    NUI_CHECK(renderer.render(radio));
+    NUI_CHECK(pixel_near(renderer.pixel(24, 32), radio_outer));
+
+    selected.set(1);
+    NUI_CHECK(renderer.render(radio));
+    NUI_CHECK(pixel_near(renderer.pixel(16, 32), radio_selected));
+}
+
+void choice_style_state_invalidation_contract() {
+    constexpr ui::Size size{180.0f, 64.0f};
+    test::MockPlatform platform;
+
+    // Paint-only interaction variants repaint without requesting layout.
+    {
+        ui::State<bool> checked{false};
+        ui::CheckboxStyle style;
+        style.hovered.box_fill = ui::Color{0.18f, 0.46f, 0.72f, 1.0f};
+        ui::UI tree{ui::Checkbox{checked, "Paint only"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    // Checkbox hover may override measured box geometry, so the transition must
+    // invalidate layout rather than relying on paint-only interaction invalidation.
+    {
+        ui::State<bool> checked{false};
+        ui::CheckboxStyle style;
+        style.hovered.box_size = 30.0f;
+        ui::UI tree{ui::Checkbox{checked, "Layout hover"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    // Radio buttons share the same classification contract. Use inner_fill here:
+    // focused.outer_fill is an orthogonal overlay and intentionally resolves after
+    // hover, so changing outer_fill while focused can legitimately resolve equal.
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::RadioStyle style;
+        style.hovered.inner_fill = ui::Color{0.62f, 0.24f, 0.18f, 1.0f};
+        ui::UI tree{ui::RadioButton{group, 1, "Paint only"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(!tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+
+    {
+        ui::State<int> selected{1};
+        ui::RadioGroup<int> group{selected};
+        ui::RadioStyle style;
+        style.hovered.outer_radius = 16.0f;
+        ui::UI tree{ui::RadioButton{group, 1, "Layout hover"}.style(style)};
+        tree.resize(size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+
+        tree.dispatch(test::pointer(ui::InputType::PointerMove, 12.0f, 32.0f), platform);
+        NUI_CHECK(tree.layout_dirty());
+        NUI_CHECK(tree.paint_dirty());
+    }
+}
+
 void visual_state_goldens() {
     constexpr ui::Size size{180.0f, 64.0f};
     ui::HeadlessRenderer renderer{size, 1.0f};
 
-    // A single root control fills the headless viewport, so both indicators are
-    // vertically centered at y=32 rather than at their 32px intrinsic height.
     ui::State<bool> checked{false};
     ui::UI checkbox{ui::Checkbox{checked, "Visual"}};
     NUI_CHECK(renderer.render(checkbox));
@@ -341,7 +472,6 @@ void visual_state_goldens() {
 
     checked.set(true);
     NUI_CHECK(renderer.render(checkbox));
-    // Sample checked fill away from both checkmark strokes and rounded edges.
     NUI_CHECK(pixel_near(renderer.pixel(17, 35), ui::colors::accent));
 
     test::MockPlatform platform;
@@ -393,6 +523,8 @@ void suite() {
     radio_read_only_contract();
     radio_group_isolation_and_remount();
     observer_reentrancy_is_single_activation();
+    explicit_styles_control_checkbox_and_radio_presentation_and_measurement();
+    choice_style_state_invalidation_contract();
     visual_state_goldens();
 }
 

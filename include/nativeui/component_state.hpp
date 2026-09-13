@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/state.hpp>
 
 #include <memory>
@@ -10,7 +11,7 @@
 namespace ui {
 namespace detail {
 
-class AvailabilityWrapperComponent : public Component {
+class AvailabilityWrapperComponent : public Component, public ThemeBinding {
 public:
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;
@@ -30,6 +31,16 @@ public:
         const std::vector<ChildMetrics>&,
         std::vector<ChildPlacement>& placements) const override {
         if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    // Availability decorators paint no pixels of their own. Descendants classify
+    // their resolved Enabled/ReadOnly presentation independently, while Tree
+    // already handles visibility changes explicitly. Do not let the decorator
+    // itself force a full-viewport repaint when its own presentation is unchanged.
+    [[nodiscard]] bool availability_change_affects_paint(
+        const ComponentAvailability&,
+        const ComponentAvailability&) const noexcept override {
+        return false;
     }
 
     void paint(PaintContext&) const override {}

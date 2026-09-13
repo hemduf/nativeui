@@ -15,14 +15,17 @@ struct PressActivationResult {
 class PressActivationState {
 public:
     [[nodiscard]] PressActivationResult input(
-        const InputEvent& event, InputContext& context, bool allow_enter) {
+        const InputEvent& event,
+        InputContext& context,
+        bool allow_enter,
+        bool invalidate_visual_changes = true) {
         switch (event.type) {
             case InputType::PointerDown:
                 pointer_armed_ = true;
                 pointer_inside_ = true;
                 hovered_ = true;
                 context.capture_pointer();
-                context.invalidate();
+                if (invalidate_visual_changes) context.invalidate();
                 return {EventResult::Handled, false};
 
             case InputType::PointerMove: {
@@ -31,7 +34,7 @@ public:
                                      (pointer_armed_ && pointer_inside_ != inside);
                 hovered_ = inside;
                 if (pointer_armed_) pointer_inside_ = inside;
-                if (changed) context.invalidate();
+                if (changed && invalidate_visual_changes) context.invalidate();
                 return {EventResult::Handled, false};
             }
 
@@ -43,7 +46,7 @@ public:
                 pointer_inside_ = false;
                 hovered_ = inside;
                 context.release_pointer();
-                context.invalidate();
+                if (invalidate_visual_changes) context.invalidate();
                 return {EventResult::Handled, activate};
             }
 
@@ -52,7 +55,7 @@ public:
                 pointer_armed_ = false;
                 pointer_inside_ = false;
                 hovered_ = false;
-                context.invalidate();
+                if (invalidate_visual_changes) context.invalidate();
                 return {EventResult::Handled, false};
 
             case InputType::KeyDown:
@@ -60,7 +63,7 @@ public:
                     if (!space_down_) {
                         space_down_ = true;
                         space_armed_ = true;
-                        context.invalidate();
+                        if (invalidate_visual_changes) context.invalidate();
                     }
                     return {EventResult::Handled, false};
                 }
@@ -77,7 +80,7 @@ public:
                     const bool activate = space_armed_;
                     space_down_ = false;
                     space_armed_ = false;
-                    context.invalidate();
+                    if (invalidate_visual_changes) context.invalidate();
                     return {EventResult::Handled, activate};
                 }
                 if (allow_enter && event.key == Key::Enter) {
@@ -95,7 +98,8 @@ public:
     // retaining capture. If ReadOnly becomes effective while a press/Space
     // interaction is already armed, terminate that local interaction without
     // synthesizing PointerCancel (T059 owns cancellation for unavailability).
-    void cancel_pending_mutation(InputContext& context) {
+    void cancel_pending_mutation(InputContext& context,
+                                 bool invalidate_visual_changes = true) {
         const bool had_capture = pointer_armed_;
         const bool dirty = pointer_armed_ || pointer_inside_ || space_down_ || space_armed_ ||
                            enter_down_;
@@ -105,22 +109,25 @@ public:
         space_armed_ = false;
         enter_down_ = false;
         if (had_capture) context.release_pointer();
-        if (dirty) context.invalidate();
+        if (dirty && invalidate_visual_changes) context.invalidate();
     }
 
-    void focus_changed(bool focused, FocusContext& context) {
+    void focus_changed(bool focused,
+                       FocusContext& context,
+                       bool invalidate_visual_changes = true) {
         if (focused) return;
         const bool dirty = pointer_armed_ || pointer_inside_ || hovered_ || space_down_ ||
                            space_armed_ || enter_down_;
         reset();
-        if (dirty) context.invalidate();
+        if (dirty && invalidate_visual_changes) context.invalidate();
     }
 
-    void deactivate(LifecycleContext& context) {
+    void deactivate(LifecycleContext& context,
+                    bool invalidate_visual_changes = true) {
         const bool dirty = pointer_armed_ || pointer_inside_ || hovered_ || space_down_ ||
                            space_armed_ || enter_down_;
         reset();
-        if (dirty) context.invalidate();
+        if (dirty && invalidate_visual_changes) context.invalidate();
     }
 
     [[nodiscard]] bool pressed() const noexcept {
