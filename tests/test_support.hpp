@@ -52,6 +52,9 @@ public:
         text_input_transitions.push_back(active);
     }
 
+    void begin_pointer_capture() noexcept override { ++pointer_capture_begin_count; }
+    void end_pointer_capture() noexcept override { ++pointer_capture_end_count; }
+
     void set_clipboard_text(std::string_view text) override {
         clipboard.assign(text);
         ++clipboard_write_count;
@@ -88,6 +91,8 @@ public:
     ui::Rect rejected_drop_region{};
     int drop_accept_count{};
     int drop_reject_count{};
+    int pointer_capture_begin_count{};
+    int pointer_capture_end_count{};
     std::vector<bool> text_input_transitions;
 };
 
