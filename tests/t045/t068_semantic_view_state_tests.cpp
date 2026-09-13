@@ -38,7 +38,10 @@ ui::SemanticTreeSnapshot snapshot(ui::SemanticId id, std::string name) {
 
 ui::SemanticTreeSnapshot virtual_snapshot(
     std::uint64_t dataset_generation,
-    ui::VirtualSemanticChildren::MetadataSnapshot metadata) {
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata,
+    std::optional<ui::VirtualSemanticItemToken> selected = ui::VirtualSemanticItemToken{20},
+    float scroll_y = 0.0f,
+    bool focused = false) {
     ui::SemanticTreeSnapshot tree;
     tree.root = 7;
 
@@ -46,14 +49,15 @@ ui::SemanticTreeSnapshot virtual_snapshot(
     list.id = 7;
     list.info.role = ui::SemanticRole::ListView;
     list.info.name = "Items";
+    list.info.focused = focused;
     list.bounds = {0.0f, 0.0f, 120.0f, 40.0f};
     list.virtual_children = ui::VirtualSemanticChildren::from_metadata(
         dataset_generation,
         std::move(metadata),
-        ui::VirtualSemanticItemToken{20},
+        selected,
         list.bounds,
         20.0f,
-        0.0f);
+        scroll_y);
     tree.nodes.push_back(std::move(list));
     return tree;
 }
@@ -155,6 +159,72 @@ void identical_dataset_replacement_refreshes_backing_storage_without_semantic_ge
     T068_CHECK(second->nodes[0].virtual_children->item_at(1)->info.name == "Twenty");
 }
 
+void large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publications() {
+    constexpr std::size_t kItemCount = 100000;
+    constexpr std::uint64_t kDatasetGeneration = 41;
+
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->reserve(kItemCount);
+    for (std::size_t index = 0; index < kItemCount; ++index) {
+        mutable_metadata->push_back({
+            static_cast<ui::VirtualSemanticItemToken>(index + 1),
+            {},
+            {},
+            true,
+            false,
+            ui::SemanticCheckedState::NotApplicable,
+            {ui::SemanticAction::Select, ui::SemanticAction::Focus},
+        });
+    }
+    const ui::VirtualSemanticChildren::MetadataSnapshot shared_metadata = mutable_metadata;
+
+    ui::detail::SemanticViewState view;
+    T068_CHECK(view.publish(virtual_snapshot(
+                   kDatasetGeneration,
+                   shared_metadata,
+                   ui::VirtualSemanticItemToken{1},
+                   0.0f,
+                   false)) ==
+               std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
+
+    for (std::size_t iteration = 1; iteration <= 1000; ++iteration) {
+        const auto selected = iteration % 2 == 0
+            ? ui::VirtualSemanticItemToken{1}
+            : ui::VirtualSemanticItemToken{kItemCount};
+        const float scroll_y = static_cast<float>(iteration) * 0.5f;
+        const bool focused = iteration % 2 != 0;
+
+        const auto changes = view.publish(virtual_snapshot(
+            kDatasetGeneration,
+            shared_metadata,
+            selected,
+            scroll_y,
+            focused));
+        const std::vector<ui::SemanticChange> expected{
+            ui::SemanticChange::FocusChanged,
+            ui::SemanticChange::SelectionChanged,
+            ui::SemanticChange::BoundsChanged,
+        };
+        T068_CHECK(changes == expected);
+
+        const auto current = view.current();
+        T068_CHECK(current);
+        T068_CHECK(current->generation == iteration + 1);
+        T068_CHECK(current->nodes.size() == 1);
+        T068_CHECK(current->nodes[0].virtual_children.has_value());
+        const auto& virtual_children = *current->nodes[0].virtual_children;
+        T068_CHECK(virtual_children.dataset_generation() == kDatasetGeneration);
+        T068_CHECK(virtual_children.size() == kItemCount);
+        T068_CHECK(virtual_children.metadata_snapshot().get() == shared_metadata.get());
+    }
+
+    const auto final_snapshot = view.current();
+    T068_CHECK(final_snapshot);
+    T068_CHECK(final_snapshot->generation == 1001);
+    T068_CHECK(final_snapshot->nodes[0].virtual_children->metadata_snapshot().get() ==
+               shared_metadata.get());
+}
+
 } // namespace
 
 int main() {
@@ -162,6 +232,7 @@ int main() {
         independent_view_state_destroy_a_keeps_b_alive();
         no_change_publish_preserves_generation_and_snapshot_identity();
         identical_dataset_replacement_refreshes_backing_storage_without_semantic_generation();
+        large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publications();
         std::cout << "PASS t068 semantic view state\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
