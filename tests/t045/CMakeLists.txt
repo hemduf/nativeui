@@ -32,6 +32,7 @@ nativeui_add_semantics_test(t068_semantic_diff_regression t068_semantic_diff_reg
 nativeui_add_semantics_test(t068_semantic_action_router t068_semantic_action_router_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_read_only t068_semantic_read_only_tests.cpp)
 nativeui_add_semantics_test(t068_widget_semantic_values t068_widget_semantic_values_tests.cpp)
+nativeui_add_semantics_test(t068_semantic_view_state t068_semantic_view_state_tests.cpp)
 target_sources(t068_semantic_action_router PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
 )
