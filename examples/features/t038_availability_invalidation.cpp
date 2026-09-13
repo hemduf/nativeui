@@ -40,7 +40,14 @@ int verify_equal_disabled_transition(
     Factory&& factory,
     ui::Size size = {480.0f, 220.0f}) {
     ui::State<bool> enabled{true};
-    ui::UI tree{ui::Enabled{enabled, factory()}};
+    // UI activation focuses the first available focusable. Keep focus on a
+    // sibling so disabling the subject does not legitimately dirty paint via
+    // focus teardown; this fixture isolates the T038 equal-resolved-style
+    // invalidation contract from the independent T059 focus-loss contract.
+    ui::UI tree{ui::Column{
+        ui::Button{"Focus sentinel", [] {}},
+        ui::Enabled{enabled, factory()},
+    }};
     example::Platform platform;
     tree.resize(size);
     tree.activate(platform);
