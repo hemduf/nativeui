@@ -34,6 +34,45 @@ int verify_disabled_transition(
     return 0;
 }
 
+template <class Factory>
+int verify_equal_disabled_transition(
+    std::string_view name,
+    Factory&& factory,
+    ui::Size size = {480.0f, 220.0f}) {
+    ui::State<bool> enabled{true};
+    ui::UI tree{ui::Enabled{enabled, factory()}};
+    example::Platform platform;
+    tree.resize(size);
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    if (!renderer.render(tree)) {
+        return example::fail(std::string{name} + " baseline render failed");
+    }
+    if (tree.layout_dirty() || tree.paint_dirty()) {
+        return example::fail(std::string{name} + " baseline did not settle");
+    }
+
+    enabled.set(false);
+    if (tree.layout_dirty() || tree.paint_dirty()) {
+        return example::fail(
+            std::string{name} + " equal resolved disabled style invalidated the tree");
+    }
+    return 0;
+}
+
+int button_contracts() {
+    ui::ButtonStyle style;
+    const ui::Color stable_fill{0.16f, 0.22f, 0.30f, 1.0f};
+    const ui::Color stable_text{0.92f, 0.94f, 0.97f, 1.0f};
+    style.base.fill = stable_fill;
+    style.disabled.fill = stable_fill;
+    style.base.text = stable_text;
+    style.disabled.text = stable_text;
+    return verify_equal_disabled_transition(
+        "Button equal availability",
+        [&] { return ui::Button{"Stable", [] {}}.style(style); });
+}
+
 int text_contracts() {
     {
         ui::State<std::string> value{"single line"};
@@ -225,6 +264,7 @@ int tabs_contracts() {
 }
 
 int self_test() {
+    if (const int result = button_contracts(); result != 0) return result;
     if (const int result = text_contracts(); result != 0) return result;
     if (const int result = scrollbar_contracts(); result != 0) return result;
     if (const int result = popup_contracts(); result != 0) return result;
@@ -235,7 +275,7 @@ ui::UI make_demo() {
     return ui::UI{ui::Column{
         ui::Header{"T038 — Availability Invalidation Closeout"},
         ui::Label{
-            "Disabled/read-only style geometry is classified from resolved intrinsic measurement."
+            "Availability transitions classify equal, paint-only and layout-affecting resolved styles."
         }.size(12.0f),
     }.gap(12.0f)};
 }

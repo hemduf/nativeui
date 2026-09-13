@@ -129,7 +129,15 @@
                 style_layout_changed;
             focus_changed = focus_changed ||
                 old.visibility != change.value.visibility || old.enabled != change.value.enabled;
-            paint_changed = true;
+
+            bool style_paint_changed = true;
+            if (const auto* binding =
+                    dynamic_cast<const detail::ThemeBinding*>(change.node->component.get())) {
+                style_paint_changed =
+                    binding->availability_change_affects_paint(old, change.value);
+            }
+            paint_changed = paint_changed ||
+                old.visibility != change.value.visibility || style_paint_changed;
             change.node->component->set_effective_availability(change.value);
         }
     }
