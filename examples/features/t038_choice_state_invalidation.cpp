@@ -28,6 +28,39 @@ int checkbox_contract() {
     {
         ui::State<bool> checked{false};
         ui::CheckboxStyle style;
+        const ui::Color stable_fill{0.18f, 0.24f, 0.32f, 1.0f};
+        style.base.box_fill = stable_fill;
+        style.checked.box_fill = stable_fill;
+        style.base.checkmark_width = 0.0f;
+        style.checked.checkmark_width = 0.0f;
+
+        ui::UI tree{ui::Checkbox{checked, "Equal checked"}.style(style)};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("Checkbox equal-checked baseline failed");
+
+        checked.set(true);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved Checkbox checked state invalidated the tree");
+        }
+    }
+
+    {
+        ui::State<bool> checked{false};
+        ui::UI tree{ui::Checkbox{checked, "Checked paint"}};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("Checkbox checked-paint baseline failed");
+
+        checked.set(true);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail("visual Checkbox checked state missed paint or dirtied layout");
+        }
+    }
+
+    {
+        ui::State<bool> checked{false};
+        ui::CheckboxStyle style;
         style.checked.control_height = 58.0f;
 
         ui::UI tree{ui::Checkbox{checked, "Checked layout"}.style(style)};
@@ -65,6 +98,52 @@ int radio_contract() {
         tree.dispatch(example::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
         if (tree.layout_dirty() || tree.paint_dirty()) {
             return example::fail("equal resolved Radio hover style invalidated the tree");
+        }
+    }
+
+    {
+        ui::State<int> selected{2};
+        ui::RadioGroup<int> group{selected};
+        ui::UI tree{ui::RadioButton{group, 1, "Unrelated selection"}};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("Radio unrelated-selection baseline failed");
+
+        selected.set(3);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("unchanged Radio selected state invalidated the tree");
+        }
+    }
+
+    {
+        ui::State<int> selected{2};
+        ui::RadioGroup<int> group{selected};
+        ui::RadioStyle style;
+        style.base.mark_radius = 0.0f;
+        style.selected.mark_radius = 0.0f;
+
+        ui::UI tree{ui::RadioButton{group, 1, "Equal selected"}.style(style)};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("Radio equal-selected baseline failed");
+
+        selected.set(1);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved Radio selected state invalidated the tree");
+        }
+    }
+
+    {
+        ui::State<int> selected{2};
+        ui::RadioGroup<int> group{selected};
+        ui::UI tree{ui::RadioButton{group, 1, "Selected paint"}};
+        tree.resize(size);
+        ui::HeadlessRenderer renderer{size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("Radio selected-paint baseline failed");
+
+        selected.set(1);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail("visual Radio selected state missed paint or dirtied layout");
         }
     }
 
