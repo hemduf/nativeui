@@ -66,7 +66,7 @@ If dependencies are already available locally, prefer the documented `NATIVEUI_P
 
 ## 3. Ticket selection and parallelism
 
-Keep each branch/PR scoped to one small ticket or one independently reviewable sub-unit. Independent tickets may be active concurrently when they do not depend on each other.
+Keep each branch/PR scoped to one ticket or one independently reviewable sub-unit. Inside that scope, group related fixes and tests into coherent batches instead of splitting every assertion, widget state or review finding into a separate commit. Independent tickets may be active concurrently when they do not depend on each other.
 
 Explicit GitHub `Dependencies:` are the only hard ticket-to-ticket gates. Ticket numbers and milestone order are planning aids, not implicit dependencies.
 
@@ -147,19 +147,47 @@ When creating a ticket programmatically:
 
 If the canonical issue form changes, update this section in the same change so `AGENTS.md` and `.github/ISSUE_TEMPLATE/work-item.yml` never define different ticket contracts.
 
-## 4. Development workflow — TDD and small units
+## 4. Development workflow — local TDD, coherent batches, no micro-commit churn
 
-For every behavioral change:
+TDD remains mandatory for behavioral changes, but **RED/GREEN/REFACTOR are local development states, not required Git commits or remote pushes**.
 
-1. add or update the smallest failing test first;
-2. confirm the test fails for the expected reason;
-3. implement the smallest change that makes it pass;
-4. run the targeted test;
-5. run the complete core test suite;
-6. for rendering changes, add/update a headless/golden test when available;
-7. for platform/windowing changes, run the relevant platform smoke test when available.
+Before editing a non-trivial ticket or closeout pass:
 
-Prefer several small commits/patches over one large rewrite.
+1. read all acceptance criteria and required tests;
+2. build a short completeness matrix of the affected families/variants/invariants;
+3. inspect the whole relevant surface once and collect the real gaps before starting correction work;
+4. group related gaps that share the same invariant or subsystem into one coherent implementation batch.
+
+For each batch:
+
+1. add or update the failing tests needed to describe the complete bounded behavior of that batch;
+2. confirm the relevant tests fail locally for the expected reasons;
+3. implement the complete bounded correction for that batch;
+4. run the targeted tests until the whole batch is green;
+5. run the relevant core/full local suite before publishing the batch;
+6. for rendering changes, add/update headless/golden coverage when available;
+7. for platform/windowing changes, run the relevant local/platform smoke when available.
+
+### 4.0.1 Commit and push policy — mandatory
+
+The default is **batch-first history**, not micro-commits.
+
+- Do **not** create one commit per RED test, assertion, widget state, review finding, tiny helper, or GREEN fix.
+- Do **not** push a known intermediate RED merely to use GitHub Actions as the inner development loop when the behavior can be reproduced locally.
+- Keep local working-tree edits, fixup commits or temporary commits private until the bounded batch is coherent and locally validated; squash/fold them before publishing when practical.
+- A published implementation commit must represent a coherent, reviewable unit: tests + implementation + any required refactor for one bounded acceptance slice.
+- For a normal ticket, prefer **one implementation commit**, optionally **one consolidated review-fix commit**, and the final completion/docs update when needed. More commits are acceptable only when they are independently meaningful rollback/review units, not because TDD had multiple internal steps.
+- Never create a new published commit solely to record that a single test changed from RED to GREEN.
+- Do not push a new head while the current exact-head remote qualification is still running unless a completed failure has already proved that head invalid or an urgent integration conflict makes replacement necessary.
+- If a ticket is in closeout, perform **one complete acceptance/review audit**, collect all actionable gaps, fix them in one bounded correction batch, then qualify that batch. Do not resume a sequential “one widget/finding per remote CI cycle” loop.
+
+Exceptions to the no-micro-commit rule are limited to:
+
+- an intentionally isolated regression/bisect point that materially improves diagnosis;
+- an independently revertible safety fix;
+- a platform-only RED that cannot be reproduced locally and genuinely requires a remote platform to establish the failure.
+
+When using an exception, state why the separate published commit is necessary in the PR/ticket.
 
 Never silently weaken or delete a test merely to make a change pass.
 
@@ -184,9 +212,12 @@ Infrastructure-only tickets (build refactors, header splitting, CI plumbing) are
 Follow [`CI_POLICY.md`](CI_POLICY.md).
 
 - Keep implementation PRs in Draft while source/build/tests are changing.
-- Intermediate commits run normal `CI` plus only dedicated workflows whose subsystem `paths` filters match.
+- Remote CI is a **qualification layer**, not the RED/GREEN inner loop.
+- Publish coherent validation batches only after the affected surface builds locally and the targeted tests for that batch are green.
+- Each pushed qualification batch runs normal `CI` plus only dedicated workflows whose subsystem `paths` filters match.
+- Do not deliberately supersede an in-progress exact-head run with another small correction; wait for the useful result unless the head is already proven invalid.
 - `T042 Lifecycle Stress` and `T052 v0.1 Release Gate` are heavyweight final-candidate gates and run on the Draft -> Ready for review transition, not every PR commit.
-- Every dedicated workflow must cancel superseded runs for the same PR.
+- Every dedicated workflow must cancel genuinely superseded runs for the same PR.
 - Do not create an always-on per-ticket workflow when the test can live in the normal CTest/CI graph.
 - Do not use umbrella headers or root `CMakeLists.txt` as broad path-filter proxies when normal CI already owns generic integration coverage.
 - Any production source, test/fixture/example, build/dependency or workflow change after final qualification invalidates the candidate: convert the PR back to Draft before editing, then mark it Ready again after normal/relevant CI is green.
@@ -199,6 +230,8 @@ This rule changes when expensive checks run; it does not weaken required test or
 Every code-changing ticket must perform a final review against [`CODE_REVIEW.md`](CODE_REVIEW.md). This is mandatory, not proportional to change size. Documentation-only tickets must still consider any applicable architecture/workflow rules.
 
 The review record in the GitHub issue or PR must explicitly cover instance isolation, globals/statics, threading/real-time boundaries, lifetime/reentrancy, Objective-C runtime rules when applicable, platform integration and tests. A bare "reviewed" is not sufficient.
+
+**Review batching rule:** before starting corrective edits from a closeout/final review, inspect the complete ticket scope and collect all current Blocking/Important findings into one review record. Correct compatible findings in one coherent batch and re-review the resulting head. Do not publish one commit/push per finding unless the findings are genuinely independent rollback units or one correction must land before another can be understood.
 
 The passes below complement `CODE_REVIEW.md`; they do not replace it.
 
@@ -407,10 +440,14 @@ Do not turn `CONTEXT.md` into a changelog. Move durable decisions to `DESIGN.md`
 
 For each ticket:
 
-- branch/commit scope should match one ticket or one independently reviewable sub-unit;
+- branch/PR scope should match one ticket or one independently reviewable sub-unit;
 - keep the PR in Draft during active source/build/test iteration;
-- commit tests with the implementation they validate;
+- perform fine-grained RED/GREEN cycles locally, but publish coherent batches rather than the internal TDD steps;
+- commit tests with the implementation they validate in the same coherent batch whenever practical;
+- default published history is one implementation commit plus, if needed, one consolidated review-fix commit and completion/docs bookkeeping; use more commits only for independently meaningful rollback/review units;
+- use local fixup/squash workflows freely to keep the remote branch readable;
 - avoid drive-by formatting or unrelated refactors;
+- before the first remote qualification push for a batch, build the affected surface and run its targeted tests locally;
 - before final qualification, run the complete relevant local test set and complete the mandatory review;
 - mark the frozen candidate Ready for review to trigger heavyweight qualification according to `CI_POLICY.md`;
 - if source/build/tests/workflows must change afterward, convert the PR back to Draft before editing and repeat the final-candidate transition after CI is green;
@@ -419,16 +456,17 @@ For each ticket:
 
 Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
 
-Suggested commit style:
+Suggested commit style for a coherent batch:
 
 ```text
-core: add dirty-region aggregation
-layout: add min/max constraints
-input: add focus scopes
-widget: add slider
-render: add gradient paint
-platform: harden embedded Pugl lifecycle
+core(TNNN): complete dirty-region aggregation
+layout(TNNN): add min/max constraints and coverage
+input(TNNN): complete focus-scope behavior
+widget(TNNN): implement slider contract and tests
+platform(TNNN): harden embedded Pugl lifecycle
 ```
+
+Avoid histories such as `test: add RED`, `fix: make RED green`, `test: next case`, `fix: next case` for a sequence that is one bounded acceptance slice. Keep that sequence local and publish the completed slice.
 
 ## 14. When blocked
 
