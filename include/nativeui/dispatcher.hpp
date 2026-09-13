@@ -9,6 +9,8 @@
 
 namespace ui {
 
+class AnimationContext;
+
 namespace detail {
 struct DispatcherOwnerToken;
 struct DispatcherState;
@@ -72,8 +74,14 @@ private:
     explicit Dispatcher(const std::shared_ptr<detail::DispatcherState>& state) noexcept
         : state_(state) {}
 
+    /// Internal T065 clock access used by T040. Keeping this private prevents a
+    /// second public clock API while allowing animation elapsed-time math to use
+    /// the exact injected steady/manual clock that schedules Dispatcher timers.
+    [[nodiscard]] std::chrono::steady_clock::time_point current_time() const noexcept;
+
     std::weak_ptr<detail::DispatcherState> state_;
 
+    friend class AnimationContext;
     friend class detail::DispatcherOwner;
 };
 
