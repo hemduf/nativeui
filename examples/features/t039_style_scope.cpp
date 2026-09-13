@@ -167,6 +167,46 @@ int verify_scope_restoration() {
     return 0;
 }
 
+int verify_structural_scope_removal_restoration() {
+    ui::StyleScopeOverrides outer;
+    outer.palette.surface = byte_color(65, 66, 67);
+
+    ui::StyleScopeOverrides inner;
+    inner.palette.surface = byte_color(68, 69, 70);
+    ui::State<bool> inner_present{true};
+
+    constexpr ui::Size size{180.0f, 64.0f};
+    ui::UI tree{ui::StyleScope{
+        outer,
+        ui::Switch<bool>{inner_present}
+            .when(true, ui::StyleScope{inner, ui::Button{"Structural", [] {}}})
+            .otherwise(ui::Button{"Structural", [] {}})}};
+    ui::HeadlessRenderer renderer{size, 1.0f};
+    if (!renderer.render(tree)) {
+        return example::fail("structural scope restoration baseline render failed");
+    }
+    if (!pixel_matches(renderer.pixel(20, 20), 68, 69, 70)) {
+        return example::fail("structural inner scope did not apply before removal");
+    }
+
+    inner_present.set(false);
+    if (!renderer.render(tree)) {
+        return example::fail("structural scope removal render failed");
+    }
+    if (!pixel_matches(renderer.pixel(20, 20), 65, 66, 67)) {
+        return example::fail("structural scope removal left stale resolved descendant style");
+    }
+
+    inner_present.set(true);
+    if (!renderer.render(tree)) {
+        return example::fail("structural scope reinsertion render failed");
+    }
+    if (!pixel_matches(renderer.pixel(20, 20), 68, 69, 70)) {
+        return example::fail("reinserted structural scope did not resolve fresh ancestry");
+    }
+    return 0;
+}
+
 int verify_dynamic_descendant_ancestry() {
     ui::State<bool> visible{false};
     ui::StyleScopeOverrides scoped;
@@ -349,6 +389,7 @@ int self_test() {
     if (const auto retained = verify_nested_retained_precedence(); retained != 0) return retained;
     if (const auto isolated = verify_sibling_isolation(); isolated != 0) return isolated;
     if (const auto restored = verify_scope_restoration(); restored != 0) return restored;
+    if (const auto restored = verify_structural_scope_removal_restoration(); restored != 0) return restored;
     if (const auto dynamic = verify_dynamic_descendant_ancestry(); dynamic != 0) return dynamic;
     if (const auto isolated = verify_two_tree_isolation(); isolated != 0) return isolated;
     if (const auto golden = verify_headless_scope_golden(); golden != 0) return golden;
