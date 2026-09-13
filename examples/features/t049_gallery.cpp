@@ -61,6 +61,8 @@ struct GalleryState {
     ui::State<bool> disabled_enabled{false};
     ui::State<int> radio_selection{2};
     ui::RadioGroup<int> radio_group{radio_selection};
+    ui::State<int> state_radio_selection{2};
+    ui::RadioGroup<int> state_radio_group{state_radio_selection};
     ui::State<float> knob{0.58f};
     ui::State<float> slider{0.42f};
     ui::State<ui::RangeValue> range{ui::RangeValue{0.24f, 0.76f}};
@@ -207,7 +209,7 @@ ui::UI make_gallery(GalleryState& state) {
                                 state.disabled_enabled,
                                 ui::Button{"Disabled", [] {}}.style(button_style)},
                             ui::Checkbox{state.checked, "Selected"},
-                            ui::RadioButton{state.radio_group, 2, "Selected radio"}
+                            ui::RadioButton{state.state_radio_group, 2, "Selected radio"}
                         }.gap(10.0f),
                         ui::Label{
                             "Use pointer and keyboard focus to inspect hover, pressed and focused variants; disabled and selected states are shown explicitly."
