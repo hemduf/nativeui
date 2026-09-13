@@ -205,19 +205,41 @@ private:
         }
     }
 
-    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const override {
+        return classify_slider_style_change(
+                   resolved_style(before, focused_),
+                   resolved_style(after, focused_)) == SliderStyleInvalidation::Layout;
+    }
+
+    [[nodiscard]] VisualState current_visual_state(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
         return VisualState{
-            .enabled = effective_enabled(),
-            .read_only = effective_read_only(),
+            .enabled = availability.enabled,
+            .read_only = availability.read_only,
             .hovered = hovered_,
             .pressed = dragging_,
             .focused = focused,
         };
     }
 
-    [[nodiscard]] ResolvedSliderStyle resolved_style(bool focused) const {
+    [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
+        return current_visual_state(effective_availability(), focused);
+    }
+
+    [[nodiscard]] ResolvedSliderStyle resolved_style(
+        ComponentAvailability availability,
+        bool focused) const {
         return resolve_slider_style(
-            default_slider_style(current_theme()), style_, current_visual_state(focused));
+            default_slider_style(current_theme()),
+            style_,
+            current_visual_state(availability, focused));
+    }
+
+    [[nodiscard]] ResolvedSliderStyle resolved_style(bool focused) const {
+        return resolved_style(effective_availability(), focused);
     }
 
     [[nodiscard]] bool mutating_input(const InputEvent& event) const noexcept {
