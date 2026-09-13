@@ -128,7 +128,7 @@ public:
 
         const AnimationHandle handle{state->token, id};
         if (!ensure_wake(state)) {
-            erase_entry(state, id);
+            (void)erase_entry(state, id);
             return {};
         }
         return handle;
@@ -174,7 +174,7 @@ public:
 
         const AnimationHandle handle{state->token, id};
         if (!ensure_wake(state)) {
-            erase_entry(state, id);
+            (void)erase_entry(state, id);
             return {};
         }
         return handle;
