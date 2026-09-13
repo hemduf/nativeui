@@ -272,6 +272,14 @@ private:
             resolved_style(after, focused_));
     }
 
+    [[nodiscard]] bool availability_change_affects_paint(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const noexcept override {
+        return !checkbox_presentation_equal(
+            resolved_style(before, focused_),
+            resolved_style(after, focused_));
+    }
+
     template <class Context>
     static void invalidate_transition(const ResolvedCheckboxStyle& before,
                                       const ResolvedCheckboxStyle& after,
@@ -484,6 +492,14 @@ private:
         const ComponentAvailability& before,
         const ComponentAvailability& after) const override {
         return !radio_layout_equal(
+            resolved_style(before, focused_),
+            resolved_style(after, focused_));
+    }
+
+    [[nodiscard]] bool availability_change_affects_paint(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const noexcept override {
+        return !radio_presentation_equal(
             resolved_style(before, focused_),
             resolved_style(after, focused_));
     }

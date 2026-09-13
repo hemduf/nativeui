@@ -252,6 +252,14 @@ private:
             presentation_signature(after, focused_));
     }
 
+    [[nodiscard]] bool availability_change_affects_paint(
+        const ComponentAvailability& before,
+        const ComponentAvailability& after) const noexcept override {
+        return !same_presentation(
+            presentation_signature(before, focused_),
+            presentation_signature(after, focused_));
+    }
+
     [[nodiscard]] VisualState current_visual_state(bool focused) const noexcept {
         return current_visual_state(effective_availability(), focused);
     }
