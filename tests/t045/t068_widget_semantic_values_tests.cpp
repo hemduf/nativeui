@@ -160,6 +160,15 @@ void combo_box_value_contract() {
     T068_CHECK(expanded.expanded == ui::SemanticExpandedState::Expanded);
 }
 
+void dialog_value_contract() {
+    const auto info = ui::detail::dialog_semantic_info("Settings");
+    T068_CHECK(info.role == ui::SemanticRole::Dialog);
+    T068_CHECK(info.name == "Settings");
+    T068_CHECK(info.focusable);
+    T068_CHECK(info.supports(ui::SemanticAction::Focus));
+    T068_CHECK(!info.supports(ui::SemanticAction::Activate));
+}
+
 } // namespace
 
 int main() {
@@ -172,6 +181,7 @@ int main() {
         bounded_display_value_contract();
         text_edit_value_contract();
         combo_box_value_contract();
+        dialog_value_contract();
         std::cout << "PASS t068 widget semantic values\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
