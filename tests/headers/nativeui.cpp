@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,15 @@ void nativeui_header_compile_t068_custom_semantics() {
     const auto info = component.semantics();
     (void)info;
 }
+
+using NativeUIHeaderT068ComboBoxComponent = ui::detail::ComboBoxComponent<int>;
+using NativeUIHeaderT068ComboBoxSemantics =
+    ui::SemanticInfo (NativeUIHeaderT068ComboBoxComponent::*)() const;
+static_assert(
+    std::is_same_v<
+        decltype(&NativeUIHeaderT068ComboBoxComponent::semantics),
+        NativeUIHeaderT068ComboBoxSemantics>,
+    "ComboBoxComponent must expose its own semantic value/expanded-state snapshot");
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {
     auto spec = ui::make_spec(ui::If{visible, ui::Spacer{1.0f, 1.0f}});
