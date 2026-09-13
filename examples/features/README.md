@@ -22,6 +22,16 @@ Current examples:
 | T024 | `nativeui_example_t024_goldens` | golden rendering scenes and explicit baseline workflow |
 | T025 | `nativeui_example_t025_text_edit_model` | reusable headless text editing model |
 | T041 | `nativeui_example_t041_smoke_harness` | real standalone parent + embedded Pugl module lifecycle |
+| T049 | `nativeui_example_t049_gallery` | single-window public-API component gallery and deterministic aggregate self-test |
+
+## Component gallery
+
+`nativeui_example_t049_gallery` is the aggregate visual catalogue. It deliberately does not replace the focused examples that define each feature contract. For the widget/style surface represented by the gallery, use these focused targets when debugging or learning a specific API:
+
+- `nativeui_example_t022_images` and `nativeui_example_t023_svg_icons` for deterministic image/SVG resources;
+- `nativeui_example_t030_button`, `nativeui_example_t031_checkbox_radio`, `nativeui_example_t032_slider`, `nativeui_example_t033_progress_meter` and `nativeui_example_t034_scroll_view` for standard control/value/navigation primitives;
+- `nativeui_example_t035_combo_popup` and `nativeui_example_t036_list_tabs` for collections and navigation;
+- `nativeui_example_t038_widget_styles` for typed visual-state style resolution.
 
 Desktop mode:
 
