@@ -55,12 +55,9 @@ namespace detail {
            lhs.checkmark_width == rhs.checkmark_width;
 }
 
-[[nodiscard]] inline bool checkbox_patch_affects_layout(
-    const CheckboxStylePatch& patch) noexcept {
-    return patch.box_size || patch.minimum_width || patch.control_height ||
-           patch.leading_padding || patch.label_gap || patch.text_size ||
-           patch.text_weight || patch.text_slant || patch.font_family ||
-           patch.fallback_families;
+[[nodiscard]] inline bool checkbox_checkmark_visible(
+    const ResolvedCheckboxStyle& style) noexcept {
+    return style.box_size > 0.0f && style.checkmark_width > 0.0f && style.checkmark.a > 0.0f;
 }
 
 [[nodiscard]] inline bool radio_layout_equal(const ResolvedRadioStyle& lhs,
@@ -88,11 +85,8 @@ namespace detail {
            lhs.mark_radius == rhs.mark_radius;
 }
 
-[[nodiscard]] inline bool radio_patch_affects_layout(const RadioStylePatch& patch) noexcept {
-    return patch.outer_radius || patch.minimum_width || patch.control_height ||
-           patch.leading_padding || patch.label_gap || patch.text_size ||
-           patch.text_weight || patch.text_slant || patch.font_family ||
-           patch.fallback_families;
+[[nodiscard]] inline bool radio_mark_visible(const ResolvedRadioStyle& style) noexcept {
+    return style.mark_radius > 0.0f && style.mark_fill.a > 0.0f;
 }
 
 template <class Context, class Resolved, class SameLayout, class SamePresentation>
@@ -109,6 +103,66 @@ void invalidate_resolved_style_transition(const Resolved& before,
     }
     context.invalidate();
 }
+
+struct CheckboxStateInvalidation final {
+    const Theme* theme{};
+    CheckboxStyle style;
+    VisualState visual{};
+    std::function<void()> invalidate;
+    std::function<void()> invalidate_layout;
+    bool active{};
+
+    void sync(VisualState state) noexcept { visual = state; }
+
+    void publish(bool checked) {
+        if (!active || !theme) return;
+
+        auto before_state = visual;
+        auto after_state = visual;
+        after_state.checked = checked;
+
+        const auto inherited = default_checkbox_style(*theme);
+        const auto before = resolve_checkbox_style(inherited, style, before_state);
+        const auto after = resolve_checkbox_style(inherited, style, after_state);
+        const bool before_mark = before_state.checked && checkbox_checkmark_visible(before);
+        const bool after_mark = after_state.checked && checkbox_checkmark_visible(after);
+
+        visual = after_state;
+        if (checkbox_presentation_equal(before, after) && before_mark == after_mark) return;
+        if (!checkbox_layout_equal(before, after)) invalidate_layout();
+        invalidate();
+    }
+};
+
+struct RadioStateInvalidation final {
+    const Theme* theme{};
+    RadioStyle style;
+    VisualState visual{};
+    std::function<void()> invalidate;
+    std::function<void()> invalidate_layout;
+    bool active{};
+
+    void sync(VisualState state) noexcept { visual = state; }
+
+    void publish(bool selected) {
+        if (!active || !theme) return;
+
+        auto before_state = visual;
+        auto after_state = visual;
+        after_state.selected = selected;
+
+        const auto inherited = default_radio_style(*theme);
+        const auto before = resolve_radio_style(inherited, style, before_state);
+        const auto after = resolve_radio_style(inherited, style, after_state);
+        const bool before_mark = before_state.selected && radio_mark_visible(before);
+        const bool after_mark = after_state.selected && radio_mark_visible(after);
+
+        visual = after_state;
+        if (radio_presentation_equal(before, after) && before_mark == after_mark) return;
+        if (!radio_layout_equal(before, after)) invalidate_layout();
+        invalidate();
+    }
+};
 
 class CheckboxComponent final : public Component, public ThemeBinding {
 public:
@@ -134,22 +188,29 @@ public:
     }
 
     void mount(MountContext& context) override {
-        // State::set() snapshots listeners before callbacks run. Capture only
-        // retained-tree invalidators here: an earlier listener may synchronously
-        // remove this component, so a callback that captured `this` would dangle.
-        const bool checked_changes_layout = checkbox_patch_affects_layout(style_.checked);
-        auto invalidate = context.invalidator();
-        auto invalidate_layout = context.layout_invalidator();
+        // State::set() snapshots listeners before callbacks run. Keep the state
+        // classifier detached from the component so an earlier listener may
+        // synchronously remove this node without leaving a raw `this` capture.
+        state_invalidation_ = std::make_shared<CheckboxStateInvalidation>();
+        state_invalidation_->theme = &current_theme();
+        state_invalidation_->style = style_;
+        state_invalidation_->invalidate = context.invalidator();
+        state_invalidation_->invalidate_layout = context.layout_invalidator();
+        state_invalidation_->active = true;
+        sync_state_invalidation(effective_availability(), focused_);
+
+        auto invalidation = state_invalidation_;
         subscription_ = state_.observe(
-            [checked_changes_layout,
-             invalidate = std::move(invalidate),
-             invalidate_layout = std::move(invalidate_layout)](const bool&) {
-                if (checked_changes_layout) invalidate_layout();
-                invalidate();
+            [invalidation = std::move(invalidation)](const bool& checked) {
+                invalidation->publish(checked);
             });
     }
 
-    void unmount(LifecycleContext&) override { subscription_.reset(); }
+    void unmount(LifecycleContext&) override {
+        if (state_invalidation_) state_invalidation_->active = false;
+        subscription_.reset();
+        state_invalidation_.reset();
+    }
 
     void focus_changed(bool focused, FocusContext& context) override {
         const auto before = resolved_style(focused_);
@@ -157,6 +218,7 @@ public:
         interaction_.focus_changed(focused, context, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
     }
 
     void deactivate(LifecycleContext& context) override {
@@ -165,6 +227,7 @@ public:
         interaction_.deactivate(context, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -173,6 +236,7 @@ public:
             interaction_.cancel_pending_mutation(context, false);
             const auto after = resolved_style(focused_);
             invalidate_transition(before, after, context);
+            sync_state_invalidation(effective_availability(), focused_);
             return EventResult::Handled;
         }
 
@@ -180,6 +244,7 @@ public:
         const auto outcome = interaction_.input(event, context, false, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
         if (!outcome.activate) return outcome.result;
 
         // State observers may synchronously rebuild/destroy this component.
@@ -251,6 +316,14 @@ private:
         };
     }
 
+    void sync_state_invalidation(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
+        if (state_invalidation_) {
+            state_invalidation_->sync(current_visual_state(availability, focused));
+        }
+    }
+
     [[nodiscard]] ResolvedCheckboxStyle resolved_style(bool focused) const {
         return resolved_style(effective_availability(), focused);
     }
@@ -267,17 +340,21 @@ private:
     [[nodiscard]] bool availability_change_affects_layout(
         const ComponentAvailability& before,
         const ComponentAvailability& after) const override {
-        return !checkbox_layout_equal(
+        const bool changed = !checkbox_layout_equal(
             resolved_style(before, focused_),
             resolved_style(after, focused_));
+        sync_state_invalidation(after, focused_);
+        return changed;
     }
 
     [[nodiscard]] bool availability_change_affects_paint(
         const ComponentAvailability& before,
         const ComponentAvailability& after) const noexcept override {
-        return !checkbox_presentation_equal(
+        const bool changed = !checkbox_presentation_equal(
             resolved_style(before, focused_),
             resolved_style(after, focused_));
+        sync_state_invalidation(after, focused_);
+        return changed;
     }
 
     template <class Context>
@@ -292,6 +369,7 @@ private:
     std::string label_;
     CheckboxStyle style_;
     State<bool>::Subscription subscription_;
+    std::shared_ptr<CheckboxStateInvalidation> state_invalidation_;
     PressActivationState interaction_;
     bool focused_{};
 };
@@ -364,19 +442,29 @@ public:
 
     void mount(MountContext& context) override {
         if (!observe_) return;
-        const bool selected_changes_layout = radio_patch_affects_layout(style_.selected);
-        auto invalidate = context.invalidator();
-        auto invalidate_layout = context.layout_invalidator();
+
+        state_invalidation_ = std::make_shared<RadioStateInvalidation>();
+        state_invalidation_->theme = &current_theme();
+        state_invalidation_->style = style_;
+        state_invalidation_->invalidate = context.invalidator();
+        state_invalidation_->invalidate_layout = context.layout_invalidator();
+        state_invalidation_->active = true;
+        sync_state_invalidation(effective_availability(), focused_);
+
+        auto invalidation = state_invalidation_;
+        auto is_selected = is_selected_;
         subscription_ = observe_(
-            [selected_changes_layout,
-             invalidate = std::move(invalidate),
-             invalidate_layout = std::move(invalidate_layout)]() {
-                if (selected_changes_layout) invalidate_layout();
-                invalidate();
+            [invalidation = std::move(invalidation),
+             is_selected = std::move(is_selected)]() {
+                invalidation->publish(is_selected && is_selected());
             });
     }
 
-    void unmount(LifecycleContext&) override { subscription_.reset(); }
+    void unmount(LifecycleContext&) override {
+        if (state_invalidation_) state_invalidation_->active = false;
+        subscription_.reset();
+        state_invalidation_.reset();
+    }
 
     void focus_changed(bool focused, FocusContext& context) override {
         const auto before = resolved_style(focused_);
@@ -384,6 +472,7 @@ public:
         interaction_.focus_changed(focused, context, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
     }
 
     void deactivate(LifecycleContext& context) override {
@@ -392,6 +481,7 @@ public:
         interaction_.deactivate(context, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
     }
 
     [[nodiscard]] const void* focus_group_identity() const noexcept override {
@@ -404,6 +494,7 @@ public:
 
     void focus_group_select() override {
         if (effective_read_only()) return;
+        sync_state_invalidation(effective_availability(), focused_);
         auto select = select_;
         if (select) select();
     }
@@ -414,6 +505,7 @@ public:
             interaction_.cancel_pending_mutation(context, false);
             const auto after = resolved_style(focused_);
             invalidate_transition(before, after, context);
+            sync_state_invalidation(effective_availability(), focused_);
             return EventResult::Handled;
         }
 
@@ -421,6 +513,7 @@ public:
         const auto outcome = interaction_.input(event, context, false, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
+        sync_state_invalidation(effective_availability(), focused_);
         if (!outcome.activate) return outcome.result;
 
         // Selection callbacks may rebuild the retained tree. Do not access the
@@ -475,6 +568,14 @@ private:
         };
     }
 
+    void sync_state_invalidation(
+        ComponentAvailability availability,
+        bool focused) const noexcept {
+        if (state_invalidation_) {
+            state_invalidation_->sync(current_visual_state(availability, focused));
+        }
+    }
+
     [[nodiscard]] ResolvedRadioStyle resolved_style(bool focused) const {
         return resolved_style(effective_availability(), focused);
     }
@@ -491,17 +592,21 @@ private:
     [[nodiscard]] bool availability_change_affects_layout(
         const ComponentAvailability& before,
         const ComponentAvailability& after) const override {
-        return !radio_layout_equal(
+        const bool changed = !radio_layout_equal(
             resolved_style(before, focused_),
             resolved_style(after, focused_));
+        sync_state_invalidation(after, focused_);
+        return changed;
     }
 
     [[nodiscard]] bool availability_change_affects_paint(
         const ComponentAvailability& before,
         const ComponentAvailability& after) const noexcept override {
-        return !radio_presentation_equal(
+        const bool changed = !radio_presentation_equal(
             resolved_style(before, focused_),
             resolved_style(after, focused_));
+        sync_state_invalidation(after, focused_);
+        return changed;
     }
 
     template <class Context>
@@ -519,6 +624,7 @@ private:
     Observe observe_;
     RadioStyle style_;
     std::shared_ptr<void> subscription_;
+    std::shared_ptr<RadioStateInvalidation> state_invalidation_;
     PressActivationState interaction_;
     bool focused_{};
 };
