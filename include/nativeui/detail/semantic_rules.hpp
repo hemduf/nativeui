@@ -7,9 +7,13 @@
 
 namespace ui::detail {
 
-namespace semantic_rules_detail {
-
-[[nodiscard]] inline bool is_read_only_mutation(SemanticAction action) noexcept {
+/// Classify whether a semantic action mutates the target's application value.
+///
+/// T045/T059 use this one closed-set policy at both publication time and the
+/// T068 execution-time recheck. Keeping the classification in one helper avoids
+/// allowing a read-only action through one boundary while filtering it at the
+/// other.
+[[nodiscard]] inline bool semantic_action_mutates_value(SemanticAction action) noexcept {
     switch (action) {
         case SemanticAction::Toggle:
         case SemanticAction::Increment:
@@ -25,8 +29,6 @@ namespace semantic_rules_detail {
     }
     return true;
 }
-
-} // namespace semantic_rules_detail
 
 /// Apply retained effective availability/focus state to a component-provided
 /// semantic value before it is published in an immutable snapshot.
@@ -57,7 +59,7 @@ namespace semantic_rules_detail {
         if (action == SemanticAction::Focus && !info.focusable) {
             return true;
         }
-        return info.read_only && semantic_rules_detail::is_read_only_mutation(action);
+        return info.read_only && semantic_action_mutates_value(action);
     });
 
     return info;

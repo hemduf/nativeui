@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/detail/semantic_proxy.hpp>
+#include <nativeui/detail/semantic_rules.hpp>
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/semantics.hpp>
 
@@ -23,23 +24,6 @@ struct SemanticActionRequest {
     std::optional<double> numeric_value;
     std::optional<std::string> text_value;
 };
-
-[[nodiscard]] inline bool semantic_action_mutates_value(SemanticAction action) noexcept {
-    switch (action) {
-        case SemanticAction::Toggle:
-        case SemanticAction::Increment:
-        case SemanticAction::Decrement:
-        case SemanticAction::SetValue:
-        case SemanticAction::Select:
-            return true;
-        case SemanticAction::Activate:
-        case SemanticAction::Focus:
-        case SemanticAction::Expand:
-        case SemanticAction::Collapse:
-            return false;
-    }
-    return true;
-}
 
 [[nodiscard]] inline bool semantic_action_allowed(
     const SemanticInfo& info,
