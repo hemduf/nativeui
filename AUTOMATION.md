@@ -70,7 +70,7 @@ Product issues define:
 PRs and exact-head Actions define:
 
 - canonical implementation stream;
-- current exact head;
+- current exact head and observed base composition;
 - code/review evidence;
 - executed CI/platform/sanitizer evidence;
 - mergeability.
@@ -106,13 +106,15 @@ Every event starts with:
 and contains a compact structured block with at least:
 
 ```yaml
-generation: <integer>
+generation: <current committed generation>
+assignment_generation: <generation that assigned the work|null>
 worker: W1|W2|W3|Integration
 kind: <event kind>
 ticket: TNNN|null
 issue: <number|null>
 pr: <number|null>
 head: <exact SHA|null>
+base: <observed target/base SHA|null>
 result: <concise factual result>
 next_action: <concrete next action>
 ```
@@ -141,10 +143,25 @@ Rules:
 
 - write an event only for a meaningful state/head/phase change; never emit hourly heartbeat spam;
 - an event referring to a PR/review/qualification must include its exact head SHA;
+- `REVIEW_PASS`, `QUALIFICATION_*`, `MERGE_READY` and `MERGED` also record the observed base/main SHA when that composition matters;
 - if live head differs, the event is stale and cannot authorize review PASS, qualification or merge;
+- if the base/main changed materially since executable qualification, Integration re-evaluates composition according to `CI_POLICY.md`; project-state-only documentation may remain non-invalidating, executable/API/build changes do not;
 - detailed code findings belong in the PR; the cycle event summarizes their scheduling consequence;
 - a `MERGED` event must be verified against live PR/issue state before any dependent claim;
 - workers always read the current cycle comments before deciding their useful action.
+
+### 5.1 Generation-race rule
+
+Immediately before posting any worker event, the worker must re-fetch `#250` and its `current_cycle_issue`.
+
+If the committed generation changed while the worker was running:
+
+1. revalidate the live issue/PR/head and the new generation assignment/reservation;
+2. if the result is still relevant, post the event to the **new current cycle**, use the new `generation`, and preserve the original `assignment_generation`;
+3. if the new plan invalidates the scheduling consequence, do not post a misleading control-plane event; keep any durable technical finding in the product PR/issue and let the Scheduler rediscover live state;
+4. never post a fresh coordination event only to a superseded/closed cycle.
+
+This prevents completed work from being lost when a worker overlaps a Scheduler generation transition.
 
 ## 6. Product status and leases
 
@@ -179,7 +196,7 @@ It reads:
 - `#250` and current cycle events;
 - all open product issues plus dependencies/priorities/status;
 - all open product PRs and exact heads;
-- exact-head workflows/checks/reviews/mergeability;
+- exact-head workflows/checks/reviews/mergeability and observed base composition;
 - recently merged work needed to recompute unlocks.
 
 Then it:
@@ -250,9 +267,9 @@ At every run:
 4. use batch-first TDD: inspect complete bounded surface, tests before correction, implementation + refactor in one coherent qualification head;
 5. obey exact-head backpressure: no push over queued/in-progress useful CI;
 6. max one new qualification head per PR per run;
-7. before every write re-fetch issue/PR/branch/main; never force-push or discard concurrent work;
+7. before every repository write re-fetch issue/PR/branch/main; never force-push or discard concurrent work;
 8. perform own completeness/self-review before declaring `SOURCE_READY`;
-9. write a structured cycle event for every meaningful transition.
+9. immediately before every event write, apply the generation-race rule from section 5.1.
 
 Delivery workers do not merge their own product PRs. Independent final integration belongs to Integration.
 
@@ -271,10 +288,10 @@ Ordered responsibilities:
 5. for infrastructure-only failures, use supported rerun/recovery mechanisms when available without manufacturing a new source head;
 6. perform safe mechanical main synchronization/merge-conflict resolution only when it changes no intended product behavior; any changed head is requalified;
 7. transition Draft -> Ready only for a frozen candidate satisfying `CI_POLICY.md` preconditions;
-8. verify heavyweight final gates;
+8. verify heavyweight final gates and the candidate's observed base/main composition;
 9. merge only exact expected head with zero Blocking/Important finding and complete acceptance/test evidence;
 10. transition product issue Done/closed, synchronize project-state docs as required, recompute immediately affected dependants and make newly available product tickets Ready;
-11. emit `MERGED` including verified unlocks.
+11. emit `MERGED` including verified unlocks and observed base/main SHA, after applying the generation-race rule.
 
 Status repair is background work and must never delay a critical-path qualification or merge.
 
@@ -299,6 +316,8 @@ If exact-head relevant workflows are queued/in-progress:
 - inspect all completed failing jobs before producing a correction batch.
 
 `startup_failure`, zero-job/no-step failures and equivalent non-executed results are infrastructure/unqualified evidence, never product green or product red.
+
+A successful PR workflow must be interpreted with its tested PR/base composition. If `main` advances with executable/API/build changes, Integration must re-evaluate/requalify the candidate as required by `CI_POLICY.md`; pure project-state documentation does not by itself force executable requalification.
 
 T042/T052 remain final-candidate gates according to `CI_POLICY.md`.
 
