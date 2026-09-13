@@ -108,12 +108,12 @@ During active development, keep code-changing PRs Draft and run normal CI plus o
 
 GitHub live state is authoritative. `#250` is Scheduler-only control state; current `AUTOMATION CYCLE — GNNN` issue comments are the Worker → Scheduler event bus. Delivery W1/W2/W3 are interchangeable with at most three source-changing lanes. Integration owns independent final review, exact-head CI diagnosis, qualification, merge and completion/unlock bookkeeping; it never implements product features. Reporter is read-only.
 
-T039, T040 and T049 are merged. The next source-changing critical-path lane is T069 after its issue metadata is coherently Ready. T056/#68 remains the next known completed-ticket metadata repair needed before T070 readiness; T043/#43 and T052/#52 remain known completed-ticket metadata repairs before T071 readiness. T068/PR #241 remains parked for 1.2.
+T039, T040 and T049 are merged. The next source-changing critical-path lane is T069 after its issue metadata is coherently Ready. Completed-ticket metadata drift on T047/#47, T059/#71, T056/#68, T043/#43 and T052/#52 has been repaired to coherent Done. T068/PR #241 remains parked for 1.2.
 
 ## Next actions
 
 1. Make T069/#81 coherently Ready after the verified T039 merge and completed-dependency revalidation, then let the reserved Delivery lane claim it atomically.
-2. Service any new T069 SOURCE_READY/CI/review/merge transition before background metadata cleanup.
-3. Repair T056/#68 to coherent Done before T070 readiness; repair T043/#43 and T052/#52 before T071 readiness.
+2. Service any new T069 SOURCE_READY/CI/review/merge transition before background cleanup.
+3. After T069 completes, re-evaluate T070 directly; its known completed metadata prerequisites are now coherent. After T070, re-evaluate T071 against the same rule.
 4. Keep T068/PR #241 parked for NativeUI 1.2.
 5. Continue through T069 -> T070 -> T071 after dependencies are genuinely and coherently Done; automation continues beyond release gates into the post-1.0 backlog.
