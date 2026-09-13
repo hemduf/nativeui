@@ -56,7 +56,7 @@ ui::StyleScopeOverrides inner_scope() {
 
 int verify_retained_scope_invalidation() {
     ui::StyleScopeOverrides initial;
-    initial.palette.control_background = ui::Color{0.12f, 0.18f, 0.25f, 1.0f};
+    initial.palette.surface = ui::Color{0.12f, 0.18f, 0.25f, 1.0f};
     ui::State<ui::StyleScopeOverrides> scoped{initial};
 
     ui::UI tree{ui::Row{
@@ -70,7 +70,7 @@ int verify_retained_scope_invalidation() {
     if (tree.dirty()) return example::fail("baseline render left retained scope dirty");
 
     auto paint_only = scoped.get();
-    paint_only.palette.control_background = ui::Color{0.36f, 0.16f, 0.10f, 1.0f};
+    paint_only.palette.surface = ui::Color{0.36f, 0.16f, 0.10f, 1.0f};
     scoped.set(paint_only);
     if (tree.layout_dirty() || !tree.paint_dirty()) {
         return example::fail("paint-only scope replacement did not stay paint-only");
@@ -99,7 +99,7 @@ int verify_retained_scope_invalidation() {
 
 int verify_nested_retained_precedence() {
     ui::StyleScopeOverrides outer;
-    outer.palette.control_background = ui::Color{0.14f, 0.20f, 0.28f, 1.0f};
+    outer.palette.surface = ui::Color{0.14f, 0.20f, 0.28f, 1.0f};
     outer.controls.control_height = 48.0f;
 
     ui::StyleScopeOverrides inner;
@@ -143,10 +143,10 @@ int verify_sibling_isolation() {
 
 int verify_scope_restoration() {
     ui::StyleScopeOverrides outer;
-    outer.palette.control_background = byte_color(65, 66, 67);
+    outer.palette.surface = byte_color(65, 66, 67);
 
     ui::StyleScopeOverrides inner_value;
-    inner_value.palette.control_background = byte_color(68, 69, 70);
+    inner_value.palette.surface = byte_color(68, 69, 70);
     ui::State<ui::StyleScopeOverrides> inner{inner_value};
 
     constexpr ui::Size size{180.0f, 64.0f};
@@ -170,7 +170,7 @@ int verify_scope_restoration() {
 int verify_dynamic_descendant_ancestry() {
     ui::State<bool> visible{false};
     ui::StyleScopeOverrides scoped;
-    scoped.palette.control_background = byte_color(74, 75, 76);
+    scoped.palette.surface = byte_color(74, 75, 76);
 
     constexpr ui::Size size{180.0f, 64.0f};
     ui::UI tree{ui::StyleScope{
@@ -189,9 +189,9 @@ int verify_dynamic_descendant_ancestry() {
 
 int verify_two_tree_isolation() {
     ui::StyleScopeOverrides first_value;
-    first_value.palette.control_background = byte_color(80, 81, 82);
+    first_value.palette.surface = byte_color(80, 81, 82);
     ui::StyleScopeOverrides second_value;
-    second_value.palette.control_background = byte_color(83, 84, 85);
+    second_value.palette.surface = byte_color(83, 84, 85);
     ui::State<ui::StyleScopeOverrides> first{first_value};
     ui::State<ui::StyleScopeOverrides> second{second_value};
 
@@ -206,7 +206,7 @@ int verify_two_tree_isolation() {
     const auto second_before = second_renderer.pixel(20, 20);
 
     auto next = first.get();
-    next.palette.control_background = byte_color(86, 87, 88);
+    next.palette.surface = byte_color(86, 87, 88);
     first.set(next);
     if (!second_tree.dirty()) {
         if (!first_renderer.render(first_tree)) return example::fail("first isolated scope rerender failed");
@@ -228,7 +228,7 @@ int verify_headless_scope_golden() {
 
     {
         ui::StyleScopeOverrides outer;
-        outer.palette.control_background = byte_color(65, 66, 67);
+        outer.palette.surface = byte_color(65, 66, 67);
         ui::UI tree{ui::StyleScope{outer, ui::Button{"Outer", [] {}}}};
         ui::HeadlessRenderer renderer{size, 1.0f};
         if (!renderer.render(tree)) return example::fail("outer golden render failed");
@@ -237,9 +237,9 @@ int verify_headless_scope_golden() {
 
     {
         ui::StyleScopeOverrides outer;
-        outer.palette.control_background = byte_color(65, 66, 67);
+        outer.palette.surface = byte_color(65, 66, 67);
         ui::StyleScopeOverrides inner;
-        inner.palette.control_background = byte_color(68, 69, 70);
+        inner.palette.surface = byte_color(68, 69, 70);
         ui::UI tree{ui::StyleScope{
             outer,
             ui::StyleScope{inner, ui::Button{"Inner", [] {}}}}};
@@ -250,7 +250,7 @@ int verify_headless_scope_golden() {
 
     {
         ui::StyleScopeOverrides outer;
-        outer.palette.control_background = byte_color(65, 66, 67);
+        outer.palette.surface = byte_color(65, 66, 67);
         ui::ButtonStyle explicit_style;
         explicit_style.base.fill = byte_color(71, 72, 73);
         ui::UI tree{ui::StyleScope{
@@ -264,7 +264,7 @@ int verify_headless_scope_golden() {
     {
         ui::State<bool> visible{false};
         ui::StyleScopeOverrides outer;
-        outer.palette.control_background = byte_color(74, 75, 76);
+        outer.palette.surface = byte_color(74, 75, 76);
         ui::UI tree{ui::StyleScope{
             outer,
             ui::If{visible, ui::Button{"Dynamic", [] {}}}}};
