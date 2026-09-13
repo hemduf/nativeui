@@ -372,8 +372,7 @@ public:
             }
             set_hovered(index, context);
             pointer_armed_ = index;
-            runtime_->pressed_index = index;
-            context.invalidate();
+            set_pressed(index, context);
             context.capture_pointer();
             return EventResult::Handled;
         }
@@ -383,8 +382,7 @@ public:
             if (!pointer_armed_) return EventResult::Ignored;
             const auto armed = *pointer_armed_;
             pointer_armed_.reset();
-            runtime_->pressed_index.reset();
-            context.invalidate();
+            set_pressed(std::nullopt, context);
             context.release_pointer();
             if (index && *index == armed) {
                 active_index_ = armed;
@@ -395,8 +393,7 @@ public:
         case InputType::PointerCancel:
             if (!pointer_armed_) return EventResult::Ignored;
             pointer_armed_.reset();
-            runtime_->pressed_index.reset();
-            context.invalidate();
+            set_pressed(std::nullopt, context);
             context.release_pointer();
             return EventResult::Handled;
         default:
@@ -434,10 +431,51 @@ private:
             });
     }
 
+    [[nodiscard]] std::optional<ResolvedListViewStyle> row_style(
+        std::optional<std::size_t> index) const {
+        if (!index || *index >= runtime_->keys.size()) return std::nullopt;
+        const bool selected = runtime_->selection->get() &&
+            *runtime_->selection->get() == runtime_->keys[*index];
+        const bool hovered = !selected && runtime_->hovered_index &&
+            *runtime_->hovered_index == *index;
+        const bool pressed = !selected && runtime_->pressed_index &&
+            *runtime_->pressed_index == *index;
+        return resolve_list_view_style(
+            default_list_view_style(current_theme()),
+            runtime_->style,
+            VisualState{
+                .enabled = effective_enabled() && runtime_->enabled_at(*index),
+                .read_only = effective_read_only(),
+                .hovered = hovered,
+                .pressed = pressed,
+                .selected = selected,
+            });
+    }
+
     void set_hovered(std::optional<std::size_t> index, InputContext& context) {
         if (runtime_->hovered_index == index) return;
+        const auto previous = runtime_->hovered_index;
+        const auto previous_before = row_style(previous);
+        const auto next_before = index != previous ? row_style(index) : std::nullopt;
         runtime_->hovered_index = index;
-        context.invalidate();
+        const auto previous_after = row_style(previous);
+        const auto next_after = index != previous ? row_style(index) : std::nullopt;
+        if (previous_before != previous_after || next_before != next_after) {
+            context.invalidate();
+        }
+    }
+
+    void set_pressed(std::optional<std::size_t> index, InputContext& context) {
+        if (runtime_->pressed_index == index) return;
+        const auto previous = runtime_->pressed_index;
+        const auto previous_before = row_style(previous);
+        const auto next_before = index != previous ? row_style(index) : std::nullopt;
+        runtime_->pressed_index = index;
+        const auto previous_after = row_style(previous);
+        const auto next_after = index != previous ? row_style(index) : std::nullopt;
+        if (previous_before != previous_after || next_before != next_after) {
+            context.invalidate();
+        }
     }
 
     [[nodiscard]] std::optional<std::size_t> row_at(Point position, Rect bounds) const noexcept {

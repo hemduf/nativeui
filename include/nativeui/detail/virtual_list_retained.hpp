@@ -22,6 +22,24 @@
 namespace ui::detail {
 
 template <class Key>
+class VirtualListRetainedRuntime;
+
+template <class Key>
+struct VirtualListPresentationState final {
+    const Theme* theme{};
+    ComponentAvailability availability{};
+    bool focused{};
+    std::optional<std::size_t> hovered_index;
+};
+
+template <class Key>
+[[nodiscard]] ResolvedListViewStyle resolve_virtual_list_row_style(
+    const VirtualListRetainedRuntime<Key>& runtime,
+    const VirtualListPresentationState<Key>& presentation,
+    std::size_t index,
+    bool pressed);
+
+template <class Key>
 class VirtualListRetainedRuntime {
 public:
     using Model = VirtualListDatasetModel<Key>;
@@ -289,7 +307,8 @@ public:
     }
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children(
-        const std::shared_ptr<VirtualListRetainedRuntime>& self) const {
+        const std::shared_ptr<VirtualListRetainedRuntime>& self,
+        const std::shared_ptr<VirtualListPresentationState<Key>>& presentation) const {
         std::vector<DynamicChildSpec> result;
         result.reserve(window_.items().size());
         for (const auto& materialized : window_.items()) {
@@ -308,11 +327,20 @@ public:
             result.push_back(DynamicChildSpec{
                 materialized.key,
                 Spec{
-                    [self, key] {
+                    [self, presentation, key] {
                         return std::make_unique<VirtualListRowInteractionComponent>(
                             [self, key] { return self->begin_pointer_capture(key); },
                             [self, key] { self->end_pointer_capture(key); },
-                            [self, key] { return self->activate_key(key); });
+                            [self, key] { return self->activate_key(key); },
+                            [self, presentation, key](bool before_pressed, bool after_pressed) {
+                                const auto index = self->materialized_index_for_key(key);
+                                if (!index) return false;
+                                const auto before = resolve_virtual_list_row_style(
+                                    *self, *presentation, *index, before_pressed);
+                                const auto after = resolve_virtual_list_row_style(
+                                    *self, *presentation, *index, after_pressed);
+                                return !(before == after);
+                            });
                     },
                     std::move(row_children)}});
         }
@@ -370,6 +398,32 @@ private:
     ScrollState::Subscription scroll_subscription_;
 };
 
+template <class Key>
+[[nodiscard]] ResolvedListViewStyle resolve_virtual_list_row_style(
+    const VirtualListRetainedRuntime<Key>& runtime,
+    const VirtualListPresentationState<Key>& presentation,
+    std::size_t index,
+    bool pressed) {
+    static const Theme fallback = default_theme();
+    const auto& theme = presentation.theme ? *presentation.theme : fallback;
+    const auto selected_index = runtime.materialized_selected_index();
+    const bool selected = selected_index && *selected_index == index;
+    const bool hovered = !selected && presentation.hovered_index &&
+        *presentation.hovered_index == index;
+    const bool effective_pressed = !selected && pressed;
+    return resolve_list_view_style(
+        default_list_view_style(theme),
+        runtime.style(),
+        VisualState{
+            .enabled = presentation.availability.enabled && runtime.enabled_at(index),
+            .read_only = presentation.availability.read_only,
+            .hovered = hovered,
+            .pressed = effective_pressed,
+            .focused = presentation.focused,
+            .selected = selected,
+        });
+}
+
 class VirtualListOwnedSpec final {
 public:
     explicit VirtualListOwnedSpec(Spec spec) : spec_(std::move(spec)) {}
@@ -383,8 +437,10 @@ private:
 template <class Key>
 class VirtualListRetainedComponent final : public Component, public DynamicChildrenSource {
 public:
-    explicit VirtualListRetainedComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
-        : runtime_(std::move(runtime)) {}
+    VirtualListRetainedComponent(
+        std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime,
+        std::shared_ptr<VirtualListPresentationState<Key>> presentation)
+        : runtime_(std::move(runtime)), presentation_(std::move(presentation)) {}
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         Size result{0.0f, runtime_->content_height()};
@@ -427,7 +483,7 @@ public:
     }
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
-        return runtime_->desired_children(runtime_);
+        return runtime_->desired_children(runtime_, presentation_);
     }
 
     void set_structure_invalidator(std::function<void()> invalidator) override {
@@ -442,13 +498,16 @@ public:
 
 private:
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime_;
+    std::shared_ptr<VirtualListPresentationState<Key>> presentation_;
 };
 
 template <class Key>
 class VirtualListViewComponent final : public Component, public ThemeBinding {
 public:
-    explicit VirtualListViewComponent(std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime)
-        : runtime_(std::move(runtime)) {}
+    VirtualListViewComponent(
+        std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime,
+        std::shared_ptr<VirtualListPresentationState<Key>> presentation)
+        : runtime_(std::move(runtime)), presentation_(std::move(presentation)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
@@ -469,6 +528,9 @@ public:
     }
 
     void mount(MountContext& context) override {
+        presentation_->theme = &current_theme();
+        presentation_->availability = effective_availability();
+        presentation_->focused = false;
         if (auto* selection = selection_state()) {
             auto runtime = runtime_;
             auto invalidate = context.invalidator();
@@ -481,9 +543,15 @@ public:
         }
     }
 
-    void unmount(LifecycleContext&) override { selection_subscription_.reset(); }
+    void unmount(LifecycleContext&) override {
+        selection_subscription_.reset();
+        presentation_->theme = nullptr;
+        presentation_->hovered_index.reset();
+        presentation_->focused = false;
+    }
 
     void focus_changed(bool focused, FocusContext&) override {
+        presentation_->focused = focused;
         if (!focused) {
             runtime_->set_focused_index(std::nullopt);
             return;
@@ -557,15 +625,22 @@ public:
         return EventResult::Handled;
     }
 
-    void deactivate(LifecycleContext&) override { hovered_index_.reset(); }
+    void deactivate(LifecycleContext&) override {
+        presentation_->hovered_index.reset();
+        presentation_->focused = false;
+    }
 
     void paint(PaintContext& context) const override {
+        presentation_->theme = &current_theme();
+        presentation_->availability = effective_availability();
+        presentation_->focused = context.focused();
+
         const auto bounds = context.bounds();
         const auto surface = resolved_style(
             false,
             false,
             false,
-            false,
+            true,
             context.focused());
         auto& painter = context.painter();
         painter.fill_rounded_rect(bounds, surface.surface_corner_radius, surface.surface_fill);
@@ -578,18 +653,10 @@ public:
                 runtime_->selection_state()->get() &&
                 runtime_->materialized_selected_index() &&
                 *runtime_->materialized_selected_index() == index;
-            // Preserve the pre-T038 ListView contract shared by retained and
-            // virtualized rows: once a row is selected, its selected
-            // presentation remains authoritative until selection changes.
-            const bool hovered = !selected && hovered_index_ && *hovered_index_ == index;
             const bool pressed = !selected && runtime_->captured_index() &&
                 *runtime_->captured_index() == index;
-            const auto row = resolved_style(
-                selected,
-                hovered,
-                pressed,
-                runtime_->enabled_at(index),
-                context.focused());
+            const auto row = resolve_virtual_list_row_style(
+                *runtime_, *presentation_, index, pressed);
             paint_row(painter, bounds, index, row, selected);
         }
 
@@ -627,10 +694,26 @@ private:
             });
     }
 
+    [[nodiscard]] std::optional<ResolvedListViewStyle> row_style(
+        std::optional<std::size_t> index) const {
+        if (!index || *index >= runtime_->size()) return std::nullopt;
+        const bool pressed = runtime_->captured_index() &&
+            *runtime_->captured_index() == *index;
+        return resolve_virtual_list_row_style(
+            *runtime_, *presentation_, *index, pressed);
+    }
+
     void set_hovered(std::optional<std::size_t> index, InputContext& context) {
-        if (hovered_index_ == index) return;
-        hovered_index_ = index;
-        context.invalidate();
+        if (presentation_->hovered_index == index) return;
+        const auto previous = presentation_->hovered_index;
+        const auto previous_before = row_style(previous);
+        const auto next_before = index != previous ? row_style(index) : std::nullopt;
+        presentation_->hovered_index = index;
+        const auto previous_after = row_style(previous);
+        const auto next_after = index != previous ? row_style(index) : std::nullopt;
+        if (previous_before != previous_after || next_before != next_after) {
+            context.invalidate();
+        }
     }
 
     [[nodiscard]] std::optional<std::size_t> row_at(Point position, Rect bounds) const noexcept {
@@ -694,22 +777,30 @@ private:
         }
     }
 
+    [[nodiscard]] bool availability_change_affects_layout(
+        const ComponentAvailability&,
+        const ComponentAvailability& after) const override {
+        presentation_->availability = after;
+        return false;
+    }
+
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime_;
-    std::optional<std::size_t> hovered_index_;
+    std::shared_ptr<VirtualListPresentationState<Key>> presentation_;
     typename State<std::optional<Key>>::Subscription selection_subscription_;
 };
 
 template <class Key>
 [[nodiscard]] Spec make_virtual_list_retained_spec(
     std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime) {
-    auto initial_children = runtime->desired_children(runtime);
+    auto presentation = std::make_shared<VirtualListPresentationState<Key>>();
+    auto initial_children = runtime->desired_children(runtime, presentation);
     std::vector<Spec> children;
     children.reserve(initial_children.size());
     for (auto& child : initial_children) children.push_back(std::move(child.spec));
 
     Spec content{
-        [runtime] {
-            return std::make_unique<VirtualListRetainedComponent<Key>>(runtime);
+        [runtime, presentation] {
+            return std::make_unique<VirtualListRetainedComponent<Key>>(runtime, presentation);
         },
         std::move(children)};
 
@@ -720,8 +811,8 @@ template <class Key>
     std::vector<Spec> root_children;
     root_children.push_back(std::move(scroll));
     return Spec{
-        [runtime] {
-            return std::make_unique<VirtualListViewComponent<Key>>(runtime);
+        [runtime, presentation] {
+            return std::make_unique<VirtualListViewComponent<Key>>(runtime, presentation);
         },
         std::move(root_children)};
 }

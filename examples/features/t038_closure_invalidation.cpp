@@ -1,6 +1,20 @@
 #include "example_support.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <optional>
+#include <vector>
+
 namespace {
+
+[[nodiscard]] bool pixel_matches(ui::Rgba8 pixel, ui::Color color, int tolerance = 3) {
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    return std::abs(static_cast<int>(pixel.r) - channel(color.r)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.g) - channel(color.g)) <= tolerance &&
+           std::abs(static_cast<int>(pixel.b) - channel(color.b)) <= tolerance;
+}
 
 int combo_anchor_contract() {
     constexpr ui::Size size{260.0f, 96.0f};
@@ -39,6 +53,167 @@ int combo_anchor_contract() {
         tree.dispatch(example::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
         if (!tree.layout_dirty() || !tree.paint_dirty()) {
             return example::fail("layout-affecting ComboBox hover style did not invalidate layout + paint");
+        }
+    }
+
+    return 0;
+}
+
+int list_view_contract() {
+    constexpr ui::Size retained_size{240.0f, 96.0f};
+    constexpr ui::Size virtual_size{240.0f, 64.0f};
+    const ui::Color stable_row{0.16f, 0.22f, 0.30f, 1.0f};
+
+    {
+        example::Platform platform;
+        ui::State<std::optional<int>> selected{std::nullopt};
+        ui::ListViewStyle style;
+        style.base.row_fill = stable_row;
+        style.hovered.row_fill = stable_row;
+        style.pressed.row_fill = stable_row;
+
+        ui::UI tree{ui::ListView<int>{selected}
+            .item(1, ui::Spacer{220.0f, 32.0f})
+            .item(2, ui::Spacer{220.0f, 32.0f})
+            .style(style)};
+        tree.resize(retained_size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{retained_size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("retained ListView baseline render failed");
+
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (!renderer.render(tree)) return example::fail("retained ListView focus settle failed");
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("retained ListView focus settle left the tree dirty");
+        }
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerMove, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved retained ListView hover invalidated the tree");
+        }
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerDown, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved retained ListView press invalidated the tree");
+        }
+    }
+
+    {
+        example::Platform platform;
+        ui::State<std::optional<int>> selected{std::nullopt};
+        ui::ListViewStyle style;
+        style.base.row_fill = stable_row;
+        style.hovered.row_fill = ui::Color{0.20f, 0.52f, 0.32f, 1.0f};
+
+        ui::UI tree{ui::ListView<int>{selected}
+            .item(1, ui::Spacer{220.0f, 32.0f})
+            .item(2, ui::Spacer{220.0f, 32.0f})
+            .style(style)};
+        tree.resize(retained_size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{retained_size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("retained ListView hover baseline render failed");
+
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (!renderer.render(tree)) return example::fail("retained ListView hover focus settle failed");
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerMove, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail("changed retained ListView hover missed paint or dirtied layout");
+        }
+    }
+
+    using VirtualState = ui::VirtualListState<int>;
+
+    {
+        example::Platform platform;
+        ui::State<std::optional<int>> selected{std::nullopt};
+        VirtualState state{
+            selected,
+            32.0f,
+            [](const VirtualState::Item&) { return ui::Spacer{220.0f, 32.0f}; }};
+        if (!state.replace({
+                VirtualState::Item{1, "One"},
+                VirtualState::Item{2, "Two"}})) {
+            return example::fail("virtual ListView equal-style dataset replacement failed");
+        }
+
+        ui::ListViewStyle style;
+        const ui::Color base_surface{0.04f, 0.10f, 0.18f, 1.0f};
+        const ui::Color disabled_surface{0.72f, 0.24f, 0.12f, 1.0f};
+        style.base.surface_fill = base_surface;
+        style.disabled.surface_fill = disabled_surface;
+        style.base.row_fill = stable_row;
+        style.hovered.row_fill = stable_row;
+        style.pressed.row_fill = stable_row;
+
+        ui::UI tree{ui::ListView<int>{state}.style(style)};
+        tree.resize(virtual_size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{virtual_size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("virtual ListView baseline render failed");
+        if (!pixel_matches(renderer.pixel(3, 16), base_surface)) {
+            return example::fail("enabled virtual ListView resolved disabled surface style");
+        }
+
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (!renderer.render(tree)) return example::fail("virtual ListView focus settle failed");
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("virtual ListView focus settle left the tree dirty");
+        }
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerMove, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved virtual ListView hover invalidated the tree");
+        }
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerDown, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("equal resolved virtual ListView press invalidated the tree");
+        }
+    }
+
+    {
+        example::Platform platform;
+        ui::State<std::optional<int>> selected{std::nullopt};
+        VirtualState state{
+            selected,
+            32.0f,
+            [](const VirtualState::Item&) { return ui::Spacer{220.0f, 32.0f}; }};
+        if (!state.replace({
+                VirtualState::Item{1, "One"},
+                VirtualState::Item{2, "Two"}})) {
+            return example::fail("virtual ListView press dataset replacement failed");
+        }
+
+        ui::ListViewStyle style;
+        style.base.row_fill = stable_row;
+        style.hovered.row_fill = stable_row;
+        style.pressed.row_fill = ui::Color{0.18f, 0.30f, 0.82f, 1.0f};
+
+        ui::UI tree{ui::ListView<int>{state}.style(style)};
+        tree.resize(virtual_size);
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{virtual_size, 1.0f};
+        if (!renderer.render(tree)) return example::fail("virtual ListView press baseline render failed");
+
+        (void)tree.dispatch(example::key(ui::Key::Tab), platform);
+        if (!renderer.render(tree)) return example::fail("virtual ListView press focus settle failed");
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerMove, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || tree.paint_dirty()) {
+            return example::fail("paint-equal virtual ListView hover invalidated the tree");
+        }
+
+        (void)tree.dispatch(
+            example::pointer(ui::InputType::PointerDown, 20.0f, 16.0f), platform);
+        if (tree.layout_dirty() || !tree.paint_dirty()) {
+            return example::fail("changed virtual ListView press missed paint or dirtied layout");
         }
     }
 
@@ -277,6 +452,7 @@ int choice_availability_contract() {
 
 int self_test() {
     if (const int result = combo_anchor_contract(); result != 0) return result;
+    if (const int result = list_view_contract(); result != 0) return result;
     if (const int result = tabs_contract(); result != 0) return result;
     if (const int result = availability_contract(); result != 0) return result;
     if (const int result = button_availability_contract(); result != 0) return result;
@@ -287,7 +463,7 @@ int self_test() {
 ui::UI make_demo() {
     return ui::UI{ui::Column{
         ui::Header{"T038 — Closure invalidation"},
-        ui::Label{"Final state-aware invalidation checks for ComboBox, Tabs and availability variants."}.size(12.0f),
+        ui::Label{"Final state-aware invalidation checks for ComboBox, ListView, Tabs and availability variants."}.size(12.0f),
     }.gap(12.0f)};
 }
 
