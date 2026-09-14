@@ -13,6 +13,7 @@
 #include <X11/Xlib.h>
 #endif
 
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -141,6 +142,14 @@ void pump(ui::Application& app, int iterations = 4) {
     }
 }
 
+void fill_dispatcher_to_capacity(const ui::Dispatcher& dispatcher) {
+    for (std::size_t index = 0; index < ui::kDispatcherMaxPendingTasks; ++index) {
+        require(dispatcher.post([] {}),
+                "dispatcher rejected work before its documented capacity");
+    }
+    require(!dispatcher.post([] {}), "dispatcher accepted work beyond its documented capacity");
+}
+
 ui::WindowDesc desc(std::string title) {
     return ui::WindowDesc{
         .title = std::move(title),
@@ -256,6 +265,35 @@ void programmatic_close_bypasses_veto() {
     require(requests == 0, "programmatic close incorrectly invoked veto callback");
     require(window.is_closed() && closed == 1,
             "programmatic close did not complete exactly once");
+}
+
+void saturated_dispatcher_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    ui::UI tree{ui::Label{"T132 saturated close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated close")};
+    require(window.valid(), "saturated-close window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool callback_ran = false;
+    bool closed_inside_callback = true;
+    window.on_closed([&] { ++closed; });
+
+    require(dispatcher.post([&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        callback_ran = true;
+        window.request_close();
+        closed_inside_callback = window.is_closed();
+    }), "failed to enqueue saturated-close driver callback");
+
+    (void)app.poll(0.0);
+    require(callback_ran, "saturated-close driver callback did not run");
+    require(!closed_inside_callback,
+            "Dispatcher rejection synchronously closed the window on the callback stack");
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete the rejected-post close");
+    require(closed == 1, "rejected-post close did not deliver on_closed exactly once");
 }
 
 void reentrant_request_close_inside_veto_wins() {
@@ -397,6 +435,7 @@ void suite() {
     native_close_veto_then_accept();
     native_close_without_request_handler_accepts_once();
     programmatic_close_bypasses_veto();
+    saturated_dispatcher_close_defers_until_owner_checkpoint();
     reentrant_request_close_inside_veto_wins();
     reentrant_veto_can_close_other_window();
     reentrant_veto_can_request_application_quit();
