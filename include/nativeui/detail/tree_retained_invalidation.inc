@@ -14,6 +14,12 @@
         return retained_invalidation_lifetime_;
     }
 
+    void retire_retained_invalidation_generation() noexcept {
+        if (!retained_invalidation_lifetime_) return;
+        retained_invalidation_lifetime_->tree = nullptr;
+        retained_invalidation_lifetime_.reset();
+    }
+
     [[nodiscard]] Node* retained_invalidation_node(NodeId id) noexcept {
         if (!root_ || id == kInvalidNodeId || !retained_invalidation_live_nodes_.contains(id)) {
             return nullptr;
@@ -159,6 +165,12 @@
     }
 
     void unmount_node(Node& node) {
+        // Explicit whole-Tree unmount is a retained-callback generation boundary.
+        // Rotate the token before the first arbitrary child/component teardown
+        // callback so callbacks issued by the previous mount can never become live
+        // again if the same retained nodes/NodeIds are mounted later.
+        if (!node.parent) retire_retained_invalidation_generation();
+
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             unmount_node(**it);
         }

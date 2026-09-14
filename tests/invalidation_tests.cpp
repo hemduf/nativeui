@@ -16,6 +16,7 @@ namespace {
 struct InvalidationProbeState {
     int measures{};
     ui::NodeId node_id{ui::kInvalidNodeId};
+    ui::ComponentAvailability availability{};
     std::function<void()> invalidate_paint;
     std::function<void()> invalidate_layout;
     std::function<void()> invalidate_focus;
@@ -30,6 +31,10 @@ public:
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
         ++state_->measures;
         return {100.0f, 40.0f};
+    }
+
+    [[nodiscard]] ui::ComponentAvailability local_availability() const noexcept override {
+        return state_->availability;
     }
 
     void mount(ui::MountContext& context) override {
@@ -171,6 +176,66 @@ void retained_invalidator_tree_lifetime_contract() {
     stale_layout();
     stale_focus();
     stale_availability();
+}
+
+void retained_invalidator_unmount_remount_contract() {
+    auto probe = std::make_shared<InvalidationProbeState>();
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::Tree tree{ui::compile(ui::make_spec(InvalidationProbe{probe}))};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    const auto first_mount = *probe;
+    NUI_CHECK(first_mount.node_id != ui::kInvalidNodeId);
+
+    tree.unmount();
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(first_mount);
+    NUI_CHECK(!tree.dirty());
+
+    tree.mount();
+    NUI_CHECK(probe->node_id == first_mount.node_id);
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    // A remount deliberately reuses the retained NodeId, so only a fresh
+    // retained-invalidation generation can keep first-mount callbacks stale.
+    invoke_retained_invalidators(first_mount);
+    NUI_CHECK(!tree.dirty());
+
+    const auto second_mount = *probe;
+    second_mount.invalidate_paint();
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    second_mount.invalidate_layout();
+    NUI_CHECK(tree.layout_dirty());
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    second_mount.invalidate_focus();
+    NUI_CHECK(tree.paint_dirty());
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    probe->availability.enabled = false;
+    first_mount.invalidate_availability();
+    const auto before_fresh_availability = tree.component_availability(second_mount.node_id);
+    NUI_CHECK(before_fresh_availability.has_value());
+    NUI_CHECK(before_fresh_availability->enabled);
+
+    second_mount.invalidate_availability();
+    const auto after_fresh_availability = tree.component_availability(second_mount.node_id);
+    NUI_CHECK(after_fresh_availability.has_value());
+    NUI_CHECK(!after_fresh_availability->enabled);
 }
 
 void retained_animation_target_removal_contract() {
@@ -451,6 +516,7 @@ void suite() {
 
     retained_invalidator_stale_node_contract();
     retained_invalidator_tree_lifetime_contract();
+    retained_invalidator_unmount_remount_contract();
     retained_animation_target_removal_contract();
     retained_overlay_dialog_removal_contract();
     retained_virtual_list_recycling_contract();
