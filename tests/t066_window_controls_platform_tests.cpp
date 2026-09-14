@@ -491,6 +491,52 @@ void saturated_component_input_close_defers_until_owner_checkpoint() {
             "component-input close unmounted retained UI more than once");
 }
 
+void throwing_component_input_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    auto state = std::make_shared<InputCloseState>();
+    test::MockPlatform platform;
+    ui::UI tree{InputCloseProbe{state}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing component input")};
+    require(window.valid(), "throwing component-input window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool closed_inside_input = true;
+    bool unmounted_inside_input = true;
+    window.on_closed([&] { ++closed; });
+    state->close_from_input = [&] {
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        window.request_close();
+        closed_inside_input = window.is_closed();
+        unmounted_inside_input = state->unmounts != 0;
+    };
+
+    // Exercise the same retained component/input path as the rejection case,
+    // but fail the real lifecycle-control Dispatcher post before enqueue.
+    tree.resize({180.0f, 120.0f});
+    tree.activate(platform);
+    require(tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 24.0f, 24.0f), platform) ==
+            ui::EventResult::Handled,
+            "throwing component input driver was not handled");
+    require(state->input_ran, "throwing component input callback did not run");
+    require(!closed_inside_input,
+            "exception-before-enqueue synchronously closed from component input callback");
+    require(!unmounted_inside_input && state->unmounts == 0,
+            "exception-before-enqueue unmounted the live UI on component input stack");
+    require(!window.is_closed(),
+            "throwing component-input close committed before a later owner checkpoint");
+
+    (void)app.poll(0.0);
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete throwing component-input close");
+    require(closed == 1,
+            "throwing component-input close did not deliver on_closed exactly once");
+    require(state->unmounts <= 1,
+            "throwing component-input close unmounted retained UI more than once");
+}
+
 void saturated_native_close_reentrant_programmatic_wins() {
     ui::Application app;
     ui::UI tree{ui::Label{"T132 saturated native close"}};
@@ -733,6 +779,7 @@ void suite() {
     throwing_accepted_close_completion_commits_once();
     saturated_dispatcher_close_defers_until_owner_checkpoint();
     saturated_component_input_close_defers_until_owner_checkpoint();
+    throwing_component_input_close_defers_until_owner_checkpoint();
     saturated_native_close_reentrant_programmatic_wins();
     destroy_pending_saturated_close_is_callback_silent();
     saturated_close_isolated_between_windows();
