@@ -6,6 +6,7 @@ if(NOT DEFINED ROOT)
 endif()
 
 set(root_cmake "${ROOT}/CMakeLists.txt")
+set(feature_examples_cmake "${ROOT}/cmake/NativeUIFeatureExamples.cmake")
 set(nativeui_header "${ROOT}/include/nativeui/nativeui.hpp")
 set(virtual_list_header "${ROOT}/include/nativeui/virtual_list.hpp")
 set(virtual_list_model "${ROOT}/include/nativeui/detail/virtual_list_model.hpp")
@@ -23,6 +24,7 @@ set(virtual_list_benchmark "${ROOT}/tests/t051/t067_virtual_list_benchmarks.cpp"
 
 foreach(path IN LISTS
         root_cmake
+        feature_examples_cmake
         nativeui_header
         virtual_list_header
         virtual_list_model
@@ -57,8 +59,25 @@ function(require_text haystack needle message_text)
   endif()
 endfunction()
 
-require_text("${root_content}" "nativeui_example_t067_virtual_list"
-  "root CMake must register the T067 executable example CTest target")
+# The feature examples are registered generically. Prove the discovery helper
+# resolves the real T067 source instead of depending on a brittle literal
+# target name in the root CMakeLists.
+include("${feature_examples_cmake}")
+nativeui_discover_feature_examples(discovered_feature_examples "${ROOT}")
+list(FIND discovered_feature_examples "t067_virtual_list" t067_example_index)
+if(t067_example_index EQUAL -1)
+  message(FATAL_ERROR
+    "feature-example discovery must register examples/features/t067_virtual_list.cpp")
+endif()
+
+require_text("${root_content}" "include(cmake/NativeUIFeatureExamples.cmake)"
+  "root CMake must load generic feature-example discovery")
+require_text("${root_content}" "nativeui_discover_feature_examples(NATIVEUI_FEATURE_EXAMPLES"
+  "root CMake must discover feature examples through the shared helper")
+require_text("${root_content}" "foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)"
+  "root CMake must register every discovered feature example")
+require_text("${root_content}" "nativeui_add_feature_example(${_example})"
+  "root CMake must route discovered feature examples through the common target helper")
 require_text("${root_content}" "nativeui_t067_tests"
   "root CMake must register the T067 model contract test")
 require_text("${root_content}" "nativeui_t067_public_api_tests"
