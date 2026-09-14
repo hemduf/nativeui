@@ -7,6 +7,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -36,31 +37,75 @@ enum class ScrollAxis {
 class ScrollState {
     struct Listener {
         std::size_t id{};
+        bool active{true};
         std::function<void(Point)> callback;
     };
 
-    struct Registry {
-        void remove_listener(std::size_t id) {
-            std::erase_if(listeners, [id](const Listener& listener) { return listener.id == id; });
+    struct Control {
+        explicit Control(ScrollAxis value) : axis(value) {}
+
+        [[nodiscard]] bool has_listener(std::size_t id) const noexcept {
+            for (const auto& listener : listeners) {
+                if (listener && listener->id == id && listener->active) return true;
+            }
+            return false;
         }
-        std::vector<Listener> listeners;
+
+        void remove_listener(std::size_t id) noexcept {
+            for (auto& listener : listeners) {
+                if (listener && listener->id == id) {
+                    listener->active = false;
+                    cleanup_needed = true;
+                    break;
+                }
+            }
+            if (!dispatching && cleanup_needed) compact_inactive();
+        }
+
+        void invalidate_owner() noexcept {
+            owner_alive = false;
+            pending_offset.reset();
+            for (auto& listener : listeners) {
+                if (listener) listener->active = false;
+            }
+            cleanup_needed = true;
+            if (!dispatching) compact_inactive();
+        }
+
+        void compact_inactive() noexcept {
+            std::erase_if(listeners, [](const auto& listener) {
+                return !listener || !listener->active;
+            });
+            cleanup_needed = false;
+        }
+
+        ScrollAxis axis{ScrollAxis::Vertical};
+        Point offset{};
+        Size viewport{};
+        Size content{};
+        bool metrics_valid{};
+        std::vector<std::unique_ptr<Listener>> listeners;
+        std::optional<Point> pending_offset;
         std::size_t next_listener_id{1};
+        bool dispatching{};
+        bool cleanup_needed{};
+        bool owner_alive{true};
     };
 
 public:
     class Subscription {
     public:
         Subscription() = default;
-        Subscription(std::weak_ptr<Registry> registry, std::size_t id)
-            : registry_(std::move(registry)), id_(id) {}
+        Subscription(std::weak_ptr<Control> control, std::size_t id)
+            : control_(std::move(control)), id_(id) {}
         Subscription(const Subscription&) = delete;
         Subscription& operator=(const Subscription&) = delete;
         Subscription(Subscription&& other) noexcept
-            : registry_(std::move(other.registry_)), id_(std::exchange(other.id_, 0)) {}
+            : control_(std::move(other.control_)), id_(std::exchange(other.id_, 0)) {}
         Subscription& operator=(Subscription&& other) noexcept {
             if (this == &other) return *this;
             reset();
-            registry_ = std::move(other.registry_);
+            control_ = std::move(other.control_);
             id_ = std::exchange(other.id_, 0);
             return *this;
         }
@@ -68,57 +113,71 @@ public:
 
         void reset() noexcept {
             if (id_ == 0) return;
-            if (auto registry = registry_.lock()) registry->remove_listener(id_);
-            registry_.reset();
+            if (auto control = control_.lock()) control->remove_listener(id_);
+            control_.reset();
             id_ = 0;
         }
 
+        [[nodiscard]] bool active() const noexcept {
+            if (id_ == 0) return false;
+            if (auto control = control_.lock()) {
+                return control->owner_alive && control->has_listener(id_);
+            }
+            return false;
+        }
+
     private:
-        std::weak_ptr<Registry> registry_;
+        std::weak_ptr<Control> control_;
         std::size_t id_{};
     };
 
     explicit ScrollState(ScrollAxis axis = ScrollAxis::Vertical)
-        : axis_(axis), registry_(std::make_shared<Registry>()) {}
+        : control_(std::make_shared<Control>(axis)) {}
 
     ScrollState(const ScrollState&) = delete;
     ScrollState& operator=(const ScrollState&) = delete;
 
-    [[nodiscard]] ScrollAxis axis() const noexcept { return axis_; }
-    [[nodiscard]] Point offset() const noexcept { return offset_; }
-    [[nodiscard]] Size viewport_size() const noexcept { return viewport_; }
-    [[nodiscard]] Size content_size() const noexcept { return content_; }
-    [[nodiscard]] Point max_offset() const noexcept {
-        return Point{allows_horizontal() ? std::max(0.0f, content_.w - viewport_.w) : 0.0f,
-                     allows_vertical() ? std::max(0.0f, content_.h - viewport_.h) : 0.0f};
-    }
+    ~ScrollState() { control_->invalidate_owner(); }
+
+    [[nodiscard]] ScrollAxis axis() const noexcept { return control_->axis; }
+    [[nodiscard]] Point offset() const noexcept { return control_->offset; }
+    [[nodiscard]] Size viewport_size() const noexcept { return control_->viewport; }
+    [[nodiscard]] Size content_size() const noexcept { return control_->content; }
+    [[nodiscard]] Point max_offset() const noexcept { return maximum_offset(*control_); }
 
     void set_offset(Point value) {
-        value = clamp(value);
-        if (same(value, offset_)) return;
-        offset_ = value;
-        notify_offset();
+        auto control = control_;
+        dispatch_offset(control, clamp(*control, value));
     }
 
     void scroll_by(Point delta) {
-        set_offset(Point{offset_.x + finite_or_zero(delta.x),
-                         offset_.y + finite_or_zero(delta.y)});
+        auto control = control_;
+        if (!control->owner_alive) return;
+        const Point base = control->dispatching && control->pending_offset
+                               ? *control->pending_offset
+                               : control->offset;
+        dispatch_offset(
+            control,
+            Point{base.x + finite_or_zero(delta.x), base.y + finite_or_zero(delta.y)});
     }
 
     Subscription observe(std::function<void(Point)> callback) {
-        const auto id = registry_->next_listener_id++;
-        registry_->listeners.push_back(Listener{id, std::move(callback)});
-        return Subscription{registry_, id};
+        auto control = control_;
+        if (!control->owner_alive) return {};
+        const auto id = control->next_listener_id++;
+        control->listeners.push_back(
+            std::make_unique<Listener>(Listener{id, true, std::move(callback)}));
+        return Subscription{control, id};
     }
 
 private:
     friend class ScrollComponent;
 
-    [[nodiscard]] bool allows_horizontal() const noexcept {
-        return axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both;
+    [[nodiscard]] static bool allows_horizontal(ScrollAxis axis) noexcept {
+        return axis == ScrollAxis::Horizontal || axis == ScrollAxis::Both;
     }
-    [[nodiscard]] bool allows_vertical() const noexcept {
-        return axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both;
+    [[nodiscard]] static bool allows_vertical(ScrollAxis axis) noexcept {
+        return axis == ScrollAxis::Vertical || axis == ScrollAxis::Both;
     }
     [[nodiscard]] static float finite_or_zero(float value) noexcept {
         return std::isfinite(value) ? value : 0.0f;
@@ -126,43 +185,89 @@ private:
     [[nodiscard]] static bool same(Point a, Point b) noexcept {
         return a.x == b.x && a.y == b.y;
     }
-    [[nodiscard]] Point clamp(Point value) const noexcept {
-        value.x = allows_horizontal() ? std::max(0.0f, finite_or_zero(value.x)) : 0.0f;
-        value.y = allows_vertical() ? std::max(0.0f, finite_or_zero(value.y)) : 0.0f;
-        if (metrics_valid_) {
-            const auto maximum = max_offset();
+    [[nodiscard]] static Point maximum_offset(const Control& control) noexcept {
+        return Point{
+            allows_horizontal(control.axis)
+                ? std::max(0.0f, control.content.w - control.viewport.w)
+                : 0.0f,
+            allows_vertical(control.axis)
+                ? std::max(0.0f, control.content.h - control.viewport.h)
+                : 0.0f};
+    }
+    [[nodiscard]] static Point clamp(const Control& control, Point value) noexcept {
+        value.x = allows_horizontal(control.axis)
+                      ? std::max(0.0f, finite_or_zero(value.x))
+                      : 0.0f;
+        value.y = allows_vertical(control.axis)
+                      ? std::max(0.0f, finite_or_zero(value.y))
+                      : 0.0f;
+        if (control.metrics_valid) {
+            const auto maximum = maximum_offset(control);
             value.x = std::min(value.x, maximum.x);
             value.y = std::min(value.y, maximum.y);
         }
         return value;
     }
 
+    static void dispatch_offset(const std::shared_ptr<Control>& control, Point value) {
+        if (!control || !control->owner_alive) return;
+        value = clamp(*control, value);
+
+        if (control->dispatching) {
+            if (same(value, control->offset)) {
+                control->pending_offset.reset();
+            } else {
+                control->pending_offset = value;
+            }
+            return;
+        }
+        if (same(value, control->offset)) return;
+
+        control->pending_offset = value;
+        control->dispatching = true;
+        try {
+            while (control->owner_alive && control->pending_offset) {
+                Point next = clamp(*control, *control->pending_offset);
+                control->pending_offset.reset();
+                if (same(next, control->offset)) continue;
+
+                control->offset = next;
+                const Point pass_value = control->offset;
+                const std::size_t pass_size = control->listeners.size();
+                for (std::size_t index = 0;
+                     index < pass_size && control->owner_alive;
+                     ++index) {
+                    Listener* listener = control->listeners[index].get();
+                    if (!listener || !listener->active || !listener->callback) continue;
+                    listener->callback(pass_value);
+                }
+            }
+        } catch (...) {
+            // Match State<T>'s v1 failure transaction: the current pass value
+            // remains committed, but recursive pending work and the unstarted
+            // suffix are not retried implicitly after an observer throws.
+            control->pending_offset.reset();
+            control->dispatching = false;
+            if (control->cleanup_needed) control->compact_inactive();
+            throw;
+        }
+
+        control->dispatching = false;
+        if (control->cleanup_needed) control->compact_inactive();
+    }
+
     void update_metrics(Size viewport, Size content) {
-        viewport_ = Size{std::max(0.0f, finite_or_zero(viewport.w)),
-                         std::max(0.0f, finite_or_zero(viewport.h))};
-        content_ = Size{std::max(0.0f, finite_or_zero(content.w)),
-                        std::max(0.0f, finite_or_zero(content.h))};
-        metrics_valid_ = true;
-        const auto clamped = clamp(offset_);
-        if (!same(clamped, offset_)) {
-            offset_ = clamped;
-            notify_offset();
-        }
+        auto control = control_;
+        if (!control->owner_alive) return;
+        control->viewport = Size{std::max(0.0f, finite_or_zero(viewport.w)),
+                                 std::max(0.0f, finite_or_zero(viewport.h))};
+        control->content = Size{std::max(0.0f, finite_or_zero(content.w)),
+                                std::max(0.0f, finite_or_zero(content.h))};
+        control->metrics_valid = true;
+        dispatch_offset(control, clamp(*control, control->offset));
     }
 
-    void notify_offset() {
-        const auto listeners = registry_->listeners;
-        for (const auto& listener : listeners) {
-            if (listener.callback) listener.callback(offset_);
-        }
-    }
-
-    ScrollAxis axis_{ScrollAxis::Vertical};
-    Point offset_{};
-    Size viewport_{};
-    Size content_{};
-    bool metrics_valid_{};
-    std::shared_ptr<Registry> registry_;
+    std::shared_ptr<Control> control_;
 };
 
 enum class TrackType {

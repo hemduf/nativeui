@@ -1,9 +1,177 @@
 #include "test_support.hpp"
 
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 namespace {
 
 bool accent(ui::Rgba8 p) {
     return p.r > 220 && p.g > 120 && p.g < 190 && p.b < 100 && p.a > 220;
+}
+
+struct CopyTrackedScrollObserver {
+    explicit CopyTrackedScrollObserver(std::shared_ptr<int> copies)
+        : copies(std::move(copies)) {}
+
+    CopyTrackedScrollObserver(const CopyTrackedScrollObserver& other)
+        : copies(other.copies) {
+        ++*copies;
+    }
+
+    CopyTrackedScrollObserver(CopyTrackedScrollObserver&&) noexcept = default;
+    CopyTrackedScrollObserver& operator=(const CopyTrackedScrollObserver&) = default;
+    CopyTrackedScrollObserver& operator=(CopyTrackedScrollObserver&&) noexcept = default;
+
+    void operator()(ui::Point) const {}
+
+    std::shared_ptr<int> copies;
+};
+
+void scroll_state_observer_contract() {
+    // One pass exposes one stable value; recursive writes settle synchronously
+    // as a later pass and the latest recursive write wins.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Both};
+        std::vector<float> first_values;
+        std::vector<float> second_values;
+        std::vector<float> second_visible_offsets;
+
+        auto first = state.observe([&](ui::Point value) {
+            first_values.push_back(value.x);
+            if (value.x == 1.0f) {
+                state.set_offset({2.0f, 0.0f});
+                state.set_offset({3.0f, 0.0f});
+            }
+        });
+        auto second = state.observe([&](ui::Point value) {
+            second_values.push_back(value.x);
+            second_visible_offsets.push_back(state.offset().x);
+        });
+
+        state.set_offset({1.0f, 0.0f});
+        NUI_CHECK(first_values.size() == 2);
+        NUI_CHECK(second_values.size() == 2);
+        NUI_CHECK(first_values[0] == 1.0f);
+        NUI_CHECK(first_values[1] == 3.0f);
+        NUI_CHECK(second_values[0] == 1.0f);
+        NUI_CHECK(second_values[1] == 3.0f);
+        NUI_CHECK(second_visible_offsets[0] == 1.0f);
+        NUI_CHECK(second_visible_offsets[1] == 3.0f);
+        NUI_CHECK(state.offset().x == 3.0f);
+
+        const auto callback_count = second_values.size();
+        state.set_offset({3.0f, 0.0f});
+        NUI_CHECK(second_values.size() == callback_count);
+    }
+
+    // Removing a later observer is immediate for the current pass, while an
+    // observer added during a pass starts only on a later pass.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Both};
+        std::optional<ui::ScrollState::Subscription> later;
+        int later_calls = 0;
+        auto remover = state.observe([&](ui::Point) { later->reset(); });
+        later.emplace(state.observe([&](ui::Point) { ++later_calls; }));
+
+        state.set_offset({1.0f, 0.0f});
+        NUI_CHECK(later_calls == 0);
+        NUI_CHECK(!later->active());
+
+        ui::ScrollState addition{ui::ScrollAxis::Both};
+        ui::ScrollState::Subscription added;
+        int added_calls = 0;
+        auto adder = addition.observe([&](ui::Point) {
+            if (!added.active()) {
+                added = addition.observe([&](ui::Point) { ++added_calls; });
+            }
+        });
+
+        addition.set_offset({1.0f, 0.0f});
+        NUI_CHECK(added.active());
+        NUI_CHECK(added_calls == 0);
+        addition.set_offset({2.0f, 0.0f});
+        NUI_CHECK(added_calls == 1);
+    }
+
+    // Observer exceptions restore dispatch bookkeeping, discard recursive
+    // pending work and do not implicitly deliver the unstarted suffix.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Both};
+        bool throw_once = true;
+        int suffix_calls = 0;
+        std::vector<float> first_values;
+
+        auto first = state.observe([&](ui::Point value) {
+            first_values.push_back(value.x);
+            if (throw_once) {
+                throw_once = false;
+                state.set_offset({2.0f, 0.0f});
+                throw std::runtime_error{"scroll observer failure"};
+            }
+        });
+        auto suffix = state.observe([&](ui::Point) { ++suffix_calls; });
+
+        bool threw = false;
+        try {
+            state.set_offset({1.0f, 0.0f});
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state.offset().x == 1.0f);
+        NUI_CHECK(suffix_calls == 0);
+
+        state.set_offset({3.0f, 0.0f});
+        NUI_CHECK(state.offset().x == 3.0f);
+        NUI_CHECK(suffix_calls == 1);
+        NUI_CHECK(first_values.size() == 2);
+        NUI_CHECK(first_values[0] == 1.0f);
+        NUI_CHECK(first_values[1] == 3.0f);
+    }
+
+    // Callback-driven destruction is safe: the dispatch control block survives
+    // the active callback, stops the suffix and leaves outliving subscriptions inactive.
+    {
+        auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Both);
+        ui::ScrollState::Subscription destroyer;
+        ui::ScrollState::Subscription suffix;
+        int suffix_calls = 0;
+
+        destroyer = state->observe([&](ui::Point) { state.reset(); });
+        suffix = state->observe([&](ui::Point) { ++suffix_calls; });
+        auto* raw = state.get();
+        raw->set_offset({1.0f, 0.0f});
+
+        NUI_CHECK(!state);
+        NUI_CHECK(suffix_calls == 0);
+        NUI_CHECK(!destroyer.active());
+        NUI_CHECK(!suffix.active());
+        destroyer.reset();
+        suffix.reset();
+    }
+
+    // Stable observer scrolling must not clone the callback object on every mutation.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Both};
+        auto copies = std::make_shared<int>(0);
+        CopyTrackedScrollObserver observer{copies};
+        auto subscription = state.observe(observer);
+        const int registration_copies = *copies;
+
+        state.set_offset({1.0f, 0.0f});
+        state.set_offset({2.0f, 0.0f});
+        state.set_offset({3.0f, 0.0f});
+        NUI_CHECK(*copies == registration_copies);
+
+        auto moved = std::move(subscription);
+        NUI_CHECK(!subscription.active());
+        NUI_CHECK(moved.active());
+        moved.reset();
+        NUI_CHECK(!moved.active());
+    }
 }
 
 struct PointerEatingState {
@@ -64,6 +232,8 @@ private:
 };
 
 void suite() {
+    scroll_state_observer_contract();
+
     // Vertical scrolling exposes metrics and repositions content by a clamped offset.
     {
         ui::ScrollState state{ui::ScrollAxis::Vertical};
