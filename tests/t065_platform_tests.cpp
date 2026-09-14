@@ -4,12 +4,15 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 
 namespace {
 
 using namespace std::chrono_literals;
+
+constexpr std::string_view kNativeBoundaryFailure{"T128 native boundary failure"};
 
 int fail(std::string_view stage, std::string_view message) {
     std::cerr << "[T065 platform] " << stage << ": " << message << '\n';
@@ -19,6 +22,25 @@ int fail(std::string_view stage, std::string_view message) {
 struct Fixture {
     ui::State<std::string> text{"T065"};
     ui::UI tree{ui::TextInput{"T065 text", text}};
+};
+
+class ThrowingPaintComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {180.0f, 72.0f};
+    }
+
+    void paint(ui::PaintContext&) const override {
+        throw std::runtime_error{kNativeBoundaryFailure.data()};
+    }
+};
+
+struct ThrowingPaintRoot {
+    [[nodiscard]] ui::Spec spec() const {
+        ui::Spec root;
+        root.factory = [] { return std::make_unique<ThrowingPaintComponent>(); };
+        return root;
+    }
 };
 
 bool valid_window(const ui::StandaloneWindow& window, std::string_view stage) {
@@ -189,6 +211,46 @@ int owner_isolation() {
     return 0;
 }
 
+int native_exception_boundary() {
+    ui::Application application;
+    application.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    if (!application.valid()) return fail("native-exception", application.last_error());
+
+    ThrowingPaintRoot root;
+    ui::UI tree{root};
+    ui::StandaloneWindow window{
+        application,
+        tree,
+        ui::WindowDesc{.title = "NativeUI T128 native exception boundary",
+                       .size = {260.0f, 120.0f},
+                       .resizable = true}};
+    if (!valid_window(window, "native-exception")) return 1;
+
+    // The platform expose is delivered by Pugl through a noexcept foreign ABI
+    // thunk. A throwing user paint callback must be contained there: the event
+    // loop reports failure and closes the view, but no C++ exception may unwind
+    // through Cocoa, Win32, or X11/Pugl frames.
+    for (int i = 0; i < 12 && !window.should_close(); ++i) {
+        try {
+            if (!application.poll(0.1)) break;
+        } catch (const std::exception& e) {
+            return fail("native-exception", e.what());
+        } catch (...) {
+            return fail("native-exception", "non-standard exception escaped the native callback boundary");
+        }
+    }
+
+    if (!window.should_close()) {
+        return fail("native-exception", "throwing paint callback did not reach the native event boundary");
+    }
+    if (window.last_error() != kNativeBoundaryFailure) {
+        return fail("native-exception", window.last_error().empty()
+            ? "native boundary closed without preserving the callback error"
+            : window.last_error());
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -197,5 +259,6 @@ int main(int argc, char** argv) {
     if (mode == "--standalone-worker-wake") return standalone_worker_wake();
     if (mode == "--embedded-host-checkpoint") return embedded_host_checkpoint();
     if (mode == "--owner-isolation") return owner_isolation();
+    if (mode == "--native-exception-boundary") return native_exception_boundary();
     return fail("arguments", "unknown mode");
 }
