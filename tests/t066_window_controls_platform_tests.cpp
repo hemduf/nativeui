@@ -296,6 +296,104 @@ void saturated_dispatcher_close_defers_until_owner_checkpoint() {
     require(closed == 1, "rejected-post close did not deliver on_closed exactly once");
 }
 
+void saturated_native_close_reentrant_programmatic_wins() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 saturated native close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated native close")};
+    require(window.valid(), "saturated-native window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        window.request_close();
+        return ui::CloseDecision::Cancel;
+    });
+
+    fill_dispatcher_to_capacity(dispatcher);
+    require(send_native_close(window.native_handle()),
+            "failed to send saturated native close request");
+    (void)app.poll(0.0);
+
+    require(requests == 1,
+            "rejected native-close post did not reach the owner lifecycle checkpoint");
+    require(window.is_closed(),
+            "request_close inside recovered veto did not win over returned Cancel");
+    require(closed == 1,
+            "recovered native close did not deliver on_closed exactly once");
+    require(app.quit_requested(),
+            "recovered native last-window close did not update quit bookkeeping");
+}
+
+void destroy_pending_saturated_close_is_callback_silent() {
+    ui::Application app;
+    int closed = 0;
+    ui::UI tree{ui::Label{"T132 saturated teardown"}};
+    auto window = std::make_unique<ui::StandaloneWindow>(
+        app, tree, desc("T132 saturated teardown"));
+    require(window->valid(), "saturated-teardown window construction failed");
+
+    const auto dispatcher = window->dispatcher();
+    window->on_closed([&] { ++closed; });
+    require(dispatcher.post([&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        window->request_close();
+        require(window->should_close() && !window->is_closed(),
+                "failed enqueue did not leave close pending before teardown");
+        window.reset();
+    }), "failed to enqueue saturated-teardown driver callback");
+
+    (void)app.poll(0.0);
+    require(!window, "saturated-teardown window survived explicit destruction");
+    require(closed == 0,
+            "destruction after failed close enqueue invoked on_closed");
+    require(app.quit_requested(),
+            "destruction after failed close enqueue did not unregister last window");
+}
+
+void saturated_close_isolated_between_windows() {
+    ui::Application app;
+    ui::UI tree_a{ui::Label{"T132 isolated A"}};
+    ui::UI tree_b{ui::Label{"T132 isolated B"}};
+    ui::StandaloneWindow a{app, tree_a, desc("T132 isolated A")};
+    ui::StandaloneWindow b{app, tree_b, desc("T132 isolated B")};
+    require(a.valid() && b.valid(), "saturated-isolation window construction failed");
+
+    const auto dispatcher_a = a.dispatcher();
+    int closed_a = 0;
+    int closed_b = 0;
+    bool a_closed_inside_callback = true;
+    a.on_closed([&] { ++closed_a; });
+    b.on_closed([&] { ++closed_b; });
+
+    require(dispatcher_a.post([&] {
+        fill_dispatcher_to_capacity(dispatcher_a);
+        a.request_close();
+        a_closed_inside_callback = a.is_closed();
+    }), "failed to enqueue saturated-isolation driver callback");
+
+    (void)app.poll(0.0);
+    require(!a_closed_inside_callback,
+            "saturated window A closed on its active callback stack");
+    require(a.is_closed() && closed_a == 1,
+            "saturated window A did not close exactly once at checkpoint");
+    require(!b.is_closed() && closed_b == 0,
+            "saturated close in A poisoned independent window B");
+    require(!app.quit_requested(),
+            "closing recovered A triggered quit while B remained open");
+    require(b.set_title("T132 B survives saturated A"),
+            "window B was not operational after recovered A close");
+
+    b.request_close();
+    pump(app, 3);
+    require(b.is_closed() && closed_b == 1,
+            "window B cleanup close did not complete exactly once");
+    require(app.quit_requested(),
+            "final window close after recovery did not update quit bookkeeping");
+}
+
 void reentrant_request_close_inside_veto_wins() {
     ui::Application app;
     ui::UI tree{ui::Label{"T066 reentrant self close"}};
@@ -436,6 +534,9 @@ void suite() {
     native_close_without_request_handler_accepts_once();
     programmatic_close_bypasses_veto();
     saturated_dispatcher_close_defers_until_owner_checkpoint();
+    saturated_native_close_reentrant_programmatic_wins();
+    destroy_pending_saturated_close_is_callback_silent();
+    saturated_close_isolated_between_windows();
     reentrant_request_close_inside_veto_wins();
     reentrant_veto_can_close_other_window();
     reentrant_veto_can_request_application_quit();
