@@ -124,6 +124,9 @@ if(APPLE)
     "${CMAKE_CURRENT_LIST_DIR}/../../include"
     "${CMAKE_CURRENT_LIST_DIR}/../../src"
   )
+  target_compile_definitions(t064_macos_backend_contract PRIVATE
+    NATIVEUI_T064_FAULT_INJECTION=1
+  )
   target_link_libraries(t064_macos_backend_contract PRIVATE
     "-framework AppKit"
     "-framework UniformTypeIdentifiers"
