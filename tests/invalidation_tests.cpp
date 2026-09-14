@@ -11,8 +11,11 @@ namespace {
 
 struct InvalidationProbeState {
     int measures{};
+    ui::NodeId node_id{ui::kInvalidNodeId};
     std::function<void()> invalidate_paint;
     std::function<void()> invalidate_layout;
+    std::function<void()> invalidate_focus;
+    std::function<void()> invalidate_availability;
 };
 
 class InvalidationProbeComponent final : public ui::Component {
@@ -26,8 +29,11 @@ public:
     }
 
     void mount(ui::MountContext& context) override {
+        state_->node_id = context.node_id();
         state_->invalidate_paint = context.invalidator();
         state_->invalidate_layout = context.layout_invalidator();
+        state_->invalidate_focus = context.focus_invalidator();
+        state_->invalidate_availability = context.availability_invalidator();
     }
 
     void paint(ui::PaintContext&) const override {}
@@ -59,6 +65,78 @@ void check_rect(ui::Rect actual, ui::Rect expected) {
     NUI_CHECK_NEAR(actual.y, expected.y, 0.0001f);
     NUI_CHECK_NEAR(actual.w, expected.w, 0.0001f);
     NUI_CHECK_NEAR(actual.h, expected.h, 0.0001f);
+}
+
+void retained_invalidator_stale_node_contract() {
+    auto probe = std::make_shared<InvalidationProbeState>();
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::UI tree{ui::If{visible, InvalidationProbe{probe}}};
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    const auto removed_id = probe->node_id;
+    const auto stale_paint = probe->invalidate_paint;
+    const auto stale_layout = probe->invalidate_layout;
+    const auto stale_focus = probe->invalidate_focus;
+    const auto stale_availability = probe->invalidate_availability;
+
+    visible.set(false);
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    stale_paint();
+    stale_layout();
+    stale_focus();
+    stale_availability();
+    NUI_CHECK(!tree.dirty());
+
+    visible.set(true);
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(probe->node_id != ui::kInvalidNodeId);
+    NUI_CHECK(probe->node_id != removed_id);
+    NUI_CHECK(!tree.dirty());
+
+    // A stale callback must not target a replacement even if allocator reuse puts
+    // the replacement Node at the same address as the removed Node.
+    stale_paint();
+    stale_layout();
+    stale_focus();
+    stale_availability();
+    NUI_CHECK(!tree.dirty());
+}
+
+void retained_invalidator_tree_lifetime_contract() {
+    std::function<void()> stale_paint;
+    std::function<void()> stale_layout;
+    std::function<void()> stale_focus;
+    std::function<void()> stale_availability;
+
+    {
+        auto probe = std::make_shared<InvalidationProbeState>();
+        ui::UI tree{InvalidationProbe{probe}};
+        test::MockPlatform platform;
+        SkCanvas canvas;
+        tree.resize({160.0f, 80.0f});
+        tree.paint(canvas, platform);
+
+        stale_paint = probe->invalidate_paint;
+        stale_layout = probe->invalidate_layout;
+        stale_focus = probe->invalidate_focus;
+        stale_availability = probe->invalidate_availability;
+    }
+
+    // Sanitizer builds turn these calls into direct no-UAF regressions. Callback
+    // destruction is also independent from the expired Tree lifetime token.
+    stale_paint();
+    stale_layout();
+    stale_focus();
+    stale_availability();
 }
 
 void theme_change_classification() {
@@ -217,6 +295,8 @@ void suite() {
         NUI_CHECK(!tree.layout_dirty());
     }
 
+    retained_invalidator_stale_node_contract();
+    retained_invalidator_tree_lifetime_contract();
     theme_change_classification();
     ui_theme_ownership_and_invalidation();
 }
