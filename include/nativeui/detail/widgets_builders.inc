@@ -147,8 +147,11 @@ private:
 
 class Knob {
 public:
+    Knob(std::string label, Binding<float> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     Knob(std::string label, State<float>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : Knob(std::move(label), state.binding()) {}
 
     Knob&& range(float minimum, float maximum) && {
         minimum_ = minimum;
@@ -158,18 +161,19 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
-        auto* state = state_;
+        auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
-        return Spec{[label = std::move(label), state, minimum, maximum]() mutable {
-                        return std::make_unique<KnobComponent>(std::move(label), *state, minimum, maximum);
+        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum]() mutable {
+                        return std::make_unique<KnobComponent>(
+                            std::move(label), std::move(state), minimum, maximum);
                     },
                     {}};
     }
 
 private:
     std::string label_;
-    State<float>* state_{};
+    Binding<float> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
 };
@@ -177,8 +181,11 @@ private:
 
 class Toggle {
 public:
+    Toggle(std::string label, Binding<bool> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     Toggle(std::string label, State<bool>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : Toggle(std::move(label), state.binding()) {}
 
     Toggle&& style(ToggleStyle value) && {
         style_ = std::move(value);
@@ -187,18 +194,18 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
-        auto* state = state_;
+        auto state = std::move(state_);
         auto style = std::move(style_);
-        return Spec{[label = std::move(label), state, style = std::move(style)]() mutable {
+        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style)]() mutable {
                         return std::make_unique<ToggleComponent>(
-                            std::move(label), *state, std::move(style));
+                            std::move(label), std::move(state), std::move(style));
                     },
                     {}};
     }
 
 private:
     std::string label_;
-    State<bool>* state_{};
+    Binding<bool> state_;
     ToggleStyle style_;
 };
 
@@ -207,8 +214,11 @@ class TextInput {
 public:
     using SubmitCallback = TextInputComponent::SubmitCallback;
 
+    TextInput(std::string label, Binding<std::string> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     TextInput(std::string label, State<std::string>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : TextInput(std::move(label), state.binding()) {}
 
     TextInput&& placeholder(std::string value) && {
         placeholder_ = std::move(value);
@@ -232,15 +242,15 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
+        auto state = std::move(state_);
         auto placeholder = std::move(placeholder_);
         auto callback = std::move(on_submit_);
         auto style = std::move(style_);
-        auto* state = state_;
         const auto max_length = max_length_;
-        return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
+        return Spec{[label = std::move(label), state = std::move(state), placeholder = std::move(placeholder),
                      max_length, callback = std::move(callback), style = std::move(style)]() mutable {
                         return std::make_unique<TextInputComponent>(
-                            std::move(label), *state, std::move(placeholder), max_length,
+                            std::move(label), std::move(state), std::move(placeholder), max_length,
                             std::move(callback), std::move(style));
                     },
                     {}};
@@ -248,7 +258,7 @@ public:
 
 private:
     std::string label_;
-    State<std::string>* state_{};
+    Binding<std::string> state_;
     std::string placeholder_;
     std::size_t max_length_{256};
     SubmitCallback on_submit_;
