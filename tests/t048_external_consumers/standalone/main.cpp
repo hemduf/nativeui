@@ -18,10 +18,6 @@ int run_self_test() {
             ui::Toggle{"Enabled", enabled},
         }.padding(8.0f).gap(4.0f)};
 
-    // Exercise the relocated Core package at runtime while remaining
-    // deterministic on hosted workers that have no interactive desktop. The
-    // separately compiled native-smoke path below forces StandaloneWindow
-    // symbols to resolve from the attached package in this same executable.
     ui::HeadlessRenderer renderer{{160.0f, 80.0f}};
     if (!renderer.render(ui_tree)) return fail(3, "self-test", "headless render failed");
     if (renderer.pixel_width() != 160 || renderer.pixel_height() != 80) {
@@ -43,8 +39,12 @@ int run_native_smoke() {
                 ui::Toggle{"Enabled", enabled},
             }.padding(8.0f).gap(4.0f)};
 
+        stage = "construct-application";
+        ui::Application application;
+
         stage = "construct-window";
         ui::StandaloneWindow window{
+            application,
             ui_tree,
             ui::WindowDesc{.title = "T048 standalone consumer",
                            .size = {240.0f, 120.0f},
@@ -53,7 +53,7 @@ int run_native_smoke() {
         if (!(window.scale_factor() > 0.0f)) return fail(4, stage, "invalid scale factor");
 
         stage = "poll";
-        for (int i = 0; i < 4; ++i) (void)window.poll(0.0);
+        for (int i = 0; i < 4; ++i) (void)application.poll(0.0);
         if (!window.last_error().empty()) return fail(5, stage, window.last_error());
 
         stage = "close";
@@ -66,7 +66,7 @@ int run_native_smoke() {
         return fail(11, stage, "unknown exception");
     }
 }
-}
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc != 2) return fail(2, "arguments", "expected --self-test or --native-smoke");
