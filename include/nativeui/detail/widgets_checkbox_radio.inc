@@ -166,8 +166,8 @@ struct RadioStateInvalidation final {
 
 class CheckboxComponent final : public Component, public ThemeBinding {
 public:
-    CheckboxComponent(State<bool>& state, std::string label, CheckboxStyle style)
-        : state_(state), label_(std::move(label)), style_(std::move(style)) {}
+    CheckboxComponent(Binding<bool> state, std::string label, CheckboxStyle style)
+        : state_(std::move(state)), label_(std::move(label)), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
@@ -188,9 +188,9 @@ public:
     }
 
     void mount(MountContext& context) override {
-        // State::set() snapshots listeners before callbacks run. Keep the state
-        // classifier detached from the component so an earlier listener may
-        // synchronously remove this node without leaving a raw `this` capture.
+        // State/Binding notifications snapshot listeners before callbacks run.
+        // Keep the classifier detached from the component so an earlier listener
+        // may synchronously remove this node without leaving a raw `this` capture.
         state_invalidation_ = std::make_shared<CheckboxStateInvalidation>();
         state_invalidation_->theme = &current_theme();
         state_invalidation_->style = style_;
@@ -240,17 +240,17 @@ public:
             return EventResult::Handled;
         }
 
-        auto* state = &state_;
+        auto state = state_;
         const auto outcome = interaction_.input(event, context, false, false);
         const auto after = resolved_style(focused_);
         invalidate_transition(before, after, context);
         sync_state_invalidation(effective_availability(), focused_);
         if (!outcome.activate) return outcome.result;
 
-        // State observers may synchronously rebuild/destroy this component.
+        // Binding observers may synchronously rebuild/destroy this component.
         // Complete all component/context work before publishing the value and
         // never touch `this` afterwards.
-        state->set(!state->get());
+        state.set(!state.get());
         return outcome.result;
     }
 
@@ -365,10 +365,10 @@ private:
             before, after, context, checkbox_layout_equal, checkbox_presentation_equal);
     }
 
-    State<bool>& state_;
+    Binding<bool> state_;
     std::string label_;
     CheckboxStyle style_;
-    State<bool>::Subscription subscription_;
+    Binding<bool>::Subscription subscription_;
     std::shared_ptr<CheckboxStateInvalidation> state_invalidation_;
     PressActivationState interaction_;
     bool focused_{};
@@ -633,8 +633,11 @@ private:
 
 class Checkbox {
 public:
+    Checkbox(Binding<bool> state, std::string label)
+        : state_(std::move(state)), label_(std::move(label)) {}
+
     Checkbox(State<bool>& state, std::string label)
-        : state_(&state), label_(std::move(label)) {}
+        : Checkbox(state.binding(), std::move(label)) {}
 
     Checkbox&& style(CheckboxStyle value) && {
         style_ = std::move(value);
@@ -642,19 +645,21 @@ public:
     }
 
     Spec spec() && {
-        auto* state = state_;
+        auto state = std::move(state_);
         auto label = std::move(label_);
         auto style = std::move(style_);
         return Spec{
-            [state, label = std::move(label), style = std::move(style)]() mutable {
+            [state = std::move(state),
+             label = std::move(label),
+             style = std::move(style)]() mutable {
                 return std::make_unique<detail::CheckboxComponent>(
-                    *state, std::move(label), std::move(style));
+                    std::move(state), std::move(label), std::move(style));
             },
             {}};
     }
 
 private:
-    State<bool>* state_{};
+    Binding<bool> state_;
     std::string label_;
     CheckboxStyle style_;
 };
@@ -662,16 +667,19 @@ private:
 template <class T>
 class RadioGroup {
 public:
-    explicit RadioGroup(State<T>& selected)
-        : selected_(&selected),
+    explicit RadioGroup(Binding<T> selected)
+        : selected_(std::move(selected)),
           token_(std::make_shared<detail::RadioGroupToken>()),
           registry_(std::make_shared<detail::RadioOptionRegistry<T>>()) {}
+
+    explicit RadioGroup(State<T>& selected)
+        : RadioGroup(selected.binding()) {}
 
 private:
     template <class U>
     friend class RadioButton;
 
-    State<T>* selected_{};
+    Binding<T> selected_;
     std::shared_ptr<detail::RadioGroupToken> token_;
     std::shared_ptr<detail::RadioOptionRegistry<T>> registry_;
 };
@@ -692,7 +700,7 @@ public:
     }
 
     Spec spec() && {
-        auto* selected = selected_;
+        auto selected = std::move(selected_);
         auto token = std::move(token_);
         auto registry = std::move(registry_);
         auto value = std::move(value_);
@@ -701,14 +709,14 @@ public:
 
         auto value_identity = registry->register_value(std::move(value));
         detail::RadioButtonComponent::IsSelected is_selected =
-            [selected, value_identity] { return selected->get() == *value_identity; };
+            [selected, value_identity] { return selected.get() == *value_identity; };
         detail::RadioButtonComponent::Select select =
-            [selected, value_identity] { selected->set(*value_identity); };
+            [selected, value_identity] { selected.set(*value_identity); };
         detail::RadioButtonComponent::Observe observe =
-            [selected](std::function<void()> invalidate) -> std::shared_ptr<void> {
-                auto subscription = selected->observe(
+            [selected](std::function<void()> invalidate) mutable -> std::shared_ptr<void> {
+                auto subscription = selected.observe(
                     [invalidate = std::move(invalidate)](const T&) { invalidate(); });
-                return std::make_shared<typename State<T>::Subscription>(std::move(subscription));
+                return std::make_shared<typename Binding<T>::Subscription>(std::move(subscription));
             };
 
         return Spec{
@@ -730,7 +738,7 @@ public:
     }
 
 private:
-    State<T>* selected_{};
+    Binding<T> selected_;
     std::shared_ptr<detail::RadioGroupToken> token_;
     std::shared_ptr<detail::RadioOptionRegistry<T>> registry_;
     T value_;
