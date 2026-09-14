@@ -136,17 +136,32 @@ A stale review event or review body can never authorize qualification or merge.
 
 After a head-valid `SOURCE_READY`, the Scheduler must explicitly assign `PEER_CODE_REVIEW` to a Delivery worker different from the source worker before placing the PR in a merge/qualification path.
 
-Peer review does not consume a source-changing lane.
+Peer review does not consume a source-changing lane, but it **does consume worker execution capacity**. The Scheduler must reserve that capacity explicitly rather than assuming a reviewer will eventually become idle.
+
+A ready mandatory peer review has scheduling priority over starting a new source slice, fallback implementation, documentation fallback, or optional preflight.
+
+When a code-changing `SOURCE_READY` candidate has no valid peer review:
+
+1. assign `PEER_CODE_REVIEW` as a Delivery worker's **primary** action in the same scheduling generation;
+2. prefer a worker already waiting on CI/review/final qualification;
+3. if every Delivery worker is actively source-changing, allow the lowest-priority/lowest-critical-path worker to finish only its current coherent batch, then switch it to peer review before starting another source batch;
+4. while the mandatory review remains unassigned or unstarted, do not open an additional source lane or source fallback;
+5. when all four Delivery workers would otherwise be source-changing, the effective capacity becomes **three source lanes plus one reviewer** until the review reaches `REVIEW_PASS` or `REVIEW_BLOCKED`;
+6. lack of reviewer capacity for a ready peer review is an orchestration defect, not a valid reason to delay the review indefinitely.
+
+The target service rule is: `SOURCE_READY -> peer-review assignment` in the same Scheduler cycle, followed by execution on the assigned reviewer's next run.
+
+After the verdict, the reviewer may resume its source primary/fallback according to the next Scheduler plan.
 
 The Scheduler must treat a PR awaiting mandatory peer review as `review-closeout`, not `merge-ready`.
 
-The Scheduler must not emit or accept an `on_unlock` assumption that depends on a future merge unless the required peer-review phase is either already complete on the exact head or explicitly present before merge in the Integration queue.
+The Scheduler must not emit or accept an `on_unlock` assumption that depends on a future merge unless the required peer-review phase is either already complete on the exact head or explicitly scheduled before merge. An `on_unlock` reservation must never consume capacity needed by an already-ready mandatory peer review.
 
 A `REVIEW_PASS` worker event is valid only when it references the exact head and a durable PR review containing `<!-- nativeui-peer-code-review:v1 -->`.
 
 ## 8. Delivery peer-review requirements
 
-When W1/W2/W3/W4 is assigned `PEER_CODE_REVIEW`, that review is the worker's primary useful action for the PR.
+When W1/W2/W3/W4 is assigned `PEER_CODE_REVIEW`, that review is the worker's primary useful action for the PR and takes precedence over beginning a new source batch.
 
 The reviewer must:
 
@@ -158,7 +173,26 @@ The reviewer must:
 
 A peer-review assignment is read-only with respect to the reviewed PR source unless the Scheduler explicitly assigns a source handoff. The reviewer must not silently fix findings on another worker's branch.
 
-## 9. Integration merge gate
+## 9. Review / correction loop
+
+A `REVIEW_BLOCKED` verdict routes the PR back to its source worker with `REWORK_REQUIRED`.
+
+The correction loop is mandatory:
+
+```text
+PEER_CODE_REVIEW
+  -> REVIEW_BLOCKED
+  -> REWORK_REQUIRED
+  -> correction in TDD
+  -> new exact head
+  -> applicable CI qualification
+  -> SOURCE_READY
+  -> NEW PEER_CODE_REVIEW
+```
+
+The previous review never carries forward across a changed executable head. Repeat this loop until the current exact head has `REVIEW_PASS` with zero Blocking and zero Important findings.
+
+## 10. Integration merge gate
 
 Integration must re-fetch the PR immediately before Draft -> Ready, `MERGE_READY`, and merge.
 
@@ -179,7 +213,7 @@ If any item is missing, Integration must not merge. It must emit `REVIEW_BLOCKED
 
 Integration's own final verification is an additional defense-in-depth pass. It does not replace the mandatory peer review.
 
-## 10. Merge invariant
+## 11. Merge invariant
 
 For code-changing PRs, the invariant is:
 
