@@ -13,8 +13,10 @@
 #endif
 
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 namespace ui {
 
@@ -36,11 +38,26 @@ private:
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
+#define availability_invalidator unsafe_availability_invalidator
+#define paint_invalidator unsafe_paint_invalidator
+#define layout_invalidator unsafe_layout_invalidator
+#define focus_invalidator unsafe_focus_invalidator
+#define mount_node unsafe_mount_node
+#define unmount_node unsafe_unmount_node
 #include <nativeui/detail/tree_layout.inc>
+#undef unmount_node
+#undef mount_node
+#undef focus_invalidator
+#undef layout_invalidator
+#undef paint_invalidator
+#undef availability_invalidator
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
 #include <nativeui/detail/tree_focus_group.inc>
+#define register_dynamic_node unsafe_register_dynamic_node
 #include <nativeui/detail/tree_dynamic.inc>
+#undef register_dynamic_node
+#include <nativeui/detail/tree_retained_invalidation.inc>
 };
 
 #include <nativeui/detail/tree_compile.inc>
