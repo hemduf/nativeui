@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 void nativeui_header_compile_widgets() {
@@ -32,4 +33,19 @@ void nativeui_header_compile_widgets() {
         "Dynamic actions",
         [&items] { return items; }};
     [[maybe_unused]] auto dynamic_menu_spec = std::move(dynamic_menu).spec();
+
+    ui::State<float> knob_state{0.5f};
+    ui::State<bool> toggle_state{false};
+    auto knob_binding = knob_state.binding();
+    auto toggle_binding = toggle_state.binding();
+
+    auto binding_knob = ui::Knob{"Binding knob", knob_binding};
+    [[maybe_unused]] auto binding_knob_spec = std::move(binding_knob).spec();
+    auto legacy_knob = ui::Knob{"Legacy knob", knob_state};
+    [[maybe_unused]] auto legacy_knob_spec = std::move(legacy_knob).spec();
+
+    auto binding_toggle = ui::Toggle{"Binding toggle", toggle_binding};
+    [[maybe_unused]] auto binding_toggle_spec = std::move(binding_toggle).spec();
+    auto legacy_toggle = ui::Toggle{"Legacy toggle", toggle_state};
+    [[maybe_unused]] auto legacy_toggle_spec = std::move(legacy_toggle).spec();
 }
