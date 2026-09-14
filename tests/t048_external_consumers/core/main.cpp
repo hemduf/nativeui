@@ -26,6 +26,11 @@ int main() {
     binding_source.set(9);
     if (!binding_subscription.active() || binding_observed != 9 || binding.get() != 9) return 6;
 
+    ui::State<std::string> legacy_text{"legacy"};
+    ui::State<std::string> bound_text{"bound"};
+    [[maybe_unused]] auto legacy_text_spec = ui::TextInput{"Legacy text", legacy_text}.spec();
+    [[maybe_unused]] auto binding_text_spec = ui::TextInput{"Binding text", bound_text.binding()}.spec();
+
     ui::HeadlessRenderer renderer{{160.0f, 80.0f}};
     if (!renderer.render(ui_tree)) return 1;
     if (renderer.pixel_width() != 160 || renderer.pixel_height() != 80) return 2;
