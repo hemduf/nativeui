@@ -407,29 +407,65 @@
         for (auto& child : node.children) activate_node(*child);
     }
 
+    static void remember_current_exception(std::exception_ptr& first_error) noexcept {
+        if (!first_error) first_error = std::current_exception();
+    }
+
     void deactivate_node(Node& node) {
+        std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-            deactivate_node(**it);
+            try {
+                deactivate_node(**it);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
-        node.component->deactivate(context);
+        try {
+            node.component->deactivate(context);
+        } catch (...) {
+            remember_current_exception(first_error);
+        }
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void unmount_node(Node& node) {
+        std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-            unmount_node(**it);
+            try {
+                unmount_node(**it);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
-        node.component->unmount(context);
+        try {
+            node.component->unmount(context);
+        } catch (...) {
+            remember_current_exception(first_error);
+        }
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
-            binding->set_theme_change_invalidator({});
+            try {
+                binding->set_theme_change_invalidator({});
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         if (auto* source = dynamic_source(node)) {
-            source->set_structure_invalidator({});
-            unregister_dynamic_node(node.id);
+            try {
+                source->set_structure_invalidator({});
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
+            try {
+                unregister_dynamic_node(node.id);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void paint_node(

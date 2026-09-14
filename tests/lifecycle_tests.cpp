@@ -84,6 +84,68 @@ private:
     ui::State<int>* observed_{};
 };
 
+struct ThrowingLifecycleState {
+    std::string name;
+    std::vector<std::string>* events{};
+    bool throw_deactivate{};
+    bool throw_unmount{};
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+};
+
+class ThrowingLifecycleComponent final : public ui::Component {
+public:
+    explicit ThrowingLifecycleComponent(std::shared_ptr<ThrowingLifecycleState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {};
+    }
+
+    void mount(ui::MountContext&) override {
+        ++state_->mounts;
+        record("mount");
+    }
+
+    void activate(ui::LifecycleContext&) override {
+        ++state_->activates;
+        record("activate");
+    }
+
+    void deactivate(ui::LifecycleContext&) override {
+        ++state_->deactivates;
+        record("deactivate");
+        if (state_->throw_deactivate) throw state_->name + ".deactivate";
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++state_->unmounts;
+        record("unmount");
+        if (state_->throw_unmount) throw state_->name + ".unmount";
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    void record(std::string_view phase) {
+        if (state_->events) state_->events->push_back(state_->name + "." + std::string(phase));
+    }
+
+    std::shared_ptr<ThrowingLifecycleState> state_;
+};
+
+ui::Spec throwing_lifecycle_spec(
+    std::shared_ptr<ThrowingLifecycleState> state,
+    std::vector<ui::Spec> children = {}) {
+    return ui::Spec{
+        [state = std::move(state)] {
+            return std::make_unique<ThrowingLifecycleComponent>(state);
+        },
+        std::move(children)};
+}
+
 struct DynamicItem {
     std::string key;
     float extent{};
@@ -533,6 +595,83 @@ void suite() {
         NUI_CHECK(!surviving_dialog->active());
         surviving_dialog.reset();
         NUI_CHECK(callbacks == 0);
+    }
+
+    // T130 destructor-driven teardown contains component failures and still
+    // reaches every remaining sibling/parent hook exactly once. On the old
+    // path the first throwing deactivate() escaped ~Tree() and terminated the
+    // test process before the assertions below could run.
+    {
+        test::MockPlatform platform;
+        std::vector<std::string> events;
+        auto parent = std::make_shared<ThrowingLifecycleState>();
+        auto first = std::make_shared<ThrowingLifecycleState>();
+        auto second = std::make_shared<ThrowingLifecycleState>();
+        parent->name = "parent";
+        first->name = "first";
+        second->name = "second";
+        parent->events = &events;
+        first->events = &events;
+        second->events = &events;
+        second->throw_deactivate = true;
+        second->throw_unmount = true;
+
+        {
+            ui::Tree tree{ui::compile(throwing_lifecycle_spec(
+                parent,
+                {throwing_lifecycle_spec(first), throwing_lifecycle_spec(second)}))};
+            tree.mount();
+            tree.activate_focus(platform);
+        }
+
+        NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1);
+        NUI_CHECK(parent->activates == 1 && first->activates == 1 && second->activates == 1);
+        NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+        NUI_CHECK((events == std::vector<std::string>{
+            "parent.mount", "first.mount", "second.mount",
+            "parent.activate", "first.activate", "second.activate",
+            "second.deactivate", "first.deactivate", "parent.deactivate",
+            "second.unmount", "first.unmount", "parent.unmount"}));
+    }
+
+    // T130 explicit unmount remains an ordinary throwing C++ API, but only
+    // propagates the first component failure after the full teardown commits.
+    // A second unmount is inert, proving no lifecycle hook is double-invoked.
+    {
+        test::MockPlatform platform;
+        std::vector<std::string> events;
+        auto parent = std::make_shared<ThrowingLifecycleState>();
+        auto first = std::make_shared<ThrowingLifecycleState>();
+        auto second = std::make_shared<ThrowingLifecycleState>();
+        parent->name = "parent-explicit";
+        first->name = "first-explicit";
+        second->name = "second-explicit";
+        parent->events = &events;
+        first->events = &events;
+        second->events = &events;
+        second->throw_deactivate = true;
+        first->throw_unmount = true;
+
+        ui::Tree tree{ui::compile(throwing_lifecycle_spec(
+            parent,
+            {throwing_lifecycle_spec(first), throwing_lifecycle_spec(second)}))};
+        tree.mount();
+        tree.activate_focus(platform);
+
+        std::string propagated;
+        try {
+            tree.unmount();
+        } catch (const std::string& error) {
+            propagated = error;
+        }
+        NUI_CHECK(propagated == "second-explicit.deactivate");
+        NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+
+        tree.unmount();
+        NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
     }
 
     // Deterministic mount/activate/deactivate/unmount order and stable IDs.
