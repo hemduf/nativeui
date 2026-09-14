@@ -87,6 +87,8 @@ private:
 struct ThrowingLifecycleState {
     std::string name;
     std::vector<std::string>* events{};
+    bool throw_mount{};
+    bool throw_activate{};
     bool throw_deactivate{};
     bool throw_unmount{};
     int mounts{};
@@ -107,11 +109,13 @@ public:
     void mount(ui::MountContext&) override {
         ++state_->mounts;
         record("mount");
+        if (state_->throw_mount) throw state_->name + ".mount";
     }
 
     void activate(ui::LifecycleContext&) override {
         ++state_->activates;
         record("activate");
+        if (state_->throw_activate) throw state_->name + ".activate";
     }
 
     void deactivate(ui::LifecycleContext&) override {
@@ -595,6 +599,88 @@ void suite() {
         NUI_CHECK(!surviving_dialog->active());
         surviving_dialog.reset();
         NUI_CHECK(callbacks == 0);
+    }
+
+    // T130 mount failure rolls the provisional mounted state back before the
+    // exception is propagated. A retry is therefore a real second transition,
+    // and the rollback unmount is not repeated by later destruction.
+    {
+        auto state = std::make_shared<ThrowingLifecycleState>();
+        state->name = "mount-recovery";
+        state->throw_mount = true;
+        ui::Tree tree{ui::compile(throwing_lifecycle_spec(state))};
+
+        std::string propagated;
+        try {
+            tree.mount();
+        } catch (const std::string& error) {
+            propagated = error;
+        }
+        NUI_CHECK(propagated == "mount-recovery.mount");
+        NUI_CHECK(state->mounts == 1);
+        NUI_CHECK(state->unmounts == 1);
+
+        state->throw_mount = false;
+        tree.mount();
+        NUI_CHECK(state->mounts == 2);
+        NUI_CHECK(state->unmounts == 1);
+        tree.unmount();
+        NUI_CHECK(state->unmounts == 2);
+    }
+
+    // T130 activation failure must not publish a completed active transition.
+    // Retrying activation must execute component activation again instead of
+    // returning early from a stale active_ flag.
+    {
+        test::MockPlatform platform;
+        auto state = std::make_shared<ThrowingLifecycleState>();
+        state->name = "activate-recovery";
+        state->throw_activate = true;
+        ui::Tree tree{ui::compile(throwing_lifecycle_spec(state))};
+        tree.mount();
+
+        std::string propagated;
+        try {
+            tree.activate_focus(platform);
+        } catch (const std::string& error) {
+            propagated = error;
+        }
+        NUI_CHECK(propagated == "activate-recovery.activate");
+        NUI_CHECK(state->activates == 1);
+        NUI_CHECK(state->deactivates == 1);
+
+        state->throw_activate = false;
+        tree.activate_focus(platform);
+        NUI_CHECK(state->activates == 2);
+        tree.deactivate_focus(platform);
+        NUI_CHECK(state->deactivates == 2);
+        tree.unmount();
+    }
+
+    // T130 explicit deactivation propagates only after terminal Tree lifecycle
+    // state is committed. Later unmount/destruction must not invoke deactivate
+    // a second time for the failed transition.
+    {
+        test::MockPlatform platform;
+        auto state = std::make_shared<ThrowingLifecycleState>();
+        state->name = "deactivate-recovery";
+        state->throw_deactivate = true;
+        ui::Tree tree{ui::compile(throwing_lifecycle_spec(state))};
+        tree.mount();
+        tree.activate_focus(platform);
+
+        std::string propagated;
+        try {
+            tree.deactivate_focus(platform);
+        } catch (const std::string& error) {
+            propagated = error;
+        }
+        NUI_CHECK(propagated == "deactivate-recovery.deactivate");
+        NUI_CHECK(state->deactivates == 1);
+
+        tree.unmount();
+        NUI_CHECK(state->deactivates == 1);
+        NUI_CHECK(state->unmounts == 1);
     }
 
     // T130 destructor-driven teardown contains component failures and still

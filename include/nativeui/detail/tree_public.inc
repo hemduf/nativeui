@@ -26,10 +26,34 @@
             !root_->component->focusable() &&
             !root_->component->clips_children() &&
             !root_->component->is_focus_scope();
-        initialize_availability(*root_);
-        availability_structure_dirty_ = false;
-        mount_node(*root_);
-        invalidate_layout_from(*root_);
+
+        try {
+            initialize_availability(*root_);
+            availability_structure_dirty_ = false;
+            mount_node(*root_);
+            invalidate_layout_from(*root_);
+        } catch (...) {
+            // mounted_ is provisional while component mount callbacks run. If
+            // any callback/fallible retained setup fails, complete best-effort
+            // rollback while the Tree is still internally mounted, then publish
+            // a clean inactive/unmounted state before propagating the original
+            // ordinary-C++ exception.
+            try {
+                unmount_node(*root_);
+            } catch (...) {
+            }
+            focusables_.clear();
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            active_ = false;
+            availability_structure_dirty_ = false;
+            focus_structure_dirty_ = true;
+            mounted_ = false;
+            throw;
+        }
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
@@ -54,8 +78,29 @@
     void activate_focus(PlatformServices& platform) {
         flush_dynamic_mutations();
         if (active_) return;
+
+        // active_ is provisional while the component activation traversal runs.
+        // Keep the historic callback ordering, but do not leave that provisional
+        // state published if a component throws before platform/focus commit.
         active_ = true;
-        activate_node(*root_);
+        try {
+            activate_node(*root_);
+        } catch (...) {
+            try {
+                deactivate_node(*root_);
+            } catch (...) {
+            }
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            throw;
+        }
+
         active_platform_ = &platform;
         sync_availability_structure(platform);
         focus_structure_dirty_ = true;
@@ -108,12 +153,34 @@
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
-        deactivate_node(*root_);
+
+        std::exception_ptr first_error;
+        try {
+            deactivate_node(*root_);
+        } catch (...) {
+            first_error = std::current_exception();
+        }
+
+        // Tree lifecycle state commits even when a component deactivation hook
+        // fails. This makes subsequent unmount/destruction deterministic and
+        // prevents the same active transition from being torn down twice.
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
-        if (availability_structure_dirty_) sync_availability_inactive();
-        invalidate_paint(viewport_rect());
+        if (availability_structure_dirty_) {
+            try {
+                sync_availability_inactive();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        }
+        try {
+            invalidate_paint(viewport_rect());
+        } catch (...) {
+            if (!first_error) first_error = std::current_exception();
+        }
+
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void unmount() {
