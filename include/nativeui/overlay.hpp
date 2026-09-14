@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -287,9 +288,22 @@ struct OverlayState {
         if (next_id == std::numeric_limits<std::uint64_t>::max()) next_id = 0;
         else ++next_id;
 
+        // Prepare all allocation-capable state before publication. IDs remain
+        // monotonic even when the subsequent structural notification fails.
         auto lifetime = std::make_shared<const OverlayLifetimeToken>();
         entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt, {}});
-        invalidate_structure();
+        try {
+            invalidate_structure();
+        } catch (...) {
+            // The caller cannot receive a handle when notification fails, so
+            // roll back that exact provisional entry without invoking callbacks
+            // while the original exception is active.
+            const auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+                return entry.id == id && entry.lifetime == lifetime;
+            });
+            if (it != entries.end()) erase_entry_noexcept(it);
+            throw;
+        }
         return OverlayHandle{owner, lifetime, id};
     }
 
@@ -300,23 +314,47 @@ struct OverlayState {
             return false;
         }
 
-        const auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+        auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
             return entry.id == handle.id_ && entry.lifetime == lifetime;
         });
         if (it == entries.end()) return false;
-        entries.erase(it);
+
+        // Schedule retained reconciliation before publishing logical removal.
+        // If notification throws the handle remains coherently open; once it
+        // succeeds the erase path below is allocation-free/no-throw.
         invalidate_structure();
+        it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+            return entry.id == handle.id_ && entry.lifetime == lifetime;
+        });
+        if (it == entries.end()) return false;
+        erase_entry_noexcept(it);
         return true;
     }
 
     bool close_id(std::uint64_t id) {
-        const auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
+        auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
             return entry.id == id;
         });
         if (it == entries.end()) return false;
-        entries.erase(it);
+
         invalidate_structure();
+        it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
+            return entry.id == id;
+        });
+        if (it == entries.end()) return false;
+        erase_entry_noexcept(it);
         return true;
+    }
+
+private:
+    using EntryIterator = std::vector<OverlayEntry>::iterator;
+
+    void erase_entry_noexcept(EntryIterator it) noexcept {
+        static_assert(std::is_nothrow_move_assignable_v<OverlayEntry>);
+        for (auto current = it; std::next(current) != entries.end(); ++current) {
+            *current = std::move(*std::next(current));
+        }
+        entries.pop_back();
     }
 };
 

@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <functional>
+#include <stdexcept>
 
 namespace {
 
@@ -450,6 +451,114 @@ void middle_removal_contract() {
     NUI_CHECK(first->unmounts == 1);
 }
 
+void throwing_show_is_transactional_contract() {
+    auto state = std::make_shared<ui::detail::OverlayState>();
+    ui::detail::OverlayHostComponent host{state};
+    state->structural_invalidator = [] { throw std::runtime_error{"show invalidation"}; };
+
+    auto modal = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    modal.mode = ui::OverlayMode::Modal;
+    bool threw = false;
+    try {
+        (void)state->show(std::move(modal));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+
+    NUI_CHECK(threw);
+    NUI_CHECK(state->entries.empty());
+    NUI_CHECK(state->next_id == 2);
+    const auto failed_keys = host.desired_keys();
+    NUI_CHECK(failed_keys.size() == 1);
+    NUI_CHECK(failed_keys.front() == "root");
+
+    state->structural_invalidator = [] {};
+    auto recovered_modal = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    recovered_modal.mode = ui::OverlayMode::Modal;
+    const auto recovered = state->show(std::move(recovered_modal));
+    NUI_CHECK(recovered.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    NUI_CHECK(state->entries.front().id == 2);
+    const auto recovered_keys = host.desired_keys();
+    NUI_CHECK(recovered_keys.size() == 3);
+    NUI_CHECK(recovered_keys[1] == "modal-barrier:2");
+    NUI_CHECK(recovered_keys[2] == "overlay:2");
+    NUI_CHECK(state->close(recovered));
+}
+
+void throwing_close_is_transactional_contract() {
+    auto state = std::make_shared<ui::detail::OverlayState>();
+    ui::detail::OverlayHostComponent host{state};
+    state->structural_invalidator = [] {};
+
+    auto first_overlay = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    first_overlay.mode = ui::OverlayMode::Modal;
+    const auto first = state->show(std::move(first_overlay));
+    NUI_CHECK(first.valid());
+    NUI_CHECK(state->entries.size() == 1);
+
+    state->structural_invalidator = [] { throw std::runtime_error{"close invalidation"}; };
+    bool handle_close_threw = false;
+    try {
+        (void)state->close(first);
+    } catch (const std::runtime_error&) {
+        handle_close_threw = true;
+    }
+    NUI_CHECK(handle_close_threw);
+    NUI_CHECK(first.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    NUI_CHECK(host.desired_keys().size() == 3);
+
+    state->structural_invalidator = [] {};
+    NUI_CHECK(state->close(first));
+    NUI_CHECK(!first.valid());
+    NUI_CHECK(!state->close(first));
+    NUI_CHECK(state->entries.empty());
+
+    const auto second = state->show(centered(ui::make_spec(ui::Spacer{24.0f, 16.0f})));
+    NUI_CHECK(second.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    const auto second_id = state->entries.front().id;
+
+    state->structural_invalidator = [] { throw std::runtime_error{"close id invalidation"}; };
+    bool id_close_threw = false;
+    try {
+        (void)state->close_id(second_id);
+    } catch (const std::runtime_error&) {
+        id_close_threw = true;
+    }
+    NUI_CHECK(id_close_threw);
+    NUI_CHECK(second.valid());
+    NUI_CHECK(state->entries.size() == 1);
+
+    state->structural_invalidator = [] {};
+    NUI_CHECK(state->close_id(second_id));
+    NUI_CHECK(!second.valid());
+    NUI_CHECK(!state->close_id(second_id));
+}
+
+void throwing_overlay_state_is_per_ui_contract() {
+    auto failing = std::make_shared<ui::detail::OverlayState>();
+    auto healthy = std::make_shared<ui::detail::OverlayState>();
+    failing->structural_invalidator = [] { throw std::runtime_error{"isolated invalidation"}; };
+    healthy->structural_invalidator = [] {};
+
+    bool threw = false;
+    try {
+        (void)failing->show(centered(ui::make_spec(ui::Spacer{8.0f, 8.0f})));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(failing->entries.empty());
+
+    const auto healthy_handle =
+        healthy->show(centered(ui::make_spec(ui::Spacer{8.0f, 8.0f})));
+    NUI_CHECK(healthy_handle.valid());
+    NUI_CHECK(healthy->entries.size() == 1);
+    NUI_CHECK(healthy->close(healthy_handle));
+}
+
 void suite() {
     anchor_visibility_contract();
     stale_focus_restoration_contract();
@@ -457,6 +566,9 @@ void suite() {
     per_ui_handle_isolation_contract();
     reentrant_show_contract();
     middle_removal_contract();
+    throwing_show_is_transactional_contract();
+    throwing_close_is_transactional_contract();
+    throwing_overlay_state_is_per_ui_contract();
 }
 
 } // namespace
