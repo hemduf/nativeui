@@ -1,6 +1,8 @@
 #include <nativeui/nativeui.hpp>
 #include <nativeui/detail/dispatcher_owner.hpp>
 
+#include "test_support.hpp"
+
 #if defined(__APPLE__)
 #include <objc/message.h>
 #include <objc/objc.h>
@@ -16,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -71,6 +74,55 @@ public:
 
 private:
     std::shared_ptr<LifecycleCounts> counts_;
+};
+
+struct InputCloseState {
+    std::function<void()> close_from_input;
+    bool input_ran{};
+    int unmounts{};
+};
+
+class InputCloseProbeComponent final : public ui::Component {
+public:
+    explicit InputCloseProbeComponent(std::shared_ptr<InputCloseState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {120.0f, 60.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+        state_->input_ran = true;
+        state_->close_from_input();
+        return ui::EventResult::Handled;
+    }
+
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<InputCloseState> state_;
+};
+
+class InputCloseProbe {
+public:
+    explicit InputCloseProbe(std::shared_ptr<InputCloseState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<InputCloseProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<InputCloseState> state_;
 };
 
 bool send_native_close(ui::NativeViewHandle handle) {
@@ -388,6 +440,48 @@ void saturated_dispatcher_close_defers_until_owner_checkpoint() {
     require(closed == 1, "rejected-post close did not deliver on_closed exactly once");
 }
 
+void saturated_component_input_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    auto state = std::make_shared<InputCloseState>();
+    ui::UI tree{InputCloseProbe{state}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated component input")};
+    require(window.valid(), "component-input window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool closed_inside_input = true;
+    bool unmounted_inside_input = true;
+    window.on_closed([&] { ++closed; });
+    state->close_from_input = [&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        window.request_close();
+        closed_inside_input = window.is_closed();
+        unmounted_inside_input = state->unmounts != 0;
+    };
+
+    test::MockPlatform platform;
+    require(tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 24.0f, 24.0f), platform) ==
+            ui::EventResult::Handled,
+            "component input driver was not handled");
+    require(state->input_ran, "component input callback did not run");
+    require(!closed_inside_input,
+            "Dispatcher rejection synchronously closed from component input callback");
+    require(!unmounted_inside_input && state->unmounts == 0,
+            "Dispatcher rejection unmounted the live UI on component input stack");
+    require(!window.is_closed(),
+            "component-input close committed before a later owner checkpoint");
+
+    (void)app.poll(0.0);
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete component-input close");
+    require(closed == 1,
+            "component-input rejected-post close did not deliver on_closed exactly once");
+    require(state->unmounts == 1,
+            "component-input close did not unmount the UI exactly once at checkpoint");
+}
+
 void saturated_native_close_reentrant_programmatic_wins() {
     ui::Application app;
     ui::UI tree{ui::Label{"T132 saturated native close"}};
@@ -629,6 +723,7 @@ void suite() {
     throwing_native_close_post_is_contained_and_recovers();
     throwing_accepted_close_completion_commits_once();
     saturated_dispatcher_close_defers_until_owner_checkpoint();
+    saturated_component_input_close_defers_until_owner_checkpoint();
     saturated_native_close_reentrant_programmatic_wins();
     destroy_pending_saturated_close_is_callback_silent();
     saturated_close_isolated_between_windows();
