@@ -267,13 +267,38 @@ std::size_t DispatcherOwner::checkpoint() {
     if (should_wake) request_dispatcher_wake(state);
 
     std::size_t executed = 0;
-    for (auto& task : snapshot) {
+    for (std::size_t index = 0; index < snapshot.size(); ++index) {
         {
             std::lock_guard lock{state->mutex};
             if (state->closing) break;
         }
-        task.callback();
-        ++executed;
+
+        try {
+            snapshot[index].callback();
+            ++executed;
+        } catch (...) {
+            bool recover_wake = false;
+            {
+                std::lock_guard lock{state->mutex};
+                if (!state->closing) {
+                    // The callback at `index` began and is therefore consumed.
+                    // Restore only its unstarted suffix, in reverse insertion
+                    // order so the queue observes the original FIFO sequence.
+                    // Reentrant/newer posts are already in state->tasks and stay
+                    // behind every restored accepted task.
+                    for (std::size_t restore = snapshot.size(); restore > index + 1;
+                         --restore) {
+                        state->tasks.push_front(std::move(snapshot[restore - 1]));
+                    }
+                    if (!state->tasks.empty()) {
+                        state->wake_pending = true;
+                        recover_wake = true;
+                    }
+                }
+            }
+            if (recover_wake) request_dispatcher_wake(state);
+            throw;
+        }
     }
     return executed;
 }
