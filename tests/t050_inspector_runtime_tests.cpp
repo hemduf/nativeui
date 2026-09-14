@@ -368,6 +368,13 @@ void inspector_post_paint_preserves_incoming_canvas_state() {
     ui::HeadlessRenderer renderer{{64.0f, 64.0f}};
     ui::debug::set_inspector_enabled(ui, true);
 
+    // Enabling the inspector deliberately invalidates once and the overlay
+    // visualizes that transition. Consume it before comparing steady-state
+    // frames so this test isolates canvas save/restore behavior.
+    NUI_CHECK(renderer.render(ui));
+    NUI_CHECK(!ui.paint_dirty());
+    NUI_CHECK(!ui.layout_dirty());
+
     NUI_CHECK(renderer.render(ui));
     const auto first = renderer.rgba_pixels();
     NUI_CHECK(renderer.render(ui));
