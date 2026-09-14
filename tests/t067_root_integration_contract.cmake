@@ -76,7 +76,7 @@ require_text("${root_content}" "nativeui_discover_feature_examples(NATIVEUI_FEAT
   "root CMake must discover feature examples through the shared helper")
 require_text("${root_content}" "foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)"
   "root CMake must register every discovered feature example")
-require_text("${root_content}" "nativeui_add_feature_example(${_example})"
+require_text("${root_content}" [=[nativeui_add_feature_example(${_example})]=]
   "root CMake must route discovered feature examples through the common target helper")
 require_text("${root_content}" "nativeui_t067_tests"
   "root CMake must register the T067 model contract test")
