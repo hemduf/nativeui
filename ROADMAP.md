@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-13
+**Updated:** 2026-09-14
 
 NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -20,7 +20,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` includes T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+Current `main` includes T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+
+T123 / issue #281 / PR #284 is complete and merged. Frozen executable head `f2c5cada877df82d8936f9dd545d796c0ab5156e` passed normal CI `34837857267`, T066 Window Controls `34837857292`, then final-candidate T042 Lifecycle Stress `34841171641` and T052 v0.1 Release Gate `34841171493`. Independent final `CODE_REVIEW.md` review `5197372173` reported zero Blocking/Important findings. The delivered contract freezes deterministic lifetime-safe `State<T>` notification passes, recursive latest-write coalescing, observer add/remove behavior, subscription/source lifetime, explicit equality requirements, steady-state non-cloning listener storage and deterministic throwing-observer recovery/pending-write policy. T123 now unblocks T127 and the first decomposed T124 child T138.
 
 T039 / issue #39 / PR #260 is complete and merged. Frozen executable head `3cf0c8e33cb472648cef880ece780dbda6b3fd38` passed normal CI `34778524773`, T066 Window Controls `34778524854`, then final-candidate T042 Lifecycle Stress `34779287474` and T052 v0.1 Release Gate `34779287449`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered scoped-style contract provides typed lexical `StyleScope` inheritance, retained-ancestry resolution, exact outer/inner/component precedence, bounded paint-vs-layout invalidation, structural removal/restoration/reinsertion, T058 dynamic ancestry, sibling/two-UI isolation and deterministic headless acceptance evidence.
 
@@ -57,14 +59,18 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
 
-release:            T039(done) + T040(done) -> T069 -> T070 -> T071 -> v1.0.0
-                    T049(done) -------------------------------> T071
-                    T044(done) -------------------------------> T071
+state/safety:       T123(done) -> T138(ready) -> T139 -> T140 -> T141 -> T124 closeout
+                    T123(done) -> T127(ready)
+                    T125 + T126 + T128 + T129 + T130 + T131 + T132 in parallel where safe
+
+release:            T124 + T125..T132(done) -> T069 -> T070 -> T071 -> v1.0.0
+                    T049(done) ----------------------------------------> T071
+                    T044(done) ----------------------------------------> T071
 
 post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The v1 platform prerequisite lane and styling prerequisite lane are complete. T069 is the next P0 public-API freeze frontier after completed-dependency metadata revalidation. Completed-ticket drift on T047, T059, T056, T043 and T052 has been repaired to coherent Done. T068/PR #241 is parked for 1.2 and is excluded from the v1 release critical path.
+The historical platform/styling prerequisites are complete, but the September 14 pre-freeze safety audit added hard blockers before T069. T124 is now an umbrella decomposed as T138 -> T139 -> T140 -> T141 -> T124 closeout. T138/#303 and T127/#288 are the verified immediate unlocks from T123. T069 remains Blocked until the full pre-freeze blocker frontier is Done. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -137,7 +143,7 @@ All capture bookkeeping remains per view, widgets stay platform-neutral, exactly
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T049 component gallery, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture.
+Delivered foundations include T047/T048 package consumption, T049 component gallery, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture. T123 is also complete as the hardened state-observer baseline; the remaining pre-freeze safety blockers must converge before T069.
 
 ### T049 — Public component gallery
 
@@ -216,22 +222,23 @@ T068 is explicitly deferred to NativeUI 1.2 and no longer blocks T069, T070, T07
 ### Final v1 release path
 
 ```text
-T038(done) -> T039(done) ------------+-> T069 -> T070 -> T071 -> v1.0.0
-              T040(done) ------------/
-T049(done) ---------------------------------------> T071
-T044(done) ----------------------------------------> T071
-other explicit T069/T071 dependencies ------------------------/
+T123(done) -> T138 -> T139 -> T140 -> T141 -> T124 closeout --+
+T123(done) -> T127 ---------------------------------------------|
+T125 + T126 + T128 + T129 + T130 + T131 + T132 ---------------+-> T069 -> T070 -> T071 -> v1.0.0
+T049(done) ---------------------------------------------------------------> T071
+T044(done) ---------------------------------------------------------------> T071
 ```
 
-T039 is complete. T069 is the final v1 public API freeze and is semantically unlocked once its product issue metadata is coherently Ready. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
+T123 is complete. T138 and T127 are the first verified unlocks from that merge. T124 is an umbrella/integration parent and must not be treated as one monolithic implementation ticket. T069 is the final v1 public API freeze but remains blocked until the complete safety frontier above is Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
 
 ## Immediate cross-lane plan
 
-1. Transition T069/#81 to coherent Ready after final live dependency revalidation, then let the reserved Delivery lane claim it atomically.
-2. Give any T069 SOURCE_READY/qualification/merge closeout priority over background cleanup.
-3. After T069 completes, re-evaluate T070 directly; completed prerequisite metadata including T056/#68 is coherent. After T070, re-evaluate T071; T043/#43 and T052/#52 are now also coherent Done.
-4. Keep T068/PR #241 parked for 1.2.
-5. Continue through T069 -> T070 -> T071; release gates do not end automation.
+1. Assign T138/#303 and T127/#288 when compatible source lanes are free; both are now Ready after T123.
+2. Continue exact-head closeout of T125/T126/T128/T129/T130/T131/T132, giving merge/qualification work priority over metadata cleanup.
+3. Advance the decomposed T124 chain strictly as `T138 -> T139 -> T140 -> T141 -> T124 closeout`; do not claim the umbrella parent for monolithic feature work.
+4. Keep T069/#81 Blocked until the complete pre-freeze safety frontier is Done and synchronized on main; then perform one whole-surface API-freeze audit before Ready/final gates.
+5. After T069 completes, re-evaluate T070 directly; after T070, re-evaluate T071 on the exact frozen/RC baseline.
+6. Keep T068/PR #241 parked for 1.2.
 
 ## Prioritization rule
 
@@ -239,6 +246,7 @@ T039 is complete. T069 is the final v1 public API freeze and is semantically unl
 core correctness
   -> layout/input/render/text foundations
   -> widgets/styles/overlays/platform services
+  -> pre-freeze safety/lifetime convergence
   -> public API freeze
   -> reference package/release
 ```
