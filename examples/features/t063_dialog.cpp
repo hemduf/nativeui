@@ -385,10 +385,11 @@ int close_failure_transaction_contract() {
     }
     tree.resize({420.0f, 260.0f});
 
-    bool fail_invalidation = true;
+    bool fail_invalidation = false;
     tree.set_invalidation_callback(std::function<void()>{[&] {
         if (fail_invalidation) throw std::runtime_error{"T131 injected close failure"};
     }});
+    fail_invalidation = true;
 
     bool action_threw = false;
     try {
@@ -577,12 +578,13 @@ int overlay_command_failure_recovery_contract() {
         tree.resize({240.0f, 180.0f});
         tree.activate(platform);
 
-        bool fail_invalidation = true;
+        bool fail_invalidation = false;
         tree.set_invalidation_callback(std::function<void()>{[&] {
             if (fail_invalidation) {
                 throw std::runtime_error{"T131 injected popup transaction failure"};
             }
         }});
+        fail_invalidation = true;
 
         bool show_threw = false;
         try {
@@ -638,12 +640,13 @@ int overlay_command_failure_recovery_contract() {
             return example::fail("T131 PopupMenu retry setup did not open");
         }
 
-        bool fail_invalidation = true;
+        bool fail_invalidation = false;
         tree.set_invalidation_callback(std::function<void()>{[&] {
             if (fail_invalidation) {
                 throw std::runtime_error{"T131 injected menu close failure"};
             }
         }});
+        fail_invalidation = true;
         bool close_threw = false;
         try {
             (void)tree.dispatch(example::key(ui::Key::Enter), platform);
