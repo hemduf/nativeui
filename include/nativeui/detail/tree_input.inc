@@ -141,7 +141,21 @@
             layout_invalidator(node),
             [this, &node] { set_pointer_capture(node); },
             [this, &node] { release_pointer_capture(node); }};
-        return node.component->input(event, context);
+        try {
+            return node.component->input(event, context);
+        } catch (...) {
+            if (event.type == InputType::PointerDown ||
+                event.type == InputType::PointerUp ||
+                event.type == InputType::PointerCancel) {
+                // Component input may acquire or retain capture before throwing.
+                // Framework-only cleanup is noexcept and performs no component
+                // callback, so later pointer input starts from a coherent idle
+                // interaction instead of inheriting a failed native capture.
+                clear_pointer_capture();
+                pointer_interaction_active_ = false;
+            }
+            throw;
+        }
     }
 
     std::unique_ptr<Node> root_;
