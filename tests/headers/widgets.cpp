@@ -36,8 +36,10 @@ void nativeui_header_compile_widgets() {
 
     ui::State<float> knob_state{0.5f};
     ui::State<bool> toggle_state{false};
+    ui::State<std::string> text_state{"hello"};
     auto knob_binding = knob_state.binding();
     auto toggle_binding = toggle_state.binding();
+    auto text_binding = text_state.binding();
 
     auto binding_knob = ui::Knob{"Binding knob", knob_binding};
     [[maybe_unused]] auto binding_knob_spec = std::move(binding_knob).spec();
@@ -48,4 +50,9 @@ void nativeui_header_compile_widgets() {
     [[maybe_unused]] auto binding_toggle_spec = std::move(binding_toggle).spec();
     auto legacy_toggle = ui::Toggle{"Legacy toggle", toggle_state};
     [[maybe_unused]] auto legacy_toggle_spec = std::move(legacy_toggle).spec();
+
+    auto binding_text = ui::TextInput{"Binding text", text_binding};
+    [[maybe_unused]] auto binding_text_spec = std::move(binding_text).spec();
+    auto legacy_text = ui::TextInput{"Legacy text", text_state};
+    [[maybe_unused]] auto legacy_text_spec = std::move(legacy_text).spec();
 }
