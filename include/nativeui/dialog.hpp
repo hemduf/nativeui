@@ -456,7 +456,7 @@ public:
     }
 
     [[nodiscard]] bool active() const noexcept {
-        if (generation_ == 0 || !overlay_.valid()) return false;
+        if (generation_ == 0) return false;
         const auto state = state_.lock();
         return state && !state->ui_tearing_down && state->owns(generation_);
     }
@@ -622,27 +622,97 @@ private:
             return false;
         }
 
-        // Preserve the first requested result across a failed internal close.
-        // In particular an action close that throws must not be silently turned
-        // into Dismissed merely because recovery is driven by a later close().
+        // Preserve the first requested result across every retry. Once an
+        // action has requested completion, a later repair close must not turn
+        // that result into Dismissed.
         if (!pending_result_) pending_result_.emplace(std::move(result));
-
-        // Copy application state before the structural commit point. Allocation
-        // failure here leaves the live Dialog untouched and fully retryable.
-        auto completion = completion_;
-        auto completion_result = *pending_result_;
         const auto generation = generation_;
 
-        // OverlayState guarantees that a throwing close leaves this handle and
-        // logical overlay coherently live. Do not relinquish any controller
-        // repair state until the per-UI completion is terminal or durably
-        // deferred at UI's existing safe dispatch checkpoint.
+        // A previously accepted close can still be waiting at UI's retained
+        // checkpoint if an unrelated exception escaped the outer dispatch.
+        // Resume that exact transaction rather than publishing a second
+        // completion or replacing the original result.
+        if (state->pending_completion_generation == generation &&
+            state->pending_completion) {
+            if (ui_->tree_.dispatch_depth_ != 0) return true;
+            ui_->flush_pending_dialog_completion();
+            return !state->owns(generation);
+        }
+
+        // Copy every allocation-capable application/handler object before the
+        // structural commit point. Failure here leaves the live Dialog intact.
+        auto completion = completion_;
+        auto completion_result = *pending_result_;
+
+        if (ui_->tree_.dispatch_depth_ != 0) {
+            // Closing the logical overlay from inside Tree::dispatch can make
+            // the handle stale before T058 reaches its retained safe point. If
+            // that later checkpoint throws, no controller remains capable of
+            // repair. Defer the *whole* Dialog close transaction instead.
+            auto escape_handler = state->escape_handler;
+            auto deactivate_handler = state->deactivate_handler;
+            auto overlay = overlay_;
+            std::weak_ptr<detail::DialogState> weak_state = state_;
+            std::weak_ptr<int> lifetime = lifetime_;
+            auto* self = this;
+            auto* ui = ui_;
+
+            ui_->complete_dialog_close(
+                generation,
+                [weak_state = std::move(weak_state),
+                 lifetime = std::move(lifetime),
+                 self,
+                 ui,
+                 generation,
+                 overlay = std::move(overlay),
+                 escape_handler = std::move(escape_handler),
+                 deactivate_handler = std::move(deactivate_handler),
+                 completion = std::move(completion),
+                 result = std::move(completion_result)]() mutable {
+                    auto state = weak_state.lock();
+                    if (!state || state->ui_tearing_down) return;
+
+                    // UI::finish_dialog_completion() releases the slot
+                    // immediately before invoking this closure. There is no
+                    // callback gap between those two operations, so restore the
+                    // same generation/handlers before the first fallible close
+                    // step. A failure then leaves one coherent retry owner.
+                    if (state->active_generation != 0) return;
+                    state->active_generation = generation;
+                    state->escape_handler = std::move(escape_handler);
+                    state->deactivate_handler = std::move(deactivate_handler);
+
+                    (void)ui->close_overlay(overlay);
+                    ui->prepare_overlay_layout();
+
+                    if (!state->release(generation)) return;
+                    if (!lifetime.expired() && self->generation_ == generation) {
+                        self->clear_local_state();
+                    }
+                    if (completion) completion(std::move(result));
+                });
+
+            return state->pending_completion_generation == generation &&
+                   static_cast<bool>(state->pending_completion);
+        }
+
+        // Outside retained dispatch the ordinary OverlayState transaction can
+        // commit directly. Clear controller-local state before invoking the
+        // application completion so a callback may immediately reuse Dialog.
         (void)ui_->close_overlay(overlay_);
+        std::weak_ptr<int> lifetime = lifetime_;
+        auto* self = this;
         try {
             ui_->complete_dialog_close(
                 generation,
-                [completion = std::move(completion),
+                [lifetime = std::move(lifetime),
+                 self,
+                 generation,
+                 completion = std::move(completion),
                  result = std::move(completion_result)]() mutable {
+                    if (!lifetime.expired() && self->generation_ == generation) {
+                        self->clear_local_state();
+                    }
                     if (completion) completion(std::move(result));
                 });
         } catch (...) {
