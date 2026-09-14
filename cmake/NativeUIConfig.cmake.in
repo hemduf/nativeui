@@ -33,7 +33,7 @@ foreach(_nativeui_required IN ITEMS
   if(NOT EXISTS "${_nativeui_required}")
     set(NativeUI_FOUND FALSE)
     set(NativeUI_NOT_FOUND_MESSAGE
-      "NativeUI package is incomplete: required pinned Skia file is missing: ${_nativeui_required}")
+      "NativeUI package is incomplete: required pinned rendering file is missing: ${_nativeui_required}")
     return()
   endif()
 endforeach()
@@ -70,29 +70,6 @@ if(NOT TARGET SkiaBuilder::svg)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/NativeUITargets.cmake")
-
-# NativeUI::Core is a static library and still needs the pinned rendering
-# libraries when the final executable/module links. They are link-only package
-# requirements: a Core consumer must not inherit Skia's include directory or
-# other compile usage requirements. The source-tree target predates this freeze
-# and is exported with a direct SkiaBuilder::svg edge, so normalize that edge
-# after importing the installed targets.
-get_target_property(_nativeui_core_links NativeUI::Core INTERFACE_LINK_LIBRARIES)
-if(_nativeui_core_links)
-  set(_nativeui_core_link_interface "")
-  foreach(_nativeui_core_link IN LISTS _nativeui_core_links)
-    if(_nativeui_core_link STREQUAL "SkiaBuilder::svg")
-      list(APPEND _nativeui_core_link_interface "$<LINK_ONLY:SkiaBuilder::svg>")
-    else()
-      list(APPEND _nativeui_core_link_interface "${_nativeui_core_link}")
-    endif()
-  endforeach()
-  set_property(TARGET NativeUI::Core PROPERTY
-    INTERFACE_LINK_LIBRARIES "${_nativeui_core_link_interface}")
-endif()
-unset(_nativeui_core_link)
-unset(_nativeui_core_link_interface)
-unset(_nativeui_core_links)
 
 # These package-owned source roots are intentionally install-relative. Pugl is
 # pinned and shipped as source because its platform backend is compiled into the

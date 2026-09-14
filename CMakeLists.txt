@@ -110,8 +110,8 @@ function(nativeui_enable_sanitizers target)
   endif()
 endfunction()
 
-# Core runtime + Skia-only services. This target deliberately has no Pugl or
-# OpenGL dependency and is compiled once regardless of final consumer identity.
+# Core runtime + Skia-only services. Skia is a private implementation/ link
+# dependency: consumers of NativeUI::Core never inherit Skia compile usage.
 add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
@@ -135,7 +135,7 @@ if(NATIVEUI_ENABLE_INSPECTOR)
   # Propagate the flag publicly so every translation unit sees one ABI/layout.
   target_compile_definitions(nativeui_core PUBLIC NATIVEUI_ENABLE_INSPECTOR=1)
 endif()
-target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
+target_link_libraries(nativeui_core PRIVATE SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
 
@@ -147,10 +147,12 @@ if(NATIVEUI_BUILD_PLATFORM)
     _nativeui_prepare_macos_platform_common()
   endif()
 
+  # Source-tree-only implementation target. The stable v1 CMake API exports
+  # NativeUI::Core plus nativeui_attach_platform(); this target is never a
+  # documented/exported consumer contract.
   add_library(nativeui STATIC
     src/pugl_skia.cpp
   )
-  add_library(NativeUI::NativeUI ALIAS nativeui)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
@@ -165,12 +167,12 @@ if(NATIVEUI_BUILD_PLATFORM)
     target_compile_definitions(nativeui PRIVATE GL_SILENCE_DEPRECATION)
     target_link_libraries(nativeui
       PUBLIC NativeUI::Core
-      PRIVATE nativeui_pugl_common NativeUI::OpenGL
+      PRIVATE SkiaBuilder::skia nativeui_pugl_common NativeUI::OpenGL
     )
   else()
     target_link_libraries(nativeui
       PUBLIC NativeUI::Core
-      PRIVATE NativeUI::Pugl NativeUI::OpenGL
+      PRIVATE SkiaBuilder::skia NativeUI::Pugl NativeUI::OpenGL
     )
   endif()
   nativeui_enable_project_warnings(nativeui)
@@ -221,7 +223,8 @@ install(FILES
 )
 
 # Preserve the exact pinned Skia binaries/headers in the package. This avoids a
-# consumer silently resolving an ABI-incompatible system Skia.
+# consumer silently resolving an ABI-incompatible system Skia. They remain
+# package-private implementation assets and do not become Core include usage.
 install(DIRECTORY "${_skia_include}/"
   DESTINATION "${NATIVEUI_INSTALL_SKIA_DIR}/include"
 )
@@ -393,6 +396,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t069_api_freeze_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t069_api_freeze_contract.cmake"
+  )
   set_tests_properties(
     nativeui_feature_example_discovery_contract
     PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
@@ -428,6 +437,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_t067_root_integration_contract
     PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
   )
+  set_tests_properties(
+    nativeui_t069_api_freeze_contract
+    PROPERTIES LABELS "build;cmake;t069;api" TIMEOUT 30
+  )
 
   function(nativeui_add_core_test name source)
     add_executable(${name} ${source})
@@ -450,6 +463,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
   nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
   nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
+  nativeui_add_core_test(nativeui_t069_public_api_tests tests/t069_public_api_tests.cpp)
   nativeui_add_core_test(nativeui_t050_inspector_model_tests tests/t050_inspector_model_tests.cpp)
   if(NATIVEUI_ENABLE_INSPECTOR)
     nativeui_add_core_test(nativeui_t050_inspector_runtime_tests tests/t050_inspector_runtime_tests.cpp)
@@ -579,13 +593,23 @@ if(NATIVEUI_BUILD_TESTS)
     endif()
   endif()
 
-  # Each public header gets its own translation unit so missing direct includes
-  # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
-    add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
-    target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
-    nativeui_enable_sanitizers(nativeui_header_${_header}_compile)
+  # Every normal installed root header gets an independent translation unit so
+  # missing direct includes and accidental backend requirements cannot hide
+  # behind umbrella include order. detail/ is intentionally unsupported.
+  file(GLOB _nativeui_public_headers CONFIGURE_DEPENDS
+    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/include/nativeui"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/nativeui/*.hpp"
+  )
+  foreach(_header_file IN LISTS _nativeui_public_headers)
+    get_filename_component(_header_name "${_header_file}" NAME_WE)
+    string(MAKE_C_IDENTIFIER "${_header_name}" _header_id)
+    set(_header_source "${CMAKE_CURRENT_BINARY_DIR}/t069-header-${_header_id}.cpp")
+    file(GENERATE OUTPUT "${_header_source}"
+      CONTENT "#include <nativeui/${_header_file}>\nint main() { return 0; }\n")
+    add_library(nativeui_header_${_header_id}_compile OBJECT "${_header_source}")
+    target_link_libraries(nativeui_header_${_header_id}_compile PRIVATE NativeUI::Core)
+    nativeui_enable_project_warnings(nativeui_header_${_header_id}_compile)
+    nativeui_enable_sanitizers(nativeui_header_${_header_id}_compile)
   endforeach()
 
   # Every completed feature ships an executable example. In display-less builds
