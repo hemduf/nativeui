@@ -32,8 +32,10 @@ foreach(_nativeui_required IN ITEMS
     "${_nativeui_unicode_core_lib}")
   if(NOT EXISTS "${_nativeui_required}")
     set(NativeUI_FOUND FALSE)
+    # Preserve T047's pre-freeze diagnostic prefix while clarifying that this
+    # is a package-private rendering asset, not a consumer-facing dependency.
     set(NativeUI_NOT_FOUND_MESSAGE
-      "NativeUI package is incomplete: required pinned rendering file is missing: ${_nativeui_required}")
+      "NativeUI package is incomplete: required pinned Skia file is missing (private rendering asset): ${_nativeui_required}")
     return()
   endif()
 endforeach()
