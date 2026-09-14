@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -358,6 +359,111 @@ int deactivation_suppresses_completion_contract() {
     return 0;
 }
 
+int close_failure_transaction_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    ui::Dialog dialog{tree};
+    std::vector<ui::DialogResult> results;
+    if (dialog.show(confirm_spec(), [&](ui::DialogResult result) {
+            results.push_back(std::move(result));
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T131 action-close failure setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+
+    bool fail_invalidation = true;
+    tree.set_invalidation_callback(std::function<void()>{[&] {
+        if (fail_invalidation) throw std::runtime_error{"T131 injected close failure"};
+    }});
+
+    bool action_threw = false;
+    try {
+        (void)tree.dispatch(example::key(ui::Key::Enter), platform);
+    } catch (const std::runtime_error&) {
+        action_threw = true;
+    }
+    if (!action_threw || !dialog.active() || !results.empty() ||
+        tree.overlay_entries().size() != 1) {
+        return example::fail("T131 failed action close lost Dialog repair state");
+    }
+
+    fail_invalidation = false;
+    if (!dialog.close() || dialog.active() || results.size() != 1 ||
+        results.front().kind != ui::DialogResultKind::Action ||
+        results.front().action_id != "confirm" || !tree.overlay_entries().empty()) {
+        return example::fail("T131 action close did not recover with original completion result");
+    }
+
+    int dismissed = 0;
+    if (dialog.show(confirm_spec(false), [&](ui::DialogResult result) {
+            if (result.kind == ui::DialogResultKind::Dismissed) ++dismissed;
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T131 programmatic-close retry setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+    fail_invalidation = true;
+    bool programmatic_threw = false;
+    try {
+        (void)dialog.close();
+    } catch (const std::runtime_error&) {
+        programmatic_threw = true;
+    }
+    if (!programmatic_threw || !dialog.active() || dismissed != 0 ||
+        tree.overlay_entries().size() != 1) {
+        return example::fail("T131 failed programmatic close lost Dialog repair state");
+    }
+
+    fail_invalidation = false;
+    if (!dialog.close() || dialog.active() || dismissed != 1 ||
+        !tree.overlay_entries().empty()) {
+        return example::fail("T131 programmatic close did not recover exactly once");
+    }
+    tree.clear_invalidation_callback();
+    return 0;
+}
+
+int throwing_completion_releases_slot_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    ui::Dialog dialog{tree};
+    int throwing_completions = 0;
+    if (dialog.show(confirm_spec(false), [&](ui::DialogResult) {
+            ++throwing_completions;
+            throw std::runtime_error{"T131 injected completion failure"};
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T131 throwing-completion setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+
+    bool threw = false;
+    try {
+        (void)dialog.close();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    if (!threw || throwing_completions != 1 || dialog.active() ||
+        !tree.overlay_entries().empty()) {
+        return example::fail("T131 throwing completion did not leave Dialog terminal");
+    }
+
+    int recovered_completions = 0;
+    if (dialog.show(confirm_spec(false), [&](ui::DialogResult) { ++recovered_completions; }) !=
+        ui::DialogShowResult::Shown) {
+        return example::fail("T131 throwing completion stranded the per-UI Dialog slot");
+    }
+    tree.resize({420.0f, 260.0f});
+    if (!dialog.close() || recovered_completions != 1 || dialog.active()) {
+        return example::fail("T131 Dialog was not reusable after throwing completion");
+    }
+    return 0;
+}
+
 bool is_opaque_red(ui::Rgba8 pixel) {
     return pixel.r >= 250 && pixel.g <= 4 && pixel.b <= 4 && pixel.a >= 250;
 }
@@ -472,6 +578,8 @@ int self_test() {
     if (const int result = text_editor_enter_contract(); result != 0) return result;
     if (const int result = reentrant_ui_destruction_contract(); result != 0) return result;
     if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
+    if (const int result = close_failure_transaction_contract(); result != 0) return result;
+    if (const int result = throwing_completion_releases_slot_contract(); result != 0) return result;
     if (const int result = scroll_and_pointer_action_contract(); result != 0) return result;
     if (const int result = headless_sizing_and_backdrop_contract(); result != 0) return result;
     return 0;
