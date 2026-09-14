@@ -75,7 +75,11 @@ public:
         if (const auto found = files.find(id); found != files.end()) {
             auto callback = std::move(found->second);
             files.erase(found);
-            callback(ui::FileDialogResult{.status = ui::DesktopServiceStatus::Cancelled});
+            callback(ui::FileDialogResult{
+                .status = ui::DesktopServiceStatus::Cancelled,
+                .paths = {},
+                .error = {},
+            });
             return true;
         }
         if (const auto found = urls.find(id); found != urls.end()) {
