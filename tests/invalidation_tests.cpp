@@ -1,6 +1,6 @@
 #include "test_support.hpp"
 
-#include "include/core/SkCanvas.h"
+#include <nativeui/headless.hpp>
 
 #include <functional>
 #include <memory>
@@ -95,14 +95,11 @@ void theme_change_classification() {
 }
 
 void ui_theme_ownership_and_invalidation() {
-    test::MockPlatform platform;
-    SkCanvas canvas;
-
     auto initial = ui::default_theme();
     initial.palette.background = ui::Color{0.12f, 0.13f, 0.14f, 1.0f};
     ui::UI tree{ui::Button{"Theme", [] {}}, initial};
-    tree.resize({180.0f, 64.0f});
-    tree.paint(canvas, platform);
+    ui::HeadlessRenderer renderer{{180.0f, 64.0f}};
+    NUI_CHECK(renderer.render(tree));
     NUI_CHECK(!tree.dirty());
     NUI_CHECK(tree.theme().palette.background.r == initial.palette.background.r);
 
@@ -116,7 +113,7 @@ void ui_theme_ownership_and_invalidation() {
     NUI_CHECK(tree.paint_dirty());
     NUI_CHECK(!tree.layout_dirty());
 
-    tree.paint(canvas, platform);
+    NUI_CHECK(renderer.render(tree));
     NUI_CHECK(!tree.dirty());
 
     auto layout = tree.theme();
@@ -153,11 +150,9 @@ void suite() {
     {
         auto probe = std::make_shared<InvalidationProbeState>();
         ui::UI tree{ui::Padding{10.0f, InvalidationProbe{probe}}};
-        test::MockPlatform platform;
-        SkCanvas canvas;
+        ui::HeadlessRenderer renderer{{200.0f, 100.0f}};
 
-        tree.resize({200.0f, 100.0f});
-        tree.paint(canvas, platform);
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!tree.dirty());
         NUI_CHECK(!tree.layout_dirty());
         const int measures_after_layout = probe->measures;
@@ -177,7 +172,7 @@ void suite() {
         probe->invalidate_paint();
         NUI_CHECK(exposures.size() == 1);
 
-        tree.paint(canvas, platform);
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!tree.dirty());
         NUI_CHECK(probe->measures == measures_after_layout);
 
@@ -191,14 +186,14 @@ void suite() {
         check_rect(exposures.back(), {0.0f, 0.0f, 200.0f, 100.0f});
         NUI_CHECK(probe->measures == measures_after_layout);
 
-        tree.paint(canvas, platform);
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!tree.layout_dirty());
         NUI_CHECK(!tree.paint_dirty());
         NUI_CHECK(probe->measures > measures_after_layout);
 
         // Painting an already-clean tree never schedules a redraw by itself.
         exposures.clear();
-        tree.paint(canvas, platform);
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(exposures.empty());
     }
 
@@ -206,10 +201,8 @@ void suite() {
     {
         ui::State<float> value{0.25f};
         ui::UI tree{ui::Knob{"Value", value}};
-        test::MockPlatform platform;
-        SkCanvas canvas;
-        tree.resize({180.0f, 190.0f});
-        tree.paint(canvas, platform);
+        ui::HeadlessRenderer renderer{{180.0f, 190.0f}};
+        NUI_CHECK(renderer.render(tree));
         NUI_CHECK(!tree.dirty());
 
         value.set(0.75f);
