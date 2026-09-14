@@ -43,7 +43,8 @@ nativeui_enable_sanitizers(nativeui_t065_platform_contract)
 foreach(_mode IN ITEMS
     standalone-worker-wake
     embedded-host-checkpoint
-    owner-isolation)
+    owner-isolation
+    native-exception-boundary)
   string(REPLACE "-" "_" _suffix "${_mode}")
   add_test(
     NAME nativeui_t065_${_suffix}
@@ -55,6 +56,7 @@ set_tests_properties(
   nativeui_t065_standalone_worker_wake
   nativeui_t065_embedded_host_checkpoint
   nativeui_t065_owner_isolation
+  nativeui_t065_native_exception_boundary
   PROPERTIES
     LABELS "integration;platform;dispatcher;t065"
     TIMEOUT 20
