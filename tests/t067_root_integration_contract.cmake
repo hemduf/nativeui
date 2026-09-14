@@ -1,3 +1,6 @@
+if(NOT DEFINED ROOT AND DEFINED SOURCE_DIR)
+  set(ROOT "${SOURCE_DIR}")
+endif()
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT is required")
 endif()

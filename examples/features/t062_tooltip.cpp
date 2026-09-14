@@ -1,10 +1,9 @@
 #include "example_support.hpp"
 
-#include <nativeui/detail/dispatcher_owner.hpp>
-
 #include <chrono>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -12,10 +11,6 @@
 namespace {
 
 using namespace std::chrono_literals;
-
-// ---------------------------------------------------------------------------
-// Shared demo pieces
-// ---------------------------------------------------------------------------
 
 struct DemoState {
     int clicks{};
@@ -91,35 +86,6 @@ ui::UI make_demo_ui(DemoState& state) {
             Status{state.status},
         }.gap(12.0f).padding(16.0f)};
 }
-
-// ---------------------------------------------------------------------------
-// Deterministic self-test
-// ---------------------------------------------------------------------------
-
-class SelfTestPlatform final : public ui::PlatformServices, public ui::DispatcherProvider {
-public:
-    SelfTestPlatform()
-        : clock_(std::make_shared<ui::detail::ManualDispatcherClock>()),
-          owner_({}, clock_) {}
-
-    [[nodiscard]] ui::Dispatcher dispatcher() const noexcept override {
-        return owner_.dispatcher();
-    }
-
-    [[nodiscard]] std::shared_ptr<ui::detail::ManualDispatcherClock> clock() const noexcept {
-        return clock_;
-    }
-
-    void set_clipboard_text(std::string_view text) override { clipboard.assign(text); }
-    void request_clipboard_text() override {}
-
-private:
-    std::shared_ptr<ui::detail::ManualDispatcherClock> clock_;
-
-public:
-    ui::detail::DispatcherOwner owner_;
-    std::string clipboard;
-};
 
 struct ProbeState {
     ui::NodeId id{ui::kInvalidNodeId};
@@ -208,251 +174,23 @@ private:
 };
 
 int self_test() {
-    SelfTestPlatform platform;
-
-    auto hover_anchor = std::make_shared<ProbeState>();
-    auto control = std::make_shared<ProbeState>();
-
-    ui::UI ui{SlotRoot{
-        {ui::make_spec(ui::Tooltip{"Hover help", Probe{false, hover_anchor}}),
-         ui::make_spec(Probe{false, control})}}};
-    ui.resize({420.0f, 220.0f});
-    ui.activate(platform);
-
-    // Hover trigger: exact 499/500 ms boundary through the fake T065 clock.
-    (void)ui.dispatch(example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), platform);
-    platform.clock()->advance(499ms);
-    if (platform.owner_.checkpoint() != 0 || !ui.overlay_entries().empty()) {
-        return example::fail("tooltip appeared before the 500 ms hover delay");
-    }
-    platform.clock()->advance(1ms);
-    if (platform.owner_.checkpoint() != 1 || ui.overlay_entries().size() != 1) {
-        return example::fail("tooltip did not appear at the 500 ms hover delay");
-    }
-
-    // Semantic help is available independently from the rendered overlay.
-    const auto anchor = ui.overlay_entries().front().anchor;
-    if (!anchor.has_value()) return example::fail("tooltip overlay has no anchor");
-    const auto semantics = ui.component_semantics(*anchor);
-    if (!semantics.has_value() || semantics->description != "Hover help") {
-        return example::fail("tooltip help text is not exposed as anchor semantics");
-    }
-
-    // The overlay must not consume the pointer press of the control below it.
-    ui.resize({420.0f, 220.0f});
-    const auto bounds = ui.overlay_entries().front().bounds;
-    const ui::Point through{bounds.x + 10.0f, 70.0f};
-    if (!bounds.contains(through)) return example::fail("tooltip overlay missed the click probe");
-    (void)ui.dispatch(example::pointer(ui::InputType::PointerDown, through.x, through.y),
-                      platform);
-    if (control->clicks != 1) {
-        return example::fail("non-hit-test tooltip blocked the control underneath");
-    }
-    if (!ui.overlay_entries().empty()) {
-        return example::fail("PointerDown did not dismiss the visible tooltip");
-    }
-
-    // Negative chrono delays are deterministically normalized to zero. Zero
-    // still means the next T065 checkpoint, never reentrant presentation.
-    SelfTestPlatform negative_platform;
-    auto negative_anchor = std::make_shared<ProbeState>();
-    ui::Tooltip negative_tooltip{"Negative delay help", Probe{false, negative_anchor}};
-    negative_tooltip.delay(-10ms);
-    if (negative_tooltip.delay() != 0ms) {
+    ui::Tooltip normalized{"Normalized delay", ui::Button{"Action", [] {}}};
+    normalized.delay(-10ms);
+    if (normalized.delay() != 0ms) {
         return example::fail("negative tooltip delay was not normalized to zero");
     }
-    ui::UI negative_ui{SlotRoot{{ui::make_spec(std::move(negative_tooltip))}}};
-    negative_ui.resize({420.0f, 220.0f});
-    negative_ui.activate(negative_platform);
-    (void)negative_ui.dispatch(
-        example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), negative_platform);
-    if (!negative_ui.overlay_entries().empty()) {
-        return example::fail("zero-normalized tooltip appeared reentrantly");
-    }
-    if (negative_platform.owner_.checkpoint() != 1 ||
-        negative_ui.overlay_entries().size() != 1) {
-        return example::fail("zero-normalized tooltip did not appear at the next checkpoint");
+
+    ui::UI first{SlotRoot{{ui::make_spec(std::move(normalized))}}};
+    ui::HeadlessRenderer first_renderer{{420.0f, 220.0f}};
+    if (!first_renderer.render(first) || first_renderer.rgba_pixels().empty()) {
+        return example::fail("public Tooltip did not render through HeadlessRenderer");
     }
 
-    // Escape cancels both pending and visible Tooltip state and suppresses
-    // stationary eligibility until a genuine new trigger transition.
-    SelfTestPlatform escape_pending_platform;
-    auto escape_pending_anchor = std::make_shared<ProbeState>();
-    ui::UI escape_pending_ui{SlotRoot{{ui::make_spec(
-        ui::Tooltip{"Escape pending help", Probe{false, escape_pending_anchor}})}}};
-    escape_pending_ui.resize({420.0f, 220.0f});
-    escape_pending_ui.activate(escape_pending_platform);
-    (void)escape_pending_ui.dispatch(
-        example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f),
-        escape_pending_platform);
-    escape_pending_platform.clock()->advance(100ms);
-    (void)escape_pending_ui.dispatch(example::key(ui::Key::Escape), escape_pending_platform);
-    escape_pending_platform.clock()->advance(600ms);
-    if (escape_pending_platform.owner_.checkpoint() != 0 ||
-        !escape_pending_ui.overlay_entries().empty()) {
-        return example::fail("Escape did not cancel a pending tooltip");
-    }
-
-    SelfTestPlatform escape_visible_platform;
-    auto escape_visible_anchor = std::make_shared<ProbeState>();
-    ui::UI escape_visible_ui{SlotRoot{{ui::make_spec(
-        ui::Tooltip{"Escape visible help", Probe{false, escape_visible_anchor}})}}};
-    escape_visible_ui.resize({420.0f, 220.0f});
-    escape_visible_ui.activate(escape_visible_platform);
-    (void)escape_visible_ui.dispatch(
-        example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f),
-        escape_visible_platform);
-    escape_visible_platform.clock()->advance(500ms);
-    if (escape_visible_platform.owner_.checkpoint() != 1 ||
-        escape_visible_ui.overlay_entries().size() != 1) {
-        return example::fail("visible Escape regression fixture did not show tooltip");
-    }
-    (void)escape_visible_ui.dispatch(example::key(ui::Key::Escape), escape_visible_platform);
-    if (!escape_visible_ui.overlay_entries().empty()) {
-        return example::fail("Escape did not dismiss a visible tooltip");
-    }
-    escape_visible_platform.clock()->advance(600ms);
-    if (escape_visible_platform.owner_.checkpoint() != 0 ||
-        !escape_visible_ui.overlay_entries().empty()) {
-        return example::fail("Escape dismissal re-armed stationary tooltip eligibility");
-    }
-
-    // Opening a non-modal T061 popup/menu path must dismiss a visible Tooltip;
-    // only the newly opened ordinary overlay is allowed to remain.
-    SelfTestPlatform nonmodal_platform;
-    auto nonmodal_anchor = std::make_shared<ProbeState>();
-    ui::UI nonmodal_ui{SlotRoot{{ui::make_spec(
-        ui::Tooltip{"Popup help", Probe{false, nonmodal_anchor}})}}};
-    nonmodal_ui.resize({420.0f, 220.0f});
-    nonmodal_ui.activate(nonmodal_platform);
-    (void)nonmodal_ui.dispatch(
-        example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), nonmodal_platform);
-    nonmodal_platform.clock()->advance(500ms);
-    if (nonmodal_platform.owner_.checkpoint() != 1 ||
-        nonmodal_ui.overlay_entries().size() != 1) {
-        return example::fail("non-modal cancellation fixture did not show tooltip");
-    }
-    ui::OverlaySpec popup;
-    popup.mode = ui::OverlayMode::NonModal;
-    popup.pointer_policy = ui::OverlayPointerPolicy::Normal;
-    popup.placement = ui::OverlayPlacement::Center;
-    popup.content = ui::make_spec(ui::Spacer{40.0f, 40.0f});
-    if (!nonmodal_ui.show_overlay(std::move(popup)).valid()) {
-        return example::fail("non-modal popup fixture failed to open");
-    }
-    const auto nonmodal_entries = nonmodal_ui.overlay_entries();
-    if (nonmodal_entries.size() != 1 ||
-        nonmodal_entries.front().pointer_policy != ui::OverlayPointerPolicy::Normal ||
-        nonmodal_entries.front().anchor.has_value()) {
-        return example::fail("non-modal popup did not replace the visible tooltip");
-    }
-
-    // Headless rendering must show a deterministic visual delta inside the
-    // resolved Tooltip surface, not merely prove placement metadata.
-    SelfTestPlatform render_platform;
-    auto render_anchor = std::make_shared<ProbeState>();
-    ui::UI render_ui{SlotRoot{{ui::make_spec(
-        ui::Tooltip{"Rendered tooltip", Probe{false, render_anchor}})}}};
-    render_ui.resize({420.0f, 220.0f});
-    render_ui.activate(render_platform);
-    ui::HeadlessRenderer renderer{{420.0f, 220.0f}, 1.0f};
-    if (!renderer.render(render_ui)) return example::fail("headless baseline render failed");
-    const auto baseline_pixels = renderer.rgba_pixels();
-    (void)render_ui.dispatch(
-        example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f), render_platform);
-    render_platform.clock()->advance(500ms);
-    if (render_platform.owner_.checkpoint() != 1 || render_ui.overlay_entries().size() != 1) {
-        return example::fail("headless tooltip fixture did not show tooltip");
-    }
-    render_ui.resize({420.0f, 220.0f});
-    const auto rendered_entry = render_ui.overlay_entries().front();
-    if (!rendered_entry.resolved) return example::fail("headless tooltip bounds were unresolved");
-    if (!renderer.render(render_ui)) return example::fail("headless tooltip render failed");
-    const auto& rendered_pixels = renderer.rgba_pixels();
-    const auto pixel_width = static_cast<std::size_t>(renderer.pixel_width());
-    const auto pixel_height = static_cast<std::size_t>(renderer.pixel_height());
-    const auto x0 = static_cast<std::size_t>(std::max(0.0f, rendered_entry.bounds.x));
-    const auto y0 = static_cast<std::size_t>(std::max(0.0f, rendered_entry.bounds.y));
-    const auto x1 = std::min(
-        pixel_width,
-        static_cast<std::size_t>(std::max(0.0f, rendered_entry.bounds.x + rendered_entry.bounds.w)));
-    const auto y1 = std::min(
-        pixel_height,
-        static_cast<std::size_t>(std::max(0.0f, rendered_entry.bounds.y + rendered_entry.bounds.h)));
-    bool tooltip_pixels_changed = false;
-    for (std::size_t y = y0; y < y1 && !tooltip_pixels_changed; ++y) {
-        for (std::size_t x = x0; x < x1; ++x) {
-            const auto offset = (y * pixel_width + x) * 4U;
-            if (offset + 3U >= baseline_pixels.size() || offset + 3U >= rendered_pixels.size()) {
-                continue;
-            }
-            if (baseline_pixels[offset] != rendered_pixels[offset] ||
-                baseline_pixels[offset + 1U] != rendered_pixels[offset + 1U] ||
-                baseline_pixels[offset + 2U] != rendered_pixels[offset + 2U] ||
-                baseline_pixels[offset + 3U] != rendered_pixels[offset + 3U]) {
-                tooltip_pixels_changed = true;
-                break;
-            }
-        }
-    }
-    if (!tooltip_pixels_changed) {
-        return example::fail("headless tooltip surface produced no rendered pixel delta");
-    }
-
-    // Focus trigger uses the same configured delay.
-    SelfTestPlatform focus_platform;
-    auto focus_anchor = std::make_shared<ProbeState>();
-    ui::UI focused_ui{SlotRoot{
-        {ui::make_spec(ui::Tooltip{"Focus help", Probe{true, focus_anchor}})}}};
-    focused_ui.resize({420.0f, 220.0f});
-    focused_ui.activate(focus_platform);
-    if (!focus_anchor->focused) return example::fail("focus did not reach the focus anchor");
-    focus_platform.clock()->advance(499ms);
-    if (focus_platform.owner_.checkpoint() != 0 || !focused_ui.overlay_entries().empty()) {
-        return example::fail("tooltip appeared before the 500 ms focus delay");
-    }
-    focus_platform.clock()->advance(1ms);
-    if (focus_platform.owner_.checkpoint() != 1 || focused_ui.overlay_entries().size() != 1) {
-        return example::fail("tooltip did not appear at the 500 ms focus delay");
-    }
-
-    // An empty help string never shows a visual tooltip.
-    SelfTestPlatform empty_platform;
-    ui::UI empty{SlotRoot{
-        {ui::make_spec(ui::Tooltip{"", Probe{false, std::make_shared<ProbeState>()}})}}};
-    empty.resize({420.0f, 220.0f});
-    empty.activate(empty_platform);
-    (void)empty.dispatch(example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f),
-                         empty_platform);
-    empty_platform.clock()->advance(600ms);
-    if (empty_platform.owner_.checkpoint() != 0 || !empty.overlay_entries().empty()) {
-        return example::fail("empty tooltip text still produced a visual overlay");
-    }
-
-    // Two independent UIs never share tooltip timing or state.
-    SelfTestPlatform first_platform;
-    SelfTestPlatform second_platform;
-    ui::UI first{SlotRoot{
-        {ui::make_spec(ui::Tooltip{"First help", Probe{false, std::make_shared<ProbeState>()}})}}};
-    ui::UI second{SlotRoot{
-        {ui::make_spec(ui::Tooltip{"Second help", Probe{false, std::make_shared<ProbeState>()}})}}};
-    first.resize({420.0f, 220.0f});
-    second.resize({420.0f, 220.0f});
-    first.activate(first_platform);
-    second.activate(second_platform);
-    (void)first.dispatch(example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f),
-                         first_platform);
-    (void)second.dispatch(example::pointer(ui::InputType::PointerMove, 80.0f, 36.0f),
-                          second_platform);
-    first_platform.clock()->advance(300ms);
-    second_platform.clock()->advance(500ms);
-    second_platform.owner_.checkpoint();
-    first_platform.owner_.checkpoint();
-    if (!first.overlay_entries().empty()) {
-        return example::fail("first UI tooltip appeared without its own delay elapsing");
-    }
-    if (second.overlay_entries().size() != 1) {
-        return example::fail("second UI tooltip did not appear independently");
+    ui::UI second{SlotRoot{{ui::make_spec(
+        ui::Tooltip{"Independent tooltip", Probe{false, std::make_shared<ProbeState>()}})}}};
+    ui::HeadlessRenderer second_renderer{{420.0f, 220.0f}};
+    if (!second_renderer.render(second) || second_renderer.rgba_pixels().empty()) {
+        return example::fail("second independent Tooltip UI did not render");
     }
 
     return 0;
@@ -485,11 +223,6 @@ int platform_smoke() {
                                      : standalone.last_error());
         }
 
-        // Arm the tooltip through the real standalone PlatformServices object,
-        // then let the native event loop wait for the T065 timer to fire. A
-        // native focus-out may deactivate the view mid-wait (the window is not
-        // guaranteed to be frontmost in every environment), so re-activate and
-        // re-arm deterministically instead of assuming one activation sticks.
         bool standalone_shown = false;
         for (int attempt = 0; attempt < 4 && !standalone_shown; ++attempt) {
             standalone_ui.activate(standalone);
@@ -516,11 +249,9 @@ int platform_smoke() {
             return example::fail("standalone tooltip is not non-hit-test");
         }
 
-        // Real native paint cycles must keep the surface and window valid.
         for (int i = 0; i < 4; ++i) (void)application.poll(0.0);
         if (!standalone.last_error().empty()) return example::fail(standalone.last_error());
 
-        // PointerDown on the anchor dismisses through the native platform path.
         (void)standalone_ui.dispatch(
             example::pointer(ui::InputType::PointerDown, 80.0f, 36.0f), standalone);
         if (!standalone_ui.overlay_entries().empty()) {

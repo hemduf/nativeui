@@ -35,8 +35,16 @@ int run_self_test() {
 }
 
 int run_native_smoke() {
-    const char* stage = "construct-parent-ui";
+    const char* stage = "construct-application";
     try {
+        ui::Application application;
+        if (!application.valid()) {
+            return fail(4, stage, application.last_error().empty()
+                                      ? "application is invalid"
+                                      : application.last_error());
+        }
+
+        stage = "construct-parent-ui";
         ui::UI parent_ui{
             ui::Column{
                 ui::Header{"T048 embedded host seam"},
@@ -45,6 +53,7 @@ int run_native_smoke() {
 
         stage = "construct-parent";
         ui::StandaloneWindow parent{
+            application,
             parent_ui,
             ui::WindowDesc{.title = "T048 embedded host seam",
                            .size = {300.0f, 180.0f},
@@ -69,7 +78,7 @@ int run_native_smoke() {
             stage = "poll";
             const auto start = std::chrono::steady_clock::now();
             for (int i = 0; i < 64; ++i) {
-                (void)parent.poll(0.0);
+                (void)application.poll(0.0);
                 (void)child.poll();
             }
             if (std::chrono::steady_clock::now() - start > std::chrono::seconds(1)) {
@@ -94,7 +103,7 @@ int run_native_smoke() {
         return fail(12, stage, "unknown exception");
     }
 }
-}
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc != 2) return fail(2, "arguments", "expected --self-test or --native-smoke");
