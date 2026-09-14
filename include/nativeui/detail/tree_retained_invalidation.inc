@@ -171,14 +171,16 @@
         // again if the same retained nodes/NodeIds are mounted later.
         if (!node.parent) retire_retained_invalidation_generation();
 
+        // Terminal retained removal begins before descendant teardown. Retire this
+        // node's long-lived identity first so arbitrary child unmount callbacks
+        // cannot re-enter paint/layout/focus/availability/theme/dynamic invalidation
+        // through an ancestor whose subtree is already being removed.
+        retained_invalidation_live_nodes_.erase(node.id);
+
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             unmount_node(**it);
         }
 
-        // Terminal retirement precedes arbitrary component teardown callbacks. Any
-        // previously-issued retained invalidator is therefore already a no-op even
-        // while the Node object still occupies its old address.
-        retained_invalidation_live_nodes_.erase(node.id);
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
             binding->set_theme_change_invalidator({});
         }

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -76,6 +77,37 @@ public:
 
 private:
     ui::Spec value_;
+};
+
+struct RetainedTeardownProbeState {
+    std::shared_ptr<InvalidationProbeState> ancestor;
+    std::function<std::optional<ui::ComponentAvailability>()> read_ancestor_availability;
+    std::optional<ui::ComponentAvailability> observed_during_descendant_unmount;
+    int descendant_unmounts{};
+};
+
+class RetainedTeardownDescendantComponent final : public ui::Component {
+public:
+    explicit RetainedTeardownDescendantComponent(std::shared_ptr<RetainedTeardownProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {10.0f, 10.0f};
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++state_->descendant_unmounts;
+        state_->ancestor->availability.enabled = false;
+        state_->ancestor->invalidate_availability();
+        if (state_->read_ancestor_availability) {
+            state_->observed_during_descendant_unmount = state_->read_ancestor_availability();
+        }
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<RetainedTeardownProbeState> state_;
 };
 
 void check_rect(ui::Rect actual, ui::Rect expected) {
@@ -236,6 +268,45 @@ void retained_invalidator_unmount_remount_contract() {
     const auto after_fresh_availability = tree.component_availability(second_mount.node_id);
     NUI_CHECK(after_fresh_availability.has_value());
     NUI_CHECK(!after_fresh_availability->enabled);
+}
+
+void retained_invalidator_terminal_subtree_boundary_contract() {
+    auto ancestor = std::make_shared<InvalidationProbeState>();
+    auto teardown = std::make_shared<RetainedTeardownProbeState>();
+    teardown->ancestor = ancestor;
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::Spec subtree{
+        [ancestor] { return std::make_unique<InvalidationProbeComponent>(ancestor); },
+        {ui::Spec{
+            [teardown] {
+                return std::make_unique<RetainedTeardownDescendantComponent>(teardown);
+            },
+            {}}}};
+    ui::UI tree{ui::If{visible, SpecRoot{std::move(subtree)}}};
+    tree.resize({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(ancestor->node_id != ui::kInvalidNodeId);
+
+    const auto ancestor_id = ancestor->node_id;
+    const auto initial = tree.component_availability(ancestor_id);
+    NUI_CHECK(initial.has_value());
+    NUI_CHECK(initial->enabled);
+    teardown->read_ancestor_availability = [&tree, ancestor_id] {
+        return tree.component_availability(ancestor_id);
+    };
+
+    visible.set(false);
+    tree.resize({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+
+    NUI_CHECK(teardown->descendant_unmounts == 1);
+    NUI_CHECK(teardown->observed_during_descendant_unmount.has_value());
+    NUI_CHECK(teardown->observed_during_descendant_unmount->enabled);
+    NUI_CHECK(!tree.dirty());
 }
 
 void retained_animation_target_removal_contract() {
@@ -517,6 +588,7 @@ void suite() {
     retained_invalidator_stale_node_contract();
     retained_invalidator_tree_lifetime_contract();
     retained_invalidator_unmount_remount_contract();
+    retained_invalidator_terminal_subtree_boundary_contract();
     retained_animation_target_removal_contract();
     retained_overlay_dialog_removal_contract();
     retained_virtual_list_recycling_contract();
