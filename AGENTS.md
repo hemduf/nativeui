@@ -127,12 +127,12 @@ Every new ticket must contain, in this order:
 4. `Status` — `Ready`, `Doing` or `Blocked`, using section 3.1 semantics;
 5. `Dependencies` — explicit ticket dependencies only, or `None`;
 6. `Objective` — the observable result, not implementation detail;
-7. `Scope` — included work, relevant architectural constraints and explicit exclusions where useful;
-8. `Acceptance criteria` — observable/testable completion criteria;
-9. `Required tests` — targeted tests plus every applicable full-suite, feature-example, platform, headless or golden validation;
-10. `Implementation / scheduling note` — technical direction, blocker or dependency/parallelization rationale when useful;
+7. `Scope` — included work, relevant architectural constraints, failure/recovery behavior and explicit exclusions where useful;
+8. `Acceptance criteria` — observable/testable completion criteria, including relevant failure-path recovery semantics;
+9. `Required tests` — targeted tests plus every applicable deterministic fault-injection, full-suite, feature-example, platform, sanitizer, headless or golden validation;
+10. `Implementation / scheduling note` — technical direction, failure/transaction boundaries, blocker or dependency/parallelization rationale when useful;
 11. `Completion protocol` — the standard TDD, test, review, metadata, `CONTEXT.md` and `ROADMAP.md` completion checklist;
-12. `Mandatory code review record` — the structured `CODE_REVIEW.md` record required by section 5;
+12. `Mandatory code review record` — the complete structured `CODE_REVIEW.md` record required by section 5, including transactional state, scheduling/queue failure, exception/unwind, partial construction, performance/allocation and privacy when applicable;
 13. `Merge requirement` — the mandatory final section from section 3.2.
 
 The title should use `TNNN — Short imperative title` for numbered roadmap work. Use a precise category prefix only for deliberately unnumbered incident/regression tickets, while still preserving the same body formalism.
@@ -143,7 +143,8 @@ When creating a ticket programmatically:
 - do not omit review/test/completion sections because the task appears small;
 - keep dependencies explicit instead of inferring them from ticket number or milestone;
 - synchronize the selected priority/status with GitHub labels (`priority:P0|P1|P2`, `status:ready|doing|blocked`) and set the real GitHub milestone when applicable;
-- preserve the `## Merge requirement` section as the final section of the issue body.
+- preserve the `## Merge requirement` section as the final section of the issue body;
+- do not place personal information in tests/examples/code/generated metadata or ticket fixtures.
 
 If the canonical issue form changes, update this section in the same change so `AGENTS.md` and `.github/ISSUE_TEMPLATE/work-item.yml` never define different ticket contracts.
 
@@ -156,17 +157,20 @@ Before editing a non-trivial ticket or closeout pass:
 1. read all acceptance criteria and required tests;
 2. build a short completeness matrix of the affected families/variants/invariants;
 3. inspect the whole relevant surface once and collect the real gaps before starting correction work;
-4. group related gaps that share the same invariant or subsystem into one coherent implementation batch.
+4. identify every user/component callback, allocation, enqueue/schedule operation, resource acquisition and native/foreign boundary crossed by the changed state transition;
+5. identify explicit prepare/commit/recovery points for changed state machines;
+6. group related gaps that share the same invariant or subsystem into one coherent implementation batch.
 
 For each batch:
 
-1. add or update the failing tests needed to describe the complete bounded behavior of that batch;
+1. add or update the failing tests needed to describe the complete bounded behavior of that batch, including deterministic failure injection where the bug class cannot be reached reliably otherwise;
 2. confirm the relevant tests fail locally for the expected reasons;
 3. implement the complete bounded correction for that batch;
 4. run the targeted tests until the whole batch is green;
-5. run the relevant core/full local suite before publishing the batch;
-6. for rendering changes, add/update headless/golden coverage when available;
-7. for platform/windowing changes, run the relevant local/platform smoke when available.
+5. after any injected exception/rejection/failure, test at least one subsequent normal operation so recovery is proven rather than inferred;
+6. run the relevant core/full local suite before publishing the batch;
+7. for rendering changes, add/update headless/golden and failed-paint/layout recovery coverage when available;
+8. for platform/windowing changes, run the relevant local/platform smoke plus partial-construction/no-throw-teardown coverage when applicable.
 
 ### 4.0.1 Commit and push policy — mandatory
 
@@ -229,7 +233,23 @@ This rule changes when expensive checks run; it does not weaken required test or
 
 Every code-changing ticket must perform a final review against [`CODE_REVIEW.md`](CODE_REVIEW.md). This is mandatory, not proportional to change size. Documentation-only tickets must still consider any applicable architecture/workflow rules.
 
-The review record in the GitHub issue or PR must explicitly cover instance isolation, globals/statics, threading/real-time boundaries, lifetime/reentrancy, Objective-C runtime rules when applicable, platform integration and tests. A bare "reviewed" is not sufficient.
+The review record in the GitHub issue or PR must contain **every applicable field required by `CODE_REVIEW.md`**, including at minimum:
+
+- instance isolation;
+- globals/statics;
+- threading/real-time boundaries;
+- lifetime/reentrancy;
+- transactional state prepare/commit/recovery;
+- scheduling/queue capacity/rejection/exception-before-enqueue when work is deferred;
+- exception/unwind, `noexcept`, destructor and foreign-ABI behavior;
+- partial construction/resource cleanup when native/registered resources are acquired;
+- Objective-C runtime rules when applicable;
+- platform integration;
+- performance/allocation impact;
+- privacy;
+- exact tests/fault seams and remaining findings.
+
+A bare "reviewed" or an old reduced review record is not sufficient.
 
 **Review batching rule:** before starting corrective edits from a closeout/final review, inspect the complete ticket scope and collect all current Blocking/Important findings into one review record. Correct compatible findings in one coherent batch and re-review the resulting head. Do not publish one commit/push per finding unless the findings are genuinely independent rollback units or one correction must land before another can be understood.
 
@@ -240,7 +260,8 @@ The passes below complement `CODE_REVIEW.md`; they do not replace it.
 Check:
 
 - ownership and lifetime;
-- dangling `State<T>` or callback captures;
+- dangling `State<T>`, `ScrollState`, invalidator or callback captures;
+- callback self-destruction/top-level owner lifetime;
 - bounds and invalid state handling;
 - focus behavior;
 - event consumption/propagation;
@@ -248,7 +269,12 @@ Check:
 - API consistency and naming;
 - no accidental plugin/audio semantics;
 - per-instance ownership and no implicit mutable global/singleton/thread-local instance state;
-- all intentionally process-shared state is documented and safe for simultaneous instances.
+- all intentionally process-shared state is documented and safe for simultaneous instances;
+- every changed state machine has explicit prepare/commit/recovery semantics;
+- guards/counters/posted/pending flags restore their exact previous valid state on exception;
+- accepted work is not silently lost/duplicated when a callback throws;
+- queue rejection/throw cannot violate a documented deferred-safe-point contract;
+- ordinary C++ vs foreign-ABI exception behavior is explicit.
 
 ### Pass B — UI/runtime quality
 
@@ -258,10 +284,12 @@ Check:
 - excessive full-tree scans;
 - invalidation scope;
 - clipping and transforms;
-- pointer capture lifecycle;
+- pointer capture lifecycle, including throwing cancellation paths;
 - redraw-at-idle regressions;
 - text/UTF-8 edge cases;
 - reentrancy during callbacks;
+- observer add/remove/recursive-write/throw behavior;
+- failed layout/paint recovery and dirty-state preservation;
 - UI state is not being mutated directly from an audio/real-time thread.
 
 ### Pass C — integration/platform
@@ -271,6 +299,9 @@ Required for substantial windowing/rendering/text-input changes. Check:
 - standalone and embedded lifecycle;
 - repeated attach/detach/open/close;
 - multiple instances, including destroying one while another remains active;
+- partial native construction failure after each meaningful acquisition step;
+- no-throw teardown when retained callbacks fail;
+- lifecycle-control scheduling under queue full/rejection/throw;
 - macOS/Windows/Linux conditional code;
 - Pugl API behavior at the pinned commit;
 - Skia API behavior for `chrome/m149`;
@@ -308,7 +339,12 @@ Do not violate these without an explicit architecture ticket:
 - new components do not require adding a central component `enum`/switch;
 - plugin parameter semantics remain external;
 - mutable instance-dependent process-global/singleton/thread-local state is forbidden;
-- `State<T>` and normal retained UI mutation are UI/main-thread confined unless an API explicitly documents thread safety;
+- `State<T>`, `ScrollState` and normal retained UI mutation are UI/main-thread confined unless an API explicitly documents thread safety;
+- callbacks that throw cannot leave NativeUI guard/transaction/queue state poisoned;
+- destructors and destructor-driven retained/native teardown are no-throw;
+- retained callbacks/invalidators that intentionally outlive a component use lifetime-safe owner/identity semantics;
+- deferred lifecycle work never falls back to unsafe synchronous execution solely because ordinary queue enqueue failed;
+- partial native construction leaves no registered callback/native resource behind;
 - Objective-C runtime-visible classes generated/defined for plug-in embedding must use consumer/plugin-specific collision-resistant names;
 - on macOS, generic Core/Pugl C code may be shared, but Objective-C Pugl/OpenGL/IME bridge sources are compiled per final consumer identity; no fixed framework-level runtime prefix or generic precompiled Objective-C bridge is reusable across unrelated final bundles;
 - no SDL, GLFW, Qt, JUCE or NanoVG dependency;
@@ -337,7 +373,7 @@ When that happens, implement the generic capability first, then the widget.
 - render callback receives local coordinates;
 - input callback receives local pointer coordinates;
 - `on_input()` makes the canvas focusable unless an explicit focus API supersedes this later;
-- pointer capture must always be released on PointerUp/cancel/deactivation;
+- pointer capture must always be released on PointerUp/cancel/deactivation, including exceptional callback paths;
 - reusable standard widgets should still become first-class components rather than permanent Canvas implementations.
 
 ## 9. Text rules
@@ -404,13 +440,14 @@ When updating either dependency, create a dedicated ticket and update:
 A ticket is `Done` only when:
 
 - acceptance criteria are met;
-- required tests exist and pass;
+- required tests exist and pass, including deterministic failure-path tests required by `CODE_REVIEW.md` for the changed domain;
 - every feature ticket has a dedicated executable example with a passing `--self-test`;
 - NativeUI-owned targets build with the default empty `NATIVEUI_ALLOWED_WARNINGS` and emit no compiler warnings; any explicitly approved exception is recorded in the ticket/PR and requires the corresponding CMake opt-in;
 - all applicable review passes are complete;
-- the mandatory `CODE_REVIEW.md` review record is present in the issue or PR and all blocking findings are corrected;
+- the **complete current** mandatory `CODE_REVIEW.md` review record is present in the issue or PR — old reduced records are insufficient — and all Blocking/Important findings are corrected;
 - the final candidate has the green normal, relevant path-scoped and heavyweight qualification evidence required by `CI_POLICY.md`;
 - multi-instance/global-state impact is explicitly assessed for every code change;
+- transactional state, scheduling/queue failure, exception/unwind, partial construction, lifetime/reentrancy, performance/allocation and privacy fields are explicitly assessed when applicable;
 - Objective-C runtime naming/prefix strategy is recorded whenever Objective-C/Objective-C++ code is touched;
 - docs/API examples are updated when behavior changed;
 - the GitHub issue is marked `Done` with `status:done` and closed as completed; optional local ticket copies are synchronized if present;
@@ -418,7 +455,7 @@ A ticket is `Done` only when:
 - `ROADMAP.md` is updated in the same merge/completion cycle for **every merged ticket**, including final status, delivered scope, dependency-frontier changes and milestone progress;
 - the issue body still ends with the mandatory `## Merge requirement` section.
 
-A ticket must not be considered complete merely because code and CI are green if the roadmap synchronization step has not been performed.
+A ticket must not be considered complete merely because code and CI are green if the roadmap synchronization or current review-record step has not been performed.
 
 ## 12. End-of-session compaction
 
@@ -448,11 +485,11 @@ For each ticket:
 - use local fixup/squash workflows freely to keep the remote branch readable;
 - avoid drive-by formatting or unrelated refactors;
 - before the first remote qualification push for a batch, build the affected surface and run its targeted tests locally;
-- before final qualification, run the complete relevant local test set and complete the mandatory review;
+- before final qualification, run the complete relevant local test set and complete the mandatory review, including fault-injection recovery paths;
 - mark the frozen candidate Ready for review to trigger heavyweight qualification according to `CI_POLICY.md`;
 - if source/build/tests/workflows must change afterward, convert the PR back to Draft before editing and repeat the final-candidate transition after CI is green;
 - update the GitHub issue, `CONTEXT.md` and `ROADMAP.md` in the final merge/completion cycle;
-- do not merge/close the ticket with a stale roadmap.
+- do not merge/close the ticket with a stale roadmap or stale reduced code-review record.
 
 Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
 
@@ -478,20 +515,3 @@ Do not guess around a platform/API uncertainty.
 4. continue another independent `Ready` ticket if possible.
 
 A CI/platform wait on one branch must not become a global project stop when independent `Ready` work exists.
-
-Do not redesign the whole toolkit to work around a single unverified platform issue.
-
-## 15. Iteration ZIP artifact
-
-For this project, one completed ticket is one development iteration unless explicitly regrouped.
-
-At the end of every completed iteration:
-
-1. finish the ticket completion protocol;
-2. update the GitHub issue, `ROADMAP.md` and `CONTEXT.md`; the roadmap update is mandatory for every merged ticket, not only when milestone scope changes;
-3. include `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, `CONTEXT.md`, roadmap, plan, source, tests and CMake files; optional local ticket exports may be included in the recovery ZIP but remain excluded from Git;
-4. exclude build directories, downloaded dependencies and generated binaries;
-5. create a versioned/recoverable ZIP named with the completed ticket, for example `nativeui_T011.zip`;
-6. provide that ZIP to the user as the recovery snapshot for that iteration.
-
-The ZIP is a recovery snapshot, not a substitute for Git history and not a dependency gate for unrelated `Ready` work. It must be sufficient for another agent to resume by following section 2.
