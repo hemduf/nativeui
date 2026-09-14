@@ -192,8 +192,7 @@ std::size_t DispatcherOwner::checkpoint() {
     if (!state) return 0;
 
     const auto now = state->clock->now();
-    std::vector<TaskEntry> snapshot;
-    snapshot.reserve(kDispatcherMaxTasksPerCheckpoint);
+    std::size_t work_count = 0;
     bool should_wake = false;
 
     {
@@ -251,14 +250,17 @@ std::size_t DispatcherOwner::checkpoint() {
             }
         }
 
-        const std::size_t count =
-            std::min(state->tasks.size(), kDispatcherMaxTasksPerCheckpoint);
-        for (std::size_t i = 0; i < count; ++i) {
-            snapshot.push_back(std::move(state->tasks.front()));
-            state->tasks.pop_front();
-        }
+        // Freeze only how much work this checkpoint may begin. Leave every
+        // unstarted accepted task in the primary deque so an exception never
+        // needs a recovery insertion that could itself allocate or fail. A task
+        // is removed immediately before its invocation, making that begun task
+        // consumed while preserving all later work in FIFO order.
+        work_count = std::min(state->tasks.size(), kDispatcherMaxTasksPerCheckpoint);
 
-        if (!state->tasks.empty() || timer_blocked_by_full_queue) {
+        // Work beyond this checkpoint's bounded budget (or a due timer that
+        // could not be queued because the queue is full) already needs another
+        // owner/event-loop checkpoint independently of callback outcomes.
+        if (state->tasks.size() > work_count || timer_blocked_by_full_queue) {
             state->wake_pending = true;
             should_wake = true;
         }
@@ -267,39 +269,45 @@ std::size_t DispatcherOwner::checkpoint() {
     if (should_wake) request_dispatcher_wake(state);
 
     std::size_t executed = 0;
-    for (std::size_t index = 0; index < snapshot.size(); ++index) {
+    for (std::size_t index = 0; index < work_count; ++index) {
+        TaskEntry task;
         {
             std::lock_guard lock{state->mutex};
-            if (state->closing) break;
+            if (state->closing || state->tasks.empty()) break;
+            task = std::move(state->tasks.front());
+            state->tasks.pop_front();
         }
 
         try {
-            snapshot[index].callback();
+            task.callback();
             ++executed;
         } catch (...) {
             bool recover_wake = false;
             {
                 std::lock_guard lock{state->mutex};
-                if (!state->closing) {
-                    // The callback at `index` began and is therefore consumed.
-                    // Restore only its unstarted suffix, in reverse insertion
-                    // order so the queue observes the original FIFO sequence.
-                    // Reentrant/newer posts are already in state->tasks and stay
-                    // behind every restored accepted task.
-                    for (std::size_t restore = snapshot.size(); restore > index + 1;
-                         --restore) {
-                        state->tasks.push_front(std::move(snapshot[restore - 1]));
-                    }
-                    if (!state->tasks.empty()) {
-                        state->wake_pending = true;
-                        recover_wake = true;
-                    }
+                if (!state->closing && !state->tasks.empty()) {
+                    state->wake_pending = true;
+                    recover_wake = true;
                 }
             }
             if (recover_wake) request_dispatcher_wake(state);
             throw;
         }
     }
+
+    // Reentrant posts made while original work was executing are deliberately
+    // outside the frozen work_count. Ensure they cannot be stranded when the
+    // original queue had no overflow wake pending.
+    bool recover_wake = false;
+    {
+        std::lock_guard lock{state->mutex};
+        if (!state->closing && !state->tasks.empty() && !state->wake_pending) {
+            state->wake_pending = true;
+            recover_wake = true;
+        }
+    }
+    if (recover_wake) request_dispatcher_wake(state);
+
     return executed;
 }
 
