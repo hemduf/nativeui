@@ -39,6 +39,8 @@ The previously completed v1 feature/platform/styling foundation remains merged a
 
 **T123 / #281 is Done.** PR #284 merged exact source head `f2c5cada877df82d8936f9dd545d796c0ab5156e` into main as merge commit `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`. The frozen candidate passed normal CI `34837857267`, T066 `34837857292`, T042 Lifecycle Stress `34841171641` and T052 v0.1 Release Gate `34841171493`. Independent final `CODE_REVIEW.md` review `5197372173` recorded zero Blocking/Important findings. The deterministic `State<T>` lifetime, reentrancy, pending-write and throwing-observer policy is now the baseline for dependent state work.
 
+**T126 / #287 is Done.** PR #295 merged exact source head `4ae5dae65f86cc34bd3177f91ad3e6db7403b02d` as merge commit `be216d7a41999113472a0457827d43caad28cf15`. Exact-head CI `34844330034`, T064 `34844329931`, Package Contracts `34844329951`, T066 `34844330127`, T042 Lifecycle Stress `34846694493` and T052 v0.1 Release Gate `34846694353` all passed. Independent Integration review `5197980748` recorded zero Blocking/Important findings. DesktopServices completion is now terminal before fallible UI marshalling; AppKit/native/worker completion boundaries contain C++ exceptions, retained panel cleanup is deterministic, and queue rejection/allocation failure cannot strand request capacity or fall back to application code on a backend thread.
+
 Current safety blocker set/frontier:
 
 - **T124 / #282 — Blocked umbrella/integration parent:** decomposed into T138 -> T139 -> T140 -> T141; T124 becomes Done only after all four children and final parent closeout.
@@ -47,7 +49,7 @@ Current safety blocker set/frontier:
 - **T140 / #305 — Blocked on T139:** migrate standard stateful widget families to Binding internals.
 - **T141 / #306 — Blocked on T140:** dynamic composition/style/focus migration plus integrated T124 qualification.
 - **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety.
-- **T126 / #287:** DesktopServices completion/native exception boundaries; current qualification still requires product-side closeout before merge.
+- **T126 / #287 — Done:** DesktopServices completion/native exception boundaries.
 - **T127 / #288 — Ready:** `ScrollState` lifetime, retained-consumer ownership, reentrant and throwing-observer semantics, now unblocked by T123.
 - **T128 / #289:** Dispatcher accepted-work recovery and Animation scheduler callback-exception invariants; current candidate still requires the explicit cross-platform exceptional native-boundary smoke required by the ticket.
 - **T129 / #290:** lifetime-safe retained invalidation callbacks after Node/Tree removal.
@@ -55,7 +57,7 @@ Current safety blocker set/frontier:
 - **T131 / #293:** transaction-safe Overlay/Dialog show/close/destructor behavior.
 - **T132 / #294:** failure-safe deferred standalone close scheduling under Dispatcher rejection/throw.
 
-T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set, including the T124 child chain and T127, is Done and synchronized on main.
+T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set, including the T124 child chain and T127, is Done and synchronized on main. T126 completion removes one independent P0 prerequisite but does not directly unlock T069 or another blocked child.
 
 The immediate v1 frontier is therefore:
 
@@ -67,9 +69,11 @@ T123(done) -> T138(ready) -> T139(blocked) -> T140(blocked) -> T141(blocked)
 
 T123(done) -------------------------------------------> T127(ready)
 
-parallel P0: T125 + T126 + T128 + T129 + T130 + T131 + T132
+T126(done)
 
-T124 + T125..T132 all Done
+parallel remaining P0: T125 + T128 + T129 + T130 + T131 + T132
+
+T124 + T125 + T127..T132 all Done
               |
               v
             T069 -> T070 -> T071 -> v1.0.0
@@ -119,12 +123,13 @@ The audit found recurring classes of bugs that normal happy-path CI did not expo
 - T061 / PR #216: generic retained overlay/portal stack; T131 hardens transactional failure behavior.
 - T062 / PR #226 + PR #245: Tooltip contract and post-merge completeness closure.
 - T063 / PR #227: modal Dialog policy over T061.
-- T064 / PR #240: bounded cross-platform DesktopServices using T072 on Linux; T126 hardens exceptional completion boundaries.
+- T064 / PR #240: bounded cross-platform DesktopServices using T072 on Linux.
 - T065 / PR #133: bounded UI-thread Dispatcher/timers; T128 hardens callback failure and T132 lifecycle-control enqueue failure.
 - T066 / PR #237: standalone window controls and deterministic close lifecycle.
 - T067 / PR #219 + PR #233: fixed-height virtualized ListView; T127 now hardens ScrollState lifetime/reentrancy.
 - T072 / PR #185: sole v1 Linux `libdbus-1` transport used by T064 and reserved for future T068 1.2 integration.
 - T123 / PR #284: deterministic lifetime-safe `State<T>` notification, observer-exception and reentrancy contract; merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99` after complete normal/path/final qualification.
+- T126 / PR #295: DesktopServices completion exception-boundary, terminal-drop and retained native cleanup hardening; merged as `be216d7a41999113472a0457827d43caad28cf15` after complete normal/path/final qualification.
 
 ## Validation policy
 
@@ -142,14 +147,14 @@ Fault injection is mandatory where normal execution cannot deterministically rep
 
 ## Automation / integration recovery
 
-GitHub live state is authoritative. `#250` is Scheduler-only control state; current `AUTOMATION CYCLE — GNNN` issue comments are the Worker -> Scheduler event bus. Delivery W1/W2/W3 are interchangeable with at most three source-changing lanes. Integration owns independent final review, exact-head CI diagnosis, qualification, merge and completion/unlock bookkeeping; it never implements product features. Reporter is read-only.
+GitHub live state is authoritative. `#250` is Scheduler-only control state; current `AUTOMATION CYCLE — GNNN` issue comments are the Worker -> Scheduler event bus. Delivery W1/W2/W3/W4 are interchangeable with at most four source-changing lanes under the current scheduler capacity override. Integration owns independent final review, exact-head CI diagnosis, qualification, merge and completion/unlock bookkeeping; it never implements product features. Reporter is read-only.
 
 Scheduler/Delivery must treat explicit dependencies as hard gates. T124 is an umbrella after decomposition; do not assign a monolithic T124 implementation. Execute `T138 -> T139 -> T140 -> T141`, then close T124. T069 must remain blocked until the whole pre-freeze safety frontier is Done.
 
 Optimal parallelization before the freeze:
 
-1. start T138 and T127 from the now-merged T123 baseline when a compatible source lane is available;
-2. continue independent T125/T126/T128/T129/T130/T131/T132 closeout according to conflict/PR availability;
+1. start T138 and T127 from the merged T123 baseline when compatible source lanes are available;
+2. continue independent T125/T128/T129/T130/T131/T132 closeout according to conflict/PR availability;
 3. advance the T124 child chain sequentially after each exact dependency merges;
 4. after T124 and all remaining pre-freeze blockers are Done and synchronized on main, resume T069 whole-surface freeze;
 5. then proceed T070 -> T071 on the exact frozen/RC baselines.
@@ -157,7 +162,7 @@ Optimal parallelization before the freeze:
 ## Next actions
 
 1. Schedule **T138 / #303** and **T127 / #288** as the two verified immediate unlocks from T123.
-2. Close current product-side qualification/rework gaps on T126 and T128 before any Ready/final-gate transition for those PRs.
+2. Close the remaining product/review gaps on T128 before any Ready/final-gate transition for that PR; T126 requires no further product work.
 3. Continue independent P0 safety blockers in parallel where source overlap allows it.
 4. Require every blocker PR to record transactional state, scheduling/queue failure, exception/unwind, partial construction, lifetime/reentrancy, performance/allocation, privacy and exact fault-test evidence where applicable.
 5. Keep T069/#81 Blocked until the full pre-freeze safety blocker frontier is genuinely Done.
