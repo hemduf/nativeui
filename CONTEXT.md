@@ -43,11 +43,13 @@ The previously completed v1 feature/platform/styling foundation remains merged a
 
 **T128 / #289 is Done.** PR #296 merged exact source head `ce58df7758e960c329f26394bad44ce4c7b4efc1` as merge commit `ca65087b503aff04133394c5ef200cd7cae75e12`. Exact-head CI `34848275511`, T051 `34848275318`, T064 `34848275472`, T065 Dispatcher `34848275470`, T065 Platform `34848275371`, T066 `34848275349`, T042 Lifecycle Stress `34853025047` and T052 v0.1 Release Gate `34853023976` all passed. Independent Integration review `5198631295` recorded zero Blocking/Important findings. Accepted Dispatcher work now survives neighboring callback failure without retrying the begun callback or allocating a recovery queue; animation failure terminalizes the failing entry while preserving sibling scheduling; and the native event-loop exception boundary is exercised on Linux, Windows and macOS.
 
+**T138 / #303 is Done.** PR #343 merged the current-main-synchronized exact source head `268c2e4c00307e894ba02f56304174225ef49b50` as merge commit `1f63d9a4778773102f162618ad5ffd34f2bc6497`. Exact-head CI `34854738551`, Package Contracts `34854738531` and T066 `34854738635` passed. Final-candidate T042 Lifecycle Stress `34856470278` and T052 v0.1 Release Gate `34856470266` also passed after transient external dependency-download failures were classified as infrastructure and recovered with targeted reruns. Independent current-main Integration review `5198976168` recorded zero Blocking/Important findings. The core public `Binding<T>` value/lifetime contract is therefore merged and directly unlocks T139.
+
 Current safety blocker set/frontier:
 
-- **T124 / #282 — Blocked umbrella/integration parent:** decomposed into T138 -> T139 -> T140 -> T141; T124 becomes Done only after all four children and final parent closeout.
-- **T138 / #303 — qualification candidate:** core public `Binding<T>` value/lifetime contract is implemented and independently reviewed, but the T128 executable merge advanced `main` after its prior candidate composition was launched; current-main composition must be requalified before merge.
-- **T139 / #304 — Blocked on T138:** Binding-backed widget entry points and legacy `State<T>&` compatibility.
+- **T124 / #282 — Blocked umbrella/integration parent:** decomposed into T138 -> T139 -> T140 -> T141; T124 becomes Done only after all four children and final parent closeout. T138 is complete and checked in the parent.
+- **T138 / #303 — Done:** core public `Binding<T>` value/lifetime contract merged and fully qualified.
+- **T139 / #304 — Ready:** Binding-backed widget entry points and legacy `State<T>&` compatibility, now live-unblocked by T138.
 - **T140 / #305 — Blocked on T139:** migrate standard stateful widget families to Binding internals.
 - **T141 / #306 — Blocked on T140:** dynamic composition/style/focus migration plus integrated T124 qualification.
 - **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety.
@@ -57,24 +59,24 @@ Current safety blocker set/frontier:
 - **T129 / #290:** lifetime-safe retained invalidation callbacks after Node/Tree removal.
 - **T130 / #291:** Component lifecycle/layout/paint exception safety plus native partial-construction and no-throw teardown.
 - **T131 / #293:** transaction-safe Overlay/Dialog show/close/destructor behavior.
-- **T132 / #294 — qualification candidate:** failure-safe deferred standalone close scheduling is implemented/reviewed, but it must be requalified on the post-T128 current-main composition before merge.
+- **T132 / #294 — rework required:** exact-head normal/path qualification is green, but fresh Integration review `5198957541` found one Blocking completeness gap: the required end-to-end exception-before-enqueue standalone close lifecycle regressions are still missing. No Ready/final-gate/merge claim is valid until a changed head closes that gap and is requalified.
 
-T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set, including the T124 child chain and T127, is Done and synchronized on main. T126 and T128 are now complete independent P0 prerequisites, but neither directly unlocks T069 while the remaining AND prerequisites are unresolved.
+T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set, including the T124 child chain and T127, is Done and synchronized on main. T126, T128 and T138 are now complete independent P0 prerequisites, but T069 remains gated by the remaining AND prerequisites.
 
 The immediate v1 frontier is therefore:
 
 ```text
-T123(done) -> T138(requalify current main) -> T139(blocked) -> T140(blocked) -> T141(blocked)
-                                                                         |
-                                                                         v
-                                                                    T124 closeout
+T123(done) -> T138(done) -> T139(ready) -> T140(blocked) -> T141(blocked)
+                                                           |
+                                                           v
+                                                      T124 closeout
 
 T123(done) ------------------------------------------------------------> T127(ready)
 
 T126(done)
 T128(done)
 
-parallel remaining P0: T125 + T129 + T130 + T131 + T132(requalify current main)
+parallel remaining P0: T125 + T129 + T130 + T131 + T132(rework required)
 
 T124 + T125 + T127 + T129 + T130 + T131 + T132 all Done
                          |
@@ -134,6 +136,7 @@ The audit found recurring classes of bugs that normal happy-path CI did not expo
 - T123 / PR #284: deterministic lifetime-safe `State<T>` notification, observer-exception and reentrancy contract; merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99` after complete normal/path/final qualification.
 - T126 / PR #295: DesktopServices completion exception-boundary, terminal-drop and retained native cleanup hardening; merged as `be216d7a41999113472a0457827d43caad28cf15` after complete normal/path/final qualification.
 - T128 / PR #296: Dispatcher/Animation exceptional recovery and cross-platform foreign-boundary containment hardening; merged as `ca65087b503aff04133394c5ef200cd7cae75e12` after complete normal/path/final qualification.
+- T138 / PR #343: core public `Binding<T>` value/lifetime contract; merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497` after current-main normal/path/final qualification and clean Integration review.
 
 ## Validation policy
 
@@ -157,17 +160,17 @@ Scheduler/Delivery must treat explicit dependencies as hard gates. T124 is an um
 
 Optimal parallelization before the freeze:
 
-1. requalify T138 on the current post-T128 main composition, then advance T139 only after T138 is live-verified Done;
+1. advance T139 now that T138 is live-verified Done; continue the T124 child chain strictly one dependency at a time;
 2. run T127 when a source lane is available and continue independent T125/T129/T130/T131/T132 closeout according to conflict/PR availability;
-3. requalify T132 on current main before merge because T128 changed adjacent Dispatcher/Animation execution semantics after the prior candidate was launched;
+3. return T132 to bounded product rework for the missing end-to-end exception-before-enqueue lifecycle regressions, then requalify the changed exact head before any Ready/merge decision;
 4. advance the T124 child chain sequentially after each exact dependency merges;
 5. after T124 and all remaining pre-freeze blockers are Done and synchronized on main, resume T069 whole-surface freeze;
 6. then proceed T070 -> T071 on the exact frozen/RC baselines.
 
 ## Next actions
 
-1. Mechanically synchronize/requalify **T138 / #303** against current main, merge it when exact normal/path/T042/T052 evidence is current, then unlock T139.
-2. Mechanically synchronize/requalify **T132 / #294** against current main before merge; its previous candidate composition predates the T128 executable merge.
+1. Claim/execute **T139 / #304** only within the scheduler's available source-lane capacity; T138 is Done and the dependency is now satisfied.
+2. Rework **T132 / #294** to add the three required end-to-end exception-before-enqueue lifecycle regressions identified by Integration review `5198957541`, then requalify the new exact head.
 3. Schedule **T127 / #288** when source capacity frees and continue T125/T129/T130/T131 in parallel where source overlap allows it.
 4. Require every blocker PR to record transactional state, scheduling/queue failure, exception/unwind, partial construction, lifetime/reentrancy, performance/allocation, privacy and exact fault-test evidence where applicable.
 5. Keep T069/#81 Blocked until the full pre-freeze safety blocker frontier is genuinely Done.
