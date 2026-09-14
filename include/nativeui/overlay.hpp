@@ -346,6 +346,43 @@ struct OverlayState {
         return true;
     }
 
+    // Destructor-only recovery seam. Normal callers use close()/close_id(),
+    // which preserve the still-open transaction on notification failure. A
+    // dying controller has no future retry owner, so it must terminally drop
+    // its exact entry, contain invalidation exceptions, and best-effort notify
+    // retained reconciliation after the logical removal.
+    bool close_noexcept(OverlayHandle handle) noexcept {
+        const auto handle_owner = handle.owner_.lock();
+        const auto lifetime = handle.lifetime_.lock();
+        if (!handle_owner || handle_owner != owner || !lifetime || handle.id_ == 0) {
+            return false;
+        }
+
+        auto find_entry = [&]() noexcept {
+            return std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+                return entry.id == handle.id_ && entry.lifetime == lifetime;
+            });
+        };
+
+        auto it = find_entry();
+        if (it == entries.end()) return false;
+
+        try {
+            invalidate_structure();
+        } catch (...) {
+        }
+
+        it = find_entry();
+        if (it == entries.end()) return true;
+        erase_entry_noexcept(it);
+
+        try {
+            invalidate_structure();
+        } catch (...) {
+        }
+        return true;
+    }
+
 private:
     using EntryIterator = std::vector<OverlayEntry>::iterator;
 
