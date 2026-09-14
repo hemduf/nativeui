@@ -3,6 +3,7 @@
 #include <nativeui/component_state.hpp>
 
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -121,6 +122,116 @@ void suite() {
     NUI_CHECK(added_calls == 0);
     addition.set(2);
     NUI_CHECK(added_calls == 1);
+
+    // Observer exceptions abort only the current pass. The value for that pass
+    // is already committed; unstarted observers remain registered but are not
+    // called for the failed pass. A later explicit set() starts a fresh pass.
+    ui::State<int> throwing_first{0};
+    int throwing_first_calls = 0;
+    int after_throwing_first_calls = 0;
+    bool throw_first_once = true;
+    auto throwing_first_subscription = throwing_first.observe([&](const int&) {
+        ++throwing_first_calls;
+        if (throw_first_once) {
+            throw_first_once = false;
+            throw std::runtime_error("state observer failure");
+        }
+    });
+    auto after_throwing_first = throwing_first.observe([&](const int&) {
+        ++after_throwing_first_calls;
+    });
+    bool caught_first = false;
+    try {
+        throwing_first.set(1);
+    } catch (const std::runtime_error&) {
+        caught_first = true;
+    }
+    NUI_CHECK(caught_first);
+    NUI_CHECK(throwing_first.get() == 1);
+    NUI_CHECK(throwing_first_calls == 1);
+    NUI_CHECK(after_throwing_first_calls == 0);
+    NUI_CHECK(throwing_first_subscription.active());
+    NUI_CHECK(after_throwing_first.active());
+    throwing_first.set(2);
+    NUI_CHECK(throwing_first.get() == 2);
+    NUI_CHECK(throwing_first_calls == 2);
+    NUI_CHECK(after_throwing_first_calls == 1);
+
+    // A recursive write queued immediately before a middle observer throws is
+    // discarded with the failed transaction. The throwing callback is not
+    // retried automatically, the suffix is not marked delivered, and all active
+    // observers remain available for the next explicit mutation.
+    ui::State<int> throwing_middle{0};
+    std::vector<int> throwing_middle_trace;
+    bool throw_middle_once = true;
+    auto before_middle = throwing_middle.observe([&](const int& value) {
+        throwing_middle_trace.push_back(100 + value);
+    });
+    auto middle = throwing_middle.observe([&](const int& value) {
+        throwing_middle_trace.push_back(200 + value);
+        if (value == 1 && throw_middle_once) {
+            throwing_middle.set(2);
+            throw_middle_once = false;
+            throw std::runtime_error("state observer failure");
+        }
+    });
+    auto after_middle = throwing_middle.observe([&](const int& value) {
+        throwing_middle_trace.push_back(300 + value);
+    });
+    bool caught_middle = false;
+    try {
+        throwing_middle.set(1);
+    } catch (const std::runtime_error&) {
+        caught_middle = true;
+    }
+    NUI_CHECK(caught_middle);
+    NUI_CHECK(throwing_middle.get() == 1);
+    NUI_CHECK(throwing_middle_trace == std::vector<int>({101, 201}));
+    NUI_CHECK(before_middle.active());
+    NUI_CHECK(middle.active());
+    NUI_CHECK(after_middle.active());
+    throwing_middle.set(3);
+    NUI_CHECK(throwing_middle.get() == 3);
+    NUI_CHECK(throwing_middle_trace ==
+              std::vector<int>({101, 201, 103, 203, 303}));
+
+    // Registry mutation before a throw is durable: removal is immediate, a new
+    // observer remains registered, neither callback is spuriously invoked during
+    // unwind, and the registry remains usable afterward.
+    ui::State<int> throwing_registry{0};
+    ui::State<int>::Subscription removed_before_throw;
+    ui::State<int>::Subscription added_before_throw;
+    int removed_before_throw_calls = 0;
+    int added_before_throw_calls = 0;
+    bool mutate_then_throw_once = true;
+    auto mutate_then_throw = throwing_registry.observe([&](const int& value) {
+        if (value == 1 && mutate_then_throw_once) {
+            removed_before_throw.reset();
+            added_before_throw = throwing_registry.observe([&](const int&) {
+                ++added_before_throw_calls;
+            });
+            mutate_then_throw_once = false;
+            throw std::runtime_error("state observer failure");
+        }
+    });
+    removed_before_throw = throwing_registry.observe([&](const int&) {
+        ++removed_before_throw_calls;
+    });
+    bool caught_registry = false;
+    try {
+        throwing_registry.set(1);
+    } catch (const std::runtime_error&) {
+        caught_registry = true;
+    }
+    NUI_CHECK(caught_registry);
+    NUI_CHECK(mutate_then_throw.active());
+    NUI_CHECK(!removed_before_throw.active());
+    NUI_CHECK(added_before_throw.active());
+    NUI_CHECK(removed_before_throw_calls == 0);
+    NUI_CHECK(added_before_throw_calls == 0);
+    throwing_registry.set(2);
+    NUI_CHECK(removed_before_throw_calls == 0);
+    NUI_CHECK(added_before_throw_calls == 1);
 
     // A subscription is allowed to outlive its State. Destruction/reset must
     // not dereference a dead State object (important under ASan/UBSan).
