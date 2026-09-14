@@ -127,7 +127,7 @@ public:
         // change availability/focus while the source component is still alive.
         if (overlay_state_->entries.empty()) {
             const auto command_source = overlay_command_source(event);
-            const auto result = tree_.dispatch(event, platform);
+            const auto result = dispatch_tree_dialog_safe(event, platform);
             const bool completing_dialog = has_pending_dialog_completion();
             if (!completing_dialog) {
                 process_component_overlay_command(command_source, platform);
@@ -217,7 +217,7 @@ public:
         }
 
         const auto command_source = overlay_command_source(event);
-        const auto result = tree_.dispatch(event, platform);
+        const auto result = dispatch_tree_dialog_safe(event, platform);
         const bool completing_dialog = has_pending_dialog_completion();
         if (!completing_dialog) {
             process_component_overlay_command(command_source, platform);
@@ -472,6 +472,25 @@ private:
         // its anchor or open another T061 overlay directly.
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
+    }
+
+    EventResult dispatch_tree_dialog_safe(
+        const InputEvent& event, PlatformServices& platform) {
+        const auto depth_before = tree_.dispatch_depth_;
+        try {
+            return tree_.dispatch(event, platform);
+        } catch (...) {
+            // T131 must not let a propagated Dialog close failure poison future
+            // completion by leaving Tree's dispatch-depth bookkeeping elevated.
+            // Preserve queued structural work for the next retained checkpoint;
+            // T125 owns the generic reconciliation/unwind guard rather than this
+            // Dialog-specific propagation seam.
+            if (dialog_state_ && dialog_state_->active_generation != 0 &&
+                tree_.dispatch_depth_ > depth_before) {
+                tree_.dispatch_depth_ = depth_before;
+            }
+            throw;
+        }
     }
 
     [[nodiscard]] bool has_pending_dialog_completion() const noexcept {
