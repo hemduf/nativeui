@@ -444,6 +444,7 @@ void saturated_component_input_close_defers_until_owner_checkpoint() {
     ui::Application app;
     app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
     auto state = std::make_shared<InputCloseState>();
+    test::MockPlatform platform;
     ui::UI tree{InputCloseProbe{state}};
     ui::StandaloneWindow window{app, tree, desc("T132 saturated component input")};
     require(window.valid(), "component-input window construction failed");
@@ -460,7 +461,11 @@ void saturated_component_input_close_defers_until_owner_checkpoint() {
         unmounted_inside_input = state->unmounts != 0;
     };
 
-    test::MockPlatform platform;
+    // Native realize/configure timing is platform-specific. Prepare the retained
+    // input fixture explicitly so the regression isolates close deferral rather
+    // than depending on whether the first native activation event already ran.
+    tree.resize({180.0f, 120.0f});
+    tree.activate(platform);
     require(tree.dispatch(
                 test::pointer(ui::InputType::PointerDown, 24.0f, 24.0f), platform) ==
             ui::EventResult::Handled,
