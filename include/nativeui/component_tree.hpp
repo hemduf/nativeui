@@ -12,6 +12,7 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <exception>
 #include <limits>
 #include <optional>
 #include <string>

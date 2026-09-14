@@ -1,5 +1,13 @@
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {}
-    ~Tree() { unmount(); }
+    ~Tree() noexcept {
+        try {
+            unmount();
+        } catch (...) {
+            // Destructor-driven teardown is containment-only. unmount() has
+            // already completed best-effort retained cleanup and restored Tree
+            // lifecycle invariants before propagating its first component error.
+        }
+    }
 
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
@@ -111,23 +119,36 @@
     void unmount() {
         if (!mounted_ || !root_) return;
 
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
+
         // Normal platform integrations deactivate before unmount so focused
         // controls can release platform services. This fallback still runs the
         // platform-neutral component lifecycle if a caller destroys an active
-        // tree directly.
+        // tree directly. Teardown is best-effort: preserve the first component
+        // exception, finish every remaining phase, publish terminal Tree state,
+        // then propagate only for this ordinary explicit C++ entry point.
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
         if (active_) {
-            deactivate_node(*root_);
+            capture_error([&] { deactivate_node(*root_); });
             active_ = false;
         }
 
-        unmount_node(*root_);
+        capture_error([&] { unmount_node(*root_); });
         focusables_.clear();
         mounted_ = false;
+
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     [[nodiscard]] bool dirty() const noexcept {
