@@ -147,8 +147,11 @@ private:
 
 class Knob {
 public:
+    Knob(std::string label, Binding<float> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     Knob(std::string label, State<float>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : Knob(std::move(label), state.binding()) {}
 
     Knob&& range(float minimum, float maximum) && {
         minimum_ = minimum;
@@ -158,18 +161,19 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
-        auto* state = state_;
+        auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
-        return Spec{[label = std::move(label), state, minimum, maximum]() mutable {
-                        return std::make_unique<KnobComponent>(std::move(label), *state, minimum, maximum);
+        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum]() mutable {
+                        return std::make_unique<KnobComponent>(
+                            std::move(label), std::move(state), minimum, maximum);
                     },
                     {}};
     }
 
 private:
     std::string label_;
-    State<float>* state_{};
+    Binding<float> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
 };
@@ -177,8 +181,11 @@ private:
 
 class Toggle {
 public:
+    Toggle(std::string label, Binding<bool> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     Toggle(std::string label, State<bool>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : Toggle(std::move(label), state.binding()) {}
 
     Toggle&& style(ToggleStyle value) && {
         style_ = std::move(value);
@@ -187,18 +194,18 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
-        auto* state = state_;
+        auto state = std::move(state_);
         auto style = std::move(style_);
-        return Spec{[label = std::move(label), state, style = std::move(style)]() mutable {
+        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style)]() mutable {
                         return std::make_unique<ToggleComponent>(
-                            std::move(label), *state, std::move(style));
+                            std::move(label), std::move(state), std::move(style));
                     },
                     {}};
     }
 
 private:
     std::string label_;
-    State<bool>* state_{};
+    Binding<bool> state_;
     ToggleStyle style_;
 };
 

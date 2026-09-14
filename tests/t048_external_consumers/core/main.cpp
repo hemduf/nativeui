@@ -2,10 +2,14 @@
 
 int main() {
     ui::State<bool> enabled{true};
+    ui::State<float> drive{0.5f};
+    ui::State<bool> bound_enabled{false};
     ui::UI ui_tree{
         ui::Column{
             ui::Header{"T048 core consumer"},
+            ui::Knob{"Drive", drive.binding()},
             ui::Toggle{"Enabled", enabled},
+            ui::Toggle{"Bound enabled", bound_enabled.binding()},
         }.padding(8.0f).gap(4.0f)};
 
     // T138: prove the installed umbrella exposes Binding<T> directly and the
