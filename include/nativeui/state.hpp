@@ -15,11 +15,12 @@ namespace ui {
 // Generic observable UI state (no plugin/audio semantics)
 // -----------------------------------------------------------------------------
 //
-// State<T> is intentionally a retained-UI/main-thread abstraction. It does not
-// synchronize value/listener access and must not be used as an audio-thread or
-// cross-thread transport. Plug-in adapters must hand data into the UI domain
-// with an explicitly reviewed thread-safe bridge (atomics/queues/snapshots as
-// appropriate) and call State<T>::set()/observe() on the UI thread.
+// State<T> and Binding<T> are intentionally retained-UI/main-thread
+// abstractions. They do not synchronize value/listener access and must not be
+// used as an audio-thread or cross-thread transport. Plug-in adapters must hand
+// data into the UI domain with an explicitly reviewed thread-safe bridge
+// (atomics/queues/snapshots as appropriate) and call set()/observe() on the UI
+// thread.
 //
 // State values must support equality comparison. Notifications are synchronous:
 // every pass exposes one stable borrowed value, observers added during a pass
@@ -33,10 +34,19 @@ namespace ui {
 // rethrowing the original exception. No observer callback is invoked as part of
 // exception cleanup; a later explicit set() starts a fresh notification pass.
 
+namespace detail {
+
 template <class T>
-requires requires(const T& lhs, const T& rhs) {
+concept StateValue = requires(const T& lhs, const T& rhs) {
     { lhs == rhs } -> std::convertible_to<bool>;
-}
+};
+
+} // namespace detail
+
+template <detail::StateValue T>
+class Binding;
+
+template <detail::StateValue T>
 class State {
     struct Listener {
         std::size_t id{};
@@ -93,6 +103,8 @@ class State {
     };
 
 public:
+    using Callback = std::function<void(const T&)>;
+
     class Subscription {
     public:
         Subscription() = default;
@@ -145,11 +157,20 @@ public:
     [[nodiscard]] const T& get() const noexcept { return control_->value; }
 
     void set(T value) {
-        // Keep the control block alive for the complete synchronous dispatch.
-        // This also makes callback-driven destruction of the owning State safe:
-        // the destructor invalidates the source, while this local reference lets
-        // the active callback return without dereferencing a destroyed State.
-        auto control = control_;
+        set_control(control_, std::move(value));
+    }
+
+    Subscription observe(Callback callback) {
+        return observe_control(control_, std::move(callback));
+    }
+
+    [[nodiscard]] Binding<T> binding() noexcept;
+
+private:
+    // Shared mutation entry point for State<T> and Binding<T>. Taking the
+    // control block by value is deliberate: a callback is allowed to destroy
+    // the owning State while the synchronous notification stack is active.
+    static void set_control(std::shared_ptr<Control> control, T value) {
         if (!control->owner_alive) return;
 
         if (control->dispatching) {
@@ -205,8 +226,8 @@ public:
         if (control->cleanup_needed) control->compact_inactive();
     }
 
-    Subscription observe(std::function<void(const T&)> callback) {
-        auto control = control_;
+    static Subscription observe_control(std::shared_ptr<Control> control,
+                                        Callback callback) {
         if (!control->owner_alive) return {};
 
         const auto id = control->next_listener_id++;
@@ -215,8 +236,64 @@ public:
         return Subscription{control, id};
     }
 
-private:
     std::shared_ptr<Control> control_;
+
+    friend class Binding<T>;
 };
+
+// Binding<T> is a reference-like handle to one State<T> source. It retains the
+// source control block, never the State object itself. Destroying State marks the
+// source invalid and removes subscriptions, while the retained last value stays
+// readable until the final Binding handle is released. A logically invalid
+// Binding ignores writes and returns an inactive subscription from observe().
+//
+// Copy and move both preserve source identity. Move intentionally behaves like a
+// reference-handle copy so the moved-from Binding remains a valid handle; this
+// keeps every constructed Binding readable and avoids an empty-handle state with
+// no retained value.
+template <detail::StateValue T>
+class Binding {
+public:
+    using Callback = typename State<T>::Callback;
+    using Subscription = typename State<T>::Subscription;
+
+    Binding(const Binding&) = default;
+    Binding& operator=(const Binding&) = default;
+    Binding(Binding&& other) noexcept
+        : control_(other.control_) {}
+    Binding& operator=(Binding&& other) noexcept {
+        if (this != &other) control_ = other.control_;
+        return *this;
+    }
+
+    [[nodiscard]] bool valid() const noexcept {
+        return control_->owner_alive;
+    }
+
+    [[nodiscard]] const T& get() const noexcept {
+        return control_->value;
+    }
+
+    void set(T value) {
+        State<T>::set_control(control_, std::move(value));
+    }
+
+    Subscription observe(Callback callback) {
+        return State<T>::observe_control(control_, std::move(callback));
+    }
+
+private:
+    explicit Binding(std::shared_ptr<typename State<T>::Control> control) noexcept
+        : control_(std::move(control)) {}
+
+    std::shared_ptr<typename State<T>::Control> control_;
+
+    friend class State<T>;
+};
+
+template <detail::StateValue T>
+Binding<T> State<T>::binding() noexcept {
+    return Binding<T>{control_};
+}
 
 } // namespace ui
