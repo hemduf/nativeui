@@ -711,7 +711,7 @@ public:
         detail::RadioButtonComponent::IsSelected is_selected =
             [selected, value_identity] { return selected.get() == *value_identity; };
         detail::RadioButtonComponent::Select select =
-            [selected, value_identity] { selected.set(*value_identity); };
+            [selected, value_identity]() mutable { selected.set(*value_identity); };
         detail::RadioButtonComponent::Observe observe =
             [selected](std::function<void()> invalidate) mutable -> std::shared_ptr<void> {
                 auto subscription = selected.observe(
