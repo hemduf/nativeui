@@ -12,6 +12,7 @@
 #endif
 
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -48,12 +49,21 @@ public:
         tree_.mount();
     }
 
-    ~UI() {
+    ~UI() noexcept {
         // T063 distinguishes whole-UI teardown from explicit Dialog controller
         // destruction. Publish the terminal state before Tree/overlay members
         // begin reverse-order destruction so an outliving controller is inert
         // and never invokes an application callback after the UI lifetime.
         if (dialog_state_) dialog_state_->begin_ui_teardown();
+
+        // Whole-UI teardown is a no-unwind boundary. Application invalidation
+        // callbacks are view notifications, not teardown work; detach them
+        // before retained members destruct so an injected/throwing callback
+        // cannot terminate the process while recovery objects are unwinding.
+        try {
+            tree_.set_invalidation_callback(std::function<void(Rect)>{});
+        } catch (...) {
+        }
     }
 
     [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
@@ -341,6 +351,11 @@ private:
     friend debug::InspectorSnapshot debug::inspector_snapshot(UI& ui);
 #endif
 
+    struct PendingOverlayCommand final {
+        NodeId source_id{kInvalidNodeId};
+        detail::OverlayComponentCommand command;
+    };
+
     [[nodiscard]] static bool same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
     }
@@ -430,11 +445,21 @@ private:
 
     void process_component_overlay_command(
         NodeId source_id, PlatformServices& platform) {
-        auto command = take_overlay_command(source_id);
-        if (!command) return;
+        std::optional<PendingOverlayCommand> pending;
+        if (overlay_command_retry_) {
+            pending.emplace(std::move(*overlay_command_retry_));
+            overlay_command_retry_.reset();
+        } else {
+            auto command = take_overlay_command(source_id);
+            if (!command) return;
+            pending.emplace(PendingOverlayCommand{source_id, std::move(*command)});
+        }
 
-        if (command->kind == detail::OverlayComponentCommandKind::Show) {
-            auto on_shown = std::move(command->on_shown);
+        source_id = pending->source_id;
+        auto& command = pending->command;
+
+        if (command.kind == detail::OverlayComponentCommandKind::Show) {
+            auto on_shown = std::move(command.on_shown);
             const bool suppress_when_read_only = anchor_dismisses_when_read_only(source_id);
             const bool source_still_valid = node_is_focused(source_id) &&
                 guarded_anchor_allows_commit(source_id, suppress_when_read_only);
@@ -448,28 +473,52 @@ private:
                 return;
             }
 
-            const auto handle = show_overlay(std::move(command->overlay));
+            OverlayHandle handle;
+            try {
+                handle = show_overlay(std::move(command.overlay));
+            } catch (...) {
+                // A failed show did not commit an OverlayState entry. The
+                // component command itself has already been consumed, so reset
+                // its opener suppression through the existing invalid-handle
+                // acknowledgement before propagating the original failure.
+                auto failure = std::current_exception();
+                try {
+                    if (on_shown) on_shown({});
+                } catch (...) {
+                }
+                std::rethrow_exception(failure);
+            }
+
             if (on_shown) on_shown(handle);
             prepare_overlay_layout();
             enforce_new_modal_capture_barrier(platform);
             return;
         }
 
-        const auto guard_anchor = command->guard_anchor;
-        const bool suppress_when_read_only = command->suppress_when_anchor_read_only;
-        auto callback = std::move(command->after_close);
+        const auto guard_anchor = command.guard_anchor;
+        const bool suppress_when_read_only = command.suppress_when_anchor_read_only;
 
-        // This is the T035 commit/reentrancy checkpoint: logical close,
-        // retained detach and focus/capture reconciliation all complete before
-        // application state/callback code is invoked.
-        (void)close_overlay(command->handle);
-        prepare_overlay_layout();
+        // This is the T035 commit/reentrancy checkpoint. Keep the full
+        // CloseThenInvoke command recoverable until logical close and retained
+        // detach have both reached their safe point. If either fallible internal
+        // step fails, a later outer dispatch retries the same command; the
+        // application callback has not begun and therefore cannot run twice.
+        try {
+            (void)close_overlay(command.handle);
+            prepare_overlay_layout();
+        } catch (...) {
+            overlay_command_retry_.emplace(std::move(*pending));
+            throw;
+        }
+
         const bool allowed = guarded_anchor_allows_commit(
             guard_anchor, suppress_when_read_only);
+        auto callback = std::move(command.after_close);
         if (allowed && callback) callback();
 
         // The application callback may invalidate dynamic composition, remove
-        // its anchor or open another T061 overlay directly.
+        // its anchor or open another T061 overlay directly. Failures from this
+        // point must not requeue the callback because it may already have run.
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
     }
@@ -526,11 +575,21 @@ private:
             return;
         }
 
+        // The pending generation/completion is the only durable repair state
+        // once Dialog::complete() has transferred ownership to the UI. Do not
+        // move or clear it before the retained detach checkpoint succeeds.
         const auto generation = dialog_state_->pending_completion_generation;
+        prepare_overlay_layout();
+
+        if (!dialog_state_ || dialog_state_->ui_tearing_down ||
+            dialog_state_->pending_completion_generation != generation ||
+            !dialog_state_->pending_completion) {
+            return;
+        }
+
         auto completion = std::move(dialog_state_->pending_completion);
         dialog_state_->pending_completion_generation = 0;
         dialog_state_->pending_completion = {};
-        prepare_overlay_layout();
         finish_dialog_completion(generation, std::move(completion));
     }
 
@@ -639,6 +698,7 @@ private:
     Tree tree_;
     Size viewport_{};
     std::uint64_t last_modal_capture_barrier_id_{};
+    std::optional<PendingOverlayCommand> overlay_command_retry_;
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
     bool inspector_enabled_{};
     NodeId inspector_selected_node_{kInvalidNodeId};

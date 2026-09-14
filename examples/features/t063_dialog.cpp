@@ -1,6 +1,10 @@
 #include "example_support.hpp"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+
+#include <chrono>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -96,6 +100,13 @@ public:
 private:
     std::shared_ptr<KeySinkState> state_;
 };
+
+ui::InputEvent key_up(ui::Key key) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::KeyUp;
+    event.key = key;
+    return event;
+}
 
 ui::InputEvent wheel(float x, float y, float dy) {
     ui::InputEvent event{};
@@ -387,6 +398,8 @@ int close_failure_transaction_contract() {
     }
     if (!action_threw || !dialog.active() || !results.empty() ||
         tree.overlay_entries().size() != 1) {
+        fail_invalidation = false;
+        tree.clear_invalidation_callback();
         return example::fail("T131 failed action close lost Dialog repair state");
     }
 
@@ -394,6 +407,7 @@ int close_failure_transaction_contract() {
     if (!dialog.close() || dialog.active() || results.size() != 1 ||
         results.front().kind != ui::DialogResultKind::Action ||
         results.front().action_id != "confirm" || !tree.overlay_entries().empty()) {
+        tree.clear_invalidation_callback();
         return example::fail("T131 action close did not recover with original completion result");
     }
 
@@ -401,6 +415,7 @@ int close_failure_transaction_contract() {
     if (dialog.show(confirm_spec(false), [&](ui::DialogResult result) {
             if (result.kind == ui::DialogResultKind::Dismissed) ++dismissed;
         }) != ui::DialogShowResult::Shown) {
+        tree.clear_invalidation_callback();
         return example::fail("T131 programmatic-close retry setup failed");
     }
     tree.resize({420.0f, 260.0f});
@@ -413,15 +428,102 @@ int close_failure_transaction_contract() {
     }
     if (!programmatic_threw || !dialog.active() || dismissed != 0 ||
         tree.overlay_entries().size() != 1) {
+        fail_invalidation = false;
+        tree.clear_invalidation_callback();
         return example::fail("T131 failed programmatic close lost Dialog repair state");
     }
 
     fail_invalidation = false;
     if (!dialog.close() || dialog.active() || dismissed != 1 ||
         !tree.overlay_entries().empty()) {
+        tree.clear_invalidation_callback();
         return example::fail("T131 programmatic close did not recover exactly once");
     }
     tree.clear_invalidation_callback();
+    return 0;
+}
+
+int destructor_failure_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    bool fail_invalidation = false;
+    int dismissed = 0;
+    {
+        ui::Dialog dialog{tree};
+        if (dialog.show(confirm_spec(false), [&](ui::DialogResult result) {
+                if (result.kind == ui::DialogResultKind::Dismissed) ++dismissed;
+            }) != ui::DialogShowResult::Shown) {
+            return example::fail("T131 destructor-close setup failed");
+        }
+        tree.resize({420.0f, 260.0f});
+        tree.set_invalidation_callback(std::function<void()>{[&] {
+            if (fail_invalidation) {
+                throw std::runtime_error{"T131 injected destructor close failure"};
+            }
+        }});
+        fail_invalidation = true;
+    }
+
+    fail_invalidation = false;
+    tree.clear_invalidation_callback();
+    if (dismissed != 1 || !tree.overlay_entries().empty()) {
+        return example::fail("T131 Dialog destructor did not contain close failure and finish terminal cleanup");
+    }
+
+    int recovered = 0;
+    {
+        ui::Dialog dialog{tree};
+        if (dialog.show(confirm_spec(false), [&](ui::DialogResult) { ++recovered; }) !=
+            ui::DialogShowResult::Shown) {
+            return example::fail("T131 destructor close stranded the per-UI slot");
+        }
+        tree.resize({420.0f, 260.0f});
+        if (!dialog.close()) return example::fail("T131 post-destructor recovery close failed");
+    }
+    if (recovered != 1 || !tree.overlay_entries().empty()) {
+        return example::fail("T131 Dialog slot was not reusable after destructor close fault");
+    }
+
+    int throwing_completions = 0;
+    {
+        ui::Dialog dialog{tree};
+        if (dialog.show(confirm_spec(false), [&](ui::DialogResult) {
+                ++throwing_completions;
+                throw std::runtime_error{"T131 destructor completion failure"};
+            }) != ui::DialogShowResult::Shown) {
+            return example::fail("T131 destructor throwing-completion setup failed");
+        }
+        tree.resize({420.0f, 260.0f});
+    }
+    if (throwing_completions != 1 || !tree.overlay_entries().empty()) {
+        return example::fail("T131 Dialog destructor did not contain application completion failure");
+    }
+    return 0;
+}
+
+int whole_ui_teardown_suppresses_completion_contract() {
+    example::Platform platform;
+    int completions = 0;
+    auto tree = std::make_unique<ui::UI>(ui::Spacer{320.0f, 180.0f});
+    tree->resize({420.0f, 260.0f});
+    tree->activate(platform);
+    auto dialog = std::make_unique<ui::Dialog>(*tree);
+    if (dialog->show(confirm_spec(false), [&](ui::DialogResult) { ++completions; }) !=
+        ui::DialogShowResult::Shown) {
+        return example::fail("T131 whole-UI teardown setup failed");
+    }
+    tree->resize({420.0f, 260.0f});
+    tree.reset();
+    if (completions != 0 || dialog->active()) {
+        return example::fail("T131 whole-UI teardown invoked Dialog completion or left controller active");
+    }
+    dialog.reset();
+    if (completions != 0) {
+        return example::fail("T131 outliving Dialog invoked completion after UI teardown");
+    }
     return 0;
 }
 
@@ -460,6 +562,166 @@ int throwing_completion_releases_slot_contract() {
     tree.resize({420.0f, 260.0f});
     if (!dialog.close() || recovered_completions != 1 || dialog.active()) {
         return example::fail("T131 Dialog was not reusable after throwing completion");
+    }
+    return 0;
+}
+
+int overlay_command_failure_recovery_contract() {
+    example::Platform platform;
+
+    {
+        ui::State<int> selection{1};
+        ui::UI tree{ui::ComboBox<int>{
+            selection,
+            {{1, "One", true}, {2, "Two", true}}}};
+        tree.resize({240.0f, 180.0f});
+        tree.activate(platform);
+
+        bool fail_invalidation = true;
+        tree.set_invalidation_callback(std::function<void()>{[&] {
+            if (fail_invalidation) {
+                throw std::runtime_error{"T131 injected popup transaction failure"};
+            }
+        }});
+
+        bool show_threw = false;
+        try {
+            (void)tree.dispatch(example::key(ui::Key::Down), platform);
+        } catch (const std::runtime_error&) {
+            show_threw = true;
+        }
+        fail_invalidation = false;
+        if (!show_threw || !tree.overlay_entries().empty() || selection.get() != 1) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox failed show left overlay/opener state wedged");
+        }
+
+        (void)tree.dispatch(key_up(ui::Key::Down), platform);
+        (void)tree.dispatch(example::key(ui::Key::Down), platform);
+        (void)tree.dispatch(key_up(ui::Key::Down), platform);
+        if (tree.overlay_entries().size() != 1) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox could not reopen after failed show");
+        }
+        (void)tree.dispatch(example::key(ui::Key::Down), platform);
+
+        fail_invalidation = true;
+        bool close_threw = false;
+        try {
+            (void)tree.dispatch(example::key(ui::Key::Enter), platform);
+        } catch (const std::runtime_error&) {
+            close_threw = true;
+        }
+        fail_invalidation = false;
+        if (!close_threw || selection.get() != 1 || tree.overlay_entries().size() != 1) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox failed close lost pending commit/overlay state");
+        }
+
+        (void)tree.dispatch(key_up(ui::Key::Enter), platform);
+        tree.clear_invalidation_callback();
+        if (selection.get() != 2 || !tree.overlay_entries().empty()) {
+            return example::fail("T131 ComboBox close retry did not commit exactly once");
+        }
+    }
+
+    {
+        int actions = 0;
+        ui::UI tree{ui::PopupMenu{
+            "Actions",
+            {ui::PopupMenuItem::action("Run", [&] { ++actions; })}}};
+        tree.resize({240.0f, 180.0f});
+        tree.activate(platform);
+        (void)tree.dispatch(example::key(ui::Key::Enter), platform);
+        (void)tree.dispatch(key_up(ui::Key::Enter), platform);
+        if (tree.overlay_entries().size() != 1) {
+            return example::fail("T131 PopupMenu retry setup did not open");
+        }
+
+        bool fail_invalidation = true;
+        tree.set_invalidation_callback(std::function<void()>{[&] {
+            if (fail_invalidation) {
+                throw std::runtime_error{"T131 injected menu close failure"};
+            }
+        }});
+        bool close_threw = false;
+        try {
+            (void)tree.dispatch(example::key(ui::Key::Enter), platform);
+        } catch (const std::runtime_error&) {
+            close_threw = true;
+        }
+        fail_invalidation = false;
+        if (!close_threw || actions != 0 || tree.overlay_entries().size() != 1) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 PopupMenu failed close lost pending action/overlay state");
+        }
+
+        (void)tree.dispatch(key_up(ui::Key::Enter), platform);
+        tree.clear_invalidation_callback();
+        if (actions != 1 || !tree.overlay_entries().empty()) {
+            return example::fail("T131 PopupMenu close retry did not invoke action exactly once");
+        }
+    }
+
+    return 0;
+}
+
+int tooltip_failure_transaction_contract() {
+    auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+    ui::detail::DispatcherOwner owner{
+        std::shared_ptr<ui::detail::DispatcherWakeBackend>{}, clock};
+
+    bool fail_show = true;
+    bool fail_hide = false;
+    int shows = 0;
+    int hides = 0;
+    ui::detail::TooltipController controller{
+        owner.dispatcher(),
+        ui::DispatcherDuration::zero(),
+        [&] {
+            ++shows;
+            if (fail_show) throw std::runtime_error{"T131 injected tooltip show failure"};
+        },
+        [&] {
+            ++hides;
+            if (fail_hide) throw std::runtime_error{"T131 injected tooltip hide failure"};
+        }};
+
+    controller.set_hovered(true);
+    bool show_threw = false;
+    try {
+        (void)owner.checkpoint();
+    } catch (const std::runtime_error&) {
+        show_threw = true;
+    }
+    if (!show_threw || controller.visible() || shows != 1) {
+        return example::fail("T131 Tooltip show failure left controller visible");
+    }
+
+    controller.set_hovered(false);
+    fail_show = false;
+    controller.set_hovered(true);
+    (void)owner.checkpoint();
+    if (!controller.visible() || shows != 2) {
+        return example::fail("T131 Tooltip could not recover after failed presentation");
+    }
+
+    fail_hide = true;
+    bool hide_threw = false;
+    try {
+        controller.cancel();
+    } catch (const std::runtime_error&) {
+        hide_threw = true;
+    }
+    if (!hide_threw || !controller.visible() || hides != 1) {
+        fail_hide = false;
+        return example::fail("T131 Tooltip hide failure discarded visible retry state");
+    }
+
+    fail_hide = false;
+    controller.cancel();
+    if (controller.visible() || hides != 2) {
+        return example::fail("T131 Tooltip hide retry did not reach coherent hidden state");
     }
     return 0;
 }
@@ -579,7 +841,11 @@ int self_test() {
     if (const int result = reentrant_ui_destruction_contract(); result != 0) return result;
     if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
     if (const int result = close_failure_transaction_contract(); result != 0) return result;
+    if (const int result = destructor_failure_contract(); result != 0) return result;
+    if (const int result = whole_ui_teardown_suppresses_completion_contract(); result != 0) return result;
     if (const int result = throwing_completion_releases_slot_contract(); result != 0) return result;
+    if (const int result = overlay_command_failure_recovery_contract(); result != 0) return result;
+    if (const int result = tooltip_failure_transaction_contract(); result != 0) return result;
     if (const int result = scroll_and_pointer_action_contract(); result != 0) return result;
     if (const int result = headless_sizing_and_backdrop_contract(); result != 0) return result;
     return 0;
