@@ -2,7 +2,7 @@
 
 This document is the mandatory automation-specific review gate for autonomous NativeUI delivery. It supplements `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, and `AUTOMATION.md`; it never weakens them.
 
-The purpose of this gate is to prevent a code-changing pull request from being merged merely because CI is green or because the implementation worker wrote a self-review summary.
+The purpose of this gate is to prevent a code-changing pull request from being merged merely because CI is green or because the implementation worker wrote a self-review summary, while also avoiding unnecessary review -> source-worker -> review latency for bounded corrections.
 
 ## 1. Mandatory state transition
 
@@ -15,6 +15,17 @@ SOURCE_READY
   -> FINAL_QUALIFICATION
   -> MERGE_READY
   -> MERGED
+```
+
+When review finds a bounded actionable defect, the optimized path is:
+
+```text
+PEER_CODE_REVIEW
+  -> REVIEW_FIX
+  -> new exact head
+  -> applicable CI qualification
+  -> SECOND_PEER_CODE_REVIEW
+  -> REVIEW_PASS
 ```
 
 `PEER_CODE_REVIEW` is mandatory and cannot be skipped.
@@ -32,6 +43,8 @@ For example, if W2 produced the exact candidate, W1, W3, or W4 may perform the m
 The GitHub connector may submit all automation activity through the same repository account. Therefore independence is determined by the recorded automation worker role and assignment, not by GitHub username alone.
 
 The implementation worker's own `CODE_REVIEW.md` self-pass remains mandatory before `SOURCE_READY`, but it is not the peer review.
+
+A worker that modifies the PR while acting as reviewer becomes a **review-fix author** for the resulting head and cannot provide the final independent `REVIEW_PASS` for that new head. A second Delivery worker, different from both the original source worker when practical and always different from the review-fix author, must independently review the resulting exact head.
 
 ## 3. Exact-head review procedure
 
@@ -81,7 +94,7 @@ reviewer_worker: W1|W2|W3|W4
 source_worker: W1|W2|W3|W4|unknown
 reviewed_head: <exact PR head SHA>
 reviewed_base: <observed base/main SHA>
-verdict: REVIEW_PASS|REVIEW_BLOCKED
+verdict: REVIEW_PASS|REVIEW_BLOCKED|REVIEW_FIX_REQUIRED
 blocking_findings: <integer>
 important_findings: <integer>
 ```
@@ -111,14 +124,17 @@ Inline review comments should be used for precise findings when useful. Findings
 `REVIEW_PASS` is legal only when:
 
 - the review was performed on the current exact PR head;
-- the reviewer is a different worker role from the source worker;
+- the reviewer is a different worker role from the source/review-fix author of that head;
 - the full applicable `CODE_REVIEW.md` record is present;
 - acceptance criteria, required tests, non-goals and touched failure domains were inspected against the implementation;
 - `blocking_findings == 0`;
 - `important_findings == 0`;
 - no unresolved review thread represents a Blocking or Important defect.
 
-Any Blocking or Important finding requires `REVIEW_BLOCKED` plus a durable PR finding and a worker event that routes the PR back to the implementation worker as `REWORK_REQUIRED`.
+Any Blocking or Important finding requires either:
+
+- `REVIEW_FIX_REQUIRED` when the reviewer can safely apply a bounded correction under section 8; or
+- `REVIEW_BLOCKED` plus a durable PR finding and `REWORK_REQUIRED` when the correction is not suitable for reviewer-owned fixing.
 
 Advisory findings may remain only when they do not conceal correctness, lifecycle, performance, API, platform, privacy, or test-completeness risk.
 
@@ -146,10 +162,14 @@ When a code-changing `SOURCE_READY` candidate has no valid peer review:
 2. prefer a worker already waiting on CI/review/final qualification;
 3. if every Delivery worker is actively source-changing, allow the lowest-priority/lowest-critical-path worker to finish only its current coherent batch, then switch it to peer review before starting another source batch;
 4. while the mandatory review remains unassigned or unstarted, do not open an additional source lane or source fallback;
-5. when all four Delivery workers would otherwise be source-changing, the effective capacity becomes **three source lanes plus one reviewer** until the review reaches `REVIEW_PASS` or `REVIEW_BLOCKED`;
+5. when all four Delivery workers would otherwise be source-changing, the effective capacity becomes **three source lanes plus one reviewer** until the review reaches `REVIEW_PASS`, `REVIEW_FIX_REQUIRED`, or `REVIEW_BLOCKED`;
 6. lack of reviewer capacity for a ready peer review is an orchestration defect, not a valid reason to delay the review indefinitely.
 
 The target service rule is: `SOURCE_READY -> peer-review assignment` in the same Scheduler cycle, followed by execution on the assigned reviewer's next run.
+
+When `REVIEW_FIX_REQUIRED` is emitted and the finding qualifies for section 8, keep the same reviewer assigned in `REVIEW_FIX` mode so the correction can happen immediately rather than round-tripping to the original source worker.
+
+As soon as the reviewer publishes a corrected new head, schedule `SECOND_PEER_CODE_REVIEW` on a different Delivery worker. This second review has priority over starting a new source slice. The worker that performed the correction cannot certify its own resulting head.
 
 After the verdict, the reviewer may resume its source primary/fallback according to the next Scheduler plan.
 
@@ -159,30 +179,83 @@ The Scheduler must not emit or accept an `on_unlock` assumption that depends on 
 
 A `REVIEW_PASS` worker event is valid only when it references the exact head and a durable PR review containing `<!-- nativeui-peer-code-review:v1 -->`.
 
-## 8. Delivery peer-review requirements
+## 8. Reviewer-owned correction mode (`REVIEW_FIX`)
 
-When W1/W2/W3/W4 is assigned `PEER_CODE_REVIEW`, that review is the worker's primary useful action for the PR and takes precedence over beginning a new source batch.
+A peer reviewer may immediately correct findings on the reviewed PR to reduce latency, but only under this bounded mode.
 
-The reviewer must:
+`REVIEW_FIX` is allowed when all of the following are true:
 
-1. inspect the exact diff and relevant surrounding implementation;
-2. apply `CODE_REVIEW.md` comprehensively rather than sampling only the obvious code path;
-3. inspect acceptance/test completeness and failure recovery;
-4. submit the structured PR review;
-5. emit `REVIEW_PASS` or `REVIEW_BLOCKED` for the exact head.
+- the defect is directly evidenced by the review and its intended behavior is unambiguous from the issue, tests, existing architecture and `CODE_REVIEW.md`;
+- the correction stays within the existing ticket scope and public contract;
+- no product/design decision is required;
+- the correction does not require broad architecture redesign, dependency changes, ticket decomposition, or a new feature;
+- the reviewer can add or strengthen a deterministic regression test first when behavior changes;
+- the current PR head is re-fetched immediately before every write;
+- no conflicting worker has changed the branch;
+- the correction is one coherent review-fix batch, not micro-commit churn.
 
-A peer-review assignment is read-only with respect to the reviewed PR source unless the Scheduler explicitly assigns a source handoff. The reviewer must not silently fix findings on another worker's branch.
+Typical suitable fixes include:
+
+- missing error/recovery handling with an obvious documented contract;
+- missing lifetime/reentrancy guard;
+- missing bounds/null/stale-handle check;
+- wrong state restoration on exception;
+- missing regression/fault test for an already-defined invariant;
+- small API/implementation mismatch where the issue contract is explicit;
+- warning/build portability correction that does not alter intended product behavior.
+
+`REVIEW_FIX` is forbidden when the finding requires:
+
+- a new product/API decision or ambiguous behavior choice;
+- meaningful architectural redesign;
+- a scope expansion or new ticket family;
+- large cross-subsystem refactoring whose correctness cannot be bounded in the review run;
+- resolution of a conflict with concurrent source work;
+- bypassing or weakening acceptance criteria, tests, CI, or review independence.
+
+When correction is not safe under these rules, use `REVIEW_BLOCKED` / `REWORK_REQUIRED` and return ownership to the source worker.
+
+A reviewer applying a fix must:
+
+1. leave the original finding/review durable on the old head;
+2. add/adjust regression tests before the production correction when applicable;
+3. apply one coherent correction batch;
+4. publish a new exact head;
+5. emit `REVIEW_FIX_APPLIED` with old head, new head, findings corrected and tests changed;
+6. never emit `REVIEW_PASS` for that new head;
+7. hand off immediately to `SECOND_PEER_CODE_REVIEW` by another Delivery worker.
+
+The review-fix author may perform a self-check of its correction, but that self-check is not the independent final peer review.
 
 ## 9. Review / correction loop
 
-A `REVIEW_BLOCKED` verdict routes the PR back to its source worker with `REWORK_REQUIRED`.
+The optimized loop is:
 
-The correction loop is mandatory:
+```text
+PEER_CODE_REVIEW
+  -> REVIEW_PASS
+```
+
+or, for bounded findings:
+
+```text
+PEER_CODE_REVIEW
+  -> REVIEW_FIX_REQUIRED
+  -> REVIEW_FIX
+  -> corrected new exact head
+  -> applicable CI qualification
+  -> SECOND_PEER_CODE_REVIEW
+  -> REVIEW_PASS | REVIEW_FIX_REQUIRED | REVIEW_BLOCKED
+```
+
+If a second reviewer finds another bounded issue, it may itself become the next `REVIEW_FIX` author; the resulting head must then be reviewed by a different worker again. No worker may certify a head it modified.
+
+For non-bounded findings:
 
 ```text
 PEER_CODE_REVIEW
   -> REVIEW_BLOCKED
-  -> REWORK_REQUIRED
+  -> REWORK_REQUIRED to source worker
   -> correction in TDD
   -> new exact head
   -> applicable CI qualification
@@ -190,7 +263,7 @@ PEER_CODE_REVIEW
   -> NEW PEER_CODE_REVIEW
 ```
 
-The previous review never carries forward across a changed executable head. Repeat this loop until the current exact head has `REVIEW_PASS` with zero Blocking and zero Important findings.
+The previous review never carries forward across a changed executable head. Repeat until the current exact head has `REVIEW_PASS` with zero Blocking and zero Important findings.
 
 ## 10. Integration merge gate
 
@@ -200,10 +273,11 @@ For every code-changing PR, Integration must verify all of the following:
 
 - a durable `<!-- nativeui-peer-code-review:v1 -->` review exists;
 - its `reviewed_head` equals the current exact PR head;
-- its reviewer worker differs from the source worker;
+- its reviewer worker differs from the worker that authored the current head's last review-fix/source batch;
 - verdict is `REVIEW_PASS`;
 - Blocking = 0 and Important = 0;
 - no later review/thread introduced a Blocking/Important finding;
+- any preceding `REVIEW_FIX_APPLIED` was followed by an independent review of the resulting head;
 - the implementation worker's self-review/completeness evidence exists;
 - exact-head CI/final qualification requirements are satisfied;
 - acceptance criteria and required tests are complete;
@@ -221,6 +295,7 @@ For code-changing PRs, the invariant is:
 MERGE_ALLOWED =
     exact_head_ci_green
  && peer_review_exact_head_pass
+ && reviewer_did_not_author_current_head
  && blocking_findings == 0
  && important_findings == 0
  && acceptance_complete
