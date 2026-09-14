@@ -383,14 +383,22 @@ public:
     Dialog(Dialog&&) = delete;
     Dialog& operator=(Dialog&&) = delete;
 
-    ~Dialog() {
-        // Invalidate every retained action/lifecycle callback before a
-        // controller can disappear. Explicit live-UI destruction still follows
-        // close() and therefore delivers one Dismissed result; whole-UI teardown
-        // is inert because DialogState is marked terminal first.
+    ~Dialog() noexcept {
+        // Invalidate retained callbacks first. Normal close stays retryable for
+        // ordinary callers, but a dying controller has no legal retry owner:
+        // contain failures and force the exact overlay/slot terminal before any
+        // application completion can escape this destructor.
         lifetime_.reset();
-        if (active()) (void)close();
-        else clear_local_state();
+        if (!active()) {
+            clear_local_state();
+            return;
+        }
+
+        try {
+            if (close()) return;
+        } catch (...) {
+        }
+        finish_destructor_close_noexcept();
     }
 
     [[nodiscard]] DialogShowResult show(DialogSpec spec, Completion completion) {
@@ -662,6 +670,36 @@ private:
         (void)ui_->close_overlay(overlay_);
         if (!state->release(generation)) return;
         clear_local_state();
+    }
+
+    void finish_destructor_close_noexcept() noexcept {
+        auto state = state_.lock();
+        if (!state || state->ui_tearing_down || !ui_ || generation_ == 0 ||
+            !state->owns(generation_)) {
+            clear_local_state();
+            return;
+        }
+
+        auto completion = std::move(completion_);
+        DialogResult result = pending_result_
+            ? std::move(*pending_result_)
+            : DialogResult{DialogResultKind::Dismissed, {}};
+        const auto generation = generation_;
+
+        (void)ui_->overlay_state_->close_noexcept(overlay_);
+        try {
+            ui_->prepare_overlay_layout();
+        } catch (...) {
+        }
+
+        const bool released = state->release(generation);
+        clear_local_state();
+        if (!released || !completion) return;
+
+        try {
+            completion(std::move(result));
+        } catch (...) {
+        }
     }
 
     void clear_local_state() noexcept {
