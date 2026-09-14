@@ -91,9 +91,14 @@
         }
         auto* old = focusables_[focused_index_];
         if (syncing_availability_) {
-            auto* trap = trapping_scope_for(old);
-            availability_cleared_focus_ =
-                trap && trap->focus_restore != kInvalidNodeId ? old : nullptr;
+            // Preserve the exact target across adjacent availability passes. A
+            // State observer may queue a reversal (disabled -> enabled) for the
+            // next stable notification pass only after this reconciliation has
+            // returned. Keeping the retained node identity lets that synchronous
+            // follow-up pass restore focus without weakening State's stable-pass
+            // semantics. Dynamic reconciliation clears this pointer before a
+            // retained node is removed.
+            availability_cleared_focus_ = old;
         } else {
             availability_cleared_focus_ = nullptr;
         }
@@ -198,7 +203,10 @@
             if (auto* fallback = first_available_focusable()) set_focus(fallback, platform);
             else clear_focus(platform);
         }
-        availability_cleared_focus_ = nullptr;
+        if (!focus_active_ && focus_target_available(availability_cleared_focus_)) {
+            set_focus(availability_cleared_focus_, platform);
+        }
+        if (focus_active_) availability_cleared_focus_ = nullptr;
         focus_structure_dirty_ = false;
     }
 
