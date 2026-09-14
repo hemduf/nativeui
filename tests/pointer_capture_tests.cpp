@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <memory>
+#include <stdexcept>
 
 namespace {
 
@@ -11,6 +12,7 @@ struct CaptureState {
     int cancel{};
     bool release_on_up{};
     bool recapture_on_cancel{};
+    bool throw_on_cancel{};
 };
 
 class CaptureProbeComponent final : public ui::Component {
@@ -39,6 +41,10 @@ public:
         case ui::InputType::PointerCancel:
             ++state_->cancel;
             if (state_->recapture_on_cancel) context.capture_pointer();
+            if (state_->throw_on_cancel) {
+                state_->throw_on_cancel = false;
+                throw std::runtime_error("pointer cancel fault");
+            }
             return ui::EventResult::Handled;
         default:
             return ui::EventResult::Ignored;
@@ -181,6 +187,42 @@ void suite() {
         NUI_CHECK(state->cancel == 1);
         NUI_CHECK(platform.pointer_capture_begin_count == 6);
         NUI_CHECK(platform.pointer_capture_end_count == 6);
+    }
+
+    // T125: a throwing PointerCancel cannot leave the cancellation guard or the
+    // native capture owner wedged. The original exception remains observable to
+    // the direct C++ caller, cleanup does not synthesize another callback, and a
+    // later PointerDown can acquire/release a fresh capture normally.
+    {
+        auto state = std::make_shared<CaptureState>();
+        state->throw_on_cancel = true;
+        ui::UI tree{CaptureProbe{state}};
+        tree.resize({120.0f, 80.0f});
+        tree.activate(platform);
+
+        const int begin_before = platform.pointer_capture_begin_count;
+        const int end_before = platform.pointer_capture_end_count;
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 1);
+
+        bool threw = false;
+        try {
+            (void)tree.cancel_pointer(platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 1);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+        NUI_CHECK(state->cancel == 1);
+
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 20.0f), platform);
+        NUI_CHECK(state->down == 2);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 2);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 20.0f), platform);
+        NUI_CHECK(state->up == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 2);
     }
 }
 
