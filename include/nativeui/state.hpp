@@ -25,6 +25,13 @@ namespace ui {
 // every pass exposes one stable borrowed value, observers added during a pass
 // start on the next pass, observers removed before their turn are skipped, and
 // recursive writes are coalesced to the latest value for the next pass.
+//
+// Observer exceptions terminate the current notification transaction. The pass
+// value is already committed, callbacks that have not started remain registered
+// but are not invoked for the failed pass, and any recursive pending write is
+// discarded. State restores dispatch bookkeeping and listener structure before
+// rethrowing the original exception. No observer callback is invoked as part of
+// exception cleanup; a later explicit set() starts a fresh notification pass.
 
 template <class T>
 requires requires(const T& lhs, const T& rhs) {
@@ -183,6 +190,11 @@ public:
                 }
             }
         } catch (...) {
+            // Exception policy: the current value remains committed, but an
+            // unstarted suffix of this pass receives no synthetic retry and any
+            // recursive next-pass write is discarded. Restore only framework
+            // bookkeeping/registry state while unwinding, then propagate the
+            // original observer exception to the direct C++ caller.
             control->pending_value.reset();
             control->dispatching = false;
             if (control->cleanup_needed) control->compact_inactive();
