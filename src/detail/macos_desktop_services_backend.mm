@@ -72,23 +72,30 @@ public:
     explicit MacDesktopServicesBackend(NativeViewHandle parent_view)
         : parent_view_(parent_view) {}
 
-    ~MacDesktopServicesBackend() override {
-        std::vector<NSSavePanel*> panels;
-        {
-            std::lock_guard lock{mutex_};
-            closing_ = true;
-            panels.reserve(active_.size());
-            for (auto& [id, entry] : active_) {
-                (void)id;
-                if (entry.panel) panels.push_back(entry.panel);
-            }
-            active_.clear();
-        }
+#if defined(NATIVEUI_T064_FAULT_INJECTION)
+    MacDesktopServicesBackend(NativeViewHandle parent_view,
+                              MacDesktopServicesFaultHooks hooks)
+        : parent_view_(parent_view), fault_hooks_(std::move(hooks)) {}
+#endif
 
-        for (NSSavePanel* panel : panels) {
+    ~MacDesktopServicesBackend() override {
+        // Do not allocate while tearing down retained native panels. Each
+        // iteration removes ownership before sending AppKit cancellation.
+        for (;;) {
+            std::optional<Entry> entry;
+            {
+                std::lock_guard lock{mutex_};
+                closing_ = true;
+                if (active_.empty()) break;
+                const auto found = active_.begin();
+                entry.emplace(std::move(found->second));
+                active_.erase(found);
+            }
+
+            NSSavePanel* panel = entry->panel;
             [panel cancel:nil];
             [panel orderOut:nil];
-            [panel release];
+            release_panel(panel);
         }
     }
 
@@ -180,7 +187,7 @@ public:
         NSSavePanel* panel = entry->panel;
         [panel cancel:nil];
         [panel orderOut:nil];
-        [panel release];
+        release_panel(panel);
 
         FileDialogResult result;
         result.status = DesktopServiceStatus::Cancelled;
@@ -245,21 +252,33 @@ private:
                                      bool multiple,
                                      FileDialogCallback completion) {
         [panel retain];
-        {
+        bool stored = false;
+        try {
             std::lock_guard lock{mutex_};
-            if (closing_ || active_.contains(request_id)) {
-                [panel release];
-                return DesktopServiceStatus::Error;
+            if (!closing_ && !active_.contains(request_id)) {
+                active_.emplace(
+                    request_id,
+                    Entry{panel, std::move(completion), multiple});
+                stored = true;
             }
-            active_.emplace(
-                request_id,
-                Entry{panel, std::move(completion), multiple});
+        } catch (...) {
+            release_panel(panel);
+            return DesktopServiceStatus::Error;
+        }
+        if (!stored) {
+            release_panel(panel);
+            return DesktopServiceStatus::Error;
         }
 
         const std::weak_ptr<MacDesktopServicesBackend> weak = weak_from_this();
         void (^handler)(NSModalResponse) = ^(NSModalResponse response) {
-            if (const auto self = weak.lock()) {
-                self->finish_panel(request_id, response);
+            try {
+                if (const auto self = weak.lock()) {
+                    self->finish_panel(request_id, response);
+                }
+            } catch (...) {
+                // This Objective-C completion block is a foreign callback
+                // boundary: no C++ exception may unwind back into AppKit.
             }
         };
 
@@ -283,6 +302,20 @@ private:
     void finish_panel(DesktopRequestId request_id, NSModalResponse response) {
         auto entry = take(request_id);
         if (!entry) return;
+
+        struct PanelReleaseGuard final {
+            MacDesktopServicesBackend* owner{};
+            NSSavePanel* panel{};
+            ~PanelReleaseGuard() {
+                if (owner && panel) owner->release_panel(panel);
+            }
+        } release_guard{this, entry->panel};
+
+#if defined(NATIVEUI_T064_FAULT_INJECTION)
+        if (fault_hooks_.before_result_processing) {
+            fault_hooks_.before_result_processing();
+        }
+#endif
 
         FileDialogResult result;
         if (response != NSModalResponseOK) {
@@ -317,21 +350,42 @@ private:
             }
         }
 
-        NSSavePanel* panel = entry->panel;
         auto completion = std::move(entry->completion);
-        [panel release];
         completion(std::move(result));
+    }
+
+    void release_panel(NSSavePanel* panel) noexcept {
+        if (!panel) return;
+#if defined(NATIVEUI_T064_FAULT_INJECTION)
+        if (fault_hooks_.released_panels) {
+            fault_hooks_.released_panels->fetch_add(1, std::memory_order_acq_rel);
+        }
+#endif
+        [panel release];
     }
 
     NativeViewHandle parent_view_{};
     std::mutex mutex_;
     std::unordered_map<DesktopRequestId, Entry> active_;
     bool closing_{};
+#if defined(NATIVEUI_T064_FAULT_INJECTION)
+    MacDesktopServicesFaultHooks fault_hooks_;
+#endif
 };
 
 std::shared_ptr<DesktopServicesBackend>
 make_macos_desktop_services_backend(NativeViewHandle parent_view) {
     return std::make_shared<MacDesktopServicesBackend>(parent_view);
 }
+
+#if defined(NATIVEUI_T064_FAULT_INJECTION)
+std::shared_ptr<DesktopServicesBackend>
+make_macos_desktop_services_backend_for_testing(
+    NativeViewHandle parent_view,
+    MacDesktopServicesFaultHooks hooks) {
+    return std::make_shared<MacDesktopServicesBackend>(
+        parent_view, std::move(hooks));
+}
+#endif
 
 } // namespace ui::detail
