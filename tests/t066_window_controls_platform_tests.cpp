@@ -1,4 +1,5 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/detail/dispatcher_owner.hpp>
 
 #if defined(__APPLE__)
 #include <objc/message.h>
@@ -267,6 +268,97 @@ void programmatic_close_bypasses_veto() {
             "programmatic close did not complete exactly once");
 }
 
+void throwing_programmatic_close_post_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    ui::UI tree{ui::Label{"T132 throwing programmatic close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing programmatic close")};
+    require(window.valid(), "throwing-programmatic window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool callback_ran = false;
+    bool closed_inside_callback = true;
+    window.on_closed([&] { ++closed; });
+
+    require(dispatcher.post([&] {
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        callback_ran = true;
+        window.request_close();
+        closed_inside_callback = window.is_closed();
+    }), "failed to enqueue throwing-programmatic driver callback");
+
+    (void)app.poll(0.0);
+    require(callback_ran, "throwing-programmatic driver callback did not run");
+    require(!closed_inside_callback,
+            "exception-before-enqueue synchronously closed on active callback stack");
+    require(window.is_closed(),
+            "owner checkpoint did not commit throwing-programmatic close");
+    require(closed == 1,
+            "throwing-programmatic close did not complete exactly once");
+}
+
+void throwing_native_close_post_is_contained_and_recovers() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 throwing native close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing native close")};
+    require(window.valid(), "throwing-native window construction failed");
+
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        return ui::CloseDecision::Cancel;
+    });
+
+    ui::detail::DispatcherTestAccess::fail_next_post(window.dispatcher());
+    require(send_native_close(window.native_handle()),
+            "failed throwing native close request");
+    (void)app.poll(0.0);
+
+    require(requests == 1,
+            "throwing native request did not recover Requesting exactly once");
+    require(!window.is_closed(), "cancelled throwing native request closed window");
+    require(!app.quit_requested(), "cancelled throwing native request triggered quit");
+    require(window.set_title("T132 native throw recovered"),
+            "window unusable after throwing native request post");
+
+    window.request_close();
+    pump(app, 3);
+    require(window.is_closed() && closed == 1,
+            "cleanup close after native throw did not complete once");
+}
+
+void throwing_accepted_close_completion_commits_once() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 throwing completion"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing completion")};
+    require(window.valid(), "throwing-completion window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        return ui::CloseDecision::Accept;
+    });
+
+    require(send_native_close(window.native_handle()),
+            "failed native close for throwing completion");
+    (void)app.poll(0.0);
+
+    require(requests == 1, "throwing completion veto callback count mismatch");
+    require(window.is_closed(),
+            "later owner checkpoint did not commit throwing completion");
+    require(closed == 1,
+            "throwing completion did not fire on_closed exactly once");
+    require(app.quit_requested(),
+            "throwing completion last-window close did not update quit bookkeeping");
+}
+
 void saturated_dispatcher_close_defers_until_owner_checkpoint() {
     ui::Application app;
     app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
@@ -533,6 +625,9 @@ void suite() {
     native_close_veto_then_accept();
     native_close_without_request_handler_accepts_once();
     programmatic_close_bypasses_veto();
+    throwing_programmatic_close_post_defers_until_owner_checkpoint();
+    throwing_native_close_post_is_contained_and_recovers();
+    throwing_accepted_close_completion_commits_once();
     saturated_dispatcher_close_defers_until_owner_checkpoint();
     saturated_native_close_reentrant_programmatic_wins();
     destroy_pending_saturated_close_is_callback_silent();
