@@ -20,9 +20,11 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` includes T138 / PR #343 merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`, T128 / PR #296 merged as `ca65087b503aff04133394c5ef200cd7cae75e12`, T126 / PR #295 merged as `be216d7a41999113472a0457827d43caad28cf15`, T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+Current `main` includes T139 / PR #350 merged as `61950a9f40145368dba709e755ee8f0c06ae411b`, T138 / PR #343 merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`, T128 / PR #296 merged as `ca65087b503aff04133394c5ef200cd7cae75e12`, T126 / PR #295 merged as `be216d7a41999113472a0457827d43caad28cf15`, T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
 
-T138 / issue #303 / PR #343 is complete and merged. Frozen current-main-synchronized source head `268c2e4c00307e894ba02f56304174225ef49b50` passed normal CI `34854738551`, Package Contracts `34854738531` and T066 Window Controls `34854738635`, then final-candidate T042 Lifecycle Stress `34856470278` and T052 v0.1 Release Gate `34856470266`. Initial final-gate attempts encountered external CPM/Skia download failures; those were classified as infrastructure and targeted reruns produced genuine terminal green results. Independent current-main Integration review `5198976168` reported zero Blocking/Important findings. The core public `Binding<T>` value/lifetime contract is merged, T124 parent bookkeeping marks T138 complete, and T139 is now the directly unblocked Ready child.
+T139 / issue #304 / PR #350 is complete and merged. Frozen exact source head `f8e9729f5d967c8168335ae63e9800a0bb0b6ef4` passed normal CI `34895438606`, Package Contracts `34895438615` and T066 Window Controls `34895438808`, then final-candidate T042 Lifecycle Stress `34901397463` and T052 v0.1 Release Gate `34901397478`. Mandatory exact-head second peer review `5203042503` reported `REVIEW_PASS` with zero Blocking/Important findings and reviewer independence from the W4 review-fix author. Representative Knob/Toggle/TextInput entry points now accept `Binding<T>` directly while legacy `State<T>&` syntax forwards unchanged; behavior tests cover exactly-once mutation, targeted external invalidation, public/installed consumer compilation, and the mandatory T139 feature example. T124 parent bookkeeping marks T139 complete and T140 is now the directly unblocked Ready child.
+
+T138 / issue #303 / PR #343 is complete and merged. Frozen current-main-synchronized source head `268c2e4c00307e894ba02f56304174225ef49b50` passed normal CI `34854738551`, Package Contracts `34854738531` and T066 Window Controls `34854738635`, then final-candidate T042 Lifecycle Stress `34856470278` and T052 v0.1 Release Gate `34856470266`. Initial final-gate attempts encountered external CPM/Skia download failures; those were classified as infrastructure and targeted reruns produced genuine terminal green results. Independent current-main Integration review `5198976168` reported zero Blocking/Important findings. The core public `Binding<T>` value/lifetime contract is merged and underpins the completed T139 entry-point layer.
 
 T128 / issue #289 / PR #296 is complete and merged. Frozen source head `ce58df7758e960c329f26394bad44ce4c7b4efc1` passed normal CI `34848275511`, T051 Release Benchmarks `34848275318`, T064 Desktop Services Contract `34848275472`, T065 Dispatcher Contract `34848275470`, T065 Platform Dispatcher `34848275371`, T066 Window Controls `34848275349`, then final-candidate T042 Lifecycle Stress `34853025047` and T052 v0.1 Release Gate `34853023976`. Independent final `CODE_REVIEW.md` review `5198631295` reported zero Blocking/Important findings. Accepted Dispatcher work now remains durable after a neighboring callback throws without retrying the begun callback or allocating a recovery queue; failing animation entries become terminal before propagation while sibling scheduling remains live; completion is at-most-once; and a real platform expose/paint exception is contained at the foreign event-loop boundary on Linux, Windows and macOS. T128 is satisfied as one pre-freeze T069 prerequisite and directly unlocks no child ticket.
 
@@ -65,20 +67,20 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
 
-state/safety:       T123(done) -> T138(done) -> T139(ready) -> T140 -> T141 -> T124 closeout
+state/safety:       T123(done) -> T138(done) -> T139(done) -> T140(ready) -> T141 -> T124 closeout
                     T123(done) -> T127(ready)
                     T126(done)
                     T128(done)
-                    T125 + T129 + T130 + T131 + T132(rework required) in parallel where safe
+                    T125 + T129 + T130 + T131 + T132(source-ready/review pending) in parallel where safe
 
-release:            T124 + T125 + T127 + T129 + T130 + T131 + T132(done) -> T069 -> T070 -> T071 -> v1.0.0
+release:            T124 + T125 + T127 + T129 + T130 + T131 + T132 -> T069 -> T070 -> T071 -> v1.0.0
                     T049(done) -----------------------------------------------------------> T071
                     T044(done) -----------------------------------------------------------> T071
 
 post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The historical platform/styling prerequisites are complete, but the September 14 pre-freeze safety audit added hard blockers before T069. T124 is an umbrella decomposed as T138 -> T139 -> T140 -> T141 -> T124 closeout. T138 is now Done and T139 is Ready as its verified immediate dependent. T127 remains a verified immediate unlock from T123. T126 and T128 are Done and remove independent prerequisites, but T069 remains Blocked until the remaining full pre-freeze blocker frontier is Done. T132 has green current-head normal/path CI but a fresh Integration review found a Blocking completeness gap in the required exception-before-enqueue lifecycle regressions, so it must return through one bounded rework/requalification cycle before merge. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
+The historical platform/styling prerequisites are complete, but the September 14 pre-freeze safety audit added hard blockers before T069. T124 is an umbrella decomposed as T138 -> T139 -> T140 -> T141 -> T124 closeout. T138 and T139 are now Done and T140 is Ready as the verified immediate dependent. T127 remains a verified immediate unlock from T123. T126 and T128 are Done and remove independent prerequisites, but T069 remains Blocked until the remaining full pre-freeze blocker frontier is Done. T132 is SOURCE_READY with green exact-head normal/path CI but still requires mandatory independent peer review before any Integration Ready/final qualification transition. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -151,7 +153,7 @@ All capture bookkeeping remains per view, widgets stay platform-neutral, exactly
 
 ## Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include T047/T048 package consumption, T049 component gallery, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture. T123 is complete as the hardened state-observer baseline, T126 is complete as the hardened DesktopServices exceptional-completion boundary, T128 is complete as the hardened Dispatcher/Animation exceptional-recovery boundary, and T138 is complete as the core public Binding value/lifetime contract; the remaining pre-freeze safety blockers must converge before T069.
+Delivered foundations include T047/T048 package consumption, T049 component gallery, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture. T123 is complete as the hardened state-observer baseline, T126 is complete as the hardened DesktopServices exceptional-completion boundary, T128 is complete as the hardened Dispatcher/Animation exceptional-recovery boundary, T138 is complete as the core public Binding value/lifetime contract, and T139 is complete as the representative Binding-backed widget entry-point/source-compatibility layer; the remaining pre-freeze safety blockers must converge before T069.
 
 ### T049 — Public component gallery
 
@@ -233,7 +235,11 @@ Frozen current-main-synchronized head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7`
 
 ### T138 — Core Binding value/lifetime contract
 
-**Complete in PR #343 / issue #303, merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`.** `Binding<T>` and `State<T>::binding()` share the hardened T123 control block without retaining a raw State owner pointer/reference. State destruction invalidates the logical source while retained storage remains readable; invalid writes are no-ops and new observations are inactive. Copy/move/source isolation, Binding-driven mutation/observation/reentrancy, callback-driven owner destruction, public header shape and installed/relocated package use are covered. Frozen synchronized head `268c2e4c00307e894ba02f56304174225ef49b50` passed CI, Package Contracts, T066 and final T042/T052 qualification with independent current-main review `5198976168` reporting zero Blocking/Important findings. T139 is the next Ready child of T124.
+**Complete in PR #343 / issue #303, merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`.** `Binding<T>` and `State<T>::binding()` share the hardened T123 control block without retaining a raw State owner pointer/reference. State destruction invalidates the logical source while retained storage remains readable; invalid writes are no-ops and new observations are inactive. Copy/move/source isolation, Binding-driven mutation/observation/reentrancy, callback-driven owner destruction, public header shape and installed/relocated package use are covered. Frozen synchronized head `268c2e4c00307e894ba02f56304174225ef49b50` passed CI, Package Contracts, T066 and final T042/T052 qualification with independent current-main review `5198976168` reporting zero Blocking/Important findings.
+
+### T139 — Binding-backed widget entry points
+
+**Complete in PR #350 / issue #304, merged as `61950a9f40145368dba709e755ee8f0c06ae411b`.** Representative Knob, Toggle and TextInput builders/components retain `Binding<T>` canonically while explicit legacy `State<T>&` overloads forward through `state.binding()` without implicit-conversion ambiguity. Pointer/keyboard edits preserve exactly-once State notification and external State changes preserve targeted paint-only invalidation for the covered families. Public-header and installed/relocated T048 consumer fixtures compile both Binding and legacy syntax, and `examples/features/t139_binding_widgets.cpp` provides the required public-API interactive/self-test coverage. Frozen head `f8e9729f5d967c8168335ae63e9800a0bb0b6ef4` passed CI, Package Contracts, T066, T042 and T052; independent second peer review `5203042503` reported zero Blocking/Important findings. T140 is now Ready.
 
 ### T068 — Native accessibility bridges (post-1.0)
 
@@ -242,23 +248,23 @@ T068 is explicitly deferred to NativeUI 1.2 and no longer blocks T069, T070, T07
 ### Final v1 release path
 
 ```text
-T123(done) -> T138(done) -> T139(ready) -> T140 -> T141 -> T124 closeout --------+
-T123(done) -> T127 ---------------------------------------------------------------|
-T126(done) -----------------------------------------------------------------------|
-T128(done) -----------------------------------------------------------------------|
-T125 + T129 + T130 + T131 + T132(rework required) -------------------------------+-> T069 -> T070 -> T071 -> v1.0.0
+T123(done) -> T138(done) -> T139(done) -> T140(ready) -> T141 -> T124 closeout --------+
+T123(done) -> T127 ----------------------------------------------------------------------|
+T126(done) ------------------------------------------------------------------------------|
+T128(done) ------------------------------------------------------------------------------|
+T125 + T129 + T130 + T131 + T132(source-ready/review pending) --------------------------+-> T069 -> T070 -> T071 -> v1.0.0
 T049(done) -----------------------------------------------------------------------------------> T071
 T044(done) -----------------------------------------------------------------------------------> T071
 ```
 
-T123, T126, T128 and T138 are complete. T139 and T127 are verified Ready unlocks. T124 is an umbrella/integration parent and must not be treated as one monolithic implementation ticket. T132 has green current-head normal/path checks but remains product-incomplete: fresh Integration review requires the explicit end-to-end exception-before-enqueue lifecycle regressions before a new exact-head qualification can become merge evidence. T069 is the final v1 public API freeze but remains blocked until the remaining safety frontier above is Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
+T123, T126, T128, T138 and T139 are complete. T140 and T127 are verified Ready unlocks. T124 is an umbrella/integration parent and must not be treated as one monolithic implementation ticket. T132 has a green exact-head normal/path matrix and a SOURCE_READY closeout record but still requires a mandatory independent peer review before Integration qualification. T069 is the final v1 public API freeze but remains blocked until the remaining safety frontier above is Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
 
 ## Immediate cross-lane plan
 
-1. Advance T139/#304 now that T138 is live Done; only claim source work when scheduler capacity permits, then continue T140/T141/T124 strictly after each dependency completes.
-2. Return T132/#294 to one bounded rework batch for the three required end-to-end exception-before-enqueue lifecycle regressions, then repeat exact-head normal/path review and final qualification.
-3. Assign T127/#288 when a compatible source lane is free and continue T125/T129/T130/T131 closeout, giving merge/qualification work priority over metadata cleanup.
-4. Advance the decomposed T124 chain strictly as `T138(done) -> T139 -> T140 -> T141 -> T124 closeout`; do not claim the umbrella parent for monolithic feature work.
+1. Advance T140/#305 now that T139 is live Done; only claim source work when scheduler capacity permits, then continue T141/T124 strictly after each dependency completes.
+2. Route T132/#294 through mandatory independent peer review of its exact SOURCE_READY head before any Draft->Ready/final qualification transition.
+3. Finish exact-head CI and mandatory independent second-peer review for T129/#290 after its reviewer fix; continue T127/#288 and T125/T130/T131 closeout where conflict/capacity permits, giving merge/qualification work priority over metadata cleanup.
+4. Advance the decomposed T124 chain strictly as `T138(done) -> T139(done) -> T140 -> T141 -> T124 closeout`; do not claim the umbrella parent for monolithic feature work.
 5. Keep T069/#81 Blocked until the complete remaining pre-freeze safety frontier is Done and synchronized on main; then perform one whole-surface API-freeze audit before Ready/final gates.
 6. After T069 completes, re-evaluate T070 directly; after T070, re-evaluate T071 on the exact frozen/RC baseline.
 7. Keep T068/PR #241 parked for 1.2.
