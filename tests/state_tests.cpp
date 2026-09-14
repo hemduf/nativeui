@@ -2,7 +2,9 @@
 
 #include <nativeui/component_state.hpp>
 
+#include <concepts>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -14,8 +16,16 @@ struct NoEquality {};
 template <class T>
 concept SupportsState = requires { typename ui::State<T>; };
 
+template <class T>
+concept SupportsBinding = requires { typename ui::Binding<T>; };
+
 static_assert(SupportsState<int>);
 static_assert(!SupportsState<NoEquality>);
+static_assert(SupportsBinding<int>);
+static_assert(!SupportsBinding<NoEquality>);
+static_assert(std::copy_constructible<ui::Binding<int>>);
+static_assert(std::movable<ui::Binding<int>>);
+static_assert(!std::default_initializable<ui::Binding<int>>);
 
 struct CopyTrackedCallback {
     explicit CopyTrackedCallback(std::shared_ptr<int> copies)
@@ -68,6 +78,125 @@ void suite() {
     state.set(4);
     NUI_CHECK(observed == 3);
     NUI_CHECK(callback_count == 2);
+
+    // T138: Binding is a reference-like view over the same logical State
+    // source. Mutations and observations are bidirectional without a raw State
+    // pointer/reference in the handle.
+    ui::State<int> bound_state{10};
+    auto binding = bound_state.binding();
+    NUI_CHECK(binding.valid());
+    NUI_CHECK(binding.get() == 10);
+
+    int binding_observed = 0;
+    int binding_callback_count = 0;
+    auto binding_subscription = binding.observe([&](const int& value) {
+        binding_observed = value;
+        ++binding_callback_count;
+    });
+    NUI_CHECK(binding_subscription.active());
+
+    binding.set(11);
+    NUI_CHECK(bound_state.get() == 11);
+    NUI_CHECK(binding.get() == 11);
+    NUI_CHECK(binding_observed == 11);
+    NUI_CHECK(binding_callback_count == 1);
+
+    bound_state.set(12);
+    NUI_CHECK(binding.get() == 12);
+    NUI_CHECK(binding_observed == 12);
+    NUI_CHECK(binding_callback_count == 2);
+
+    // Binding is a copyable/movable source handle. Move preserves the source
+    // identity of both handles rather than creating an empty, unreadable state.
+    auto binding_copy = binding;
+    auto binding_moved = std::move(binding_copy);
+    NUI_CHECK(binding_copy.valid());
+    NUI_CHECK(binding_moved.valid());
+    binding_moved.set(13);
+    NUI_CHECK(binding.get() == 13);
+    NUI_CHECK(binding_copy.get() == 13);
+    NUI_CHECK(bound_state.get() == 13);
+
+    // Independent sources must remain isolated even when their Binding handles
+    // coexist and mutate through the same public API.
+    ui::State<int> left_source{1};
+    ui::State<int> right_source{100};
+    auto left_binding = left_source.binding();
+    auto right_binding = right_source.binding();
+    left_binding.set(2);
+    NUI_CHECK(left_source.get() == 2);
+    NUI_CHECK(left_binding.get() == 2);
+    NUI_CHECK(right_source.get() == 100);
+    NUI_CHECK(right_binding.get() == 100);
+    right_source.set(101);
+    NUI_CHECK(left_binding.get() == 2);
+    NUI_CHECK(right_binding.get() == 101);
+
+    // Binding uses the exact T123 dispatch transaction: one stable value per
+    // pass and recursive latest-write coalescing for the next pass.
+    ui::State<int> binding_reentrant_source{0};
+    auto binding_reentrant = binding_reentrant_source.binding();
+    std::vector<int> binding_reentrant_trace;
+    auto binding_reentrant_first = binding_reentrant.observe([&](const int& value) {
+        binding_reentrant_trace.push_back(100 + value);
+        NUI_CHECK(binding_reentrant.get() == value);
+        if (value == 1) {
+            binding_reentrant.set(2);
+            binding_reentrant.set(3);
+        }
+    });
+    auto binding_reentrant_second = binding_reentrant.observe([&](const int& value) {
+        binding_reentrant_trace.push_back(200 + value);
+        NUI_CHECK(binding_reentrant_source.get() == value);
+    });
+    NUI_CHECK(binding_reentrant_first.active());
+    NUI_CHECK(binding_reentrant_second.active());
+    binding_reentrant.set(1);
+    NUI_CHECK(binding_reentrant_source.get() == 3);
+    NUI_CHECK(binding_reentrant_trace == std::vector<int>({101, 201, 103, 203}));
+
+    // A live Binding retains the source control block after State destruction.
+    // It becomes logically invalid, keeps the last committed value readable,
+    // ignores writes and refuses new active subscriptions.
+    std::optional<ui::Binding<int>> retained_binding;
+    ui::State<int>::Subscription retained_binding_subscription;
+    int retained_observed = 0;
+    {
+        auto owner = std::make_unique<ui::State<int>>(40);
+        retained_binding.emplace(owner->binding());
+        retained_binding_subscription = retained_binding->observe([&](const int& value) {
+            retained_observed = value;
+        });
+        retained_binding->set(41);
+        NUI_CHECK(retained_observed == 41);
+        NUI_CHECK(retained_binding_subscription.active());
+        owner.reset();
+    }
+    NUI_CHECK(!retained_binding->valid());
+    NUI_CHECK(retained_binding->get() == 41);
+    NUI_CHECK(!retained_binding_subscription.active());
+    retained_binding->set(42);
+    NUI_CHECK(retained_binding->get() == 41);
+    int invalid_binding_calls = 0;
+    auto inactive_binding_subscription = retained_binding->observe([&](const int&) {
+        ++invalid_binding_calls;
+    });
+    NUI_CHECK(!inactive_binding_subscription.active());
+    NUI_CHECK(invalid_binding_calls == 0);
+
+    // Destruction from a Binding observer is also safe. The active set() call
+    // retains the shared control block while the State destructor invalidates
+    // the source and remaining registrations.
+    auto binding_destroy_owner = std::make_unique<ui::State<int>>(0);
+    auto binding_destroy = binding_destroy_owner->binding();
+    auto binding_destroy_subscription = binding_destroy.observe([&](const int&) {
+        binding_destroy_owner.reset();
+    });
+    binding_destroy.set(1);
+    NUI_CHECK(!binding_destroy_owner);
+    NUI_CHECK(!binding_destroy.valid());
+    NUI_CHECK(binding_destroy.get() == 1);
+    NUI_CHECK(!binding_destroy_subscription.active());
 
     // One pass exposes one stable value. Recursive writes do not mutate the
     // current pass and coalesce to the latest value for the next pass.
