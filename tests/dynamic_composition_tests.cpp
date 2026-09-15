@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,6 +69,33 @@ public:
 private:
     std::string name_;
     std::shared_ptr<DynamicLog> log_;
+};
+
+class ThrowOnceDynamicProbe {
+public:
+    ThrowOnceDynamicProbe(
+        std::string name,
+        std::shared_ptr<DynamicLog> log,
+        std::shared_ptr<int> attempts)
+        : name_(std::move(name)), log_(std::move(log)), attempts_(std::move(attempts)) {}
+
+    ui::Spec spec() && {
+        auto name = std::move(name_);
+        auto log = std::move(log_);
+        auto attempts = std::move(attempts_);
+        return ui::Spec{
+            [name = std::move(name), log = std::move(log), attempts = std::move(attempts)] {
+                ++*attempts;
+                if (*attempts == 1) throw std::runtime_error("dynamic factory failure");
+                return std::make_unique<DynamicProbeComponent>(name, log);
+            },
+            {}};
+    }
+
+private:
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+    std::shared_ptr<int> attempts_;
 };
 
 class LifetimeOrderProbeComponent final : public ui::Component {
@@ -316,6 +344,58 @@ void replacement_destroys_before_insert_contract() {
     NUI_CHECK((log->events == std::vector<std::string>{
         "old.mount", "old.activate", "old.deactivate", "old.unmount", "old.destroy",
         "new.mount", "new.activate"}));
+}
+
+void factory_failure_preserves_pending_dynamic_owners_contract() {
+    ui::State<int> selected{1};
+    ui::State<bool> second_visible{true};
+    auto log = std::make_shared<DynamicLog>();
+    auto attempts = std::make_shared<int>(0);
+    test::MockPlatform platform;
+
+    ui::UI tree{
+        ui::Column{
+            ui::Switch<int>{selected}
+                .when(1, DynamicProbe{"old", log})
+                .when(2, ThrowOnceDynamicProbe{"recovered", log, attempts}),
+            ui::If{second_visible, DynamicProbe{"second", log}}
+        }.gap(4.0f).padding(0.0f)};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "old.mount", "second.mount", "old.activate", "second.activate"}));
+
+    selected.set(2);
+    second_visible.set(false);
+
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(*attempts == 1);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "old.mount", "second.mount", "old.activate", "second.activate",
+        "old.deactivate", "old.unmount"}));
+
+    // The failed owner and the still-unprocessed sibling owner must both be
+    // retried on the next safe checkpoint. The reconciliation guard must also
+    // be restored rather than poisoning all future dynamic work.
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(*attempts == 2);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "old.mount", "second.mount", "old.activate", "second.activate",
+        "old.deactivate", "old.unmount",
+        "recovered.mount", "recovered.activate",
+        "second.deactivate", "second.unmount"}));
+
+    second_visible.set(true);
+    tree.resize({160.0f, 80.0f});
+    NUI_CHECK(log->mounted_ids.at("second").size() == 2);
+    NUI_CHECK(log->events[10] == "second.mount");
+    NUI_CHECK(log->events[11] == "second.activate");
 }
 
 void keyed_contract() {
@@ -578,6 +658,7 @@ void suite() {
     conditional_contract();
     switch_contract();
     replacement_destroys_before_insert_contract();
+    factory_failure_preserves_pending_dynamic_owners_contract();
     keyed_contract();
     coalesced_writes_contract();
     focus_capture_and_lifetime_contract();
