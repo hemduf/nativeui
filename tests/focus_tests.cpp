@@ -18,6 +18,8 @@ public:
         return {100.0f, 40.0f};
     }
 
+    void paint(ui::PaintContext&) const override {}
+
     void focus_changed(bool focused, ui::FocusContext&) override {
         if (focused) {
             ++state_->focus_in;
