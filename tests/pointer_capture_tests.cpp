@@ -1,7 +1,16 @@
 #include "test_support.hpp"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
+
+namespace ui {
+struct TreeTestAccess {
+    [[nodiscard]] static auto dispatch_depth(const Tree& tree) noexcept {
+        return tree.dispatch_depth_;
+    }
+};
+} // namespace ui
 
 namespace {
 
@@ -15,6 +24,7 @@ struct CaptureState {
     bool throw_on_down{};
     bool throw_on_up{};
     bool throw_on_cancel{};
+    std::function<void(ui::InputContext&)> on_cancel;
 };
 
 class CaptureProbeComponent final : public ui::Component {
@@ -51,6 +61,7 @@ public:
         case ui::InputType::PointerCancel:
             ++state_->cancel;
             if (state_->recapture_on_cancel) context.capture_pointer();
+            if (state_->on_cancel) state_->on_cancel(context);
             if (state_->throw_on_cancel) {
                 state_->throw_on_cancel = false;
                 throw std::runtime_error("pointer cancel fault");
@@ -306,6 +317,104 @@ void suite() {
         tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 20.0f), platform);
         NUI_CHECK(state->up == 2);
         NUI_CHECK(platform.pointer_capture_end_count == end_before + 2);
+    }
+
+    // T125: nested cancellation must restore the previous guard value rather
+    // than forcing false. After the inner cancel returns, the outer callback's
+    // recapture attempt must still be suppressed; once the outer frame exits,
+    // later ordinary capture must work again.
+    {
+        auto state = std::make_shared<CaptureState>();
+        ui::UI tree{CaptureProbe{state}};
+        tree.resize({120.0f, 80.0f});
+        tree.activate(platform);
+
+        bool reenter_once = true;
+        state->on_cancel = [&](ui::InputContext& context) {
+            if (!reenter_once) return;
+            reenter_once = false;
+            NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
+            context.capture_pointer();
+        };
+
+        const int begin_before = platform.pointer_capture_begin_count;
+        const int end_before = platform.pointer_capture_end_count;
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
+        NUI_CHECK(state->cancel == 2);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 1);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+
+        state->on_cancel = {};
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 30.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 2);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 2);
+    }
+
+    // T125: direct global-command failure restores dispatch depth to the exact
+    // pre-call level, and a later command uses an ordinary outermost frame.
+    // A nested command failure caught by its outer callback must restore depth
+    // back to one until the outer dispatch itself completes.
+    {
+        auto state = std::make_shared<CaptureState>();
+        ui::Tree tree{ui::compile(ui::make_spec(CaptureProbe{state}))};
+        tree.mount();
+        tree.layout({120.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        ui::InputEvent copy{};
+        copy.type = ui::InputType::Command;
+        copy.command = ui::Command::Copy;
+
+        bool throw_once = true;
+        int global_calls = 0;
+        tree.set_global_command_handler([&](ui::Command) -> ui::EventResult {
+            ++global_calls;
+            if (throw_once) {
+                throw_once = false;
+                throw std::runtime_error("global command fault");
+            }
+            return ui::EventResult::Handled;
+        });
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(copy, platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 0);
+        NUI_CHECK(tree.dispatch(copy, platform) == ui::EventResult::Handled);
+        NUI_CHECK(global_calls == 2);
+        NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 0);
+
+        tree.set_global_command_handler([&](ui::Command command) -> ui::EventResult {
+            if (command == ui::Command::Paste) {
+                throw std::runtime_error("nested command fault");
+            }
+            if (command == ui::Command::Copy) {
+                NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 1);
+                ui::InputEvent nested{};
+                nested.type = ui::InputType::Command;
+                nested.command = ui::Command::Paste;
+                bool nested_threw = false;
+                try {
+                    (void)tree.dispatch(nested, platform);
+                } catch (const std::runtime_error&) {
+                    nested_threw = true;
+                }
+                NUI_CHECK(nested_threw);
+                NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 1);
+                return ui::EventResult::Handled;
+            }
+            return ui::EventResult::Ignored;
+        });
+
+        NUI_CHECK(tree.dispatch(copy, platform) == ui::EventResult::Handled);
+        NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 0);
     }
 }
 

@@ -208,28 +208,21 @@
                     }
                 }
 
-                active_drop_offer_ = &event->offer;
-                drop_offer_decided_ = false;
-                try {
-                    (void)ui_.dispatch(input, services_);
-                    if (!drop_offer_decided_) {
-                        (void)puglRejectOffer(view_,
-                                              &event->offer,
-                                              0,
-                                              0,
-                                              std::numeric_limits<uint32_t>::max(),
-                                              std::numeric_limits<uint32_t>::max());
-                    }
-                } catch (...) {
-                    // The offer event is borrowed from Pugl's callback stack.
-                    // Clear it using only no-throw state writes before the
-                    // foreign event thunk contains the exception.
-                    active_drop_offer_ = nullptr;
-                    drop_offer_decided_ = false;
-                    throw;
+                // Pugl owns this offer object only for the duration of the
+                // callback frame. Restore the exact previous borrow/decision
+                // state before the outer noexcept event thunk contains any
+                // exception. The scope guard performs scalar assignments only.
+                ScopedBorrowState offer_borrow{
+                    active_drop_offer_, drop_offer_decided_, &event->offer};
+                (void)ui_.dispatch(input, services_);
+                if (!drop_offer_decided_) {
+                    (void)puglRejectOffer(view_,
+                                          &event->offer,
+                                          0,
+                                          0,
+                                          std::numeric_limits<uint32_t>::max(),
+                                          std::numeric_limits<uint32_t>::max());
                 }
-                active_drop_offer_ = nullptr;
-                drop_offer_decided_ = false;
                 return PUGL_SUCCESS;
             }
 
