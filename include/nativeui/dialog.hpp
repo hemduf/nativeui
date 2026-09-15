@@ -696,14 +696,18 @@ private:
                    static_cast<bool>(state->pending_completion);
         }
 
-        // Outside retained dispatch the ordinary OverlayState transaction can
-        // commit directly. Clear controller-local state before invoking the
-        // application completion so a callback may immediately reuse Dialog.
-        (void)ui_->close_overlay(overlay_);
+        // Outside retained dispatch, keep the logical entry/lifetime published
+        // until retained reconciliation itself reaches the same safe checkpoint.
+        // Generic close_overlay() commits removal before that checkpoint and can
+        // therefore lose the only repair handle if reconciliation throws.
+        if (!ui_->overlay_state_->close_reconciled(
+                overlay_, [ui = ui_] { ui->prepare_overlay_layout(); })) {
+            return false;
+        }
         std::weak_ptr<int> lifetime = lifetime_;
         auto* self = this;
         try {
-            ui_->complete_dialog_close(
+            ui_->finish_dialog_completion(
                 generation,
                 [lifetime = std::move(lifetime),
                  self,
