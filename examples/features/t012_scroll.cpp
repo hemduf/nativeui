@@ -37,6 +37,37 @@ int main(int argc, char** argv) {
         if (!(scroll.max_offset().y > 0.0f)) return example::fail("scroll content did not overflow viewport");
         scroll.set_offset({0.0f, 10000.0f});
         if (!example::near(scroll.offset().y, scroll.max_offset().y)) return example::fail("scroll offset did not clamp");
+
+        // T127: the public Scroll builder and its realized retained component
+        // borrow ScrollState without owning it. A dead owner must make both the
+        // not-yet-realized factory and an already-realized tree inert rather
+        // than leaving a dangling retained dereference.
+        {
+            auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+            auto spec = std::move(ui::Scroll{*state, ui::Spacer{100.0f, 400.0f}}).spec();
+            state.reset();
+            auto component = spec.factory();
+            const std::vector<ui::ChildMetrics> child_metrics{
+                ui::ChildMetrics{{100.0f, 400.0f}}};
+            const auto minimum = component->minimum_size(child_metrics);
+            if (!example::near(minimum.h, 0.0f)) {
+                return example::fail("dead ScrollState factory did not stay lifetime-safe");
+            }
+        }
+
+        {
+            auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+            ui::UI retained{ui::Scroll{*state, ui::Spacer{100.0f, 400.0f}}};
+            ui::HeadlessRenderer retained_renderer{{100.0f, 100.0f}};
+            if (!retained_renderer.render(retained)) {
+                return example::fail("retained Scroll lifetime setup render failed");
+            }
+            state.reset();
+            retained_renderer.resize({120.0f, 120.0f});
+            if (!retained_renderer.render(retained)) {
+                return example::fail("retained Scroll dereferenced a dead ScrollState");
+            }
+        }
         return 0;
     }
 
