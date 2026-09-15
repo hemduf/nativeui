@@ -231,7 +231,7 @@ public:
         SkPaint paint;
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kStroke_Style);
-        paint.setStrokeWidth(width);
+        paint.setStrokeWidth(style.width);
         paint.setStrokeCap(to_sk_cap(style.cap));
         paint.setStrokeJoin(to_sk_join(style.join));
         paint.setStrokeMiter(std::max(0.0f, style.miter_limit));
