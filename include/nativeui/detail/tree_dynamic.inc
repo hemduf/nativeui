@@ -106,7 +106,16 @@
         ++structural_epoch_;
         if (std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
             dirty_dynamic_nodes_.end()) {
-            dirty_dynamic_nodes_.push_back(owner);
+            try {
+                dirty_dynamic_nodes_.push_back(owner);
+            } catch (...) {
+                // Keep a no-allocation recovery marker before propagating the
+                // enqueue failure. The next safe checkpoint retries every live
+                // dynamic owner, so this mutation cannot be silently lost even
+                // though recording the precise owner failed.
+                dynamic_reconcile_retry_all_ = true;
+                throw;
+            }
         }
 
         // Observers only enqueue structural work. They must not claim that
@@ -426,30 +435,57 @@
     }
 
     void flush_dynamic_mutations() {
-        if (reconciling_dynamic_ || !root_ || dirty_dynamic_nodes_.empty()) return;
+        if (reconciling_dynamic_ || !root_ ||
+            (dirty_dynamic_nodes_.empty() && !dynamic_reconcile_retry_all_)) {
+            return;
+        }
 
+        const bool previous_reconciling = reconciling_dynamic_;
         reconciling_dynamic_ = true;
         constexpr std::size_t kMaxStructuralPasses = 32;
         std::size_t pass = 0;
 
-        while (!dirty_dynamic_nodes_.empty() && pass < kMaxStructuralPasses) {
-            auto captured = std::move(dirty_dynamic_nodes_);
-            dirty_dynamic_nodes_.clear();
-
-            std::vector<NodeId> ordered;
-            ordered.reserve(captured.size());
-            collect_dirty_dynamic_nodes(*root_, captured, ordered);
-
-            for (const auto owner : ordered) {
-                if (auto* node = find_node_mutable(*root_, owner)) {
-                    (void)reconcile_dynamic_node(*node);
+        try {
+            while ((!dirty_dynamic_nodes_.empty() || dynamic_reconcile_retry_all_) &&
+                   pass < kMaxStructuralPasses) {
+                std::vector<NodeId> captured;
+                if (dynamic_reconcile_retry_all_) {
+                    // The prior exact owner list could not be retained safely.
+                    // Rebuild a conservative snapshot from all live dynamic
+                    // records before clearing the coarse retry marker.
+                    captured.reserve(dynamic_records_.size());
+                    for (const auto& record : dynamic_records_) {
+                        captured.push_back(record.owner);
+                    }
+                    dynamic_reconcile_retry_all_ = false;
+                    dirty_dynamic_nodes_.clear();
+                } else {
+                    captured = std::move(dirty_dynamic_nodes_);
+                    dirty_dynamic_nodes_.clear();
                 }
+
+                std::vector<NodeId> ordered;
+                ordered.reserve(captured.size());
+                collect_dirty_dynamic_nodes(*root_, captured, ordered);
+
+                for (const auto owner : ordered) {
+                    if (auto* node = find_node_mutable(*root_, owner)) {
+                        (void)reconcile_dynamic_node(*node);
+                    }
+                }
+                ++pass;
             }
-            ++pass;
+            reconciling_dynamic_ = previous_reconciling;
+        } catch (...) {
+            // No allocation and no component callback is allowed during unwind.
+            // A coarse retry marker preserves the captured owner, any owners not
+            // yet processed, and mutations queued re-entrantly before the throw.
+            dynamic_reconcile_retry_all_ = true;
+            reconciling_dynamic_ = previous_reconciling;
+            throw;
         }
 
-        reconciling_dynamic_ = false;
-        if (!dirty_dynamic_nodes_.empty()) {
+        if (dynamic_reconcile_retry_all_ || !dirty_dynamic_nodes_.empty()) {
             structural_diagnostic_ = "structural reconciliation pass limit exceeded";
             invalidate_paint(viewport_rect());
         }
@@ -461,4 +497,5 @@
     std::uint64_t structural_epoch_{};
     bool runtime_node_ids_initialized_{};
     bool reconciling_dynamic_{};
+    bool dynamic_reconcile_retry_all_{};
     std::string structural_diagnostic_;
