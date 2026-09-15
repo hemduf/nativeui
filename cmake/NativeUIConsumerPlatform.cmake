@@ -209,19 +209,15 @@ function(_nativeui_prepare_macos_platform_common)
     endif()
   endif()
 
-  # Dependencies.cmake still defines its historical all-in-one Pugl target for
-  # non-macOS platforms. It is intentionally unreachable/excluded on macOS once
-  # T053 rewires NativeUI::NativeUI to this generic common target plus a final-
-  # consumer bridge.
   if(TARGET nativeui_pugl)
     set_target_properties(nativeui_pugl PROPERTIES EXCLUDE_FROM_ALL TRUE)
   endif()
 endfunction()
 
-# Installed packages do not export a generic NativeUI::NativeUI platform target:
-# T047's public surface is NativeUI::Core + nativeui_attach_platform(). Build the
-# private generic C++/Pugl layer lazily in the consuming build when that helper is
-# actually called. macOS still keeps Objective-C bridge sources per final target.
+# Installed packages expose NativeUI::Core plus nativeui_attach_platform(). The
+# generic platform implementation is package-private and is created lazily when
+# the helper is actually called. macOS still keeps Objective-C bridge sources
+# per final target so T053 runtime names remain consumer-specific.
 function(_nativeui_prepare_package_platform out_var)
   if(TARGET _nativeui_package_platform)
     set(${out_var} _nativeui_package_platform PARENT_SCOPE)
@@ -323,15 +319,15 @@ function(_nativeui_prepare_package_platform out_var)
   endif()
   target_link_libraries(_nativeui_package_platform
     PUBLIC NativeUI::Core
-    PRIVATE "${_nativeui_pugl_target}" "${_nativeui_opengl_target}"
+    PRIVATE SkiaBuilder::skia "${_nativeui_pugl_target}" "${_nativeui_opengl_target}"
   )
 
   set(${out_var} _nativeui_package_platform PARENT_SCOPE)
 endfunction()
 
-# Internal T053 source-tree/package primitive. T047 supplies the public
-# nativeui_attach_platform() validation wrapper; all high-level helpers must
-# delegate here instead of reproducing the prefix or bridge logic.
+# Internal source-tree/package primitive. T047 supplies the public
+# nativeui_attach_platform() validation wrapper; all high-level helpers delegate
+# here instead of reproducing the prefix or bridge logic.
 function(_nativeui_attach_consumer_platform)
   cmake_parse_arguments(PARSE_ARGV 0 NUI "" "TARGET;CONSUMER_ID;OUT_BRIDGE" "")
   if(NUI_UNPARSED_ARGUMENTS)
@@ -348,8 +344,8 @@ function(_nativeui_attach_consumer_platform)
     message(FATAL_ERROR "NativeUI consumer platform attachment requires CONSUMER_ID")
   endif()
 
-  if(TARGET NativeUI::NativeUI)
-    set(_nativeui_platform_target NativeUI::NativeUI)
+  if(TARGET nativeui)
+    set(_nativeui_platform_target nativeui)
   else()
     _nativeui_prepare_package_platform(_nativeui_platform_target)
   endif()
@@ -416,10 +412,6 @@ function(_nativeui_attach_consumer_platform)
         nativeui_enable_project_warnings("${_nativeui_bridge}")
       endif()
 
-      # Xcode's Foundation MIN/MAX macros use GNU statement expressions. Pugl's
-      # mac.m calls those system macros with side-effect-free arguments, so keep
-      # the project-wide pedantic warning policy and disable only Clang's narrow
-      # macro-expansion diagnostic for this Objective-C bridge.
       if(CMAKE_OBJC_COMPILER_ID MATCHES "Clang")
         target_compile_options("${_nativeui_bridge}" PRIVATE
           -Wno-gnu-statement-expression-from-macro-expansion

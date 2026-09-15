@@ -91,12 +91,6 @@ public:
         return true;
     }
 
-    /// Apply one authoritative native configure snapshot. A valid reported
-    /// scale is adopted even if the physical extent is transiently zero, but
-    /// zero/non-finite extents preserve the last valid logical viewport and do
-    /// not produce a layout size. The most recent scale-observation validity is
-    /// retained so the platform owner can publish a bounded diagnostic without
-    /// changing the non-fatal fallback behavior.
     [[nodiscard]] std::optional<Size> configure(Size physical, float reported_scale) noexcept {
         (void)observe_scale(reported_scale);
         if (!valid_physical_extent(physical)) {
@@ -111,9 +105,6 @@ public:
         return logical_size_;
     }
 
-    /// Convert a public logical request without mutating authoritative size
-    /// state. The caller records the pending request only after the native API
-    /// has accepted the physical request.
     [[nodiscard]] std::optional<Size> physical_request(Size logical) const noexcept {
         if (!valid_logical_size(logical)) return std::nullopt;
         return logical_to_physical_size(logical, last_valid_scale_);
@@ -132,9 +123,6 @@ private:
     std::optional<Size> pending_request_;
 };
 
-/// Submit one public logical-size request at the native boundary. The native
-/// request callback is invoked at most once, and authoritative logical size is
-/// deliberately left unchanged until a configure snapshot is received.
 template <class NativeRequest>
 [[nodiscard]] bool submit_logical_size_request(ViewGeometryState& geometry,
                                                Size logical,
@@ -146,9 +134,6 @@ template <class NativeRequest>
     return true;
 }
 
-/// Apply one authoritative native configure snapshot and dispatch at most one
-/// layout resize for it. Native request submission is intentionally absent
-/// from this path so a request echo cannot recurse back into the platform.
 template <class Resize>
 [[nodiscard]] std::optional<Size> apply_authoritative_configure(ViewGeometryState& geometry,
                                                                  Size physical,
@@ -181,17 +166,10 @@ public:
         const Size next = *pending_;
         pending_.reset();
         if (last_notified_ && !differs(next, *last_notified_)) return false;
-
-        // Publish the current value before entering user code. A synchronous
-        // queue of the same value is therefore coalesced, while a new value is
-        // retained for the next safe checkpoint rather than recursively fired.
         last_notified_ = next;
 
-        // The callback may destroy the owning window/view and therefore this
-        // PreferredSizeState. Keep the in-flight marker in separately owned
-        // storage so returning from user code never touches destroyed owner
-        // memory. Reentrant dispatches observe the weak token while it is live.
-        auto dispatch_token = std::make_shared<unsigned char>(0);
+        auto dispatch_token =
+            std::make_shared<unsigned char>(static_cast<unsigned char>(0));
         dispatch_token_ = dispatch_token;
         std::forward<Callback>(callback)(next);
         return true;

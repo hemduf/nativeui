@@ -31,18 +31,24 @@ foreach(_module IN ITEMS NativeUIBinaryData.cmake NativeUIEmbedResource.cmake)
   endif()
 endforeach()
 
-# Public-header isolation is an extensible list. Do not make T056 depend on
-# adjacency between its header and later public headers: adding a new isolated
-# compile probe must not invalidate the older EmbeddedResourceEntry contract.
-string(REGEX MATCH "foreach\\(_header IN ITEMS [^\n]*\\)" _header_compile_list "${_root_cmake}")
-if(_header_compile_list STREQUAL "")
-  message(FATAL_ERROR "T056 package source contract: public-header compile list is missing")
-endif()
-foreach(_header IN ITEMS embedded_resource resource_manager)
-  string(FIND " ${_header_compile_list} " " ${_header} " _header_compile)
-  if(_header_compile EQUAL -1)
+# T069 made public-header isolation exhaustive instead of maintaining a stale
+# hand-written list. Verify the discovery mechanism and the older T056 headers
+# it must cover, without coupling this contract to header ordering.
+foreach(_needle IN ITEMS
+    "file(GLOB _nativeui_public_headers CONFIGURE_DEPENDS"
+    "include/nativeui/*.hpp"
+    "foreach(_header_file IN LISTS _nativeui_public_headers)"
+    "file(GENERATE OUTPUT")
+  string(FIND "${_root_cmake}" "${_needle}" _header_contract)
+  if(_header_contract EQUAL -1)
     message(FATAL_ERROR
-      "T056 package source contract: ${_header}.hpp lacks isolated public-header compilation")
+      "T056 package source contract: exhaustive public-header isolation is missing: ${_needle}")
+  endif()
+endforeach()
+foreach(_header IN ITEMS embedded_resource resource_manager)
+  if(NOT EXISTS "${SOURCE_DIR}/include/nativeui/${_header}.hpp")
+    message(FATAL_ERROR
+      "T056 package source contract: ${_header}.hpp is missing from exhaustive public-header discovery")
   endif()
 endforeach()
 

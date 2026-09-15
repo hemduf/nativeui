@@ -18,7 +18,7 @@ function(_nativeui_linux_dbus_source_root out_var)
 endfunction()
 
 function(_nativeui_link_linux_dbus_transport target)
-  if(TARGET NativeUI::NativeUI)
+  if(TARGET nativeui)
     target_link_libraries(nativeui PRIVATE "${target}")
   elseif(TARGET _nativeui_package_platform)
     target_link_libraries(_nativeui_package_platform PRIVATE "${target}")
