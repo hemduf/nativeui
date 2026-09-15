@@ -1,5 +1,8 @@
 #include <nativeui/nativeui.hpp>
 
+#include <string>
+#include <vector>
+
 int main() {
     ui::State<bool> enabled{true};
     ui::State<float> drive{0.5f};
@@ -30,6 +33,36 @@ int main() {
     ui::State<std::string> bound_text{"bound"};
     [[maybe_unused]] auto legacy_text_spec = ui::TextInput{"Legacy text", legacy_text}.spec();
     [[maybe_unused]] auto binding_text_spec = ui::TextInput{"Binding text", bound_text.binding()}.spec();
+
+    // T141: installed/relocated consumers compile both first-class Binding and
+    // legacy State syntax for retained dynamic composition and focus scopes.
+    ui::State<bool> visible{true};
+    ui::State<int> page{1};
+    ui::State<std::vector<int>> items{{1, 2}};
+    ui::State<bool> focus_active{true};
+
+    [[maybe_unused]] auto binding_if = ui::If{visible.binding(), ui::Label{"Binding If"}}.spec();
+    [[maybe_unused]] auto legacy_if = ui::If{visible, ui::Label{"Legacy If"}}.spec();
+    [[maybe_unused]] auto binding_switch = ui::Switch<int>{page.binding()}
+        .when(1, ui::Label{"Binding Switch"})
+        .otherwise(ui::Label{"Binding fallback"})
+        .spec();
+    [[maybe_unused]] auto legacy_switch = ui::Switch<int>{page}
+        .when(1, ui::Label{"Legacy Switch"})
+        .otherwise(ui::Label{"Legacy fallback"})
+        .spec();
+    [[maybe_unused]] auto binding_each = ui::ForEach<int>{
+        items.binding(),
+        [](int value) { return value; },
+        [](int value) { return ui::Label{std::to_string(value)}; }}.spec();
+    [[maybe_unused]] auto legacy_each = ui::ForEach<int>{
+        items,
+        [](int value) { return value; },
+        [](int value) { return ui::Label{std::to_string(value)}; }}.spec();
+    [[maybe_unused]] auto binding_focus = ui::FocusScope{
+        focus_active.binding(), ui::Label{"Binding focus"}}.spec();
+    [[maybe_unused]] auto legacy_focus = ui::FocusScope{
+        focus_active, ui::Label{"Legacy focus"}}.spec();
 
     ui::HeadlessRenderer renderer{{160.0f, 80.0f}};
     if (!renderer.render(ui_tree)) return 1;
