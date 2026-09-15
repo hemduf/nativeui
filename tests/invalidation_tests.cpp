@@ -2,8 +2,13 @@
 
 #include "include/core/SkCanvas.h"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+#include <nativeui/detail/virtual_list_retained.hpp>
+
+#include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -11,8 +16,12 @@ namespace {
 
 struct InvalidationProbeState {
     int measures{};
+    ui::NodeId node_id{ui::kInvalidNodeId};
+    ui::ComponentAvailability availability{};
     std::function<void()> invalidate_paint;
     std::function<void()> invalidate_layout;
+    std::function<void()> invalidate_focus;
+    std::function<void()> invalidate_availability;
 };
 
 class InvalidationProbeComponent final : public ui::Component {
@@ -25,9 +34,16 @@ public:
         return {100.0f, 40.0f};
     }
 
+    [[nodiscard]] ui::ComponentAvailability local_availability() const noexcept override {
+        return state_->availability;
+    }
+
     void mount(ui::MountContext& context) override {
+        state_->node_id = context.node_id();
         state_->invalidate_paint = context.invalidator();
         state_->invalidate_layout = context.layout_invalidator();
+        state_->invalidate_focus = context.focus_invalidator();
+        state_->invalidate_availability = context.availability_invalidator();
     }
 
     void paint(ui::PaintContext&) const override {}
@@ -54,11 +70,425 @@ private:
     std::shared_ptr<InvalidationProbeState> state_;
 };
 
+class SpecRoot {
+public:
+    explicit SpecRoot(ui::Spec value) : value_(std::move(value)) {}
+    [[nodiscard]] ui::Spec spec() && { return std::move(value_); }
+
+private:
+    ui::Spec value_;
+};
+
+struct RetainedTeardownProbeState {
+    std::shared_ptr<InvalidationProbeState> ancestor;
+    std::function<std::optional<ui::ComponentAvailability>()> read_ancestor_availability;
+    std::optional<ui::ComponentAvailability> observed_during_descendant_unmount;
+    int descendant_unmounts{};
+};
+
+class RetainedTeardownDescendantComponent final : public ui::Component {
+public:
+    explicit RetainedTeardownDescendantComponent(std::shared_ptr<RetainedTeardownProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {10.0f, 10.0f};
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++state_->descendant_unmounts;
+        state_->ancestor->availability.enabled = false;
+        state_->ancestor->invalidate_availability();
+        if (state_->read_ancestor_availability) {
+            state_->observed_during_descendant_unmount = state_->read_ancestor_availability();
+        }
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<RetainedTeardownProbeState> state_;
+};
+
+class RetainedInvalidationContainerComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {160.0f, 80.0f};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
 void check_rect(ui::Rect actual, ui::Rect expected) {
     NUI_CHECK_NEAR(actual.x, expected.x, 0.0001f);
     NUI_CHECK_NEAR(actual.y, expected.y, 0.0001f);
     NUI_CHECK_NEAR(actual.w, expected.w, 0.0001f);
     NUI_CHECK_NEAR(actual.h, expected.h, 0.0001f);
+}
+
+void invoke_retained_invalidators(const InvalidationProbeState& probe) {
+    probe.invalidate_paint();
+    probe.invalidate_layout();
+    probe.invalidate_focus();
+    probe.invalidate_availability();
+}
+
+void retained_invalidator_stale_node_contract() {
+    auto probe = std::make_shared<InvalidationProbeState>();
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::UI tree{ui::If{visible, InvalidationProbe{probe}}};
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    auto previous_id = probe->node_id;
+    std::vector<ui::NodeId> observed_ids{previous_id};
+    const auto first_stale_paint = probe->invalidate_paint;
+    const auto first_stale_layout = probe->invalidate_layout;
+    const auto first_stale_focus = probe->invalidate_focus;
+    const auto first_stale_availability = probe->invalidate_availability;
+
+    for (int cycle = 0; cycle < 4; ++cycle) {
+        const auto stale_paint = probe->invalidate_paint;
+        const auto stale_layout = probe->invalidate_layout;
+        const auto stale_focus = probe->invalidate_focus;
+        const auto stale_availability = probe->invalidate_availability;
+
+        visible.set(false);
+        tree.resize({200.0f, 100.0f});
+        tree.paint(canvas, platform);
+        NUI_CHECK(!tree.dirty());
+
+        stale_paint();
+        stale_layout();
+        stale_focus();
+        stale_availability();
+        NUI_CHECK(!tree.dirty());
+
+        visible.set(true);
+        tree.resize({200.0f, 100.0f});
+        tree.paint(canvas, platform);
+        NUI_CHECK(probe->node_id != ui::kInvalidNodeId);
+        NUI_CHECK(probe->node_id > previous_id);
+        NUI_CHECK(std::find(observed_ids.begin(), observed_ids.end(), probe->node_id) ==
+                  observed_ids.end());
+        observed_ids.push_back(probe->node_id);
+        previous_id = probe->node_id;
+        NUI_CHECK(!tree.dirty());
+
+        stale_paint();
+        stale_layout();
+        stale_focus();
+        stale_availability();
+        NUI_CHECK(!tree.dirty());
+
+        first_stale_paint();
+        first_stale_layout();
+        first_stale_focus();
+        first_stale_availability();
+        NUI_CHECK(!tree.dirty());
+    }
+}
+
+void retained_invalidator_tree_lifetime_contract() {
+    std::function<void()> stale_paint;
+    std::function<void()> stale_layout;
+    std::function<void()> stale_focus;
+    std::function<void()> stale_availability;
+
+    {
+        auto probe = std::make_shared<InvalidationProbeState>();
+        ui::UI tree{InvalidationProbe{probe}};
+        test::MockPlatform platform;
+        SkCanvas canvas;
+        tree.resize({160.0f, 80.0f});
+        tree.paint(canvas, platform);
+
+        stale_paint = probe->invalidate_paint;
+        stale_layout = probe->invalidate_layout;
+        stale_focus = probe->invalidate_focus;
+        stale_availability = probe->invalidate_availability;
+    }
+
+    stale_paint();
+    stale_layout();
+    stale_focus();
+    stale_availability();
+}
+
+void retained_invalidator_unmount_remount_contract() {
+    auto probe = std::make_shared<InvalidationProbeState>();
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::Tree tree{ui::compile(ui::make_spec(InvalidationProbe{probe}))};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    const auto first_mount = *probe;
+    NUI_CHECK(first_mount.node_id != ui::kInvalidNodeId);
+
+    tree.unmount();
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(first_mount);
+    NUI_CHECK(!tree.dirty());
+
+    tree.mount();
+    NUI_CHECK(probe->node_id == first_mount.node_id);
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    // A remount deliberately reuses the retained NodeId, so only a fresh
+    // retained-invalidation generation can keep first-mount callbacks stale.
+    invoke_retained_invalidators(first_mount);
+    NUI_CHECK(!tree.dirty());
+
+    const auto second_mount = *probe;
+    second_mount.invalidate_paint();
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    second_mount.invalidate_layout();
+    NUI_CHECK(tree.layout_dirty());
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    second_mount.invalidate_focus();
+    NUI_CHECK(tree.paint_dirty());
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    probe->availability.enabled = false;
+    first_mount.invalidate_availability();
+    const auto before_fresh_availability = tree.component_availability(second_mount.node_id);
+    NUI_CHECK(before_fresh_availability.has_value());
+    NUI_CHECK(before_fresh_availability->enabled);
+
+    second_mount.invalidate_availability();
+    const auto after_fresh_availability = tree.component_availability(second_mount.node_id);
+    NUI_CHECK(after_fresh_availability.has_value());
+    NUI_CHECK(!after_fresh_availability->enabled);
+}
+
+void retained_invalidator_dynamic_remount_membership_contract() {
+    auto dynamic_probe = std::make_shared<InvalidationProbeState>();
+    auto sibling_probe = std::make_shared<InvalidationProbeState>();
+    ui::State<bool> visible{false};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::Spec root{
+        [] { return std::make_unique<RetainedInvalidationContainerComponent>(); },
+        {ui::make_spec(ui::If{visible, InvalidationProbe{dynamic_probe}}),
+         ui::make_spec(InvalidationProbe{sibling_probe})}};
+    ui::Tree tree{ui::compile(std::move(root))};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    const auto sibling_id = sibling_probe->node_id;
+    NUI_CHECK(sibling_id != ui::kInvalidNodeId);
+
+    // Insert a runtime node before an older sibling in retained-tree order. The
+    // new NodeId is monotonic and therefore greater than the sibling id even
+    // though traversal encounters it first on a later whole-Tree remount.
+    visible.set(true);
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(dynamic_probe->node_id > sibling_id);
+    NUI_CHECK(!tree.dirty());
+
+    tree.unmount();
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(sibling_probe->node_id == sibling_id);
+    NUI_CHECK(dynamic_probe->node_id > sibling_id);
+    NUI_CHECK(!tree.dirty());
+
+    // Fresh callbacks issued by the remount must resolve every live id even
+    // when retained traversal order no longer matches NodeId order.
+    sibling_probe->availability.enabled = false;
+    sibling_probe->invalidate_availability();
+    const auto sibling_availability = tree.component_availability(sibling_id);
+    NUI_CHECK(sibling_availability.has_value());
+    NUI_CHECK(!sibling_availability->enabled);
+}
+
+void retained_invalidator_terminal_subtree_boundary_contract() {
+    auto ancestor = std::make_shared<InvalidationProbeState>();
+    auto teardown = std::make_shared<RetainedTeardownProbeState>();
+    teardown->ancestor = ancestor;
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::Spec subtree{
+        [ancestor] { return std::make_unique<InvalidationProbeComponent>(ancestor); },
+        {ui::Spec{
+            [teardown] {
+                return std::make_unique<RetainedTeardownDescendantComponent>(teardown);
+            },
+            {}}}};
+    ui::UI tree{ui::If{visible, SpecRoot{std::move(subtree)}}};
+    tree.resize({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(ancestor->node_id != ui::kInvalidNodeId);
+
+    const auto ancestor_id = ancestor->node_id;
+    const auto initial = tree.component_availability(ancestor_id);
+    NUI_CHECK(initial.has_value());
+    NUI_CHECK(initial->enabled);
+    teardown->read_ancestor_availability = [&tree, ancestor_id] {
+        return tree.component_availability(ancestor_id);
+    };
+
+    visible.set(false);
+    tree.resize({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+
+    NUI_CHECK(teardown->descendant_unmounts == 1);
+    NUI_CHECK(teardown->observed_during_descendant_unmount.has_value());
+    NUI_CHECK(teardown->observed_during_descendant_unmount->enabled);
+    NUI_CHECK(!tree.dirty());
+}
+
+void retained_animation_target_removal_contract() {
+    auto probe = std::make_shared<InvalidationProbeState>();
+    ui::State<bool> visible{true};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    ui::UI tree{ui::If{visible, InvalidationProbe{probe}}};
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+    ui::detail::DispatcherOwner owner{{}, clock};
+    ui::AnimationContext animations{owner.dispatcher()};
+    float value = 0.0f;
+    const auto handle = animations.start_tween(
+        0.0f,
+        1.0f,
+        ui::DispatcherDuration{1.0},
+        ui::Easing::Linear,
+        ui::AnimationInvalidation::Paint,
+        ui::AnimationInvalidationTarget{probe->invalidate_paint, probe->invalidate_layout},
+        [&](float next) { value = next; });
+    NUI_CHECK(handle.valid());
+
+    visible.set(false);
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    clock->advance(ui::DispatcherDuration{0.5});
+    NUI_CHECK(owner.checkpoint() == 1);
+    NUI_CHECK(value > 0.0f);
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(animations.cancel(handle));
+}
+
+void retained_overlay_dialog_removal_contract() {
+    test::MockPlatform platform;
+    SkCanvas canvas;
+    ui::UI tree{ui::Spacer{200.0f, 100.0f}};
+    tree.resize({200.0f, 100.0f});
+    tree.activate(platform);
+    tree.paint(canvas, platform);
+
+    auto overlay_probe = std::make_shared<InvalidationProbeState>();
+    ui::OverlaySpec overlay;
+    overlay.placement = ui::OverlayPlacement::Center;
+    overlay.content = ui::make_spec(InvalidationProbe{overlay_probe});
+    const auto overlay_handle = tree.show_overlay(std::move(overlay));
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(overlay_handle.valid());
+    NUI_CHECK(overlay_probe->node_id != ui::kInvalidNodeId);
+
+    const auto overlay_stale = *overlay_probe;
+    NUI_CHECK(tree.close_overlay(overlay_handle));
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(overlay_stale);
+    NUI_CHECK(!tree.dirty());
+
+    auto dialog_probe = std::make_shared<InvalidationProbeState>();
+    int completions = 0;
+    ui::Dialog dialog{tree};
+    ui::DialogSpec spec;
+    spec.title = "Lifetime";
+    spec.body = ui::make_spec(InvalidationProbe{dialog_probe});
+    NUI_CHECK(dialog.show(
+                  std::move(spec),
+                  [&](ui::DialogResult) { ++completions; }) == ui::DialogShowResult::Shown);
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(dialog_probe->node_id != ui::kInvalidNodeId);
+
+    const auto dialog_stale = *dialog_probe;
+    NUI_CHECK(dialog.close());
+    tree.resize({200.0f, 100.0f});
+    tree.paint(canvas, platform);
+    NUI_CHECK(completions == 1);
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(dialog_stale);
+    NUI_CHECK(!tree.dirty());
+}
+
+void retained_virtual_list_recycling_contract() {
+    using Runtime = ui::detail::VirtualListRetainedRuntime<int>;
+
+    auto probe = std::make_shared<InvalidationProbeState>();
+    auto runtime = std::make_shared<Runtime>(
+        20.0f,
+        [probe](const Runtime::Item& item) {
+            if (item.key == 0) return ui::make_spec(InvalidationProbe{probe});
+            return ui::make_spec(ui::Spacer{100.0f, 20.0f});
+        });
+
+    std::vector<Runtime::Item> items;
+    items.reserve(100);
+    for (int index = 0; index < 100; ++index) {
+        items.emplace_back(index, "row");
+    }
+    NUI_CHECK(runtime->replace(std::move(items)));
+
+    ui::UI tree{SpecRoot{ui::detail::make_virtual_list_retained_spec(runtime)}};
+    ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(!tree.dirty());
+    NUI_CHECK(probe->node_id != ui::kInvalidNodeId);
+
+    const auto removed_id = probe->node_id;
+    const auto stale = *probe;
+    runtime->scroll().set_offset({0.0f, 400.0f});
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(stale);
+    NUI_CHECK(!tree.dirty());
+
+    runtime->scroll().set_offset({0.0f, 0.0f});
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(probe->node_id != ui::kInvalidNodeId);
+    NUI_CHECK(probe->node_id != removed_id);
+    NUI_CHECK(!tree.dirty());
+    invoke_retained_invalidators(stale);
+    NUI_CHECK(!tree.dirty());
 }
 
 void theme_change_classification() {
@@ -132,7 +562,6 @@ void ui_theme_ownership_and_invalidation() {
 }
 
 void suite() {
-    // Dirty rectangles are clipped, merged, and duplicate coverage is ignored.
     {
         ui::DirtyRegion dirty;
         const ui::Rect clip{0.0f, 0.0f, 100.0f, 80.0f};
@@ -149,7 +578,6 @@ void suite() {
         NUI_CHECK(!dirty.add({120.0f, 0.0f, 5.0f, 5.0f}, clip).has_value());
     }
 
-    // Component paint invalidation is local and never forces a layout pass.
     {
         auto probe = std::make_shared<InvalidationProbeState>();
         ui::UI tree{ui::Padding{10.0f, InvalidationProbe{probe}}};
@@ -173,7 +601,6 @@ void suite() {
         check_rect(exposures.back(), {10.0f, 10.0f, 180.0f, 80.0f});
         NUI_CHECK(probe->measures == measures_after_layout);
 
-        // A duplicate paint invalidation does not schedule another exposure.
         probe->invalidate_paint();
         NUI_CHECK(exposures.size() == 1);
 
@@ -181,8 +608,6 @@ void suite() {
         NUI_CHECK(!tree.dirty());
         NUI_CHECK(probe->measures == measures_after_layout);
 
-        // Layout invalidation propagates to ancestors, schedules a safe full
-        // repaint, and re-runs layout lazily immediately before paint.
         exposures.clear();
         probe->invalidate_layout();
         NUI_CHECK(tree.layout_dirty());
@@ -196,13 +621,11 @@ void suite() {
         NUI_CHECK(!tree.paint_dirty());
         NUI_CHECK(probe->measures > measures_after_layout);
 
-        // Painting an already-clean tree never schedules a redraw by itself.
         exposures.clear();
         tree.paint(canvas, platform);
         NUI_CHECK(exposures.empty());
     }
 
-    // Existing state-bound widgets use paint-only invalidation by default.
     {
         ui::State<float> value{0.25f};
         ui::UI tree{ui::Knob{"Value", value}};
@@ -217,6 +640,14 @@ void suite() {
         NUI_CHECK(!tree.layout_dirty());
     }
 
+    retained_invalidator_stale_node_contract();
+    retained_invalidator_tree_lifetime_contract();
+    retained_invalidator_unmount_remount_contract();
+    retained_invalidator_dynamic_remount_membership_contract();
+    retained_invalidator_terminal_subtree_boundary_contract();
+    retained_animation_target_removal_contract();
+    retained_overlay_dialog_removal_contract();
+    retained_virtual_list_recycling_contract();
     theme_change_classification();
     ui_theme_ownership_and_invalidation();
 }
