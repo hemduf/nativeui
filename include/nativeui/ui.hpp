@@ -522,8 +522,8 @@ private:
         // step fails, a later outer dispatch retries the same command; the
         // application callback has not begun and therefore cannot run twice.
         try {
-            (void)close_overlay(command.handle);
-            prepare_overlay_layout();
+            (void)overlay_state_->close_reconciled(
+                command.handle, [this] { prepare_overlay_layout(); });
         } catch (...) {
             overlay_command_retry_.emplace(std::move(*pending));
             throw;
