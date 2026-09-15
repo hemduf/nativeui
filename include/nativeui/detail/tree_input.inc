@@ -114,11 +114,22 @@
         event.type = InputType::PointerCancel;
         // Keep the owner recorded while routing so release_pointer() remains
         // idempotent, but prevent a cancellation handler from re-capturing.
+        // Restore the exact prior guard value and terminate the stale capture
+        // even when application code throws. Cleanup performs no component
+        // callback, so the original exception can propagate to the C++ caller
+        // while the later input route remains usable.
+        const bool previous_cancelling = cancelling_pointer_capture_;
         cancelling_pointer_capture_ = true;
-        const auto result = route_from(*owner, event, platform);
-        cancelling_pointer_capture_ = false;
-        clear_pointer_capture();
-        return result;
+        try {
+            const auto result = route_from(*owner, event, platform);
+            cancelling_pointer_capture_ = previous_cancelling;
+            clear_pointer_capture();
+            return result;
+        } catch (...) {
+            cancelling_pointer_capture_ = previous_cancelling;
+            clear_pointer_capture();
+            throw;
+        }
     }
 
     [[nodiscard]] EventResult send_to(
@@ -130,7 +141,21 @@
             unsafe_layout_invalidator(node),
             [this, &node] { set_pointer_capture(node); },
             [this, &node] { release_pointer_capture(node); }};
-        return node.component->input(event, context);
+        try {
+            return node.component->input(event, context);
+        } catch (...) {
+            if (event.type == InputType::PointerDown ||
+                event.type == InputType::PointerUp ||
+                event.type == InputType::PointerCancel) {
+                // Component input may acquire or retain capture before throwing.
+                // Framework-only cleanup is noexcept and performs no component
+                // callback, so later pointer input starts from a coherent idle
+                // interaction instead of inheriting a failed native capture.
+                clear_pointer_capture();
+                pointer_interaction_active_ = false;
+            }
+            throw;
+        }
     }
 
     std::unique_ptr<Node> root_;
