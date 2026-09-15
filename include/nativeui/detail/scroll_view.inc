@@ -709,7 +709,10 @@ class ScrollView {
 public:
     template <class Child>
     ScrollView(ScrollState& state, Child&& child)
-        : state_(&state), content_(make_spec(std::forward<Child>(child))) {}
+        : state_(&state),
+          axis_(state.axis()),
+          lifetime_(state.lifetime_token()),
+          content_(make_spec(std::forward<Child>(child))) {}
 
     ScrollView&& pointer_pan(bool enabled = true) && {
         pointer_pan_ = enabled;
@@ -723,8 +726,8 @@ public:
 
     Spec spec() && {
         auto* state = state_;
-        const auto axis = state_->axis();
-        const auto lifetime = state_->lifetime_token();
+        const auto axis = axis_;
+        const auto lifetime = lifetime_;
 
         std::vector<Spec> scroll_children;
         scroll_children.push_back(std::move(content_));
@@ -765,6 +768,8 @@ public:
 
 private:
     ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
     Spec content_;
     bool pointer_pan_{};
     ScrollbarStyle style_;
