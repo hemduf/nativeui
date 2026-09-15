@@ -476,12 +476,22 @@ private:
             OverlayHandle handle;
             try {
                 handle = show_overlay(std::move(command.overlay));
+                // A component popup is not published back to its opener until
+                // the retained overlay branch reaches the same safe checkpoint
+                // that input/paint will observe. If reconciliation throws after
+                // OverlayState::show() committed, the opener still has no
+                // usable handle and this command must roll that provisional
+                // publication back before the original exception propagates.
+                prepare_overlay_layout();
             } catch (...) {
-                // A failed show did not commit an OverlayState entry. The
-                // component command itself has already been consumed, so reset
-                // its opener suppression through the existing invalid-handle
-                // acknowledgement before propagating the original failure.
                 auto failure = std::current_exception();
+                if (handle.valid()) {
+                    // The show command has not acknowledged the handle yet, so
+                    // there is no future retry owner. Use the terminal internal
+                    // cleanup seam to remove only this exact overlay while
+                    // containing any secondary invalidation failure.
+                    (void)overlay_state_->close_noexcept(handle);
+                }
                 try {
                     if (on_shown) on_shown({});
                 } catch (...) {
@@ -490,7 +500,6 @@ private:
             }
 
             if (on_shown) on_shown(handle);
-            prepare_overlay_layout();
             enforce_new_modal_capture_barrier(platform);
             return;
         }
