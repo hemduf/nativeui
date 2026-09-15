@@ -22,6 +22,7 @@ enum class NativeFault {
 
 struct FaultState {
     NativeFault fault{NativeFault::None};
+    bool throw_focus_gain{};
     bool throw_pointer_cancel{};
     bool throw_focus_loss{};
     bool throw_deactivate{};
@@ -65,6 +66,9 @@ public:
     void focus_changed(bool focused, ui::FocusContext&) override {
         if (focused) {
             ++state_->focus_gain_calls;
+            if (state_->throw_focus_gain) {
+                throw std::runtime_error("T130 injected activation focus failure");
+            }
             return;
         }
         ++state_->focus_loss_calls;
@@ -178,6 +182,59 @@ int main() {
                            .resizable = true});
         if (failed.valid()) return fail("injected construction failure produced a valid window");
         if (failed.native_handle()) return fail("failed construction retained a public native handle");
+    }
+
+    // Activation is not committed merely because component activate() returned.
+    // A later focus callback can still fail after active/platform publication.
+    // The failed transition must perform best-effort deactivation and a retry on
+    // the same UI/platform must execute a fresh activation rather than no-op on
+    // stale active_ state.
+    {
+        FaultState activation_fault{};
+        ui::UI activation_tree{FaultRoot{activation_fault}};
+        ui::StandaloneWindow activation_window(
+            app,
+            activation_tree,
+            ui::WindowDesc{.title = "T130 activation rollback",
+                           .size = {300.0f, 160.0f},
+                           .resizable = true});
+        if (!activation_window.valid()) return fail("activation rollback window construction failed");
+
+        // Normalize any native focus delivered during construction before the
+        // deterministic direct C++ activation fault below.
+        activation_tree.deactivate(activation_window);
+        const int activate_before = activation_fault.activate_calls;
+        const int deactivate_before = activation_fault.deactivate_calls;
+        const int focus_loss_before = activation_fault.focus_loss_calls;
+
+        activation_fault.throw_focus_gain = true;
+        bool propagated_focus_failure = false;
+        try {
+            activation_tree.activate(activation_window);
+        } catch (const std::runtime_error& error) {
+            propagated_focus_failure =
+                std::string_view{error.what()} == "T130 injected activation focus failure";
+        }
+        if (!propagated_focus_failure) return fail("activation focus failure did not propagate");
+        if (activation_fault.activate_calls != activate_before + 1) {
+            return fail("failed activation did not run component activate exactly once");
+        }
+        if (activation_fault.deactivate_calls != deactivate_before + 1) {
+            return fail("failed post-activate focus publication did not roll back deactivation");
+        }
+        if (activation_fault.focus_loss_calls != focus_loss_before + 1) {
+            return fail("failed focus publication did not roll back focus state");
+        }
+
+        activation_fault.throw_focus_gain = false;
+        activation_tree.activate(activation_window);
+        if (activation_fault.activate_calls != activate_before + 2) {
+            return fail("failed activation left stale active state and blocked retry");
+        }
+        activation_tree.deactivate(activation_window);
+        if (activation_fault.deactivate_calls != deactivate_before + 2) {
+            return fail("retried activation did not deactivate cleanly");
+        }
     }
 
     FaultState teardown_fault{};

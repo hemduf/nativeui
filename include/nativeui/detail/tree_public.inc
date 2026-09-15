@@ -104,14 +104,44 @@
             throw;
         }
 
+        // Component activation is only the first fallible stage. Availability
+        // reconciliation, focus publication and paint invalidation may also
+        // invoke application code after active/platform state has become
+        // provisional. Treat the complete activation as one transaction: if a
+        // later stage fails, run the ordinary best-effort deactivation path and
+        // preserve the original activation exception.
         active_platform_ = &platform;
-        sync_availability_structure(platform);
-        focus_structure_dirty_ = true;
-        sync_focus_structure(platform);
-        if (!focus_active_) {
-            if (auto* first = first_available_focusable()) set_focus(first, platform);
+        try {
+            sync_availability_structure(platform);
+            focus_structure_dirty_ = true;
+            sync_focus_structure(platform);
+            if (!focus_active_) {
+                if (auto* first = first_available_focusable()) set_focus(first, platform);
+            }
+            invalidate_paint(viewport_rect());
+        } catch (...) {
+            const auto activation_error = std::current_exception();
+            try {
+                deactivate_focus(platform);
+            } catch (...) {
+                // deactivate_focus() commits terminal Tree/platform state before
+                // propagating its first teardown error. Activation owns the
+                // original failure, so teardown diagnostics must not replace it.
+            }
+
+            // Defensive framework-only terminalization keeps this recovery
+            // correct if a future teardown stage gains a new pre-commit failure.
+            // No application callback is invoked from this fallback.
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            std::rethrow_exception(activation_error);
         }
-        invalidate_paint(viewport_rect());
     }
 
     void refresh_focus(PlatformServices& platform) {
