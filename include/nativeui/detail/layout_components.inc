@@ -146,7 +146,8 @@ private:
 
 class ScrollComponent final : public Component {
 public:
-    explicit ScrollComponent(ScrollState& state) : state_(&state) {}
+    explicit ScrollComponent(ScrollState& state)
+        : state_(&state), axis_(state.axis()), lifetime_(state.lifetime_token()) {}
 
     [[nodiscard]] bool clips_children() const noexcept override { return true; }
 
@@ -157,10 +158,10 @@ public:
     [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
         if (children.empty()) return {};
         auto minimum = children.front().minimum;
-        if (state_->axis() == ScrollAxis::Horizontal || state_->axis() == ScrollAxis::Both) {
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) {
             minimum.w = 0.0f;
         }
-        if (state_->axis() == ScrollAxis::Vertical || state_->axis() == ScrollAxis::Both) {
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) {
             minimum.h = 0.0f;
         }
         return minimum;
@@ -169,16 +170,17 @@ public:
     [[nodiscard]] Constraints child_constraints(
         const Constraints& constraints, std::size_t, std::size_t) const override {
         Size maximum = constraints.max;
-        if (state_->axis() == ScrollAxis::Horizontal || state_->axis() == ScrollAxis::Both) {
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) {
             maximum.w = kUnboundedExtent;
         }
-        if (state_->axis() == ScrollAxis::Vertical || state_->axis() == ScrollAxis::Both) {
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) {
             maximum.h = kUnboundedExtent;
         }
         return Constraints::loose(maximum);
     }
 
     void mount(MountContext& context) override {
+        if (!alive()) return;
         subscription_ = state_->observe(
             [invalidate = context.layout_invalidator()](Point) { invalidate(); });
     }
@@ -190,23 +192,37 @@ public:
         const std::vector<ChildMetrics>& children,
         std::vector<ChildPlacement>& placements) const override {
         if (placements.empty() || children.empty()) {
-            state_->update_metrics({bounds.w, bounds.h}, {});
+            if (alive()) state_->update_metrics({bounds.w, bounds.h}, {});
             return;
         }
 
         Size content = children.front().preferred;
-        if (state_->axis() == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
-        if (state_->axis() == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
-        state_->update_metrics({bounds.w, bounds.h}, content);
-        const auto offset = state_->offset();
-        placements.front().bounds = Rect{
-            bounds.x - offset.x, bounds.y - offset.y, content.w, content.h};
+        if (axis_ == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
+        if (axis_ == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
+
+        if (alive()) {
+            state_->update_metrics({bounds.w, bounds.h}, content);
+            if (alive()) {
+                const auto offset = state_->offset();
+                placements.front().bounds = Rect{
+                    bounds.x - offset.x, bounds.y - offset.y, content.w, content.h};
+                return;
+            }
+        }
+
+        placements.front().bounds = Rect{bounds.x, bounds.y, content.w, content.h};
     }
 
     void paint(PaintContext&) const override {}
 
 private:
+    [[nodiscard]] bool alive() const noexcept {
+        return state_ != nullptr && lifetime_.active();
+    }
+
     ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
     ScrollState::Subscription subscription_;
 };
 
