@@ -40,9 +40,18 @@ private:
 #include <nativeui/detail/tree_transient.inc>
 #define ensure_layout ensure_layout_legacy
 #define layout_node layout_node_legacy
+#define mount_node mount_node_untracked
+#define activate_node activate_node_untracked
+#define deactivate_node deactivate_node_untracked
+#define unmount_node unmount_node_untracked
 #include <nativeui/detail/tree_layout.inc>
+#undef unmount_node
+#undef deactivate_node
+#undef activate_node
+#undef mount_node
 #undef layout_node
 #undef ensure_layout
+#include <nativeui/detail/tree_lifecycle_transaction.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
 #include <nativeui/detail/tree_focus_group.inc>
