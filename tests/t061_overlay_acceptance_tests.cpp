@@ -252,6 +252,21 @@ ui::OverlaySpec centered(ui::Spec content) {
     return overlay;
 }
 
+ui::InputEvent key_up(ui::Key key) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::KeyUp;
+    event.key = key;
+    return event;
+}
+
+ui::DialogSpec dismissal_dialog_spec() {
+    ui::DialogSpec spec;
+    spec.body = ui::make_spec(ui::Spacer{80.0f, 40.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    return spec;
+}
+
 void anchor_visibility_contract() {
     test::MockPlatform platform;
 
@@ -559,6 +574,93 @@ void throwing_overlay_state_is_per_ui_contract() {
     NUI_CHECK(healthy->close(healthy_handle));
 }
 
+void dialog_completion_may_destroy_controller_contract() {
+    test::MockPlatform platform;
+    ui::UI tree{ui::Spacer{160.0f, 96.0f}};
+    tree.resize({160.0f, 96.0f});
+    tree.activate(platform);
+
+    std::unique_ptr<ui::Dialog> dialog = std::make_unique<ui::Dialog>(tree);
+    int completions = 0;
+    NUI_CHECK(dialog->show(dismissal_dialog_spec(), [&](ui::DialogResult result) {
+        NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+        ++completions;
+        dialog.reset();
+    }) == ui::DialogShowResult::Shown);
+    tree.resize({160.0f, 96.0f});
+
+    auto* close_target = dialog.get();
+    NUI_CHECK(close_target->close());
+    NUI_CHECK(!dialog);
+    NUI_CHECK(completions == 1);
+    NUI_CHECK(tree.overlay_entries().empty());
+
+    ui::Dialog recovered{tree};
+    int recovered_completions = 0;
+    NUI_CHECK(recovered.show(dismissal_dialog_spec(), [&](ui::DialogResult) {
+        ++recovered_completions;
+    }) == ui::DialogShowResult::Shown);
+    tree.resize({160.0f, 96.0f});
+    NUI_CHECK(recovered.close());
+    NUI_CHECK(recovered_completions == 1);
+    NUI_CHECK(!recovered.active());
+}
+
+void dialog_completion_may_destroy_ui_and_throw_contract() {
+    test::MockPlatform platform;
+    auto tree = std::make_unique<ui::UI>(ui::Spacer{160.0f, 96.0f});
+    tree->resize({160.0f, 96.0f});
+    tree->activate(platform);
+
+    ui::Dialog dialog{*tree};
+    int completions = 0;
+    NUI_CHECK(dialog.show(dismissal_dialog_spec(), [&](ui::DialogResult result) {
+        NUI_CHECK(result.kind == ui::DialogResultKind::Action);
+        NUI_CHECK(result.action_id == "confirm");
+        ++completions;
+        tree.reset();
+        throw std::runtime_error{"completion destroyed UI"};
+    }) == ui::DialogShowResult::Shown);
+    tree->resize({160.0f, 96.0f});
+
+    auto* dispatch_target = tree.get();
+    bool threw = false;
+    try {
+        (void)dispatch_target->dispatch(test::key(ui::Key::Enter), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(!tree);
+    NUI_CHECK(completions == 1);
+    NUI_CHECK(!dialog.active());
+}
+
+void popup_action_may_destroy_ui_contract() {
+    test::MockPlatform platform;
+    std::unique_ptr<ui::UI> tree;
+    int actions = 0;
+    tree = std::make_unique<ui::UI>(ui::PopupMenu{
+        "Actions",
+        {ui::PopupMenuItem::action("Run", [&] {
+            ++actions;
+            tree.reset();
+        })}});
+    tree->resize({160.0f, 96.0f});
+    tree->activate(platform);
+
+    (void)tree->dispatch(test::key(ui::Key::Enter), platform);
+    (void)tree->dispatch(key_up(ui::Key::Enter), platform);
+    NUI_CHECK(tree);
+    NUI_CHECK(tree->overlay_entries().size() == 1);
+
+    auto* dispatch_target = tree.get();
+    const auto result = dispatch_target->dispatch(test::key(ui::Key::Enter), platform);
+    NUI_CHECK(result == ui::EventResult::Handled);
+    NUI_CHECK(!tree);
+    NUI_CHECK(actions == 1);
+}
+
 void suite() {
     anchor_visibility_contract();
     stale_focus_restoration_contract();
@@ -569,6 +671,9 @@ void suite() {
     throwing_show_is_transactional_contract();
     throwing_close_is_transactional_contract();
     throwing_overlay_state_is_per_ui_contract();
+    dialog_completion_may_destroy_controller_contract();
+    dialog_completion_may_destroy_ui_and_throw_contract();
+    popup_action_may_destroy_ui_contract();
 }
 
 } // namespace

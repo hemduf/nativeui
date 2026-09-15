@@ -672,7 +672,7 @@ private:
                     auto state = weak_state.lock();
                     if (!state || state->ui_tearing_down) return;
 
-                    // UI::finish_dialog_completion() releases the slot
+                    // UI::flush_pending_dialog_completion() releases the slot
                     // immediately before invoking this closure. There is no
                     // callback gap between those two operations, so restore the
                     // same generation/handlers before the first fallible close
@@ -704,28 +704,18 @@ private:
                 overlay_, [ui = ui_] { ui->prepare_overlay_layout(); })) {
             return false;
         }
-        std::weak_ptr<int> lifetime = lifetime_;
-        auto* self = this;
-        try {
-            ui_->finish_dialog_completion(
-                generation,
-                [lifetime = std::move(lifetime),
-                 self,
-                 generation,
-                 completion = std::move(completion),
-                 result = std::move(completion_result)]() mutable {
-                    if (!lifetime.expired() && self->generation_ == generation) {
-                        self->clear_local_state();
-                    }
-                    if (completion) completion(std::move(result));
-                });
-        } catch (...) {
-            if (close_transferred(*state, generation)) clear_local_state();
-            throw;
-        }
 
-        if (!close_transferred(*state, generation)) return false;
+        // The overlay checkpoint succeeded. Make both the UI slot and this
+        // controller terminal before application code begins: the completion is
+        // allowed to synchronously destroy this Dialog (or the owning UI), so
+        // no member access is legal after invoking it.
+        if (!state->release(generation)) {
+            if (!close_transferred(*state, generation)) return false;
+            clear_local_state();
+            return true;
+        }
         clear_local_state();
+        if (completion) completion(std::move(completion_result));
         return true;
     }
 
