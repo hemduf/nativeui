@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -83,6 +84,7 @@ struct DispatcherState final {
     std::uint64_t next_timer_sequence{1};
     bool closing{};
     bool wake_pending{};
+    bool fail_next_post_for_testing{};
 };
 
 namespace {
@@ -364,6 +366,13 @@ std::optional<DispatcherDuration> DispatcherOwner::next_delay() const noexcept {
     return std::chrono::duration_cast<DispatcherDuration>(it->due - now);
 }
 
+void DispatcherTestAccess::fail_next_post(const Dispatcher& dispatcher) noexcept {
+    const auto state = dispatcher.state_.lock();
+    if (!state) return;
+    std::lock_guard lock{state->mutex};
+    if (!state->closing) state->fail_next_post_for_testing = true;
+}
+
 } // namespace ui::detail
 
 namespace ui {
@@ -377,6 +386,10 @@ bool Dispatcher::post(Callback callback) const {
     {
         std::lock_guard lock{state->mutex};
         if (state->closing) return false;
+        if (state->fail_next_post_for_testing) {
+            state->fail_next_post_for_testing = false;
+            throw std::bad_alloc{};
+        }
         const bool was_empty = state->tasks.empty();
         if (!detail::enqueue_task_locked(*state, callback)) return false;
         if (was_empty && !state->wake_pending) {

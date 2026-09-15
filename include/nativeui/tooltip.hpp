@@ -46,7 +46,7 @@ public:
     TooltipController(TooltipController&&) = delete;
     TooltipController& operator=(TooltipController&&) = delete;
 
-    ~TooltipController() { shutdown(); }
+    ~TooltipController() noexcept { shutdown(); }
 
     void set_hovered(bool hovered) { set_trigger(Trigger::Hover, hovered); }
     void set_focused(bool focused) { set_trigger(Trigger::Focus, focused); }
@@ -171,9 +171,19 @@ private:
 
     static void hide_visible(State& state) {
         if (!state.visible) return;
+
+        // Publish the hidden state before crossing the integration callback so
+        // a reentrant dismissal cannot observe a half-hidden controller. If the
+        // overlay close itself fails, roll back the exact publication and keep
+        // the only state that can drive a later retry.
         state.visible = false;
         auto hide = state.hide;
-        if (hide) hide();
+        try {
+            if (hide) hide();
+        } catch (...) {
+            state.visible = true;
+            throw;
+        }
     }
 
     static void arm(const std::shared_ptr<State>& state) {
@@ -193,11 +203,19 @@ private:
                 return;
             }
 
-            // Publish visibility before application/UI integration code runs so
-            // a reentrant dismissal cannot observe a half-shown controller.
+            // Publish visibility before integration code runs so a reentrant
+            // dismissal cannot observe a half-shown controller. A failed
+            // OverlayState transaction never commits a usable handle, so roll
+            // this flag back before propagating and allow a future eligibility
+            // transition to retry normally.
             locked->visible = true;
             auto show = locked->show;
-            if (show) show();
+            try {
+                if (show) show();
+            } catch (...) {
+                locked->visible = false;
+                throw;
+            }
         });
     }
 
@@ -233,7 +251,13 @@ private:
         if (!state_) return;
         state_->shutting_down = true;
         cancel_pending(*state_);
-        hide_visible(*state_);
+        try {
+            hide_visible(*state_);
+        } catch (...) {
+            // Destruction/unmount is a no-unwind boundary. OverlayState owns
+            // the authoritative structural lifetime; a failed best-effort hide
+            // must never terminate the process while the controller is dying.
+        }
         state_->show = {};
         state_->hide = {};
         state_.reset();
@@ -557,7 +581,14 @@ private:
             },
             {}};
         overlay_ = overlay_service_->present(std::move(overlay));
-        if (layout_invalidator_) layout_invalidator_();
+
+        // OverlayState::show() is the transaction commit point. A secondary
+        // layout notification after that point must not make the controller
+        // roll visibility back while a valid committed handle is retained.
+        try {
+            if (layout_invalidator_) layout_invalidator_();
+        } catch (...) {
+        }
     }
 
     void hide() {
@@ -565,7 +596,14 @@ private:
             (void)overlay_service_->dismiss(overlay_);
         }
         overlay_ = {};
-        if (layout_invalidator_) layout_invalidator_();
+
+        // As above, OverlayState::close() is the commit point. Keep any later
+        // notification failure from resurrecting the controller-visible state
+        // after its only overlay handle has been deterministically cleared.
+        try {
+            if (layout_invalidator_) layout_invalidator_();
+        } catch (...) {
+        }
     }
 
     std::string text_;

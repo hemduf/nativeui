@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -260,6 +261,7 @@ struct OverlayEntry {
     std::optional<Rect> anchor_bounds;
     Rect resolved_bounds{};
     bool resolved{};
+    bool closing{};
 };
 
 // One OverlayState belongs to one UI. It stores only logical overlay state and
@@ -287,9 +289,22 @@ struct OverlayState {
         if (next_id == std::numeric_limits<std::uint64_t>::max()) next_id = 0;
         else ++next_id;
 
+        // Prepare all allocation-capable state before publication. IDs remain
+        // monotonic even when the subsequent structural notification fails.
         auto lifetime = std::make_shared<const OverlayLifetimeToken>();
         entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt, {}});
-        invalidate_structure();
+        try {
+            invalidate_structure();
+        } catch (...) {
+            // The caller cannot receive a handle when notification fails, so
+            // roll back that exact provisional entry without invoking callbacks
+            // while the original exception is active.
+            const auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+                return entry.id == id && entry.lifetime == lifetime;
+            });
+            if (it != entries.end()) erase_entry_noexcept(it);
+            throw;
+        }
         return OverlayHandle{owner, lifetime, id};
     }
 
@@ -300,23 +315,125 @@ struct OverlayState {
             return false;
         }
 
-        const auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+        auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
             return entry.id == handle.id_ && entry.lifetime == lifetime;
         });
-        if (it == entries.end()) return false;
-        entries.erase(it);
+        if (it == entries.end() || it->closing) return false;
+
+        // Schedule retained reconciliation before publishing logical removal.
+        // If notification throws the handle remains coherently open; once it
+        // succeeds the erase path below is allocation-free/no-throw.
         invalidate_structure();
+        it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+            return entry.id == handle.id_ && entry.lifetime == lifetime;
+        });
+        if (it == entries.end() || it->closing) return false;
+        erase_entry_noexcept(it);
+        return true;
+    }
+
+    /// Dialog-only retained close transaction. Keep the logical entry and its
+    /// lifetime published until the caller's retained reconciliation succeeds.
+    /// A throwing reconciliation clears only the provisional marker, preserving
+    /// the exact handle/generation as the retry owner without invoking another
+    /// callback while the original exception is active.
+    template <class Reconcile>
+    bool close_reconciled(OverlayHandle handle, Reconcile&& reconcile) {
+        const auto handle_owner = handle.owner_.lock();
+        const auto lifetime = handle.lifetime_.lock();
+        if (!handle_owner || handle_owner != owner || !lifetime || handle.id_ == 0) {
+            return false;
+        }
+
+        const auto find_entry = [&]() {
+            return std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+                return entry.id == handle.id_ && entry.lifetime == lifetime;
+            });
+        };
+
+        auto it = find_entry();
+        if (it == entries.end() || it->closing) return false;
+
+        // Mark the exact entry before notifying retained structure so any
+        // synchronous source query observes the provisional close without
+        // destroying the logical entry or expiring the public handle.
+        it->closing = true;
+        try {
+            invalidate_structure();
+            std::forward<Reconcile>(reconcile)();
+        } catch (...) {
+            it = find_entry();
+            if (it != entries.end()) it->closing = false;
+            throw;
+        }
+
+        it = find_entry();
+        if (it == entries.end()) return true;
+        erase_entry_noexcept(it);
         return true;
     }
 
     bool close_id(std::uint64_t id) {
-        const auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
+        auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
             return entry.id == id;
         });
-        if (it == entries.end()) return false;
-        entries.erase(it);
+        if (it == entries.end() || it->closing) return false;
+
         invalidate_structure();
+        it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
+            return entry.id == id;
+        });
+        if (it == entries.end() || it->closing) return false;
+        erase_entry_noexcept(it);
         return true;
+    }
+
+    // Destructor-only recovery seam. Normal callers use close()/close_id(),
+    // which preserve the still-open transaction on notification failure. A
+    // dying controller has no future retry owner, so it must terminally drop
+    // its exact entry, contain invalidation exceptions, and best-effort notify
+    // retained reconciliation after the logical removal.
+    bool close_noexcept(OverlayHandle handle) noexcept {
+        const auto handle_owner = handle.owner_.lock();
+        const auto lifetime = handle.lifetime_.lock();
+        if (!handle_owner || handle_owner != owner || !lifetime || handle.id_ == 0) {
+            return false;
+        }
+
+        auto find_entry = [&]() noexcept {
+            return std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+                return entry.id == handle.id_ && entry.lifetime == lifetime;
+            });
+        };
+
+        auto it = find_entry();
+        if (it == entries.end()) return false;
+
+        try {
+            invalidate_structure();
+        } catch (...) {
+        }
+
+        it = find_entry();
+        if (it == entries.end()) return true;
+        erase_entry_noexcept(it);
+
+        try {
+            invalidate_structure();
+        } catch (...) {
+        }
+        return true;
+    }
+
+private:
+    using EntryIterator = std::vector<OverlayEntry>::iterator;
+
+    void erase_entry_noexcept(EntryIterator it) noexcept {
+        static_assert(std::is_nothrow_move_assignable_v<OverlayEntry>);
+        for (auto current = it; std::next(current) != entries.end(); ++current) {
+            *current = std::move(*std::next(current));
+        }
+        entries.pop_back();
     }
 };
 
@@ -451,6 +568,7 @@ public:
 
         std::size_t child_index = 1;
         for (auto& entry : state_->entries) {
+            if (entry.closing) continue;
             if (entry.spec.mode == OverlayMode::Modal) {
                 if (child_index >= placements.size()) break;
                 placements[child_index].bounds = bounds;
@@ -476,6 +594,7 @@ public:
         keys.reserve(state_->entries.size() * 2 + 1);
         keys.emplace_back("root");
         for (const auto& entry : state_->entries) {
+            if (entry.closing) continue;
             if (entry.spec.mode == OverlayMode::Modal) {
                 keys.push_back("modal-barrier:" + std::to_string(entry.id));
             }
@@ -494,6 +613,7 @@ public:
         // here instead of owning/copying the complete application Spec tree.
         children.push_back(DynamicChildSpec{"root", Spec{}});
         for (const auto& entry : state_->entries) {
+            if (entry.closing) continue;
             if (entry.spec.mode == OverlayMode::Modal) {
                 children.push_back(DynamicChildSpec{
                     "modal-barrier:" + std::to_string(entry.id),

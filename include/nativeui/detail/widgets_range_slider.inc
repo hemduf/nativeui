@@ -30,13 +30,13 @@ enum class RangeSliderThumb {
 class RangeSliderComponent final : public Component, public ThemeBinding {
 public:
     RangeSliderComponent(
-        State<RangeValue>& state,
+        Binding<RangeValue> state,
         float minimum,
         float maximum,
         float step,
         SliderOrientation orientation,
         SliderStyle style)
-        : state_(state),
+        : state_(std::move(state)),
           domain_(minimum, maximum, step),
           orientation_(orientation),
           style_(std::move(style)) {}
@@ -299,8 +299,8 @@ private:
     }
 
     void commit_value(const RangeValue& value) {
-        auto* state = &state_;
-        if (!(state->get() == value)) state->set(value);
+        auto state = state_;
+        if (!(state.get() == value)) state.set(value);
     }
 
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
@@ -391,11 +391,11 @@ private:
         return EventResult::Handled;
     }
 
-    State<RangeValue>& state_;
+    Binding<RangeValue> state_;
     SliderDomain domain_;
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     SliderStyle style_;
-    State<RangeValue>::Subscription subscription_;
+    Binding<RangeValue>::Subscription subscription_;
     RangeSliderThumb active_thumb_{RangeSliderThumb::Lower};
     bool has_active_thumb_{};
     bool focused_{};
@@ -407,7 +407,8 @@ private:
 
 class RangeSlider {
 public:
-    explicit RangeSlider(State<RangeValue>& state) : state_(&state) {}
+    explicit RangeSlider(Binding<RangeValue> state) : state_(std::move(state)) {}
+    explicit RangeSlider(State<RangeValue>& state) : RangeSlider(state.binding()) {}
 
     RangeSlider&& range(float minimum, float maximum) && {
         minimum_ = minimum;
@@ -431,22 +432,22 @@ public:
     }
 
     Spec spec() && {
-        auto* state = state_;
+        auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
         const float step = step_;
         const auto orientation = orientation_;
         auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, step, orientation, style = std::move(style)]() mutable {
+            [state = std::move(state), minimum, maximum, step, orientation, style = std::move(style)]() mutable {
                 return std::make_unique<detail::RangeSliderComponent>(
-                    *state, minimum, maximum, step, orientation, std::move(style));
+                    std::move(state), minimum, maximum, step, orientation, std::move(style));
             },
             {}};
     }
 
 private:
-    State<RangeValue>* state_{};
+    Binding<RangeValue> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
     float step_{};
