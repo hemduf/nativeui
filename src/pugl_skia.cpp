@@ -238,6 +238,28 @@ private:
 #  undef PlatformServices
 #endif
 
+#if defined(__linux__)
+namespace detail {
+
+// The Linux ViewCore implementation intentionally substitutes its private X11
+// capture service type while it is compiled. Keep the T130 test probe's public
+// private-header seam on the stable PlatformServices signature and bridge it to
+// an isolated X11 service instance only inside this translation unit.
+NativeViewConstructionFaultResult exercise_native_view_construction_fault(
+    UI& ui,
+    PlatformServices& services,
+    NativeParentHandle parent,
+    Size size,
+    NativeViewConstructionFaultStage stage) noexcept {
+    (void)services;
+    X11PointerCapturePlatformServices probe_services;
+    return exercise_native_view_construction_fault(
+        ui, probe_services, parent, size, stage);
+}
+
+} // namespace detail
+#endif
+
 } // namespace ui
 
 #include "detail/pugl_skia_t043.inc"
