@@ -53,7 +53,7 @@ int self_test() {
     left_tree.activate(left_platform);
     right_tree.activate(right_platform);
 
-    left_tree.dispatch(example::key(ui::Key::Tab), left_platform);
+    // Activation focuses the first focusable control, which is the Slider.
     left_tree.dispatch(example::key(ui::Key::Right), left_platform);
     if (!(left.gain.get() > 0.50f && left.gain.get() <= 1.0f)) {
         return example::fail("Binding Slider keyboard edit failed");
