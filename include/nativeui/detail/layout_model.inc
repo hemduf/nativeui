@@ -34,6 +34,10 @@ enum class ScrollAxis {
     Both,
 };
 
+namespace detail {
+class RetainedScrollComponent;
+} // namespace detail
+
 class ScrollState {
     struct Listener {
         std::size_t id{};
@@ -93,6 +97,23 @@ class ScrollState {
     };
 
 public:
+    class LifetimeToken {
+    public:
+        LifetimeToken() = default;
+
+        [[nodiscard]] bool active() const noexcept {
+            if (auto control = control_.lock()) return control->owner_alive;
+            return false;
+        }
+
+    private:
+        friend class ScrollState;
+        explicit LifetimeToken(std::weak_ptr<Control> control)
+            : control_(std::move(control)) {}
+
+        std::weak_ptr<Control> control_;
+    };
+
     class Subscription {
     public:
         Subscription() = default;
@@ -144,6 +165,9 @@ public:
     [[nodiscard]] Size viewport_size() const noexcept { return control_->viewport; }
     [[nodiscard]] Size content_size() const noexcept { return control_->content; }
     [[nodiscard]] Point max_offset() const noexcept { return maximum_offset(*control_); }
+    [[nodiscard]] LifetimeToken lifetime_token() const noexcept {
+        return LifetimeToken{control_};
+    }
 
     void set_offset(Point value) {
         auto control = control_;
@@ -172,6 +196,7 @@ public:
 
 private:
     friend class ScrollComponent;
+    friend class detail::RetainedScrollComponent;
 
     [[nodiscard]] static bool allows_horizontal(ScrollAxis axis) noexcept {
         return axis == ScrollAxis::Horizontal || axis == ScrollAxis::Both;
