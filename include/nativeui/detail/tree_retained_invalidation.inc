@@ -158,10 +158,15 @@
         if (!node.parent && retained_invalidation_live_nodes_.empty()) {
             retained_invalidation_live_nodes_.reserve(retained_subtree_node_count(node));
         }
-        // Runtime NodeIds are allocated monotonically, and explicit whole-Tree remount
-        // starts from an empty live set. Keeping this vector sorted avoids one heap node
-        // per retained identity while preserving logarithmic membership checks.
-        retained_invalidation_live_nodes_.push_back(node.id);
+        // Dynamic nodes receive monotonic ids, but their retained tree position can
+        // precede older siblings. A later whole-Tree remount therefore does not
+        // necessarily visit ids in sorted order. Keep the membership vector sorted
+        // explicitly so binary_search/lower_bound remain valid across that remount.
+        const auto live = std::lower_bound(retained_invalidation_live_nodes_.begin(),
+                                           retained_invalidation_live_nodes_.end(), node.id);
+        if (live == retained_invalidation_live_nodes_.end() || *live != node.id) {
+            retained_invalidation_live_nodes_.insert(live, node.id);
+        }
 
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
             binding->bind_theme(node.parent ? inherited_theme_for(node) : theme_);
