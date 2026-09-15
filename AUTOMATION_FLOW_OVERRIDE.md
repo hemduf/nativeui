@@ -1,8 +1,8 @@
 # NativeUI automation flow override — same-cycle closeout service
 
-This document is a narrow control-plane override for the scheduled NativeUI automation. It exists to remove an orchestration latency defect discovered on 2026-09-15: a PR could become `SOURCE_READY` after the hourly Scheduler snapshot, while later Delivery workers continued stale SOURCE assignments until the next Scheduler generation.
+This document is a narrow control-plane override for the scheduled NativeUI automation. It exists to remove orchestration latency defects discovered on 2026-09-15: a PR could become `SOURCE_READY` after the hourly Scheduler snapshot while later Delivery workers continued stale SOURCE assignments, and a nearly-qualified long-lived branch could drift behind a rapidly advancing `main` until final qualification became wasted work.
 
-This file supplements `AUTOMATION.md`, `AUTOMATION_STATUS.md`, `AUTOMATION_CODE_REVIEW_GATE.md`, and `CI_POLICY.md`. Where this file conflicts only on **handoff timing or assignment authority**, this file wins. It does not weaken acceptance, testing, exact-head CI, peer-review independence, warning, platform, privacy, or merge requirements.
+This file supplements `AUTOMATION.md`, `AUTOMATION_STATUS.md`, `AUTOMATION_CODE_REVIEW_GATE.md`, `AUTOMATION_CAPACITY_OVERRIDE.md`, and `CI_POLICY.md`. Where this file conflicts only on **handoff timing, assignment authority, closeout priority, or pre-closeout main-composition timing**, this file wins. It does not weaken acceptance, testing, exact-head CI, peer-review independence, warning, platform, privacy, or merge requirements.
 
 ## 1. Scheduling objective
 
@@ -13,11 +13,31 @@ Global service priority is:
 1. `MERGE_READY` / merge closeout;
 2. head-valid `REVIEW_PASS` / `FINAL_QUALIFICATION`;
 3. `SOURCE_READY` / `SECOND_PEER_CODE_REVIEW`;
-4. completed CI product-failure diagnosis;
-5. ordinary SOURCE implementation;
-6. documentation/fallback work.
+4. source-complete or exact-head-green **closeout work** (acceptance matrix, self review, safe main reconciliation);
+5. completed CI product-failure diagnosis;
+6. ordinary SOURCE implementation;
+7. documentation/fallback work.
 
-A merge-near PR of comparable product priority may preempt a new SOURCE batch. A `SOURCE_READY` PR waiting for an eligible reviewer while such a worker starts ordinary SOURCE is an orchestration defect.
+A merge-near PR of comparable product priority preempts a new SOURCE batch. A `SOURCE_READY` PR waiting for an eligible reviewer while such a worker starts ordinary SOURCE is an orchestration defect.
+
+### 1.1 Closeout-biased capacity
+
+A ticket is a **closeout candidate** when its intended product scope is substantially implemented and remaining work is dominated by one or more of:
+
+- exact-head CI completion/diagnosis;
+- acceptance/test/non-goal reconciliation;
+- mandatory self `CODE_REVIEW.md` pass;
+- safe main-composition reconciliation;
+- peer review / review fix / second review;
+- final qualification / merge bookkeeping.
+
+When one or more closeout candidates exist, Scheduler should keep enough implementation capacity to finish them before opening lower-value source batches. In particular:
+
+- never start a new fallback SOURCE batch merely to keep all four lanes busy while a closeout candidate can make progress;
+- prefer finishing one 90–95%-complete ticket over advancing several unrelated tickets from 40% to 50%, unless an explicit dependency/critical-path calculation proves otherwise;
+- source work already inside one coherent batch may finish that batch, but must not automatically start the next batch when a higher-priority closeout transition is waiting.
+
+This is a scheduling preference, not a waiver of dependency or safety rules.
 
 ## 2. Why hourly Scheduler snapshots are insufficient
 
@@ -78,7 +98,33 @@ The review-fix author becomes a current-head author and **cannot** issue the fin
 
 Ambiguous findings, product/API decisions, broad redesigns, scope expansion or unsafe concurrent conflicts still use `REVIEW_BLOCKED` / `REWORK_REQUIRED`; no fast-path source correction is allowed.
 
-## 6. Integration live queue
+## 6. Pre-closeout main-composition checkpoint
+
+Rapid merges can make a long-lived source branch stale immediately before review/final qualification. Avoid spending peer-review or heavyweight qualification budget on a candidate that is already composition-invalid.
+
+Before a code-changing PR may emit `SOURCE_READY`, the source worker must perform a **main-composition checkpoint** after the intended ticket scope is complete and before the final self-review is considered authoritative:
+
+1. fetch current `main`, PR base, exact head, mergeability/rebaseability and the commits/files by which `main` advanced;
+2. classify advances as:
+   - **control-plane/docs-only and non-overlapping** — no branch rewrite is required solely for these changes; record composition compatibility;
+   - **product/build/test changes but provably non-overlapping and semantically independent** — record the composition audit and continue only when repository policy permits an unchanged candidate;
+   - **overlapping, dependency-changing, ABI/public-contract-changing, merge-conflicting, or otherwise composition-relevant** — reconcile current `main` before `SOURCE_READY`;
+3. if GitHub reports `mergeable_state=dirty`, `mergeable=false`, `rebaseable=false`, or the branch misses a required dependency/product change, treat it as SOURCE work immediately; never wait for nonexistent CI;
+4. perform only a safe mechanical main synchronization when intended product behavior does not change. If reconciliation changes executable code/tests/build behavior or resolves a semantic conflict, the resulting head is a new qualification candidate and all head-scoped evidence must target that new head;
+5. after reconciliation, run the required exact-head qualification and then perform the final acceptance/self-review on the resulting head.
+
+Do **not** repeatedly merge/rebase `main` into every active branch on every upstream commit. The checkpoint is closeout-biased and composition-driven. This avoids both branch drift and pointless CI churn.
+
+### 6.1 Re-check before final qualification and merge
+
+Integration still re-fetches current `main` before Draft->Ready and before merge. If `main` advanced after peer review:
+
+- control-plane/docs-only, non-overlapping advances may be accepted by an explicit composition audit when policy allows;
+- composition-relevant advances require synchronization and therefore a new head, fresh peer review, and fresh applicable qualification.
+
+No stale exact-head review is carried across a head change.
+
+## 7. Integration live queue
 
 Integration MUST rebuild its queue from live GitHub state on every run. `#250`'s Integration queue is a snapshot, not an eligibility gate.
 
@@ -86,11 +132,11 @@ A durable independent exact-head `REVIEW_PASS` produced after the Scheduler snap
 
 If a candidate reaches `QUALIFICATION_WAIT` because heavyweight workflows are queued/running, Integration continues with another independent head-valid `REVIEW_PASS` or `MERGE_READY` candidate instead of idling. Keep at most **two** final-qualification candidates active simultaneously to bound CI fan-out.
 
-## 7. Backpressure remains per PR
+## 8. Backpressure remains per PR
 
 Exact-head CI backpressure forbids replacing a PR head while its relevant qualification is active. It does **not** forbid review, qualification or merge work on another independent PR.
 
-## 8. Scheduler normalization
+## 9. Scheduler normalization
 
 At every new generation Scheduler must consume all head-valid mid-cycle `CLAIMED` events and normalize them into `#250`:
 
@@ -99,17 +145,34 @@ At every new generation Scheduler must consume all head-valid mid-cycle `CLAIMED
 - `peer_reviewer`;
 - `review_fix_worker` when applicable;
 - reviewed/current head and observed base;
-- conditional reservations still pending.
+- conditional reservations still pending;
+- main-composition checkpoint status for closeout candidates.
 
 Stale claims whose head changed are discarded.
 
-## 9. Anti-starvation measurements
+## 10. Closeout service-level objectives
 
-Scheduler and Reporter should track at least:
+Scheduler and Reporter track these latencies from durable event/live timestamps:
 
-- `SOURCE_READY -> review claim`;
-- `REVIEW_FIX_APPLIED + green -> second-review claim`;
-- `REVIEW_PASS -> Integration action`;
-- `final qualification green -> merge`.
+- `SOURCE_READY -> review claim`: **target = next eligible Delivery run in the same cycle; alert if > 30 min when an eligible worker existed**;
+- `REVIEW_FIX_APPLIED + terminal-green CI -> second-review claim`: **target = next eligible Delivery run; alert if > 30 min**;
+- `REVIEW_PASS -> Integration action`: **target = same-cycle Integration run when one remains, otherwise the next Integration run; alert if > 60 min**;
+- `final qualification terminal green -> merge or durable blocker`: **target = next Integration run; alert if > 60 min**;
+- `closeout-ready exact-head green -> SOURCE_READY or durable finding`: **target = one source-worker run; alert if the worker instead begins an unrelated new source batch**.
+
+An SLO alert is an orchestration finding, not permission to waive any review or test gate.
 
 Target invariant: **no closeout handoff waits a full Scheduler generation when an eligible later worker exists in the same cycle.**
+
+## 11. Trend / scheduler health
+
+Reporter should distinguish throughput caused by draining a backlog of nearly-finished PRs from sustainable implementation throughput. Track both:
+
+- merge count and median merge interval;
+- number of closeout candidates at snapshot;
+- average/maximum branch age behind current `main` at the composition checkpoint;
+- count of qualification runs invalidated by subsequent composition-relevant main changes;
+- count of review/Integration starvation SLO breaches;
+- source-lane utilization separately from closeout worker utilization.
+
+A healthy scheduler may intentionally show fewer simultaneous source-changing lanes while merge throughput and critical-path completion improve.
