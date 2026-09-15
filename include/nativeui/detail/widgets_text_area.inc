@@ -796,9 +796,11 @@ private:
 
     void commit(InputContext& ctx) {
         rebuild_lines();
-        state_.set(model_.text());
+        auto state = state_;
+        auto value = model_.text();
         ensure_cursor_visible(ctx);
         ctx.invalidate();
+        state.set(std::move(value));
     }
 
     void paint_composition_line(
