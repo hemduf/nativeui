@@ -20,16 +20,23 @@
         retained_invalidation_lifetime_.reset();
     }
 
+    static std::size_t retained_subtree_node_count(const Node& node) noexcept {
+        std::size_t count = 1;
+        for (const auto& child : node.children) count += retained_subtree_node_count(*child);
+        return count;
+    }
+
     [[nodiscard]] Node* retained_invalidation_node(NodeId id) noexcept {
-        if (!root_ || id == kInvalidNodeId || !retained_invalidation_live_nodes_.contains(id)) {
+        if (!root_ || id == kInvalidNodeId ||
+            !std::binary_search(retained_invalidation_live_nodes_.begin(),
+                                retained_invalidation_live_nodes_.end(), id)) {
             return nullptr;
         }
         return find_node_mutable(*root_, id);
     }
 
-    [[nodiscard]] std::function<void()> paint_invalidator(Node& node) {
+    [[nodiscard]] std::function<void()> paint_invalidator(NodeId id) {
         const auto weak = retained_invalidation_weak();
-        const auto id = node.id;
         return [weak, id] {
             const auto lifetime = weak.lock();
             if (!lifetime || !lifetime->tree) return;
@@ -40,9 +47,8 @@
         };
     }
 
-    [[nodiscard]] std::function<void()> layout_invalidator(Node& node) {
+    [[nodiscard]] std::function<void()> layout_invalidator(NodeId id) {
         const auto weak = retained_invalidation_weak();
-        const auto id = node.id;
         return [weak, id] {
             const auto lifetime = weak.lock();
             if (!lifetime || !lifetime->tree) return;
@@ -53,9 +59,8 @@
         };
     }
 
-    [[nodiscard]] std::function<void()> focus_invalidator(Node& node) {
+    [[nodiscard]] std::function<void()> focus_invalidator(NodeId id) {
         const auto weak = retained_invalidation_weak();
-        const auto id = node.id;
         return [weak, id] {
             const auto lifetime = weak.lock();
             if (!lifetime || !lifetime->tree) return;
@@ -86,9 +91,8 @@
         invalidate_node_paint(node);
     }
 
-    [[nodiscard]] std::function<void()> availability_invalidator(Node& node) {
+    [[nodiscard]] std::function<void()> availability_invalidator(NodeId id) {
         const auto weak = retained_invalidation_weak();
-        const auto id = node.id;
         return [weak, id] {
             const auto lifetime = weak.lock();
             if (!lifetime || !lifetime->tree) return;
@@ -97,6 +101,22 @@
             if (!live) return;
             tree->invalidate_availability_from_retained(*live);
         };
+    }
+
+    static std::function<void()> retained_paint_invalidator_factory(void* owner, NodeId id) {
+        return static_cast<Tree*>(owner)->paint_invalidator(id);
+    }
+
+    static std::function<void()> retained_layout_invalidator_factory(void* owner, NodeId id) {
+        return static_cast<Tree*>(owner)->layout_invalidator(id);
+    }
+
+    static std::function<void()> retained_focus_invalidator_factory(void* owner, NodeId id) {
+        return static_cast<Tree*>(owner)->focus_invalidator(id);
+    }
+
+    static std::function<void()> retained_availability_invalidator_factory(void* owner, NodeId id) {
+        return static_cast<Tree*>(owner)->availability_invalidator(id);
     }
 
     void register_dynamic_node(Node& node) {
@@ -135,11 +155,17 @@
     }
 
     void mount_node(Node& node) {
-        retained_invalidation_live_nodes_.insert(node.id);
-        const auto weak = retained_invalidation_weak();
+        if (!node.parent && retained_invalidation_live_nodes_.empty()) {
+            retained_invalidation_live_nodes_.reserve(retained_subtree_node_count(node));
+        }
+        // Runtime NodeIds are allocated monotonically, and explicit whole-Tree remount
+        // starts from an empty live set. Keeping this vector sorted avoids one heap node
+        // per retained identity while preserving logarithmic membership checks.
+        retained_invalidation_live_nodes_.push_back(node.id);
 
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
             binding->bind_theme(node.parent ? inherited_theme_for(node) : theme_);
+            const auto weak = retained_invalidation_weak();
             const auto id = node.id;
             binding->set_theme_change_invalidator(
                 [weak, id](ThemeInvalidation invalidation) {
@@ -154,10 +180,12 @@
         if (dynamic_source(node)) register_dynamic_node(node);
         MountContext context{
             node.id,
-            paint_invalidator(node),
-            layout_invalidator(node),
-            focus_invalidator(node),
-            availability_invalidator(node),
+            MountContext::InvalidatorFactory{
+                this,
+                &Tree::retained_paint_invalidator_factory,
+                &Tree::retained_layout_invalidator_factory,
+                &Tree::retained_focus_invalidator_factory,
+                &Tree::retained_availability_invalidator_factory},
             overlay_service_};
         node.component->mount(context);
         if (node.component->focusable()) focusables_.push_back(&node);
@@ -175,7 +203,11 @@
         // node's long-lived identity first so arbitrary child unmount callbacks
         // cannot re-enter paint/layout/focus/availability/theme/dynamic invalidation
         // through an ancestor whose subtree is already being removed.
-        retained_invalidation_live_nodes_.erase(node.id);
+        const auto live = std::lower_bound(retained_invalidation_live_nodes_.begin(),
+                                           retained_invalidation_live_nodes_.end(), node.id);
+        if (live != retained_invalidation_live_nodes_.end() && *live == node.id) {
+            retained_invalidation_live_nodes_.erase(live);
+        }
 
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             unmount_node(**it);
@@ -197,5 +229,5 @@
     // Declared last so its owning shared_ptr is destroyed before the retained tree's
     // earlier data members. External callbacks hold weak_ptr only; after Tree
     // destruction they cannot recover a Tree pointer or keep the Tree alive.
-    std::unordered_set<NodeId> retained_invalidation_live_nodes_;
+    std::vector<NodeId> retained_invalidation_live_nodes_;
     std::shared_ptr<RetainedInvalidationLifetime> retained_invalidation_lifetime_;
