@@ -18,17 +18,25 @@ namespace {
 enum class NativeFault {
     None,
     Layout,
-    Deactivate,
 };
 
 struct FaultState {
     NativeFault fault{NativeFault::None};
+    bool throw_pointer_cancel{};
+    bool throw_focus_loss{};
+    bool throw_deactivate{};
+    int activate_calls{};
     int deactivate_calls{};
+    int focus_gain_calls{};
+    int focus_loss_calls{};
+    int pointer_cancel_calls{};
 };
 
 class FaultComponent final : public ui::Component {
 public:
     explicit FaultComponent(FaultState& state) : state_(&state) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
 
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
         return {120.0f, 60.0f};
@@ -43,11 +51,41 @@ public:
         }
     }
 
+    void activate(ui::LifecycleContext&) override {
+        ++state_->activate_calls;
+    }
+
     void deactivate(ui::LifecycleContext&) override {
         ++state_->deactivate_calls;
-        if (state_->fault == NativeFault::Deactivate) {
+        if (state_->throw_deactivate) {
             throw std::runtime_error("T130 injected native teardown failure");
         }
+    }
+
+    void focus_changed(bool focused, ui::FocusContext&) override {
+        if (focused) {
+            ++state_->focus_gain_calls;
+            return;
+        }
+        ++state_->focus_loss_calls;
+        if (state_->throw_focus_loss) {
+            throw std::runtime_error("T130 injected native focus-loss failure");
+        }
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
+        if (event.type == ui::InputType::PointerDown) {
+            context.capture_pointer();
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerCancel) {
+            ++state_->pointer_cancel_calls;
+            if (state_->throw_pointer_cancel) {
+                throw std::runtime_error("T130 injected native pointer-cancel failure");
+            }
+            return ui::EventResult::Handled;
+        }
+        return ui::EventResult::Ignored;
     }
 
     void paint(ui::PaintContext&) const override {}
@@ -142,7 +180,7 @@ int main() {
         if (failed.native_handle()) return fail("failed construction retained a public native handle");
     }
 
-    FaultState teardown_fault{.fault = NativeFault::Deactivate};
+    FaultState teardown_fault{};
     ui::UI tree_a{FaultRoot{teardown_fault}};
     ui::UI tree_b{ui::Label{"T066 direct-destroy B"}};
     auto a = std::make_unique<ui::StandaloneWindow>(
@@ -159,17 +197,58 @@ int main() {
                        .resizable = true});
     if (!a->valid() || !b->valid()) return fail("window construction failed");
 
-    // Make teardown deterministic without depending on native focus timing.
-    // Before the T130 fix, the injected deactivate exception escapes
-    // ViewCore::~ViewCore() and terminates the process before B can survive.
+    // Make teardown deterministic without depending on native focus timing, and
+    // establish a real retained capture so close_native_view() first exercises
+    // PointerCancel before focus loss and component deactivation.
     tree_a.activate(*a);
+    if (teardown_fault.activate_calls < 1 || teardown_fault.focus_gain_calls < 1) {
+        return fail("throwing teardown fixture did not become active and focused");
+    }
+    ui::InputEvent down{};
+    down.type = ui::InputType::PointerDown;
+    down.position = {10.0f, 10.0f};
+    if (tree_a.dispatch(down, *a) != ui::EventResult::Handled) {
+        return fail("throwing teardown fixture did not establish pointer capture");
+    }
+
+    const int activate_before_close = teardown_fault.activate_calls;
+    const int focus_loss_before_close = teardown_fault.focus_loss_calls;
+    const int deactivate_before_close = teardown_fault.deactivate_calls;
+    teardown_fault.throw_pointer_cancel = true;
+    teardown_fault.throw_focus_loss = true;
+    teardown_fault.throw_deactivate = true;
+
+    // All three retained callbacks throw during ViewCore teardown. The native
+    // boundary must still close A, attempt every later retained phase, publish
+    // inactive/no-platform Tree state and leave sibling B fully usable.
     a.reset();
-    if (teardown_fault.deactivate_calls != 1) {
+    if (teardown_fault.pointer_cancel_calls < 1) {
+        return fail("throwing pointer cancellation was not attempted");
+    }
+    if (teardown_fault.focus_loss_calls != focus_loss_before_close + 1) {
+        return fail("throwing focus loss did not run exactly once during teardown");
+    }
+    if (teardown_fault.deactivate_calls != deactivate_before_close + 1) {
         return fail("throwing component deactivate was not attempted exactly once");
     }
     if (app.quit_requested()) return fail("destroying A requested quit while B remained live");
     if (!b->native_handle()) return fail("surviving B lost its native handle");
     if (b->should_close()) return fail("surviving B became closing after destroying A");
+
+    // Prove the failed native teardown did not leave Tree::active_ or the dead
+    // PlatformServices pointer published. Reuse the exact same UI against B;
+    // the activation hook must run again rather than returning from stale state.
+    teardown_fault.throw_pointer_cancel = false;
+    teardown_fault.throw_focus_loss = false;
+    teardown_fault.throw_deactivate = false;
+    tree_a.activate(*b);
+    if (teardown_fault.activate_calls != activate_before_close + 1) {
+        return fail("failed teardown left stale active state and blocked reactivation");
+    }
+    tree_a.deactivate(*b);
+    if (teardown_fault.deactivate_calls != deactivate_before_close + 2) {
+        return fail("reactivated teardown fixture did not deactivate cleanly");
+    }
 
     // Keep resize as the first native mutation after sibling destruction. This
     // matches the T060 regression sequence exactly and prevents an unrelated

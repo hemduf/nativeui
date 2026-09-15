@@ -127,61 +127,61 @@
     }
 
     void deactivate_focus(PlatformServices& platform) {
-        flush_dynamic_mutations();
-        if (!active_) return;
-        sync_availability_structure(platform);
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
 
-        // Hover and capture callbacks must run while components and platform
-        // services are still active. Hover is presentation-only and is cleared
-        // independently from any in-flight captured interaction.
+        capture_error([&] { flush_dynamic_mutations(); });
+        if (!active_) {
+            if (first_error) std::rethrow_exception(first_error);
+            return;
+        }
+        capture_error([&] { sync_availability_structure(platform); });
+
+        // Hover/capture/focus callbacks are arbitrary application code. During
+        // native teardown they may fail, but every remaining lifecycle phase
+        // still has to run while PlatformServices is alive so the Tree cannot
+        // retain a pointer to a destroyed view.
         InputEvent leave{};
         leave.type = InputType::PointerLeave;
-        (void)clear_pointer_hover(leave, platform);
-
-        // Cancel any in-flight pointer interaction while components and
-        // platform services are still active. This is the deterministic
-        // lifecycle boundary used for focus loss and view teardown.
-        (void)cancel_pointer_capture(platform);
+        capture_error([&] { (void)clear_pointer_hover(leave, platform); });
+        capture_error([&] { (void)cancel_pointer_capture(platform); });
 
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
             FocusContext context{
                 node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
-            node->component->focus_changed(false, context);
-            invalidate_node_paint(*node);
+            capture_error([&] { node->component->focus_changed(false, context); });
+            capture_error([&] { invalidate_node_paint(*node); });
         }
 
+        // Commit authoritative interaction/platform state even when one of the
+        // callbacks above failed. clear_pointer_capture() is noexcept and still
+        // releases the native capture boundary while this PlatformServices
+        // instance is alive. T125 owns cancellation-guard recovery itself.
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
 
-        std::exception_ptr first_error;
-        try {
-            deactivate_node(*root_);
-        } catch (...) {
-            first_error = std::current_exception();
-        }
+        capture_error([&] { deactivate_node(*root_); });
 
-        // Tree lifecycle state commits even when a component deactivation hook
-        // fails. This makes subsequent unmount/destruction deterministic and
-        // prevents the same active transition from being torn down twice.
+        // Tree lifecycle state commits before the first retained exception is
+        // propagated. A later activation therefore executes a real transition
+        // instead of observing a stale active/platform state from the dead view.
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
         if (availability_structure_dirty_) {
-            try {
-                sync_availability_inactive();
-            } catch (...) {
-                if (!first_error) first_error = std::current_exception();
-            }
+            capture_error([&] { sync_availability_inactive(); });
         }
-        try {
-            invalidate_paint(viewport_rect());
-        } catch (...) {
-            if (!first_error) first_error = std::current_exception();
-        }
+        capture_error([&] { invalidate_paint(viewport_rect()); });
 
         if (first_error) std::rethrow_exception(first_error);
     }
