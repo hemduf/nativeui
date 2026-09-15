@@ -1,3 +1,91 @@
+namespace detail {
+
+// Scroll's public builder borrows ScrollState, while the retained tree may outlive
+// that owner. Keep one weak-control subscription alive as a lifetime token and
+// never enter the legacy ScrollComponent once the state has been invalidated.
+// This closes both the spec-before-realization and post-realization teardown paths
+// without making the retained tree own the application ScrollState.
+class RetainedScrollComponent final : public Component {
+public:
+    RetainedScrollComponent(
+        ScrollAxis axis,
+        std::shared_ptr<ScrollState::Subscription> lifetime,
+        std::unique_ptr<ScrollComponent> delegate)
+        : axis_(axis),
+          lifetime_(std::move(lifetime)),
+          delegate_(std::move(delegate)) {}
+
+    [[nodiscard]] bool clips_children() const noexcept override { return true; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        if (alive()) return delegate_->measure(children);
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
+        if (alive()) return delegate_->minimum_size(children);
+        if (children.empty()) return {};
+        auto minimum = children.front().minimum;
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) minimum.w = 0.0f;
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) minimum.h = 0.0f;
+        return minimum;
+    }
+
+    [[nodiscard]] Constraints child_constraints(
+        const Constraints& constraints, std::size_t index, std::size_t count) const override {
+        if (alive()) return delegate_->child_constraints(constraints, index, count);
+        Size maximum = constraints.max;
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) {
+            maximum.w = kUnboundedExtent;
+        }
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) {
+            maximum.h = kUnboundedExtent;
+        }
+        return Constraints::loose(maximum);
+    }
+
+    void mount(MountContext& context) override {
+        if (alive()) delegate_->mount(context);
+    }
+
+    void unmount(LifecycleContext& context) override {
+        // ScrollComponent::unmount only resets its weak subscription and remains
+        // safe after ScrollState invalidation.
+        if (delegate_) delegate_->unmount(context);
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>& children,
+        std::vector<ChildPlacement>& placements) const override {
+        if (alive()) {
+            delegate_->layout_children(bounds, children, placements);
+            return;
+        }
+        if (placements.empty() || children.empty()) return;
+
+        Size content = children.front().preferred;
+        if (axis_ == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
+        if (axis_ == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
+        placements.front().bounds = Rect{bounds.x, bounds.y, content.w, content.h};
+    }
+
+    void paint(PaintContext& context) const override {
+        if (alive()) delegate_->paint(context);
+    }
+
+private:
+    [[nodiscard]] bool alive() const noexcept {
+        return delegate_ && lifetime_ && lifetime_->active();
+    }
+
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    std::shared_ptr<ScrollState::Subscription> lifetime_;
+    std::unique_ptr<ScrollComponent> delegate_;
+};
+
+} // namespace detail
+
 class Scroll {
 public:
     template <class Child>
@@ -7,8 +95,19 @@ public:
 
     Spec spec() && {
         auto* state = state_;
-        return Spec{[state] { return std::make_unique<ScrollComponent>(*state); },
-                    std::move(children_)};
+        const auto axis = state_->axis();
+        auto lifetime = std::make_shared<ScrollState::Subscription>(
+            state_->observe([](Point) {}));
+        return Spec{
+            [state, axis, lifetime] {
+                std::unique_ptr<ScrollComponent> delegate;
+                if (lifetime && lifetime->active()) {
+                    delegate = std::make_unique<ScrollComponent>(*state);
+                }
+                return std::make_unique<detail::RetainedScrollComponent>(
+                    axis, lifetime, std::move(delegate));
+            },
+            std::move(children_)};
     }
 
 private:
