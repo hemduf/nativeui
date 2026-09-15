@@ -682,8 +682,8 @@ private:
                     state->escape_handler = std::move(escape_handler);
                     state->deactivate_handler = std::move(deactivate_handler);
 
-                    (void)ui->close_overlay(overlay);
-                    ui->prepare_overlay_layout();
+                    (void)ui->overlay_state_->close_reconciled(
+                        overlay, [ui] { ui->prepare_overlay_layout(); });
 
                     if (!state->release(generation)) return;
                     if (!lifetime.expired() && self->generation_ == generation) {
