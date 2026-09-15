@@ -43,11 +43,11 @@ private:
 #include <nativeui/detail/tree_layout.inc>
 #undef layout_node
 #undef ensure_layout
-#include <nativeui/detail/tree_layout_transaction.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
 #include <nativeui/detail/tree_focus_group.inc>
 #include <nativeui/detail/tree_dynamic.inc>
+#include <nativeui/detail/tree_layout_transaction.inc>
 };
 
 #include <nativeui/detail/tree_compile.inc>
