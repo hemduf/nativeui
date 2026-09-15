@@ -50,6 +50,12 @@ public:
     }
 
     ~UI() noexcept {
+        // Publish owner death before any teardown callback can run. Code that
+        // intentionally permits an application callback to delete its UI takes
+        // a weak copy of this token before the callback and never dereferences
+        // `this` after the token expires.
+        lifetime_.reset();
+
         // T063 distinguishes whole-UI teardown from explicit Dialog controller
         // destruction. Publish the terminal state before Tree/overlay members
         // begin reverse-order destruction so an outliving controller is inert
@@ -140,7 +146,7 @@ public:
             const auto result = dispatch_tree_dialog_safe(event, platform);
             const bool completing_dialog = has_pending_dialog_completion();
             if (!completing_dialog) {
-                process_component_overlay_command(command_source, platform);
+                if (!process_component_overlay_command(command_source, platform)) return result;
                 if (!overlay_state_->entries.empty()) {
                     prepare_overlay_layout();
                     enforce_new_modal_capture_barrier(platform);
@@ -229,8 +235,9 @@ public:
         const auto command_source = overlay_command_source(event);
         const auto result = dispatch_tree_dialog_safe(event, platform);
         const bool completing_dialog = has_pending_dialog_completion();
-        if (!completing_dialog) {
-            process_component_overlay_command(command_source, platform);
+        if (!completing_dialog &&
+            !process_component_overlay_command(command_source, platform)) {
+            return result;
         }
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
@@ -443,15 +450,20 @@ private:
         return !suppress_when_read_only || !availability->read_only;
     }
 
-    void process_component_overlay_command(
+    [[nodiscard]] bool process_component_overlay_command(
         NodeId source_id, PlatformServices& platform) {
+        // This control block is independent of the UI object's storage. Any
+        // callback below may synchronously delete this UI; after expiration the
+        // only legal continuation is to return to dispatch using local values.
+        std::weak_ptr<int> owner_lifetime = lifetime_;
+
         std::optional<PendingOverlayCommand> pending;
         if (overlay_command_retry_) {
             pending.emplace(std::move(*overlay_command_retry_));
             overlay_command_retry_.reset();
         } else {
             auto command = take_overlay_command(source_id);
-            if (!command) return;
+            if (!command) return true;
             pending.emplace(PendingOverlayCommand{source_id, std::move(*command)});
         }
 
@@ -470,7 +482,7 @@ private:
                 // invalid handle so the anchor clears opener suppression, and
                 // never resurrect a stale popup after focus later returns.
                 if (on_shown) on_shown({});
-                return;
+                return !owner_lifetime.expired();
             }
 
             OverlayHandle handle;
@@ -493,6 +505,7 @@ private:
             // reconciliation. ComboBox/PopupMenu opener suppression depends on
             // the committed handle being visible while focus leaves the anchor.
             if (on_shown) on_shown(handle);
+            if (owner_lifetime.expired()) return false;
 
             try {
                 // Retained preparation is still fallible after publication. On
@@ -510,7 +523,7 @@ private:
             }
 
             enforce_new_modal_capture_barrier(platform);
-            return;
+            return true;
         }
 
         const auto guard_anchor = command.guard_anchor;
@@ -532,13 +545,17 @@ private:
         const bool allowed = guarded_anchor_allows_commit(
             guard_anchor, suppress_when_read_only);
         auto callback = std::move(command.after_close);
-        if (allowed && callback) callback();
+        if (allowed && callback) {
+            callback();
+            if (owner_lifetime.expired()) return false;
+        }
 
         // The application callback may invalidate dynamic composition, remove
         // its anchor or open another T061 overlay directly. Failures from this
         // point must not requeue the callback because it may already have run.
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
+        return true;
     }
 
     EventResult dispatch_tree_dialog_safe(
@@ -588,8 +605,12 @@ private:
     }
 
     void flush_pending_dialog_completion() {
-        if (!dialog_state_ || dialog_state_->ui_tearing_down ||
-            !dialog_state_->pending_completion) {
+        // Keep the transaction state independently alive across the application
+        // completion. The completion is the last operation allowed to depend on
+        // UI ownership: it may synchronously delete this UI and may also throw.
+        auto dialog_state = dialog_state_;
+        if (!dialog_state || dialog_state->ui_tearing_down ||
+            !dialog_state->pending_completion) {
             return;
         }
 
@@ -599,12 +620,12 @@ private:
         // transaction either commits or proves itself terminal. This matters
         // when the Dialog controller is destroyed while its close is deferred:
         // the UI-owned pending closure may then be the only remaining retry owner.
-        const auto generation = dialog_state_->pending_completion_generation;
+        const auto generation = dialog_state->pending_completion_generation;
         prepare_overlay_layout();
 
-        if (!dialog_state_ || dialog_state_->ui_tearing_down ||
-            dialog_state_->pending_completion_generation != generation ||
-            !dialog_state_->pending_completion) {
+        if (dialog_state->ui_tearing_down ||
+            dialog_state->pending_completion_generation != generation ||
+            !dialog_state->pending_completion) {
             return;
         }
 
@@ -612,26 +633,25 @@ private:
         // original pending close intact. Move the original into local recovery
         // storage, freeing the DialogState slot before invoking application code
         // so a successful completion may reenter and create/defer a newer Dialog.
-        auto completion = dialog_state_->pending_completion;
-        auto durable_completion = std::move(dialog_state_->pending_completion);
-        dialog_state_->pending_completion_generation = 0;
+        auto completion = dialog_state->pending_completion;
+        auto durable_completion = std::move(dialog_state->pending_completion);
+        dialog_state->pending_completion_generation = 0;
 
         try {
-            finish_dialog_completion(generation, std::move(completion));
+            if (!dialog_state->release(generation)) return;
+            if (completion) completion();
         } catch (...) {
             // The deferred closure restores this generation before its fallible
             // retained-overlay close. If that close fails, ownership is the
             // precise signal that internal commit did not happen yet: restore
             // the original UI-owned closure without allocating or invoking any
-            // callback during unwind. If ownership is already gone, the throw
-            // came after the internal transaction became terminal (for example
-            // from application completion) and must never be retried.
-            if (dialog_state_ && !dialog_state_->ui_tearing_down &&
-                dialog_state_->owns(generation) &&
-                dialog_state_->pending_completion_generation == 0 &&
-                !dialog_state_->pending_completion) {
-                dialog_state_->pending_completion_generation = generation;
-                dialog_state_->pending_completion = std::move(durable_completion);
+            // callback during unwind. If ownership is already gone (including
+            // UI destruction), the transaction is terminal and must not retry.
+            if (!dialog_state->ui_tearing_down && dialog_state->owns(generation) &&
+                dialog_state->pending_completion_generation == 0 &&
+                !dialog_state->pending_completion) {
+                dialog_state->pending_completion_generation = generation;
+                dialog_state->pending_completion = std::move(durable_completion);
             }
             throw;
         }
@@ -736,6 +756,7 @@ private:
     // retained OverlayHost can keep lifetime seams until Tree teardown ends.
     // Declaration order also keeps the borrowed presenter valid while Tree
     // unmounts components that may still close their overlay during teardown.
+    std::shared_ptr<int> lifetime_{std::make_shared<int>(0)};
     std::shared_ptr<detail::DialogState> dialog_state_;
     std::shared_ptr<detail::OverlayState> overlay_state_;
     OverlayPresenter overlay_presenter_;
