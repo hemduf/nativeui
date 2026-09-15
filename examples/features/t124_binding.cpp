@@ -75,9 +75,12 @@ int verify_binding_invalidation_and_isolation() {
         return example::fail("baseline Binding renders left a UI dirty");
     }
 
+    // Dynamic observers only enqueue structural work. The retained checkpoint
+    // decides whether logical identity changed and only then invalidates layout;
+    // the immediate wakeup is paint-only for both State and Binding sources.
     first.visible.set(false);
-    if (!first_tree.layout_dirty() || !first_tree.paint_dirty()) {
-        return example::fail("Binding If update missed structural layout+paint invalidation");
+    if (first_tree.layout_dirty() || !first_tree.paint_dirty()) {
+        return example::fail("Binding If update changed deferred structural invalidation contract");
     }
     if (second_tree.dirty()) {
         return example::fail("Binding If update leaked invalidation into an independent UI");
@@ -87,8 +90,8 @@ int verify_binding_invalidation_and_isolation() {
     }
 
     first.page.set(2);
-    if (!first_tree.layout_dirty() || !first_tree.paint_dirty()) {
-        return example::fail("Binding Switch update missed structural layout+paint invalidation");
+    if (first_tree.layout_dirty() || !first_tree.paint_dirty()) {
+        return example::fail("Binding Switch update changed deferred structural invalidation contract");
     }
     if (!first_renderer.render(first_tree)) {
         return example::fail("Binding Switch update render failed");
@@ -97,8 +100,8 @@ int verify_binding_invalidation_and_isolation() {
     auto reordered = first.items.get();
     std::rotate(reordered.begin(), reordered.begin() + 1, reordered.end());
     first.items.set(std::move(reordered));
-    if (!first_tree.layout_dirty() || !first_tree.paint_dirty()) {
-        return example::fail("Binding ForEach update missed structural layout+paint invalidation");
+    if (first_tree.layout_dirty() || !first_tree.paint_dirty()) {
+        return example::fail("Binding ForEach update changed deferred structural invalidation contract");
     }
     if (!first_renderer.render(first_tree)) {
         return example::fail("Binding ForEach update render failed");
