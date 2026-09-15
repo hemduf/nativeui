@@ -22,6 +22,7 @@ namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
 } // namespace detail
 
+class Dialog;
 class UI;
 
 class Tree {
@@ -32,6 +33,11 @@ public:
 #endif
 #include <nativeui/detail/tree_theme_public.inc>
 private:
+    // T131 Dialog transaction recovery needs to distinguish an active retained
+    // dispatch from an outer safe checkpoint without exposing dispatch
+    // bookkeeping through Tree's public API. Dialog remains UI-owned policy;
+    // this friendship is only an internal coordination seam.
+    friend class Dialog;
     friend class UI;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
