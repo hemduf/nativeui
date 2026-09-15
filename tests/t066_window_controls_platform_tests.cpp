@@ -1,4 +1,7 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/detail/dispatcher_owner.hpp>
+
+#include "test_support.hpp"
 
 #if defined(__APPLE__)
 #include <objc/message.h>
@@ -13,7 +16,9 @@
 #include <X11/Xlib.h>
 #endif
 
+#include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -69,6 +74,55 @@ public:
 
 private:
     std::shared_ptr<LifecycleCounts> counts_;
+};
+
+struct InputCloseState {
+    std::function<void()> close_from_input;
+    bool input_ran{};
+    int unmounts{};
+};
+
+class InputCloseProbeComponent final : public ui::Component {
+public:
+    explicit InputCloseProbeComponent(std::shared_ptr<InputCloseState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {120.0f, 60.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::PointerDown) return ui::EventResult::Ignored;
+        state_->input_ran = true;
+        state_->close_from_input();
+        return ui::EventResult::Handled;
+    }
+
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<InputCloseState> state_;
+};
+
+class InputCloseProbe {
+public:
+    explicit InputCloseProbe(std::shared_ptr<InputCloseState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<InputCloseProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<InputCloseState> state_;
 };
 
 bool send_native_close(ui::NativeViewHandle handle) {
@@ -139,6 +193,14 @@ void pump(ui::Application& app, int iterations = 4) {
     for (int i = 0; i < iterations && !app.quit_requested(); ++i) {
         (void)app.poll(0.0);
     }
+}
+
+void fill_dispatcher_to_capacity(const ui::Dispatcher& dispatcher) {
+    for (std::size_t index = 0; index < ui::kDispatcherMaxPendingTasks; ++index) {
+        require(dispatcher.post([] {}),
+                "dispatcher rejected work before its documented capacity");
+    }
+    require(!dispatcher.post([] {}), "dispatcher accepted work beyond its documented capacity");
 }
 
 ui::WindowDesc desc(std::string title) {
@@ -256,6 +318,321 @@ void programmatic_close_bypasses_veto() {
     require(requests == 0, "programmatic close incorrectly invoked veto callback");
     require(window.is_closed() && closed == 1,
             "programmatic close did not complete exactly once");
+}
+
+void throwing_programmatic_close_post_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    ui::UI tree{ui::Label{"T132 throwing programmatic close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing programmatic close")};
+    require(window.valid(), "throwing-programmatic window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool callback_ran = false;
+    bool closed_inside_callback = true;
+    window.on_closed([&] { ++closed; });
+
+    require(dispatcher.post([&] {
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        callback_ran = true;
+        window.request_close();
+        closed_inside_callback = window.is_closed();
+    }), "failed to enqueue throwing-programmatic driver callback");
+
+    (void)app.poll(0.0);
+    require(callback_ran, "throwing-programmatic driver callback did not run");
+    require(!closed_inside_callback,
+            "exception-before-enqueue synchronously closed on active callback stack");
+    require(window.is_closed(),
+            "owner checkpoint did not commit throwing-programmatic close");
+    require(closed == 1,
+            "throwing-programmatic close did not complete exactly once");
+}
+
+void throwing_native_close_post_is_contained_and_recovers() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 throwing native close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing native close")};
+    require(window.valid(), "throwing-native window construction failed");
+
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        return ui::CloseDecision::Cancel;
+    });
+
+    ui::detail::DispatcherTestAccess::fail_next_post(window.dispatcher());
+    require(send_native_close(window.native_handle()),
+            "failed throwing native close request");
+    (void)app.poll(0.0);
+
+    require(requests == 1,
+            "throwing native request did not recover Requesting exactly once");
+    require(!window.is_closed(), "cancelled throwing native request closed window");
+    require(!app.quit_requested(), "cancelled throwing native request triggered quit");
+    require(window.set_title("T132 native throw recovered"),
+            "window unusable after throwing native request post");
+
+    window.request_close();
+    pump(app, 3);
+    require(window.is_closed() && closed == 1,
+            "cleanup close after native throw did not complete once");
+}
+
+void throwing_accepted_close_completion_commits_once() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 throwing completion"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing completion")};
+    require(window.valid(), "throwing-completion window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        return ui::CloseDecision::Accept;
+    });
+
+    require(send_native_close(window.native_handle()),
+            "failed native close for throwing completion");
+    (void)app.poll(0.0);
+
+    require(requests == 1, "throwing completion veto callback count mismatch");
+    require(window.is_closed(),
+            "later owner checkpoint did not commit throwing completion");
+    require(closed == 1,
+            "throwing completion did not fire on_closed exactly once");
+    require(app.quit_requested(),
+            "throwing completion last-window close did not update quit bookkeeping");
+}
+
+void saturated_dispatcher_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    ui::UI tree{ui::Label{"T132 saturated close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated close")};
+    require(window.valid(), "saturated-close window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool callback_ran = false;
+    bool closed_inside_callback = true;
+    window.on_closed([&] { ++closed; });
+
+    require(dispatcher.post([&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        callback_ran = true;
+        window.request_close();
+        closed_inside_callback = window.is_closed();
+    }), "failed to enqueue saturated-close driver callback");
+
+    (void)app.poll(0.0);
+    require(callback_ran, "saturated-close driver callback did not run");
+    require(!closed_inside_callback,
+            "Dispatcher rejection synchronously closed the window on the callback stack");
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete the rejected-post close");
+    require(closed == 1, "rejected-post close did not deliver on_closed exactly once");
+}
+
+void saturated_component_input_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    auto state = std::make_shared<InputCloseState>();
+    test::MockPlatform platform;
+    ui::UI tree{InputCloseProbe{state}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated component input")};
+    require(window.valid(), "component-input window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool closed_inside_input = true;
+    bool unmounted_inside_input = true;
+    window.on_closed([&] { ++closed; });
+    state->close_from_input = [&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        window.request_close();
+        closed_inside_input = window.is_closed();
+        unmounted_inside_input = state->unmounts != 0;
+    };
+
+    // Native realize/configure timing is platform-specific. Prepare the retained
+    // input fixture explicitly so the regression isolates close deferral rather
+    // than depending on whether the first native activation event already ran.
+    tree.resize({180.0f, 120.0f});
+    tree.activate(platform);
+    require(tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 24.0f, 24.0f), platform) ==
+            ui::EventResult::Handled,
+            "component input driver was not handled");
+    require(state->input_ran, "component input callback did not run");
+    require(!closed_inside_input,
+            "Dispatcher rejection synchronously closed from component input callback");
+    require(!unmounted_inside_input && state->unmounts == 0,
+            "Dispatcher rejection unmounted the live UI on component input stack");
+    require(!window.is_closed(),
+            "component-input close committed before a later owner checkpoint");
+
+    (void)app.poll(0.0);
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete component-input close");
+    require(closed == 1,
+            "component-input rejected-post close did not deliver on_closed exactly once");
+    // Standalone close commits at the owner checkpoint, but externally owned UI
+    // teardown timing is platform-specific (some backends defer it to owner
+    // destruction). The contract here is no teardown on the input stack and no
+    // duplicate retained teardown, not a synchronous unmount requirement.
+    require(state->unmounts <= 1,
+            "component-input close unmounted retained UI more than once");
+}
+
+void throwing_component_input_close_defers_until_owner_checkpoint() {
+    ui::Application app;
+    app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
+    auto state = std::make_shared<InputCloseState>();
+    test::MockPlatform platform;
+    ui::UI tree{InputCloseProbe{state}};
+    ui::StandaloneWindow window{app, tree, desc("T132 throwing component input")};
+    require(window.valid(), "throwing component-input window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int closed = 0;
+    bool closed_inside_input = true;
+    bool unmounted_inside_input = true;
+    window.on_closed([&] { ++closed; });
+    state->close_from_input = [&] {
+        ui::detail::DispatcherTestAccess::fail_next_post(dispatcher);
+        window.request_close();
+        closed_inside_input = window.is_closed();
+        unmounted_inside_input = state->unmounts != 0;
+    };
+
+    // Exercise the same retained component/input path as the rejection case,
+    // but fail the real lifecycle-control Dispatcher post before enqueue.
+    tree.resize({180.0f, 120.0f});
+    tree.activate(platform);
+    require(tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 24.0f, 24.0f), platform) ==
+            ui::EventResult::Handled,
+            "throwing component input driver was not handled");
+    require(state->input_ran, "throwing component input callback did not run");
+    require(!closed_inside_input,
+            "exception-before-enqueue synchronously closed from component input callback");
+    require(!unmounted_inside_input && state->unmounts == 0,
+            "exception-before-enqueue unmounted the live UI on component input stack");
+    require(!window.is_closed(),
+            "throwing component-input close committed before a later owner checkpoint");
+
+    (void)app.poll(0.0);
+    require(window.is_closed(),
+            "owner lifecycle checkpoint did not complete throwing component-input close");
+    require(closed == 1,
+            "throwing component-input close did not deliver on_closed exactly once");
+    require(state->unmounts <= 1,
+            "throwing component-input close unmounted retained UI more than once");
+}
+
+void saturated_native_close_reentrant_programmatic_wins() {
+    ui::Application app;
+    ui::UI tree{ui::Label{"T132 saturated native close"}};
+    ui::StandaloneWindow window{app, tree, desc("T132 saturated native close")};
+    require(window.valid(), "saturated-native window construction failed");
+
+    const auto dispatcher = window.dispatcher();
+    int requests = 0;
+    int closed = 0;
+    window.on_closed([&] { ++closed; });
+    window.on_close_request([&] {
+        ++requests;
+        window.request_close();
+        return ui::CloseDecision::Cancel;
+    });
+
+    fill_dispatcher_to_capacity(dispatcher);
+    require(send_native_close(window.native_handle()),
+            "failed to send saturated native close request");
+    (void)app.poll(0.0);
+
+    require(requests == 1,
+            "rejected native-close post did not reach the owner lifecycle checkpoint");
+    require(window.is_closed(),
+            "request_close inside recovered veto did not win over returned Cancel");
+    require(closed == 1,
+            "recovered native close did not deliver on_closed exactly once");
+    require(app.quit_requested(),
+            "recovered native last-window close did not update quit bookkeeping");
+}
+
+void destroy_pending_saturated_close_is_callback_silent() {
+    ui::Application app;
+    int closed = 0;
+    ui::UI tree{ui::Label{"T132 saturated teardown"}};
+    auto window = std::make_unique<ui::StandaloneWindow>(
+        app, tree, desc("T132 saturated teardown"));
+    require(window->valid(), "saturated-teardown window construction failed");
+
+    const auto dispatcher = window->dispatcher();
+    window->on_closed([&] { ++closed; });
+    require(dispatcher.post([&] {
+        fill_dispatcher_to_capacity(dispatcher);
+        window->request_close();
+        require(window->should_close() && !window->is_closed(),
+                "failed enqueue did not leave close pending before teardown");
+        window.reset();
+    }), "failed to enqueue saturated-teardown driver callback");
+
+    (void)app.poll(0.0);
+    require(!window, "saturated-teardown window survived explicit destruction");
+    require(closed == 0,
+            "destruction after failed close enqueue invoked on_closed");
+    require(app.quit_requested(),
+            "destruction after failed close enqueue did not unregister last window");
+}
+
+void saturated_close_isolated_between_windows() {
+    ui::Application app;
+    ui::UI tree_a{ui::Label{"T132 isolated A"}};
+    ui::UI tree_b{ui::Label{"T132 isolated B"}};
+    ui::StandaloneWindow a{app, tree_a, desc("T132 isolated A")};
+    ui::StandaloneWindow b{app, tree_b, desc("T132 isolated B")};
+    require(a.valid() && b.valid(), "saturated-isolation window construction failed");
+
+    const auto dispatcher_a = a.dispatcher();
+    int closed_a = 0;
+    int closed_b = 0;
+    bool a_closed_inside_callback = true;
+    a.on_closed([&] { ++closed_a; });
+    b.on_closed([&] { ++closed_b; });
+
+    require(dispatcher_a.post([&] {
+        fill_dispatcher_to_capacity(dispatcher_a);
+        a.request_close();
+        a_closed_inside_callback = a.is_closed();
+    }), "failed to enqueue saturated-isolation driver callback");
+
+    (void)app.poll(0.0);
+    require(!a_closed_inside_callback,
+            "saturated window A closed on its active callback stack");
+    require(a.is_closed() && closed_a == 1,
+            "saturated window A did not close exactly once at checkpoint");
+    require(!b.is_closed() && closed_b == 0,
+            "saturated close in A poisoned independent window B");
+    require(!app.quit_requested(),
+            "closing recovered A triggered quit while B remained open");
+    require(b.set_title("T132 B survives saturated A"),
+            "window B was not operational after recovered A close");
+
+    b.request_close();
+    pump(app, 3);
+    require(b.is_closed() && closed_b == 1,
+            "window B cleanup close did not complete exactly once");
+    require(app.quit_requested(),
+            "final window close after recovery did not update quit bookkeeping");
 }
 
 void reentrant_request_close_inside_veto_wins() {
@@ -397,6 +774,15 @@ void suite() {
     native_close_veto_then_accept();
     native_close_without_request_handler_accepts_once();
     programmatic_close_bypasses_veto();
+    throwing_programmatic_close_post_defers_until_owner_checkpoint();
+    throwing_native_close_post_is_contained_and_recovers();
+    throwing_accepted_close_completion_commits_once();
+    saturated_dispatcher_close_defers_until_owner_checkpoint();
+    saturated_component_input_close_defers_until_owner_checkpoint();
+    throwing_component_input_close_defers_until_owner_checkpoint();
+    saturated_native_close_reentrant_programmatic_wins();
+    destroy_pending_saturated_close_is_callback_silent();
+    saturated_close_isolated_between_windows();
     reentrant_request_close_inside_veto_wins();
     reentrant_veto_can_close_other_window();
     reentrant_veto_can_request_application_quit();

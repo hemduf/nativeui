@@ -14,9 +14,11 @@
 
 #include <exception>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 namespace ui {
 
@@ -24,6 +26,7 @@ namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
 } // namespace detail
 
+class Dialog;
 class UI;
 
 class Tree {
@@ -34,10 +37,19 @@ public:
 #endif
 #include <nativeui/detail/tree_theme_public.inc>
 private:
+    // T131 Dialog transaction recovery needs to distinguish an active retained
+    // dispatch from an outer safe checkpoint without exposing dispatch
+    // bookkeeping through Tree's public API. Dialog remains UI-owned policy;
+    // this friendship is only an internal coordination seam.
+    friend class Dialog;
     friend class UI;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
+#define availability_invalidator unsafe_availability_invalidator
+#define paint_invalidator unsafe_paint_invalidator
+#define layout_invalidator unsafe_layout_invalidator
+#define focus_invalidator unsafe_focus_invalidator
 #define ensure_layout ensure_layout_legacy
 #define layout_node layout_node_legacy
 #define mount_node mount_node_untracked
@@ -51,10 +63,21 @@ private:
 #undef mount_node
 #undef layout_node
 #undef ensure_layout
+#undef focus_invalidator
+#undef layout_invalidator
+#undef paint_invalidator
+#undef availability_invalidator
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
 #include <nativeui/detail/tree_focus_group.inc>
+#define register_dynamic_node unsafe_register_dynamic_node
 #include <nativeui/detail/tree_dynamic.inc>
+#undef register_dynamic_node
+#define mount_node retained_mount_node_legacy
+#define unmount_node retained_unmount_node_legacy
+#include <nativeui/detail/tree_retained_invalidation.inc>
+#undef unmount_node
+#undef mount_node
 #include <nativeui/detail/tree_lifecycle_transaction.inc>
 #include <nativeui/detail/tree_layout_transaction.inc>
 };

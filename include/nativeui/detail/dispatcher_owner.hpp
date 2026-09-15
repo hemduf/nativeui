@@ -75,4 +75,11 @@ private:
     std::shared_ptr<DispatcherState> state_;
 };
 
+/// Internal deterministic fault seam used by lifecycle/platform tests. The
+/// failure bit belongs to exactly one DispatcherState; no process-global or
+/// thread-local injection state is involved.
+struct DispatcherTestAccess final {
+    static void fail_next_post(const Dispatcher& dispatcher) noexcept;
+};
+
 } // namespace ui::detail
