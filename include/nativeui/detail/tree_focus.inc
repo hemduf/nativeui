@@ -103,7 +103,7 @@
             availability_cleared_focus_ = nullptr;
         }
         FocusContext context{
-            old->bounds, platform, paint_invalidator(*old), layout_invalidator(*old)};
+            old->bounds, platform, unsafe_paint_invalidator(*old), unsafe_layout_invalidator(*old)};
         old->component->focus_changed(false, context);
         invalidate_node_paint(*old);
         focus_active_ = false;
@@ -233,7 +233,7 @@
         auto* old = current_focus_node();
         if (old) {
             FocusContext old_context{
-                old->bounds, platform, paint_invalidator(*old), layout_invalidator(*old)};
+                old->bounds, platform, unsafe_paint_invalidator(*old), unsafe_layout_invalidator(*old)};
             old->component->focus_changed(false, old_context);
             invalidate_node_paint(*old);
         }
@@ -242,7 +242,7 @@
         focus_active_ = true;
 
         FocusContext new_context{
-            node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+            node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
         node->component->focus_changed(true, new_context);
         invalidate_node_paint(*node);
         notify_focus_within_transition(old, node, platform);

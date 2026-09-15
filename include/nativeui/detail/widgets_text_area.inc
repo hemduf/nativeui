@@ -2,13 +2,13 @@ class TextAreaComponent final : public Component, public detail::ThemeBinding {
 public:
     TextAreaComponent(
         std::string label,
-        State<std::string>& state,
+        Binding<std::string> state,
         std::string placeholder,
         std::size_t max_length,
         TextAreaStyle style)
         : label_(std::move(label)),
-          state_(state),
-          model_(state.get(), max_length),
+          state_(std::move(state)),
+          model_(state_.get(), max_length),
           placeholder_(std::move(placeholder)),
           style_(std::move(style)) {
         rebuild_lines();
@@ -796,9 +796,11 @@ private:
 
     void commit(InputContext& ctx) {
         rebuild_lines();
-        state_.set(model_.text());
+        auto state = state_;
+        auto value = model_.text();
         ensure_cursor_visible(ctx);
         ctx.invalidate();
+        state.set(std::move(value));
     }
 
     void paint_composition_line(
@@ -924,7 +926,7 @@ private:
     }
 
     std::string label_;
-    State<std::string>& state_;
+    Binding<std::string> state_;
     TextEditModel model_;
     std::string placeholder_;
     TextAreaStyle style_;
@@ -938,5 +940,5 @@ private:
     float scroll_y_{};
     std::string pending_ime_commit_;
     std::string focus_snapshot_;
-    State<std::string>::Subscription subscription_;
+    Binding<std::string>::Subscription subscription_;
 };
