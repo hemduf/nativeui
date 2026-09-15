@@ -83,9 +83,16 @@
         return first;
     }
 
+    // Stable identity of an availability-driven focus-loss notification that
+    // already entered application code but did not reach the retained commit
+    // point. A later availability checkpoint may finish framework bookkeeping
+    // for this exact node without retrying the already-started callback.
+    NodeId availability_blur_started_{kInvalidNodeId};
+
     void clear_focus(PlatformServices& platform) {
         if (!focus_active_ || focused_index_ >= focusables_.size()) {
             focus_active_ = false;
+            availability_blur_started_ = kInvalidNodeId;
             if (!syncing_availability_) availability_cleared_focus_ = nullptr;
             return;
         }
@@ -102,11 +109,30 @@
         } else {
             availability_cleared_focus_ = nullptr;
         }
-        FocusContext context{
-            old->bounds, platform, unsafe_paint_invalidator(*old), unsafe_layout_invalidator(*old)};
-        old->component->focus_changed(false, context);
+
+        const bool resume_availability_blur =
+            syncing_availability_ && availability_blur_started_ == old->id;
+        if (!resume_availability_blur) {
+            FocusContext context{
+                old->bounds,
+                platform,
+                unsafe_paint_invalidator(*old),
+                unsafe_layout_invalidator(*old)};
+            // Publish the stable identity only for availability reconciliation,
+            // immediately before entering user code. If it throws, leave focus
+            // logically active so the next pass can reconstruct the same rehome
+            // decision without invoking this callback again.
+            if (syncing_availability_) availability_blur_started_ = old->id;
+            old->component->focus_changed(false, context);
+        }
+
+        // Preserve the established successful-path ordering. Invalidation may
+        // itself throw; retaining the marker until the logical focus commit lets
+        // a later availability pass finish framework work without retrying the
+        // already-started focus callback.
         invalidate_node_paint(*old);
         focus_active_ = false;
+        availability_blur_started_ = kInvalidNodeId;
         notify_focus_within_transition(old, nullptr, platform);
     }
 
@@ -197,6 +223,20 @@
 
     void sync_focus_structure(PlatformServices& platform) {
         if (!focus_structure_dirty_) return;
+
+        // A failed availability-driven blur can be cancelled by a re-entrant
+        // state reversal before the next checkpoint. If the same node is still
+        // the authoritative, available focus target, the aborted transition no
+        // longer needs completion; retire only the framework marker without
+        // invoking application code.
+        if (availability_blur_started_ != kInvalidNodeId) {
+            auto* focused = current_focus_node();
+            if (!focused || focused->id != availability_blur_started_ ||
+                focus_target_available(focused)) {
+                availability_blur_started_ = kInvalidNodeId;
+            }
+        }
+
         reconcile_scope_deactivations(*root_, platform);
         reconcile_scope_activations(*root_, platform);
         if (focus_active_ && !focus_target_available(current_focus_node())) {

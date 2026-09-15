@@ -2,6 +2,53 @@
 
 namespace {
 
+struct PersistentBlurProbeState {
+    int focus_in{};
+    int focus_out{};
+};
+
+class PersistentBlurProbeComponent final : public ui::Component {
+public:
+    explicit PersistentBlurProbeComponent(std::shared_ptr<PersistentBlurProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {100.0f, 40.0f};
+    }
+
+    void focus_changed(bool focused, ui::FocusContext&) override {
+        if (focused) {
+            ++state_->focus_in;
+            return;
+        }
+        ++state_->focus_out;
+        throw std::runtime_error("persistent focus teardown failure");
+    }
+
+private:
+    std::shared_ptr<PersistentBlurProbeState> state_;
+};
+
+class PersistentBlurProbe {
+public:
+    explicit PersistentBlurProbe(std::shared_ptr<PersistentBlurProbeState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<PersistentBlurProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<PersistentBlurProbeState> state_;
+};
+
 void suite() {
     // Neutral input normalization: regular Tab keeps its modifier state while
     // AppKit BackTab U+0019 always means reverse traversal.
@@ -55,6 +102,40 @@ void suite() {
     tree.dispatch(test::key(ui::Key::Tab, true), platform);
     tree.dispatch(test::key(ui::Key::Space), platform);
     NUI_CHECK(third.get());
+
+    // T125: once availability-driven focus teardown has entered application
+    // code, an exception must not cause the same focus_changed(false) call to
+    // be retried on the next dispatch. The callback deliberately keeps
+    // throwing; recovery must complete retained bookkeeping, rehome focus to
+    // the still-available sibling, and route that unrelated event normally.
+    {
+        ui::State<bool> enabled{true};
+        ui::State<bool> fallback{false};
+        auto probe = std::make_shared<PersistentBlurProbeState>();
+        ui::UI recovery{
+            ui::Row{
+                ui::Enabled{enabled, PersistentBlurProbe{probe}},
+                ui::Toggle{"Fallback", fallback}}
+                .gap(4.0f)};
+
+        test::MockPlatform recovery_platform;
+        recovery.resize({240.0f, 80.0f});
+        recovery.activate(recovery_platform);
+        NUI_CHECK(probe->focus_in == 1);
+
+        bool threw = false;
+        try {
+            enabled.set(false);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(probe->focus_out == 1);
+
+        recovery.dispatch(test::key(ui::Key::Space), recovery_platform);
+        NUI_CHECK(probe->focus_out == 1);
+        NUI_CHECK(fallback.get());
+    }
 
     // A trapping active scope enters on its default focus and wraps both Tab directions.
     {
