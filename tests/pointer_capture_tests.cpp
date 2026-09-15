@@ -9,6 +9,9 @@ struct TreeTestAccess {
     [[nodiscard]] static auto dispatch_depth(const Tree& tree) noexcept {
         return tree.dispatch_depth_;
     }
+    [[nodiscard]] static bool pointer_interaction_active(const Tree& tree) noexcept {
+        return tree.pointer_interaction_active_;
+    }
 };
 } // namespace ui
 
@@ -242,6 +245,44 @@ void suite() {
         NUI_CHECK(state->down == 2);
         NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 2);
         tree.dispatch(test::pointer(ui::InputType::PointerUp, 30.0f, 20.0f), platform);
+        NUI_CHECK(state->up == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 2);
+    }
+
+    // T125: PointerDown starts interaction bookkeeping before it cancels a stale
+    // capture. If that cancellation callback throws, the failed PointerDown has
+    // not completed and must not leave retained interaction state permanently
+    // active. Cleanup is framework-only; a later gesture can capture normally.
+    {
+        auto state = std::make_shared<CaptureState>();
+        ui::Tree tree{ui::compile(ui::make_spec(CaptureProbe{state}))};
+        tree.mount();
+        tree.layout({120.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        const int begin_before = platform.pointer_capture_begin_count;
+        const int end_before = platform.pointer_capture_end_count;
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 1);
+
+        state->throw_on_cancel = true;
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 30.0f, 20.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(!ui::TreeTestAccess::pointer_interaction_active(tree));
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 1);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 40.0f, 20.0f), platform);
+        NUI_CHECK(state->down == 2);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 2);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 40.0f, 20.0f), platform);
         NUI_CHECK(state->up == 1);
         NUI_CHECK(platform.pointer_capture_end_count == end_before + 2);
     }
