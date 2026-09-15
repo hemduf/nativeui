@@ -13,6 +13,7 @@
 #endif
 
 #include <limits>
+#include <new>
 #include <optional>
 #include <string>
 
