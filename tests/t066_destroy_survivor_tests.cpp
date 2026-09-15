@@ -184,6 +184,20 @@ int main() {
         if (failed.native_handle()) return fail("failed construction retained a public native handle");
     }
 
+    // Keep one healthy Application-owned window alive while the temporary
+    // activation rollback fixture is destroyed. StandaloneWindow intentionally
+    // requests Application quit when the final live window closes, so allowing
+    // the temporary fixture to become the sole live window would make the later
+    // survivor construction test invalid rather than exercise T130 recovery.
+    ui::UI tree_b{ui::Label{"T066 direct-destroy B"}};
+    auto b = std::make_unique<ui::StandaloneWindow>(
+        app,
+        tree_b,
+        ui::WindowDesc{.title = "T066 direct-destroy B",
+                       .size = {360.0f, 180.0f},
+                       .resizable = true});
+    if (!b->valid()) return fail("survivor B construction failed");
+
     // Activation is not committed merely because component activate() returned.
     // A later focus callback can still fail after active/platform publication.
     // The failed transition must perform best-effort deactivation and a retry on
@@ -236,23 +250,19 @@ int main() {
             return fail("retried activation did not deactivate cleanly");
         }
     }
+    if (app.quit_requested()) {
+        return fail("activation rollback window destruction requested quit while B remained live");
+    }
 
     FaultState teardown_fault{};
     ui::UI tree_a{FaultRoot{teardown_fault}};
-    ui::UI tree_b{ui::Label{"T066 direct-destroy B"}};
     auto a = std::make_unique<ui::StandaloneWindow>(
         app,
         tree_a,
         ui::WindowDesc{.title = "T130 throwing teardown A",
                        .size = {420.0f, 220.0f},
                        .resizable = true});
-    auto b = std::make_unique<ui::StandaloneWindow>(
-        app,
-        tree_b,
-        ui::WindowDesc{.title = "T066 direct-destroy B",
-                       .size = {360.0f, 180.0f},
-                       .resizable = true});
-    if (!a->valid() || !b->valid()) return fail("window construction failed");
+    if (!a->valid()) return fail("throwing teardown A construction failed");
 
     // Make teardown deterministic without depending on native focus timing, and
     // establish a real retained capture so close_native_view() first exercises
