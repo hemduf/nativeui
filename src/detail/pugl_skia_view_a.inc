@@ -15,6 +15,7 @@ public:
             throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
         }
 
+        ConstructionCleanup construction_cleanup{*this};
         if (shared_world) {
             world_ = shared_world;
         } else {
@@ -105,14 +106,12 @@ public:
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
             request_redraw(rect);
         });
+        construction_cleanup.release();
     }
 
-    ~ViewCore() {
-        close_native_view();
-        if (world_ && owns_world_) {
-            puglFreeWorld(world_);
-        }
-        world_ = nullptr;
+    ~ViewCore() noexcept {
+        (void)close_native_view();
+        release_owned_world_noexcept();
     }
 
     ViewCore(const ViewCore&) = delete;
@@ -185,22 +184,38 @@ public:
         return update_size_constraints(size_constraints_.min_size(), logical);
     }
 
-    bool close_native_view() {
+    bool close_native_view() noexcept {
         if (!view_) {
             should_close_ = true;
             visible_ = false;
             return false;
         }
 
+        const auto best_effort = [this](auto&& step, const char* fallback) noexcept {
+            try {
+                step();
+            } catch (const std::exception& error) {
+                remember_teardown_error(error.what());
+            } catch (...) {
+                remember_teardown_error(fallback);
+            }
+        };
+
         // Release focus/capture/component activation while PlatformServices is
-        // still alive. This is intentionally safe both for an accepted close
-        // checkpoint and direct C++ destructor teardown.
-        (void)ui_.cancel_pointer(services_);
-        ui_.deactivate(services_);
-        set_text_input(false, {}, 0.0f);
-        preferred_size_callback_ = {};
-        preferred_size_state_.reset();
-        ui_.clear_invalidation_callback();
+        // still alive. A component fault must not abort native resource release
+        // or the destruction of an unrelated sibling window.
+        best_effort([this] { (void)ui_.cancel_pointer(services_); },
+                    "NativeUI pointer teardown failed");
+        best_effort([this] { ui_.deactivate(services_); },
+                    "NativeUI component deactivation failed");
+        best_effort([this] { set_text_input(false, {}, 0.0f); },
+                    "NativeUI text-input teardown failed");
+        best_effort([this] { preferred_size_callback_ = {}; },
+                    "NativeUI preferred-size callback teardown failed");
+        best_effort([this] { preferred_size_state_.reset(); },
+                    "NativeUI preferred-size state teardown failed");
+        best_effort([this] { ui_.clear_invalidation_callback(); },
+                    "NativeUI invalidation callback teardown failed");
         if (ime_bridge_) {
             nativeuiImeDestroy(ime_bridge_);
             ime_bridge_ = nullptr;
@@ -333,6 +348,18 @@ public:
     }
 
 private:
+    struct ConstructionCleanup {
+        explicit ConstructionCleanup(ViewCore& owner) noexcept : owner_(&owner) {}
+        ~ConstructionCleanup() noexcept {
+            if (armed_) owner_->cleanup_partial_construction_noexcept();
+        }
+        void release() noexcept { armed_ = false; }
+
+    private:
+        ViewCore* owner_{};
+        bool armed_{true};
+    };
+
     [[nodiscard]] static Size validated_initial_size(const WindowDesc& desc) {
         detail::WindowSizeConstraints constraints;
         if (!constraints.update(desc.min_size, desc.max_size)) {
@@ -409,7 +436,23 @@ private:
         });
     }
 
-    void cleanup_and_throw(PuglStatus status, const char* what) {
+    void remember_teardown_error(const char* message) noexcept {
+        if (!last_error_.empty()) return;
+        try {
+            last_error_ = message ? message : "NativeUI teardown failed";
+        } catch (...) {
+            // Teardown diagnostics must never compromise native cleanup.
+        }
+    }
+
+    void release_owned_world_noexcept() noexcept {
+        if (world_ && owns_world_) {
+            puglFreeWorld(world_);
+        }
+        world_ = nullptr;
+    }
+
+    void cleanup_partial_construction_noexcept() noexcept {
         if (ime_bridge_) {
             nativeuiImeDestroy(ime_bridge_);
             ime_bridge_ = nullptr;
@@ -418,10 +461,11 @@ private:
             puglFreeView(view_);
             view_ = nullptr;
         }
-        if (world_ && owns_world_) {
-            puglFreeWorld(world_);
-        }
-        world_ = nullptr;
+        release_owned_world_noexcept();
+    }
+
+    void cleanup_and_throw(PuglStatus status, const char* what) {
+        cleanup_partial_construction_noexcept();
         throw_pugl(status, what);
     }
 
@@ -458,11 +502,11 @@ private:
         try {
             return self->on_event(event);
         } catch (const std::exception& e) {
-            self->last_error_ = e.what();
+            self->remember_teardown_error(e.what());
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         } catch (...) {
-            self->last_error_ = "Unknown NativeUI event error";
+            self->remember_teardown_error("Unknown NativeUI event error");
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         }
