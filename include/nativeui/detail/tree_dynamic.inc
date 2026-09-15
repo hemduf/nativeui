@@ -232,6 +232,21 @@
         }
     }
 
+    void reserve_dynamic_retry(NodeId owner) {
+        if (std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
+            dirty_dynamic_nodes_.end()) {
+            dirty_dynamic_nodes_.push_back(owner);
+        }
+    }
+
+    void mark_dynamic_structure_dirty(Node& owner) noexcept {
+        for (auto* current = &owner; current; current = current->parent) {
+            current->layout_dirty = true;
+        }
+        layout_dirty_ = true;
+        focus_structure_dirty_ = true;
+    }
+
     bool reconcile_dynamic_node(Node& owner) {
         auto* source = dynamic_source(owner);
         auto* record = dynamic_record(owner.id);
@@ -299,6 +314,14 @@
             }
         }
 
+        // Reconciliation consumes the caller's captured dirty marker before it
+        // invokes arbitrary lifecycle code. Reserve a replacement checkpoint
+        // first so any exceptional exit after lifecycle mutation has durable
+        // work for the next safe reconciliation checkpoint. Allocation can
+        // still fail here, but no retained lifecycle state has changed yet.
+        reserve_dynamic_retry(owner.id);
+        const auto reconciliation_epoch = structural_epoch_;
+
         Node* retained_focus = current_focus_node();
         clear_removed_focus_restore_targets(*root_, owner, current_keys, desired_keys);
         if (availability_cleared_focus_ &&
@@ -308,11 +331,25 @@
         }
 
         // Removed siblings tear down in reverse retained order, matching normal
-        // child-to-parent/reverse-sibling lifecycle semantics.
+        // child-to-parent/reverse-sibling lifecycle semantics. A lifecycle hook
+        // can fail only after the recursive helper has completed its own
+        // best-effort traversal, so keep walking the remaining removed roots and
+        // preserve the first failure for propagation after structural commit.
+        std::exception_ptr removal_error;
         for (std::size_t i = owner.children.size(); i-- > 0;) {
             if (contains_dynamic_key(desired_keys, current_keys[i])) continue;
-            if (active_) deactivate_node(*owner.children[i]);
-            unmount_node(*owner.children[i]);
+            if (active_) {
+                try {
+                    deactivate_node(*owner.children[i]);
+                } catch (...) {
+                    if (!removal_error) removal_error = std::current_exception();
+                }
+            }
+            try {
+                unmount_node(*owner.children[i]);
+            } catch (...) {
+                if (!removal_error) removal_error = std::current_exception();
+            }
         }
 
         // Detach retained and removed nodes into separate ownership before any
@@ -342,6 +379,21 @@
         // previous_children. Destroy them before constructing replacement nodes
         // so destructor/lifetime ordering matches the retained-tree contract.
         previous_children.clear();
+
+        const bool removed_structure = retained_keys.size() != current_keys.size();
+        if (removed_structure) mark_dynamic_structure_dirty(owner);
+
+        if (removal_error) {
+            std::rethrow_exception(removal_error);
+        }
+
+        // Removed lifecycle callbacks are arbitrary application code. If they
+        // changed structure, the retained-only checkpoint above is the only
+        // snapshot safe to publish from the stale pass. Leave the reserved
+        // marker in place and let the next pass rebuild from the fresh source.
+        if (structural_epoch_ != reconciliation_epoch) {
+            return removed_structure;
+        }
 
         ensure_runtime_node_ids();
         std::vector<std::pair<std::string, std::unique_ptr<Node>>> inserted_nodes;
@@ -390,12 +442,67 @@
         owner.children = std::move(next_children);
         if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = desired_keys;
 
-        // Newly created nodes are now attached to the retained tree before
-        // mount/activation callbacks can observe or mutate surrounding state.
+        // Newly created nodes are attached before callbacks can inspect their
+        // retained surroundings, but their lifecycle publication is still a
+        // transaction. If mount/activate throws, unwind every inserted root
+        // whose lifecycle started, detach all inserted roots, restore the
+        // retained-only key checkpoint, and rethrow the original exception.
+        std::vector<bool> mount_started(owner.children.size(), false);
+        std::vector<bool> activation_started(owner.children.size(), false);
+        std::exception_ptr insertion_error;
         for (std::size_t i = 0; i < owner.children.size(); ++i) {
             if (!inserted_flags[i]) continue;
-            mount_node(*owner.children[i]);
-            if (active_) activate_node(*owner.children[i]);
+            mount_started[i] = true;
+            try {
+                mount_node(*owner.children[i]);
+            } catch (...) {
+                insertion_error = std::current_exception();
+                break;
+            }
+            if (active_) {
+                activation_started[i] = true;
+                try {
+                    activate_node(*owner.children[i]);
+                } catch (...) {
+                    insertion_error = std::current_exception();
+                    break;
+                }
+            }
+        }
+
+        if (insertion_error) {
+            for (std::size_t i = owner.children.size(); i-- > 0;) {
+                if (!inserted_flags[i] || !mount_started[i]) continue;
+                if (activation_started[i]) {
+                    try {
+                        deactivate_node(*owner.children[i]);
+                    } catch (...) {
+                        // Preserve the original insertion failure. The helper
+                        // has already completed best-effort recursive teardown.
+                    }
+                }
+                try {
+                    unmount_node(*owner.children[i]);
+                } catch (...) {
+                    // Same first-error rule: rollback failures cannot replace
+                    // the exception that caused the transaction to abort.
+                }
+            }
+
+            auto attempted_children = std::move(owner.children);
+            std::vector<std::unique_ptr<Node>> rollback_retained;
+            rollback_retained.reserve(retained_keys.size());
+            for (std::size_t i = 0; i < attempted_children.size(); ++i) {
+                if (!inserted_flags[i] && attempted_children[i]) {
+                    rollback_retained.push_back(std::move(attempted_children[i]));
+                }
+            }
+            owner.children = std::move(rollback_retained);
+            if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = retained_keys;
+            rebuild_focusables_after_structure(retained_focus);
+            mark_dynamic_structure_dirty(owner);
+            attempted_children.clear();
+            std::rethrow_exception(insertion_error);
         }
 
         rebuild_focusables_after_structure(retained_focus);
@@ -421,6 +528,14 @@
                 if (!fallback) fallback = first_available_focusable();
                 if (fallback) set_focus(fallback, *active_platform_);
             }
+        }
+
+        // If no callback queued structural work during this pass, the reserved
+        // marker is only this transaction's exception checkpoint and can be
+        // retired. Otherwise preserve it for the next bounded reconciliation
+        // pass so callback-driven state is not lost.
+        if (structural_epoch_ == reconciliation_epoch) {
+            std::erase(dirty_dynamic_nodes_, owner.id);
         }
         return true;
     }
