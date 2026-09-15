@@ -137,6 +137,22 @@
     }
 
     void mount_node(Node& node) {
+        // T052's multi-instance workload constructs a fresh retained tree inside
+        // each measured operation. Letting the three transaction journals grow
+        // geometrically made one 47-node mount/layout/activate cycle pay repeated
+        // allocator growth even though their maximum static-tree size is known.
+        // Reserve that exact root subtree size before arbitrary mount callbacks;
+        // later layout/activation passes reuse the same capacities. A reserve
+        // failure occurs before lifecycle publication, preserving the T130
+        // prepare/commit/recovery contract. Dynamic insertion may still grow a
+        // journal later when the retained tree genuinely exceeds this baseline.
+        if (!node.parent) {
+            const auto node_count = retained_subtree_node_count(node);
+            mount_transition_progress_.reserve(node_count);
+            activation_transition_progress_.reserve(node_count);
+            layout_transaction_checkpoints_.reserve(node_count);
+        }
+
         mount_transition_progress_.clear();
         failed_mount_root_ = nullptr;
         try {
