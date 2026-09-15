@@ -308,4 +308,35 @@
     std::function<void()> close_callback_;
 };
 
+NativeViewConstructionFaultResult exercise_native_view_construction_fault(
+    UI& ui,
+    PlatformServices& services,
+    NativeParentHandle parent,
+    Size size,
+    NativeViewConstructionFaultStage stage) noexcept {
+    NativeViewConstructionFaultResult result{};
+    try {
+        ViewCore core{
+            ui,
+            services,
+            PUGL_MODULE,
+            WindowDesc{
+                .title = "NativeUI T130 construction fault probe",
+                .size = size,
+                .resizable = true,
+            },
+            parent,
+            nullptr,
+            {},
+            stage,
+            &result};
+        result.unexpected_success = true;
+    } catch (const NativeViewConstructionFault&) {
+        result.injected_failure = true;
+    } catch (...) {
+        result.unexpected_failure = true;
+    }
+    return result;
+}
+
 } // namespace
