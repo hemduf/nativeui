@@ -107,6 +107,10 @@
         if (std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
             dirty_dynamic_nodes_.end()) {
             try {
+                if (fail_next_dynamic_enqueue_for_testing_) {
+                    fail_next_dynamic_enqueue_for_testing_ = false;
+                    throw std::bad_alloc{};
+                }
                 dirty_dynamic_nodes_.push_back(owner);
             } catch (...) {
                 // Keep a no-allocation recovery marker before propagating the
@@ -491,6 +495,8 @@
         }
     }
 
+    friend struct TreeTestAccess;
+
     std::vector<DynamicRecord> dynamic_records_;
     std::vector<NodeId> dirty_dynamic_nodes_;
     NodeId next_node_id_{1};
@@ -498,4 +504,5 @@
     bool runtime_node_ids_initialized_{};
     bool reconciling_dynamic_{};
     bool dynamic_reconcile_retry_all_{};
+    bool fail_next_dynamic_enqueue_for_testing_{};
     std::string structural_diagnostic_;

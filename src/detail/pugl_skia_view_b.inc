@@ -210,14 +210,23 @@
 
                 active_drop_offer_ = &event->offer;
                 drop_offer_decided_ = false;
-                (void)ui_.dispatch(input, services_);
-                if (!drop_offer_decided_) {
-                    (void)puglRejectOffer(view_,
-                                          &event->offer,
-                                          0,
-                                          0,
-                                          std::numeric_limits<uint32_t>::max(),
-                                          std::numeric_limits<uint32_t>::max());
+                try {
+                    (void)ui_.dispatch(input, services_);
+                    if (!drop_offer_decided_) {
+                        (void)puglRejectOffer(view_,
+                                              &event->offer,
+                                              0,
+                                              0,
+                                              std::numeric_limits<uint32_t>::max(),
+                                              std::numeric_limits<uint32_t>::max());
+                    }
+                } catch (...) {
+                    // The offer event is borrowed from Pugl's callback stack.
+                    // Clear it using only no-throw state writes before the
+                    // foreign event thunk contains the exception.
+                    active_drop_offer_ = nullptr;
+                    drop_offer_decided_ = false;
+                    throw;
                 }
                 active_drop_offer_ = nullptr;
                 drop_offer_decided_ = false;

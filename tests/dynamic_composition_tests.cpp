@@ -2,10 +2,19 @@
 
 #include <map>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace ui {
+struct TreeTestAccess {
+    static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
+        tree.fail_next_dynamic_enqueue_for_testing_ = true;
+    }
+};
+} // namespace ui
 
 namespace {
 
@@ -398,6 +407,41 @@ void factory_failure_preserves_pending_dynamic_owners_contract() {
     NUI_CHECK(log->events[11] == "second.activate");
 }
 
+void enqueue_allocation_failure_preserves_dynamic_work_contract() {
+    ui::State<bool> visible{true};
+    auto log = std::make_shared<DynamicLog>();
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(ui::make_spec(ui::If{visible, DynamicProbe{"child", log}}))};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.activate_focus(platform);
+    NUI_CHECK((log->events == std::vector<std::string>{"child.mount", "child.activate"}));
+
+    ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
+    bool threw = false;
+    try {
+        visible.set(false);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK((log->events == std::vector<std::string>{"child.mount", "child.activate"}));
+
+    // The state write committed before the observer enqueue failed. The
+    // no-allocation retry marker must recover that exact logical mutation at
+    // the next safe checkpoint, then leave future enqueue/flush work usable.
+    tree.layout({160.0f, 80.0f});
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.activate", "child.deactivate", "child.unmount"}));
+
+    visible.set(true);
+    tree.layout({160.0f, 80.0f});
+    NUI_CHECK(log->mounted_ids.at("child").size() == 2);
+    NUI_CHECK(log->events[4] == "child.mount");
+    NUI_CHECK(log->events[5] == "child.activate");
+}
+
 void keyed_contract() {
     ui::State<std::vector<DynamicItem>> items{{
         DynamicItem{"A", "A"},
@@ -659,6 +703,7 @@ void suite() {
     switch_contract();
     replacement_destroys_before_insert_contract();
     factory_failure_preserves_pending_dynamic_owners_contract();
+    enqueue_allocation_failure_preserves_dynamic_work_contract();
     keyed_contract();
     coalesced_writes_contract();
     focus_capture_and_lifetime_contract();

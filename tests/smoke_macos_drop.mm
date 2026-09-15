@@ -2,6 +2,8 @@
 
 #import <AppKit/AppKit.h>
 
+#include <stdexcept>
+
 // CMake substitutes a consumer-specific runtime name, just like the Pugl
 // classes. The fixture owns its pasteboard and never uses the general one.
 @interface NativeUIDropTestDraggingInfo : NSObject
@@ -17,6 +19,7 @@ namespace {
 struct DropState {
     bool accept{true};
     bool accepted{};
+    bool throw_offer_once{};
     int offers{};
     int deliveries{};
     ui::Point position{};
@@ -29,6 +32,10 @@ ui::Canvas target(DropState& state) {
         .on_input([&state](const ui::InputEvent& event, ui::CanvasInputContext& context) {
             if (event.type == ui::InputType::DropOffer) {
                 ++state.offers;
+                if (state.throw_offer_once) {
+                    state.throw_offer_once = false;
+                    throw std::runtime_error("drop offer failure");
+                }
                 if (state.accept && event.offers_drop_type("text/uri-list")) {
                     state.accepted = context.accept_drop("text/uri-list");
                 } else {
@@ -93,6 +100,37 @@ void drop(ui::NativeViewHandle handle, DropState& state, NSPasteboard* pasteboar
     }
 }
 
+void throwing_offer_is_contained_and_next_offer_is_fresh(
+    ui::NativeViewHandle handle,
+    DropState& state,
+    NSPasteboard* pasteboard) {
+    NSView* const wrapper = (__bridge NSView*)reinterpret_cast<void*>(handle);
+    NSView* const backend = wrapper.subviews.firstObject;
+    NUI_CHECK(backend != nil);
+
+    NativeUIDropTestDraggingInfo* info = [NativeUIDropTestDraggingInfo new];
+    info.draggingPasteboard = pasteboard;
+    info.draggingLocation = [wrapper convertPoint:NSMakePoint(64.0, 48.0) toView:nil];
+    id<NSDraggingDestination> const destination = (id<NSDraggingDestination>)backend;
+    id<NSDraggingInfo> const sender = (id<NSDraggingInfo>)info;
+
+    const int offers = state.offers;
+    state.throw_offer_once = true;
+    NUI_CHECK([destination draggingEntered:sender] == NSDragOperationNone);
+    NUI_CHECK(state.offers == offers + 1);
+    NUI_CHECK(!state.throw_offer_once);
+
+    // The first application callback escaped NativeUI dispatch, so the native
+    // bridge must have dropped its borrowed PuglDataOfferEvent before the
+    // noexcept event thunk contained the exception. A fresh native offer must
+    // still be able to accept safely without observing stale callback data.
+    NUI_CHECK([destination draggingEntered:sender] == NSDragOperationCopy);
+    NUI_CHECK(state.offers == offers + 2);
+    NUI_CHECK(state.accepted);
+    [destination draggingExited:sender];
+    [destination draggingEnded:sender];
+}
+
 void suite() {
     @autoreleasepool {
         DropState host_state;
@@ -143,6 +181,13 @@ void suite() {
         a.reset();
         drop(b.native_handle(), b_state, board);
         NUI_CHECK(b_state.deliveries == 1 && a_state.deliveries == 1);
+
+        DropState throwing_state;
+        ui::UI throwing_ui{target(throwing_state)};
+        ui::EmbeddedView throwing_view{
+            throwing_ui, host.native_handle(), {240.0f, 120.0f}};
+        throwing_offer_is_contained_and_next_offer_is_fresh(
+            throwing_view.native_handle(), throwing_state, board);
 
         for (int iteration = 0; iteration < 3; ++iteration) {
             DropState cycle_state;
