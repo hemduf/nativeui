@@ -1,6 +1,8 @@
 #include "test_support.hpp"
+#include "../src/detail/scoped_borrow_state.hpp"
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -64,7 +66,46 @@ private:
     std::shared_ptr<DropState> state_;
 };
 
+void borrowed_offer_unwind_contract() {
+    const int first_offer = 1;
+    const int nested_offer = 2;
+    const int* active_offer = nullptr;
+    bool decided = false;
+    bool threw = false;
+
+    try {
+        ui::detail::ScopedBorrowState outer{active_offer, decided, &first_offer};
+        NUI_CHECK(active_offer == &first_offer);
+        NUI_CHECK(!decided);
+        decided = true;
+
+        // Nested native dispatch must restore the exact outer borrow rather
+        // than forcing the temporary state to a blind null/false value.
+        {
+            ui::detail::ScopedBorrowState nested{active_offer, decided, &nested_offer};
+            NUI_CHECK(active_offer == &nested_offer);
+            NUI_CHECK(!decided);
+            decided = true;
+        }
+        NUI_CHECK(active_offer == &first_offer);
+        NUI_CHECK(decided);
+
+        throw std::runtime_error("drop dispatch fault");
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+
+    // This is the state observed after the foreign callback's dispatch body
+    // unwinds and before its catch-all returns through the native ABI. A later
+    // accept/reject path therefore cannot consume the stale callback-frame ptr.
+    NUI_CHECK(threw);
+    NUI_CHECK(active_offer == nullptr);
+    NUI_CHECK(!decided);
+}
+
 void suite() {
+    borrowed_offer_unwind_contract();
+
     auto state = std::make_shared<DropState>();
     ui::UI tree{DropTarget{state}};
     test::MockPlatform platform;

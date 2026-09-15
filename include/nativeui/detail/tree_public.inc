@@ -224,10 +224,15 @@
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
 
-        ++dispatch_depth_;
-        auto finish = [this, &platform](EventResult result) {
-            if (dispatch_depth_ > 0) --dispatch_depth_;
-            if (dispatch_depth_ == 0) {
+        // Each dispatch frame owns exactly one depth increment. Keep the prior
+        // level explicit so nested dispatch restores its caller's depth rather
+        // than assuming zero, and so an exception can restore bookkeeping
+        // without invoking arbitrary user callbacks during unwind.
+        const auto previous_dispatch_depth = dispatch_depth_;
+        dispatch_depth_ = previous_dispatch_depth + 1;
+        auto finish = [this, &platform, previous_dispatch_depth](EventResult result) {
+            dispatch_depth_ = previous_dispatch_depth;
+            if (previous_dispatch_depth == 0) {
                 flush_dynamic_mutations();
                 sync_availability_structure(platform);
                 if (active_) sync_focus_structure(platform);
@@ -235,160 +240,180 @@
             return result;
         };
 
-        // A dynamic structural root that is non-interactive, non-clipping and
-        // not a focus boundary contributes no pointer target of its own. When it
-        // currently retains exactly one child (the ordinary no-overlay UI case),
-        // start pointer hit testing at that child. Routing still bubbles through
-        // the parent, so structural callbacks/ownership semantics are unchanged.
-        Node& pointer_hit_root =
-            pointer_passthrough_dynamic_root_ && root_->children.size() == 1
-                ? *root_->children.front()
-                : *root_;
+        try {
+            // A dynamic structural root that is non-interactive, non-clipping and
+            // not a focus boundary contributes no pointer target of its own. When it
+            // currently retains exactly one child (the ordinary no-overlay UI case),
+            // start pointer hit testing at that child. Routing still bubbles through
+            // the parent, so structural callbacks/ownership semantics are unchanged.
+            Node& pointer_hit_root =
+                pointer_passthrough_dynamic_root_ && root_->children.size() == 1
+                    ? *root_->children.front()
+                    : *root_;
 
-        // Pointer targeting is intentionally independent from keyboard focus.
-        // Reverse child order matches paint stacking: later/overlay children are
-        // input-frontmost. Inert visual/layout nodes retain the historic behavior
-        // of not blocking an interactive sibling below them unless they explicitly
-        // opt into pointer targetability. Inactive focus scopes remain unavailable.
-        auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
-            if (inherited_clip.empty() || !inherited_clip.contains(point) ||
-                !node.component->effective_availability().interactive()) {
-                return nullptr;
-            }
-            if (node.component->is_focus_scope() && !node.component->focus_scope_active()) {
-                return nullptr;
-            }
-
-            Rect child_clip = inherited_clip;
-            if (node.component->clips_children()) {
-                child_clip = intersect(inherited_clip, node.bounds);
-            }
-            if (!child_clip.empty()) {
-                for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                    if (auto* result = self(self, **it, point, child_clip)) return result;
+            // Pointer targeting is intentionally independent from keyboard focus.
+            // Reverse child order matches paint stacking: later/overlay children are
+            // input-frontmost. Inert visual/layout nodes retain the historic behavior
+            // of not blocking an interactive sibling below them unless they explicitly
+            // opt into pointer targetability. Inactive focus scopes remain unavailable.
+            auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
+                if (inherited_clip.empty() || !inherited_clip.contains(point) ||
+                    !node.component->effective_availability().interactive()) {
+                    return nullptr;
                 }
-            }
-            return node.bounds.contains(point) && node.component->pointer_targetable() ? &node : nullptr;
-        };
+                if (node.component->is_focus_scope() && !node.component->focus_scope_active()) {
+                    return nullptr;
+                }
 
-        auto focus_nearest_ancestor = [this, &platform](Node* target) {
-            for (auto* current = target; current; current = current->parent) {
-                if (!current->component->focusable()) continue;
-                set_focus(current, platform);
-                return;
-            }
-        };
+                Rect child_clip = inherited_clip;
+                if (node.component->clips_children()) {
+                    child_clip = intersect(inherited_clip, node.bounds);
+                }
+                if (!child_clip.empty()) {
+                    for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
+                        if (auto* result = self(self, **it, point, child_clip)) return result;
+                    }
+                }
+                return node.bounds.contains(point) && node.component->pointer_targetable() ? &node : nullptr;
+            };
 
-        if (event.type == InputType::KeyDown && event.key == Key::Tab) {
-            if (!focus_active_) return finish(EventResult::Ignored);
-            event.shift ? move_focus_group_aware(-1, platform)
-                        : move_focus_group_aware(1, platform);
-            return finish(EventResult::Handled);
-        }
+            auto focus_nearest_ancestor = [this, &platform](Node* target) {
+                for (auto* current = target; current; current = current->parent) {
+                    if (!current->component->focusable()) continue;
+                    set_focus(current, platform);
+                    return;
+                }
+            };
 
-        if (event.type == InputType::KeyDown && focus_active_) {
-            int group_direction = 0;
-            if (event.key == Key::Left || event.key == Key::Up) group_direction = -1;
-            if (event.key == Key::Right || event.key == Key::Down) group_direction = 1;
-            if (group_direction != 0 && move_focus_in_current_group(group_direction, platform)) {
+            if (event.type == InputType::KeyDown && event.key == Key::Tab) {
+                if (!focus_active_) return finish(EventResult::Ignored);
+                event.shift ? move_focus_group_aware(-1, platform)
+                            : move_focus_group_aware(1, platform);
                 return finish(EventResult::Handled);
             }
-        }
 
-        if (event.type == InputType::Command || command_from_shortcut(event) != Command::None) {
-            InputEvent command_event = event;
-            if (command_event.type != InputType::Command) {
-                command_event.type = InputType::Command;
-                command_event.command = command_from_shortcut(event);
-                command_event.key = Key::None;
-                command_event.text.clear();
+            if (event.type == InputType::KeyDown && focus_active_) {
+                int group_direction = 0;
+                if (event.key == Key::Left || event.key == Key::Up) group_direction = -1;
+                if (event.key == Key::Right || event.key == Key::Down) group_direction = 1;
+                if (group_direction != 0 && move_focus_in_current_group(group_direction, platform)) {
+                    return finish(EventResult::Handled);
+                }
             }
 
-            if (command_event.command == Command::None) return finish(EventResult::Ignored);
+            if (event.type == InputType::Command || command_from_shortcut(event) != Command::None) {
+                InputEvent command_event = event;
+                if (command_event.type != InputType::Command) {
+                    command_event.type = InputType::Command;
+                    command_event.command = command_from_shortcut(event);
+                    command_event.key = Key::None;
+                    command_event.text.clear();
+                }
 
-            EventResult result = EventResult::Ignored;
-            if (focus_active_ && !focusables_.empty()) {
-                result = route_from(*focusables_[focused_index_], command_event, platform);
+                if (command_event.command == Command::None) return finish(EventResult::Ignored);
+
+                EventResult result = EventResult::Ignored;
+                if (focus_active_ && !focusables_.empty()) {
+                    result = route_from(*focusables_[focused_index_], command_event, platform);
+                }
+                if (!handled(result) && global_command_handler_) {
+                    result = global_command_handler_(command_event.command);
+                }
+                return finish(result);
             }
-            if (!handled(result) && global_command_handler_) {
-                result = global_command_handler_(command_event.command);
+
+            if (event.type == InputType::PointerLeave) {
+                const bool changed = clear_pointer_hover(event, platform);
+                return finish(changed ? EventResult::Handled : EventResult::Ignored);
             }
-            return finish(result);
-        }
 
-        if (event.type == InputType::PointerLeave) {
-            const bool changed = clear_pointer_hover(event, platform);
-            return finish(changed ? EventResult::Handled : EventResult::Ignored);
-        }
-
-        if (event.type == InputType::PointerCancel) {
-            const auto result = cancel_pointer_capture(platform, event);
-            pointer_interaction_active_ = false;
-            return finish(result);
-        }
-
-        if (event.type == InputType::PointerDown) {
-            // A new pointer-down starts a new interaction. Never leave an old
-            // owner captured if a previous interaction missed its PointerUp.
-            pointer_interaction_active_ = true;
-            if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
-
-            auto* target = hit_test_pointer(
-                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-            (void)update_pointer_hover_target(target, event, platform);
-            if (target) {
-                focus_nearest_ancestor(target);
-                return finish(route_from(*target, event, platform));
-            }
-            return finish(EventResult::Ignored);
-        }
-
-        if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
-            auto* target = hit_test_pointer(
-                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-            (void)update_pointer_hover_target(target, event, platform);
-            if (auto* owner = pointer_capture_owner()) {
-                return finish(route_from(*owner, event, platform));
-            }
-            if (target) {
-                return finish(route_from(*target, event, platform));
-            }
-            return finish(EventResult::Ignored);
-        }
-
-        if (event.type == InputType::PointerUp) {
-            auto* target = hit_test_pointer(
-                hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-            (void)update_pointer_hover_target(target, event, platform);
-            if (auto* owner = pointer_capture_owner()) {
-                const auto result = route_from(*owner, event, platform);
-                clear_pointer_capture();
+            if (event.type == InputType::PointerCancel) {
+                const auto result = cancel_pointer_capture(platform, event);
                 pointer_interaction_active_ = false;
                 return finish(result);
             }
-            pointer_interaction_active_ = false;
-            if (target) {
-                return finish(route_from(*target, event, platform));
+
+            if (event.type == InputType::PointerDown) {
+                // A new pointer-down starts a new interaction. Never leave an old
+                // owner captured if a previous interaction missed its PointerUp.
+                pointer_interaction_active_ = true;
+                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
+
+                auto* target = hit_test_pointer(
+                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
+                (void)update_pointer_hover_target(target, event, platform);
+                if (target) {
+                    focus_nearest_ancestor(target);
+                    return finish(route_from(*target, event, platform));
+                }
+                return finish(EventResult::Ignored);
             }
-            return finish(EventResult::Ignored);
-        }
 
-        if (is_drop) {
-            ensure_layout();
-            if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
-                return finish(route_from(*target, event, platform));
+            if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
+                auto* target = hit_test_pointer(
+                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
+                (void)update_pointer_hover_target(target, event, platform);
+                if (auto* owner = pointer_capture_owner()) {
+                    return finish(route_from(*owner, event, platform));
+                }
+                if (target) {
+                    return finish(route_from(*target, event, platform));
+                }
+                return finish(EventResult::Ignored);
             }
+
+            if (event.type == InputType::PointerUp) {
+                auto* target = hit_test_pointer(
+                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
+                (void)update_pointer_hover_target(target, event, platform);
+                if (auto* owner = pointer_capture_owner()) {
+                    const auto result = route_from(*owner, event, platform);
+                    clear_pointer_capture();
+                    pointer_interaction_active_ = false;
+                    return finish(result);
+                }
+                pointer_interaction_active_ = false;
+                if (target) {
+                    return finish(route_from(*target, event, platform));
+                }
+                return finish(EventResult::Ignored);
+            }
+
+            if (is_drop) {
+                ensure_layout();
+                if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
+                    return finish(route_from(*target, event, platform));
+                }
+                return finish(EventResult::Ignored);
+            }
+
+            if ((event.type == InputType::KeyDown || event.type == InputType::KeyUp ||
+                 event.type == InputType::TextInput || event.type == InputType::Composition ||
+                 event.type == InputType::Tick) &&
+                focus_active_ && !focusables_.empty()) {
+                return finish(route_from(*focusables_[focused_index_], event, platform));
+            }
+
             return finish(EventResult::Ignored);
-        }
+        } catch (...) {
+            // Pointer button routes can execute arbitrary cancellation, hover or
+            // focus callbacks after publishing interaction state but before the
+            // target input handler runs. If any such callback throws, terminate
+            // only framework-owned capture/interaction bookkeeping here; do not
+            // synthesize another user callback while unwinding.
+            if (event.type == InputType::PointerDown ||
+                event.type == InputType::PointerUp ||
+                event.type == InputType::PointerCancel) {
+                clear_pointer_capture();
+                pointer_interaction_active_ = false;
+            }
 
-        if ((event.type == InputType::KeyDown || event.type == InputType::KeyUp ||
-             event.type == InputType::TextInput || event.type == InputType::Composition ||
-             event.type == InputType::Tick) &&
-            focus_active_ && !focusables_.empty()) {
-            return finish(route_from(*focusables_[focused_index_], event, platform));
+            // Restore only internal bookkeeping while unwinding. Pending
+            // structural/availability work remains queued for the next safe
+            // checkpoint; do not call component/user code from this recovery.
+            dispatch_depth_ = previous_dispatch_depth;
+            throw;
         }
-
-        return finish(EventResult::Ignored);
     }
 
     /// Explicitly cancel the active pointer capture, if any. The current owner
