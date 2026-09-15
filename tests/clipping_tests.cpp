@@ -1,6 +1,11 @@
 #include "test_support.hpp"
 
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
+
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -44,6 +49,49 @@ public:
     }
 private:
     std::shared_ptr<HitState> state_;
+};
+
+struct ThrowingPaintState {
+    bool throw_on_paint{true};
+    int paints{};
+};
+
+class ThrowingPaintComponent final : public ui::Component {
+public:
+    explicit ThrowingPaintComponent(std::shared_ptr<ThrowingPaintState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {40.0f, 40.0f};
+    }
+
+    void paint(ui::PaintContext&) const override {
+        ++state_->paints;
+        if (state_->throw_on_paint) {
+            throw std::runtime_error("T130 throwing paint probe");
+        }
+    }
+
+private:
+    std::shared_ptr<ThrowingPaintState> state_;
+};
+
+class ThrowingPaint {
+public:
+    explicit ThrowingPaint(std::shared_ptr<ThrowingPaintState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<ThrowingPaintComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<ThrowingPaintState> state_;
 };
 
 bool red(ui::Rgba8 pixel) {
@@ -119,6 +167,42 @@ void suite() {
             test::pointer(ui::InputType::PointerDown, 25.0f, 20.0f), platform);
         NUI_CHECK(inside == ui::EventResult::Handled);
         NUI_CHECK(hit->pointer_down == 1);
+    }
+
+    // T130: a descendant paint exception under a framework-owned Clip must not
+    // leak SkCanvas save/clip state. The failed frame remains dirty and the same
+    // UI + canvas can paint successfully on the next attempt.
+    {
+        auto state = std::make_shared<ThrowingPaintState>();
+        ui::UI tree{ui::Clip{ThrowingPaint{state}}};
+        tree.resize({40.0f, 40.0f});
+        test::MockPlatform platform;
+
+        const auto info = SkImageInfo::Make(
+            64, 64, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+        auto surface = SkSurfaces::Raster(info);
+        NUI_CHECK(surface != nullptr);
+        auto* canvas = surface->getCanvas();
+        NUI_CHECK(canvas != nullptr);
+        const int baseline_save_count = canvas->getSaveCount();
+
+        std::string propagated;
+        try {
+            tree.paint(*canvas, platform);
+        } catch (const std::runtime_error& error) {
+            propagated = error.what();
+        }
+
+        NUI_CHECK(propagated == "T130 throwing paint probe");
+        NUI_CHECK(state->paints == 1);
+        NUI_CHECK(canvas->getSaveCount() == baseline_save_count);
+        NUI_CHECK(tree.paint_dirty());
+
+        state->throw_on_paint = false;
+        tree.paint(*canvas, platform);
+        NUI_CHECK(state->paints == 2);
+        NUI_CHECK(canvas->getSaveCount() == baseline_save_count);
+        NUI_CHECK(!tree.paint_dirty());
     }
 }
 

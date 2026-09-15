@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,6 +69,106 @@ public:
 private:
     std::string name_;
     std::shared_ptr<DynamicLog> log_;
+};
+
+struct DynamicFaultPlan {
+    bool throw_mount{};
+    bool throw_activate{};
+    bool throw_deactivate{};
+    bool throw_unmount{};
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+    int destroyed{};
+};
+
+class FaultingDynamicProbeComponent final : public ui::Component {
+public:
+    FaultingDynamicProbeComponent(
+        std::string name,
+        std::shared_ptr<DynamicLog> log,
+        std::shared_ptr<DynamicFaultPlan> faults)
+        : name_(std::move(name)), log_(std::move(log)), faults_(std::move(faults)) {}
+
+    ~FaultingDynamicProbeComponent() override {
+        ++faults_->destroyed;
+        log_->events.push_back(name_ + ".destroy");
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    void mount(ui::MountContext& context) override {
+        ++faults_->mounts;
+        log_->events.push_back(name_ + ".mount");
+        log_->mounted_ids[name_].push_back(context.node_id());
+        maybe_throw(faults_->throw_mount, "mount");
+    }
+
+    void activate(ui::LifecycleContext&) override {
+        ++faults_->activates;
+        log_->events.push_back(name_ + ".activate");
+        maybe_throw(faults_->throw_activate, "activate");
+    }
+
+    void deactivate(ui::LifecycleContext&) override {
+        ++faults_->deactivates;
+        log_->events.push_back(name_ + ".deactivate");
+        maybe_throw(faults_->throw_deactivate, "deactivate");
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++faults_->unmounts;
+        log_->events.push_back(name_ + ".unmount");
+        maybe_throw(faults_->throw_unmount, "unmount");
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    void maybe_throw(bool& armed, const char* phase) {
+        if (!armed) return;
+        armed = false;
+        throw std::runtime_error(name_ + "." + phase);
+    }
+
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+    std::shared_ptr<DynamicFaultPlan> faults_;
+};
+
+class FaultingDynamicProbe {
+public:
+    FaultingDynamicProbe(
+        std::string name,
+        std::shared_ptr<DynamicLog> log,
+        std::shared_ptr<DynamicFaultPlan> faults,
+        std::vector<ui::Spec> children = {})
+        : name_(std::move(name)),
+          log_(std::move(log)),
+          faults_(std::move(faults)),
+          children_(std::move(children)) {}
+
+    ui::Spec spec() && {
+        auto name = std::move(name_);
+        auto log = std::move(log_);
+        auto faults = std::move(faults_);
+        auto children = std::move(children_);
+        return ui::Spec{
+            [name = std::move(name), log = std::move(log), faults = std::move(faults)]() mutable {
+                return std::make_unique<FaultingDynamicProbeComponent>(
+                    std::move(name), std::move(log), std::move(faults));
+            },
+            std::move(children)};
+    }
+
+private:
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+    std::shared_ptr<DynamicFaultPlan> faults_;
+    std::vector<ui::Spec> children_;
 };
 
 class LifetimeOrderProbeComponent final : public ui::Component {
@@ -236,6 +337,140 @@ private:
     std::shared_ptr<LoopState> state_;
 };
 
+FaultingDynamicProbe faulting_subtree(
+    const std::shared_ptr<DynamicLog>& log,
+    const std::shared_ptr<DynamicFaultPlan>& parent,
+    const std::shared_ptr<DynamicFaultPlan>& first,
+    const std::shared_ptr<DynamicFaultPlan>& second,
+    const std::shared_ptr<DynamicFaultPlan>& third) {
+    std::vector<ui::Spec> children;
+    children.push_back(FaultingDynamicProbe{"first", log, first}.spec());
+    children.push_back(FaultingDynamicProbe{"second", log, second}.spec());
+    children.push_back(FaultingDynamicProbe{"third", log, third}.spec());
+    return FaultingDynamicProbe{"parent", log, parent, std::move(children)};
+}
+
+void partial_lifecycle_rollback_contract() {
+    auto log = std::make_shared<DynamicLog>();
+    auto parent = std::make_shared<DynamicFaultPlan>();
+    auto first = std::make_shared<DynamicFaultPlan>();
+    auto second = std::make_shared<DynamicFaultPlan>();
+    auto third = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(faulting_subtree(log, parent, first, second, third).spec())};
+
+    // RED before T130 exact-progress rollback: the recursive cleanup used to
+    // call third.unmount even though third.mount had never begun.
+    second->throw_mount = true;
+    bool mount_threw = false;
+    try {
+        tree.mount();
+    } catch (const std::runtime_error& error) {
+        mount_threw = std::string{error.what()} == "second.mount";
+    }
+    NUI_CHECK(mount_threw);
+    NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1);
+    NUI_CHECK(third->mounts == 0);
+    NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+    NUI_CHECK(third->unmounts == 0);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.mount", "first.mount", "second.mount",
+        "second.unmount", "first.unmount", "parent.unmount"}));
+
+    log->events.clear();
+    tree.mount();
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.mount", "first.mount", "second.mount", "third.mount"}));
+
+    // The same exact-progress rule applies to activation. The untouched third
+    // sibling must not receive deactivate when second.activate aborts traversal.
+    log->events.clear();
+    second->throw_activate = true;
+    bool activate_threw = false;
+    try {
+        tree.activate_focus(platform);
+    } catch (const std::runtime_error& error) {
+        activate_threw = std::string{error.what()} == "second.activate";
+    }
+    NUI_CHECK(activate_threw);
+    NUI_CHECK(parent->activates == 1 && first->activates == 1 && second->activates == 1);
+    NUI_CHECK(third->activates == 0);
+    NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+    NUI_CHECK(third->deactivates == 0);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.activate", "first.activate", "second.activate",
+        "second.deactivate", "first.deactivate", "parent.deactivate"}));
+
+    log->events.clear();
+    tree.activate_focus(platform);
+    tree.deactivate_focus(platform);
+    tree.unmount();
+}
+
+void dynamic_partial_lifecycle_rollback_contract() {
+    // Dynamic insertion delegates to the same lifecycle helpers but previously
+    // tracked progress only at inserted-root granularity. A fault in the second
+    // descendant therefore over-rolled the untouched third sibling.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto parent = std::make_shared<DynamicFaultPlan>();
+        auto first = std::make_shared<DynamicFaultPlan>();
+        auto second = std::make_shared<DynamicFaultPlan>();
+        auto third = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::UI tree{ui::If{visible, faulting_subtree(log, parent, first, second, third)}};
+        tree.resize({160.0f, 80.0f});
+        tree.activate(platform);
+
+        second->throw_mount = true;
+        visible.set(true);
+        bool threw = false;
+        try {
+            tree.resize({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "second.mount";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1);
+        NUI_CHECK(third->mounts == 0);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+        NUI_CHECK(third->unmounts == 0);
+    }
+
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto parent = std::make_shared<DynamicFaultPlan>();
+        auto first = std::make_shared<DynamicFaultPlan>();
+        auto second = std::make_shared<DynamicFaultPlan>();
+        auto third = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::UI tree{ui::If{visible, faulting_subtree(log, parent, first, second, third)}};
+        tree.resize({160.0f, 80.0f});
+        tree.activate(platform);
+
+        second->throw_activate = true;
+        visible.set(true);
+        bool threw = false;
+        try {
+            tree.resize({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "second.activate";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1 && third->mounts == 1);
+        NUI_CHECK(parent->activates == 1 && first->activates == 1 && second->activates == 1);
+        NUI_CHECK(third->activates == 0);
+        NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+        NUI_CHECK(third->deactivates == 0);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1 && third->unmounts == 1);
+    }
+}
+
 void conditional_contract() {
     ui::State<bool> visible{true};
     auto log = std::make_shared<DynamicLog>();
@@ -367,7 +602,6 @@ void keyed_contract() {
     NUI_CHECK((log->events == std::vector<std::string>{
         "A.mount", "B.mount", "A.activate", "B.activate", "C.mount", "C.activate"}));
 
-    // Remove, prepend, append and middle-insert all preserve unchanged keys.
     items.set({DynamicItem{"C", "C"}, DynamicItem{"A", "A"}});
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(log->events.size() == 8);
@@ -395,7 +629,6 @@ void keyed_contract() {
     NUI_CHECK(log->mounted_ids.at("A").front() == a_id);
     NUI_CHECK(log->mounted_ids.at("C").size() == 1);
 
-    // Changing a logical key forces one old teardown and one new retained node.
     items.set({
         DynamicItem{"G", "G"}, DynamicItem{"C", "C"}, DynamicItem{"F", "F"},
         DynamicItem{"A", "A"}, DynamicItem{"E", "E"}});
@@ -432,6 +665,114 @@ void coalesced_writes_contract() {
     NUI_CHECK((log->events == std::vector<std::string>{
         "child.mount", "child.activate", "child.deactivate", "child.unmount",
         "child.mount", "child.activate"}));
+}
+
+void dynamic_removal_lifecycle_failure_contract() {
+    ui::State<std::vector<DynamicItem>> items{{
+        DynamicItem{"A", "A"},
+        DynamicItem{"B", "B"},
+    }};
+    auto log = std::make_shared<DynamicLog>();
+    auto a_faults = std::make_shared<DynamicFaultPlan>();
+    auto b_faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::ForEach<DynamicItem>{
+        items,
+        [](const DynamicItem& item) { return item.key; },
+        [log, a_faults, b_faults](const DynamicItem& item) {
+            return FaultingDynamicProbe{
+                item.name, log, item.key == "A" ? a_faults : b_faults};
+        }
+    }};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    b_faults->throw_deactivate = true;
+    b_faults->throw_unmount = true;
+    items.set({});
+
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "B.deactivate");
+    }
+    NUI_CHECK(threw);
+
+    const std::vector<std::string> expected_prefix{
+        "A.mount", "B.mount", "A.activate", "B.activate",
+        "B.deactivate", "B.unmount", "A.deactivate", "A.unmount"};
+    NUI_CHECK(log->events.size() == expected_prefix.size() + 2);
+    for (std::size_t i = 0; i < expected_prefix.size(); ++i) {
+        NUI_CHECK(log->events[i] == expected_prefix[i]);
+    }
+    NUI_CHECK(a_faults->destroyed == 1);
+    NUI_CHECK(b_faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
+}
+
+void dynamic_insert_mount_failure_contract() {
+    ui::State<bool> visible{false};
+    auto log = std::make_shared<DynamicLog>();
+    auto faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::If{visible, FaultingDynamicProbe{"child", log, faults}}};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    faults->throw_mount = true;
+    visible.set(true);
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "child.mount");
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.unmount", "child.destroy"}));
+    NUI_CHECK(faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
+}
+
+void dynamic_insert_activate_failure_contract() {
+    ui::State<bool> visible{false};
+    auto log = std::make_shared<DynamicLog>();
+    auto faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::If{visible, FaultingDynamicProbe{"child", log, faults}}};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    faults->throw_activate = true;
+    visible.set(true);
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "child.activate");
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.activate", "child.deactivate", "child.unmount",
+        "child.destroy"}));
+    NUI_CHECK(faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
 }
 
 void focus_capture_and_lifetime_contract() {
@@ -493,10 +834,6 @@ void focus_scope_rehome_contract() {
     dynamic_visible.set(false);
     tree.resize({320.0f, 120.0f});
     tree.dispatch(test::key(ui::Key::Space), platform);
-
-    // Removing the focused dynamic child must obey the still-active trapping
-    // FocusScope and rehome inside it rather than escaping to the first global
-    // focusable node.
     NUI_CHECK(!outside.get());
     NUI_CHECK(fallback_value.get());
 }
@@ -534,9 +871,6 @@ void nested_focus_scope_rehome_contract() {
     NUI_CHECK(!global_value.get());
     NUI_CHECK(!outer_fallback.get());
 
-    // The nearest trap is removed with the focused child, but the surviving
-    // outer trap still owns focus. Rehoming must climb to that scope rather
-    // than escaping to the global first focusable.
     inner_visible.set(false);
     tree.resize({360.0f, 120.0f});
     tree.dispatch(test::key(ui::Key::Space), platform);
@@ -575,11 +909,16 @@ void bounded_reconciliation_contract() {
 }
 
 void suite() {
+    partial_lifecycle_rollback_contract();
+    dynamic_partial_lifecycle_rollback_contract();
     conditional_contract();
     switch_contract();
     replacement_destroys_before_insert_contract();
     keyed_contract();
     coalesced_writes_contract();
+    dynamic_removal_lifecycle_failure_contract();
+    dynamic_insert_mount_failure_contract();
+    dynamic_insert_activate_failure_contract();
     focus_capture_and_lifetime_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();
