@@ -1,5 +1,8 @@
 #include <nativeui/nativeui.hpp>
 
+#include "../src/detail/native_view_fault_probe.hpp"
+
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -125,6 +128,38 @@ int fail(std::string_view message) {
     return EXIT_FAILURE;
 }
 
+bool construction_fault_balanced(
+    const ui::detail::NativeViewConstructionFaultResult& result,
+    ui::detail::NativeViewConstructionFaultStage stage) {
+    const auto ordinal = static_cast<unsigned>(stage);
+    const auto at_least = [ordinal](ui::detail::NativeViewConstructionFaultStage threshold) {
+        return ordinal >= static_cast<unsigned>(threshold);
+    };
+    const std::uint32_t realized =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterRealize) ? 1u : 0u;
+    const std::uint32_t ime =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterImeCreate) ? 1u : 0u;
+    const std::uint32_t constraints =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterSizeConstraints) ? 1u : 0u;
+    const std::uint32_t resized =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterInitialResize) ? 1u : 0u;
+    const std::uint32_t shown =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterShow) ? 1u : 0u;
+    const std::uint32_t invalidation =
+        at_least(ui::detail::NativeViewConstructionFaultStage::AfterInvalidationCallback) ? 1u : 0u;
+
+    return result.injected_failure && !result.unexpected_failure && !result.unexpected_success &&
+           result.world_acquired == 1u && result.world_released == 1u &&
+           result.view_acquired == 1u && result.view_released == 1u &&
+           result.realize_succeeded == realized && result.unrealize_released == realized &&
+           result.ime_acquired == ime && result.ime_released == ime &&
+           result.size_constraints_applied == constraints &&
+           result.initial_resize_completed == resized &&
+           result.show_completed == shown &&
+           result.invalidation_attached == invalidation &&
+           result.invalidation_cleared == invalidation;
+}
+
 #if defined(_WIN32)
 void diagnose_failed_resize(const ui::StandaloneWindow& window) {
     const auto native = window.native_handle();
@@ -197,6 +232,38 @@ int main() {
                        .size = {360.0f, 180.0f},
                        .resizable = true});
     if (!b->valid()) return fail("survivor B construction failed");
+
+    // Probe each meaningful owned-world ViewCore construction boundary with a
+    // real embedded native child. Every injected failure must unwind each
+    // resource acquired before that boundary exactly once while leaving the
+    // healthy Application-owned parent untouched.
+    constexpr std::array construction_stages{
+        ui::detail::NativeViewConstructionFaultStage::AfterViewCreation,
+        ui::detail::NativeViewConstructionFaultStage::AfterRealize,
+        ui::detail::NativeViewConstructionFaultStage::AfterImeCreate,
+        ui::detail::NativeViewConstructionFaultStage::AfterSizeConstraints,
+        ui::detail::NativeViewConstructionFaultStage::AfterInitialResize,
+        ui::detail::NativeViewConstructionFaultStage::AfterShow,
+        ui::detail::NativeViewConstructionFaultStage::AfterInvalidationCallback,
+    };
+    for (const auto stage : construction_stages) {
+        ui::UI probe_ui{ui::Spacer{120.0f, 60.0f}};
+        const auto result = ui::detail::exercise_native_view_construction_fault(
+            probe_ui,
+            *b,
+            b->native_handle(),
+            {180.0f, 90.0f},
+            stage);
+        if (!construction_fault_balanced(result, stage)) {
+            return fail("ViewCore constructor-stage fault cleanup was not balanced");
+        }
+        if (app.quit_requested() || !b->native_handle() || b->should_close()) {
+            return fail("ViewCore constructor-stage fault damaged the healthy parent window");
+        }
+    }
+    if (!b->set_title("T066 B survives construction fault matrix")) {
+        return fail("survivor B title update failed after construction fault matrix");
+    }
 
     // Activation is not committed merely because component activate() returned.
     // A later focus callback can still fail after active/platform publication.
@@ -315,6 +382,55 @@ int main() {
     tree_a.deactivate(*b);
     if (teardown_fault.deactivate_calls != deactivate_before_close + 2) {
         return fail("reactivated teardown fixture did not deactivate cleanly");
+    }
+
+    // EmbeddedView owns its own module world/view/IME and must provide the same
+    // no-throw/best-effort retained teardown guarantee as StandaloneWindow. Keep
+    // B alive as the host parent and prove its native state survives all three
+    // injected retained teardown exceptions.
+    FaultState embedded_fault{};
+    ui::UI embedded_tree{FaultRoot{embedded_fault}};
+    auto embedded = std::make_unique<ui::EmbeddedView>(
+        embedded_tree,
+        b->native_handle(),
+        ui::Size{260.0f, 140.0f});
+    if (!embedded->native_handle()) return fail("throwing EmbeddedView construction failed");
+    embedded_tree.activate(*embedded);
+    if (embedded_fault.activate_calls < 1 || embedded_fault.focus_gain_calls < 1) {
+        return fail("throwing EmbeddedView fixture did not become active and focused");
+    }
+    if (embedded_tree.dispatch(down, *embedded) != ui::EventResult::Handled) {
+        return fail("throwing EmbeddedView fixture did not establish pointer capture");
+    }
+    const int embedded_activate_before_close = embedded_fault.activate_calls;
+    const int embedded_focus_loss_before_close = embedded_fault.focus_loss_calls;
+    const int embedded_deactivate_before_close = embedded_fault.deactivate_calls;
+    embedded_fault.throw_pointer_cancel = true;
+    embedded_fault.throw_focus_loss = true;
+    embedded_fault.throw_deactivate = true;
+    embedded.reset();
+    if (embedded_fault.pointer_cancel_calls < 1) {
+        return fail("EmbeddedView throwing pointer cancellation was not attempted");
+    }
+    if (embedded_fault.focus_loss_calls != embedded_focus_loss_before_close + 1) {
+        return fail("EmbeddedView throwing focus loss did not run exactly once");
+    }
+    if (embedded_fault.deactivate_calls != embedded_deactivate_before_close + 1) {
+        return fail("EmbeddedView throwing deactivate was not attempted exactly once");
+    }
+    if (app.quit_requested() || !b->native_handle() || b->should_close()) {
+        return fail("throwing EmbeddedView teardown damaged its parent window");
+    }
+    embedded_fault.throw_pointer_cancel = false;
+    embedded_fault.throw_focus_loss = false;
+    embedded_fault.throw_deactivate = false;
+    embedded_tree.activate(*b);
+    if (embedded_fault.activate_calls != embedded_activate_before_close + 1) {
+        return fail("EmbeddedView teardown left stale active state and blocked reactivation");
+    }
+    embedded_tree.deactivate(*b);
+    if (embedded_fault.deactivate_calls != embedded_deactivate_before_close + 2) {
+        return fail("EmbeddedView teardown fixture did not deactivate cleanly after reuse");
     }
 
     // Keep resize as the first native mutation after sibling destruction. This

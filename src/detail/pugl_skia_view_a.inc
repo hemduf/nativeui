@@ -1,3 +1,34 @@
+enum class NativeViewConstructionFaultStage : std::uint8_t {
+    AfterViewCreation,
+    AfterRealize,
+    AfterImeCreate,
+    AfterSizeConstraints,
+    AfterInitialResize,
+    AfterShow,
+    AfterInvalidationCallback,
+};
+
+struct NativeViewConstructionFaultResult {
+    bool injected_failure{};
+    bool unexpected_failure{};
+    bool unexpected_success{};
+    std::uint32_t world_acquired{};
+    std::uint32_t world_released{};
+    std::uint32_t view_acquired{};
+    std::uint32_t view_released{};
+    std::uint32_t realize_succeeded{};
+    std::uint32_t unrealize_released{};
+    std::uint32_t ime_acquired{};
+    std::uint32_t ime_released{};
+    std::uint32_t size_constraints_applied{};
+    std::uint32_t initial_resize_completed{};
+    std::uint32_t show_completed{};
+    std::uint32_t invalidation_attached{};
+    std::uint32_t invalidation_cleared{};
+};
+
+class NativeViewConstructionFault final {};
+
 class ViewCore {
 public:
     ViewCore(UI& ui,
@@ -6,7 +37,9 @@ public:
              WindowDesc desc,
              NativeParentHandle parent,
              PuglWorld* shared_world = nullptr,
-             std::function<void()> close_callback = {})
+             std::function<void()> close_callback = {},
+             NativeViewConstructionFaultStage fault_stage = NativeViewConstructionFaultStage::AfterViewCreation,
+             NativeViewConstructionFaultResult* fault_result = nullptr)
         : ui_(ui),
           services_(services),
           geometry_(validated_initial_size(desc)),
@@ -15,7 +48,11 @@ public:
             throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
         }
 
-        ConstructionCleanup construction_cleanup{*this};
+        ConstructionCleanup construction_cleanup{*this, fault_result};
+        const auto maybe_inject = [&](NativeViewConstructionFaultStage stage) {
+            if (fault_result && fault_stage == stage) throw NativeViewConstructionFault{};
+        };
+
         if (shared_world) {
             world_ = shared_world;
         } else {
@@ -23,13 +60,18 @@ public:
             owns_world_ = true;
         }
         if (!world_) throw std::runtime_error("puglNewWorld failed");
+        if (owns_world_) {
+            construction_cleanup.world_acquired = true;
+            if (fault_result) ++fault_result->world_acquired;
+        }
 
         view_ = puglNewView(world_);
         if (!view_) {
-            if (owns_world_) puglFreeWorld(world_);
-            world_ = nullptr;
             throw std::runtime_error("puglNewView failed");
         }
+        construction_cleanup.view_acquired = true;
+        if (fault_result) ++fault_result->view_acquired;
+        maybe_inject(NativeViewConstructionFaultStage::AfterViewCreation);
 
         puglSetWorldString(world_, PUGL_CLASS_NAME, "NativeUI");
         puglSetViewString(view_, PUGL_WINDOW_TITLE, desc.title.c_str());
@@ -38,7 +80,7 @@ public:
         // monitor/DPI of the host window rather than a default screen.
         if (parent) {
             const auto status = puglSetParent(view_, static_cast<PuglNativeView>(parent));
-            if (status) cleanup_and_throw(status, "puglSetParent failed");
+            if (status) throw_pugl(status, "puglSetParent failed");
         }
 
         // NativeUI public geometry is logical. Keep one per-view last-valid
@@ -48,7 +90,7 @@ public:
             geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
         const auto initial_physical = geometry_.physical_request(geometry_.logical_size());
         if (!initial_physical) {
-            cleanup_and_throw(PUGL_BAD_PARAMETER, "invalid initial logical size");
+            throw_pugl(PUGL_BAD_PARAMETER, "invalid initial logical size");
         }
         puglSetSizeHint(view_, PUGL_DEFAULT_SIZE,
                         to_pugl_span(initial_physical->w),
@@ -70,13 +112,19 @@ public:
         puglRegisterDropType(view_, "text/uri-list");
 
         if (const auto status = puglRealize(view_)) {
-            cleanup_and_throw(status, "puglRealize failed");
+            throw_pugl(status, "puglRealize failed");
         }
+        construction_cleanup.realized = true;
+        if (fault_result) ++fault_result->realize_succeeded;
+        maybe_inject(NativeViewConstructionFaultStage::AfterRealize);
 
         ime_bridge_ = nativeuiImeCreate(world_, view_, this, &ViewCore::ime_event_thunk);
         if (!ime_bridge_) {
-            cleanup_and_throw(PUGL_FAILURE, "native IME bridge initialization failed");
+            throw_pugl(PUGL_FAILURE, "native IME bridge initialization failed");
         }
+        construction_cleanup.ime_acquired = true;
+        if (fault_result) ++fault_result->ime_acquired;
+        maybe_inject(NativeViewConstructionFaultStage::AfterImeCreate);
 
         record_scale_observation(
             geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
@@ -87,25 +135,36 @@ public:
         // through the platform runtime setters, which convert them to Cocoa points
         // and avoids a conflicting backing-size constraint during visible resize.
         if (!apply_size_constraints()) {
-            cleanup_and_throw(PUGL_BAD_PARAMETER, "failed to apply window size constraints");
+            throw_pugl(PUGL_BAD_PARAMETER, "failed to apply window size constraints");
         }
+        if (fault_result) ++fault_result->size_constraints_applied;
+        maybe_inject(NativeViewConstructionFaultStage::AfterSizeConstraints);
+
         // Initial layout uses the requested logical size so synchronous focus
         // and IME callbacks during show have valid bounds. Subsequent size
         // changes are driven only by authoritative configure snapshots.
         ui_.resize(geometry_.logical_size());
+        construction_cleanup.retained_started = true;
+        if (fault_result) ++fault_result->initial_resize_completed;
+        maybe_inject(NativeViewConstructionFaultStage::AfterInitialResize);
 
         if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
-            cleanup_and_throw(status, "puglShow failed");
+            throw_pugl(status, "puglShow failed");
         }
         visible_ = true;
+        if (fault_result) ++fault_result->show_completed;
+        maybe_inject(NativeViewConstructionFaultStage::AfterShow);
 
         // Attach exposure scheduling only after the native view is visible.
         // The callback replays the already accumulated initial dirty region,
         // so no redundant whole-view redraw request is needed here.
+        construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
             request_redraw(rect);
         });
+        if (fault_result) ++fault_result->invalidation_attached;
+        maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);
         construction_cleanup.release();
     }
 
@@ -349,15 +408,23 @@ public:
 
 private:
     struct ConstructionCleanup {
-        explicit ConstructionCleanup(ViewCore& owner) noexcept : owner_(&owner) {}
+        explicit ConstructionCleanup(ViewCore& owner,
+                                     NativeViewConstructionFaultResult* fault_result) noexcept
+            : owner_(&owner), fault_result(fault_result) {}
         ~ConstructionCleanup() noexcept {
-            if (armed_) owner_->cleanup_partial_construction_noexcept();
+            if (armed_) owner_->cleanup_partial_construction_noexcept(*this);
         }
         void release() noexcept { armed_ = false; }
 
-    private:
         ViewCore* owner_{};
+        NativeViewConstructionFaultResult* fault_result{};
         bool armed_{true};
+        bool world_acquired{};
+        bool view_acquired{};
+        bool realized{};
+        bool ime_acquired{};
+        bool retained_started{};
+        bool invalidation_attached{};
     };
 
     [[nodiscard]] static Size validated_initial_size(const WindowDesc& desc) {
@@ -452,21 +519,55 @@ private:
         world_ = nullptr;
     }
 
-    void cleanup_partial_construction_noexcept() noexcept {
+    void cleanup_partial_construction_noexcept(ConstructionCleanup& cleanup) noexcept {
+        const auto best_effort = [](auto&& step) noexcept {
+            try {
+                step();
+            } catch (...) {
+                // Preserve the original constructor exception while continuing
+                // every remaining retained/native cleanup stage.
+            }
+        };
+
+        // A successful initial resize may be followed by synchronous focus or
+        // activation during show. Contain application teardown faults so a
+        // constructor failure still releases all native resources.
+        if (cleanup.retained_started) {
+            best_effort([this] { (void)ui_.cancel_pointer(services_); });
+            best_effort([this] { ui_.deactivate(services_); });
+            cleanup.retained_started = false;
+        }
+        if (cleanup.invalidation_attached) {
+            best_effort([this] { ui_.clear_invalidation_callback(); });
+            cleanup.invalidation_attached = false;
+            if (cleanup.fault_result) ++cleanup.fault_result->invalidation_cleared;
+        }
         if (ime_bridge_) {
             nativeuiImeDestroy(ime_bridge_);
             ime_bridge_ = nullptr;
+            cleanup.ime_acquired = false;
+            if (cleanup.fault_result) ++cleanup.fault_result->ime_released;
         }
         if (view_) {
+            if (cleanup.realized) {
+                (void)puglUnrealize(view_);
+                cleanup.realized = false;
+                if (cleanup.fault_result) ++cleanup.fault_result->unrealize_released;
+            }
             puglFreeView(view_);
             view_ = nullptr;
+            cleanup.view_acquired = false;
+            if (cleanup.fault_result) ++cleanup.fault_result->view_released;
         }
-        release_owned_world_noexcept();
-    }
-
-    void cleanup_and_throw(PuglStatus status, const char* what) {
-        cleanup_partial_construction_noexcept();
-        throw_pugl(status, what);
+        visible_ = false;
+        if (world_ && owns_world_) {
+            puglFreeWorld(world_);
+            world_ = nullptr;
+            cleanup.world_acquired = false;
+            if (cleanup.fault_result) ++cleanup.fault_result->world_released;
+        } else if (owns_world_) {
+            world_ = nullptr;
+        }
     }
 
     static void ime_event_thunk(void* user_data,
