@@ -268,8 +268,11 @@ private:
 
 class TextArea {
 public:
+    TextArea(std::string label, Binding<std::string> state)
+        : label_(std::move(label)), state_(std::move(state)) {}
+
     TextArea(std::string label, State<std::string>& state)
-        : label_(std::move(label)), state_(&state) {}
+        : TextArea(std::move(label), state.binding()) {}
 
     TextArea&& placeholder(std::string value) && {
         placeholder_ = std::move(value);
@@ -288,14 +291,15 @@ public:
 
     Spec spec() && {
         auto label = std::move(label_);
+        auto state = std::move(state_);
         auto placeholder = std::move(placeholder_);
         auto style = std::move(style_);
-        auto* state = state_;
         const auto max_length = max_length_;
-        return Spec{[label = std::move(label), state, placeholder = std::move(placeholder),
-                     max_length, style = std::move(style)]() mutable {
+        return Spec{[label = std::move(label), state = std::move(state),
+                     placeholder = std::move(placeholder), max_length,
+                     style = std::move(style)]() mutable {
                         return std::make_unique<TextAreaComponent>(
-                            std::move(label), *state, std::move(placeholder), max_length,
+                            std::move(label), std::move(state), std::move(placeholder), max_length,
                             std::move(style));
                     },
                     {}};
@@ -303,7 +307,7 @@ public:
 
 private:
     std::string label_;
-    State<std::string>* state_{};
+    Binding<std::string> state_;
     std::string placeholder_;
     std::size_t max_length_{};
     TextAreaStyle style_;
