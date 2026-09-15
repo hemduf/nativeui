@@ -123,7 +123,7 @@ int self_test() {
         return example::fail("Tabs Binding update lost selection availability invalidation");
     }
     if (right_tabs.layout_dirty() || right_tabs.paint_dirty()) {
-        return example::fail("Tabs Binding update dirtied independent UI");
+        return example::fail("external Tabs Binding update dirtied independent UI");
     }
 
     ui::State<std::optional<int>> legacy_list_selection{1};
@@ -187,6 +187,6 @@ int main(int argc, char** argv) {
             ui::Tabs<int>{tab_selection.binding()}
                 .tab(1, "One", ui::Spacer{240.0f, 100.0f})
                 .tab(2, "Two", ui::Spacer{240.0f, 100.0f})
-        }.gap(16.0f).padding(16.0f)};
+        }.gap(16.0f)};
     return example::run_window(tree, "NativeUI T140 Binding ListView/Tabs", {520.0f, 220.0f});
 }
