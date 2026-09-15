@@ -96,13 +96,13 @@ int self_test() {
         legacy_selection,
         {{1, "One", true}, {2, "Two", true}}}.spec();
 
-    ui::Spec stale_spec = [] {
+    auto stale_combo = [] {
         ui::State<int> temporary_selection{1};
-        return std::move(ui::ComboBox<int>{
+        return ui::ComboBox<int>{
             temporary_selection.binding(),
-            {{1, "One", true}, {2, "Two", true}}}).spec();
+            {{1, "One", true}, {2, "Two", true}}};
     }();
-    ui::UI stale_tree{std::move(stale_spec)};
+    ui::UI stale_tree{std::move(stale_combo)};
     example::Platform stale_platform;
     stale_tree.resize({320.0f, 160.0f});
     stale_tree.activate(stale_platform);
