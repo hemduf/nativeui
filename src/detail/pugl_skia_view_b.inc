@@ -208,8 +208,12 @@
                     }
                 }
 
-                active_drop_offer_ = &event->offer;
-                drop_offer_decided_ = false;
+                // Pugl owns this offer object only for the duration of the
+                // callback frame. Restore the exact previous borrow/decision
+                // state before the outer noexcept event thunk contains any
+                // exception. The scope guard performs scalar assignments only.
+                ScopedBorrowState offer_borrow{
+                    active_drop_offer_, drop_offer_decided_, &event->offer};
                 (void)ui_.dispatch(input, services_);
                 if (!drop_offer_decided_) {
                     (void)puglRejectOffer(view_,
@@ -219,8 +223,6 @@
                                           std::numeric_limits<uint32_t>::max(),
                                           std::numeric_limits<uint32_t>::max());
                 }
-                active_drop_offer_ = nullptr;
-                drop_offer_decided_ = false;
                 return PUGL_SUCCESS;
             }
 
