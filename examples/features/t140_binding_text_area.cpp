@@ -32,12 +32,9 @@ int self_test() {
 
     int left_notifications = 0;
     int right_notifications = 0;
+    bool invalidation_visible_at_publication = false;
     auto left_binding = left.notes.binding();
     auto right_binding = right.notes.binding();
-    auto left_subscription = left_binding.observe(
-        [&left_notifications](const std::string&) { ++left_notifications; });
-    auto right_subscription = right_binding.observe(
-        [&right_notifications](const std::string&) { ++right_notifications; });
 
     auto left_tree = make_ui(left);
     auto right_tree = make_ui(right);
@@ -52,6 +49,21 @@ int self_test() {
     ui::HeadlessRenderer right_renderer{{620.0f, 320.0f}, 1.0f};
     if (!left_renderer.render(left_tree)) return example::fail("initial left TextArea render failed");
     if (!right_renderer.render(right_tree)) return example::fail("initial right TextArea render failed");
+    if (left_tree.layout_dirty() || left_tree.paint_dirty() ||
+        right_tree.layout_dirty() || right_tree.paint_dirty()) {
+        return example::fail("initial TextArea render did not settle invalidation state");
+    }
+
+    auto left_subscription = left_binding.observe(
+        [&left_notifications, &left_tree, &invalidation_visible_at_publication](const std::string&) {
+            ++left_notifications;
+            if (left_notifications == 1) {
+                invalidation_visible_at_publication =
+                    left_tree.paint_dirty() && !left_tree.layout_dirty();
+            }
+        });
+    auto right_subscription = right_binding.observe(
+        [&right_notifications](const std::string&) { ++right_notifications; });
 
     left_tree.dispatch(text("!"), left_platform);
     if (left.notes.get() != "alpha!" || right.notes.get() != "alpha") {
@@ -59,6 +71,9 @@ int self_test() {
     }
     if (left_notifications != 1 || right_notifications != 0) {
         return example::fail("Binding TextArea edit notification count/isolation failed");
+    }
+    if (!invalidation_visible_at_publication) {
+        return example::fail("TextArea published Binding before completing paint invalidation");
     }
 
     if (!left_renderer.render(left_tree)) return example::fail("edited TextArea render failed");
