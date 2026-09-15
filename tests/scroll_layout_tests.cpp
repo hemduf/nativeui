@@ -174,6 +174,80 @@ void scroll_state_observer_contract() {
     }
 }
 
+void scroll_state_metrics_transaction_contract() {
+    // A layout-driven clamp participates in the same transaction as direct
+    // offset writes: recursive writes settle as a later pass and latest wins.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{ui::Scroll{state, ui::Spacer{100.0f, 400.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state.set_offset({0.0f, 250.0f});
+
+        std::vector<float> observed;
+        bool adjusted = false;
+        auto subscription = state.observe([&](ui::Point value) {
+            observed.push_back(value.y);
+            if (!adjusted && value.y == 100.0f) {
+                adjusted = true;
+                state.set_offset({0.0f, 40.0f});
+                state.set_offset({0.0f, 60.0f});
+            }
+        });
+
+        renderer.resize({100.0f, 300.0f});
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(observed.size() == 2);
+        NUI_CHECK_NEAR(observed[0], 100.0f, 0.001f);
+        NUI_CHECK_NEAR(observed[1], 60.0f, 0.001f);
+        NUI_CHECK_NEAR(state.offset().y, 60.0f, 0.001f);
+        NUI_CHECK(subscription.active());
+    }
+
+    // A throwing observer during a metrics clamp commits the current pass,
+    // discards recursive pending work/unstarted suffix delivery and recovers.
+    {
+        ui::ScrollState state{ui::ScrollAxis::Vertical};
+        ui::UI tree{ui::Scroll{state, ui::Spacer{100.0f, 400.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state.set_offset({0.0f, 250.0f});
+
+        bool throw_once = true;
+        int suffix_calls = 0;
+        std::vector<float> first_values;
+        auto first = state.observe([&](ui::Point value) {
+            first_values.push_back(value.y);
+            if (throw_once && value.y == 100.0f) {
+                throw_once = false;
+                state.set_offset({0.0f, 50.0f});
+                throw std::runtime_error{"metrics observer failure"};
+            }
+        });
+        auto suffix = state.observe([&](ui::Point) { ++suffix_calls; });
+
+        renderer.resize({100.0f, 300.0f});
+        bool threw = false;
+        try {
+            (void)renderer.render(tree);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
+        NUI_CHECK(suffix_calls == 0);
+
+        state.set_offset({0.0f, 80.0f});
+        NUI_CHECK_NEAR(state.offset().y, 80.0f, 0.001f);
+        NUI_CHECK(suffix_calls == 1);
+        NUI_CHECK(first_values.size() == 2);
+        NUI_CHECK_NEAR(first_values[0], 100.0f, 0.001f);
+        NUI_CHECK_NEAR(first_values[1], 80.0f, 0.001f);
+        NUI_CHECK(first.active());
+        NUI_CHECK(suffix.active());
+    }
+}
+
 struct PointerEatingState {
     int down{};
     int move{};
@@ -233,6 +307,7 @@ private:
 
 void suite() {
     scroll_state_observer_contract();
+    scroll_state_metrics_transaction_contract();
 
     // Vertical scrolling exposes metrics and repositions content by a clamped offset.
     {
