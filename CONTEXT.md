@@ -57,6 +57,8 @@ The previously completed v1 feature/platform/styling foundation remains merged a
 
 **T132 / #294 is Done.** PR #342 merged exact frozen head `027e895ed8670158eead1d5c722c387f74a7448f` into main as merge commit `c2f381363d57e48df96f02d5d52b3e8a6571b478`. Exact-head CI `34908565263`, T060 `34908565154`, T064 `34908565205`, T065 Dispatcher `34908565174`, T065 Platform `34908565239`, T066 `34908565163` and Package Contracts `34908565192` passed; final-candidate T042 Lifecycle Stress `34911130032` and T052 v0.1 Release Gate `34911130054` also passed. The mandatory second peer review `5204033991` on the exact review-fix head recorded `REVIEW_PASS`, zero Blocking/Important findings, with reviewer independence from current-head modifier W1. Standalone close lifecycle control now remains deferred and owner-checkpointed when ordinary Dispatcher enqueue rejects or throws, including real component/input and native-close fault regressions, pending-destruction silence, exact-once completion and two-window isolation.
 
+**T127 / #288 is Done.** PR #348 merged frozen exact head `c17cfca1dc53a921782c09d45e547482c854733b` into main as merge commit `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`. Exact-head CI `35001985912`, T066 Window Controls `35001986036` and T067 Virtual List Contract `35001985913` passed; final-candidate T042 Lifecycle Stress `35010483243` and T052 v0.1 Release Gate `35010483184` also passed. Mandatory exact-head peer review `5214429062` recorded `REVIEW_PASS`, zero Blocking/Important findings, with reviewer W3 independent from source/current-head worker W2. ScrollState observer dispatch now has stable per-instance lifetime control, deterministic latest-write reentrancy and throwing-observer recovery; retained Scroll/ScrollView/scrollbar/VirtualList consumers gate borrowed-state use through lifetime tokens and callback boundaries; steady scrolling does not clone the full callback list. The post-T141 composition was reconciled and requalified before merge.
+
 Current safety blocker set/frontier:
 
 - **T124 / #282 — Done:** decomposed Binding umbrella T138 -> T139 -> T140 -> T141 is fully merged and final integrated T124 qualification is complete.
@@ -66,21 +68,21 @@ Current safety blocker set/frontier:
 - **T141 / #306 — Done:** dynamic composition/style/focus Binding migration and final integrated T124 qualification merged and fully qualified.
 - **T125 / #286 — Doing:** retained dispatch/reconciliation/cancellation exception safety.
 - **T126 / #287 — Done:** DesktopServices completion/native exception boundaries.
-- **T127 / #288 — Doing:** `ScrollState` lifetime, retained-consumer ownership, reentrant and throwing-observer semantics; current reviewed head must reconcile against the merged T141 composition before final qualification because both touch the public-consumer test surface.
+- **T127 / #288 — Done:** `ScrollState` lifetime, retained-consumer ownership, deterministic reentrancy/exception semantics and post-T141 composition are merged and fully qualified as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`.
 - **T128 / #289 — Done:** Dispatcher accepted-work recovery, Animation callback-exception invariants and cross-platform foreign-boundary exception smoke.
 - **T129 / #290 — Done:** retained invalidation callback lifetime safety merged and fully qualified as `e400695e4f106a35093029e2465e0aa5ed12393d`.
 - **T130 / #291 — Doing:** Component lifecycle/layout/paint exception safety plus native partial-construction and no-throw teardown.
 - **T131 / #293 — Done:** transaction-safe Overlay/Dialog/popup/Tooltip failure recovery merged and fully qualified.
 - **T132 / #294 — Done:** failure-safe standalone close deferral and lifecycle-control enqueue recovery merged and fully qualified.
 
-T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set is Done and synchronized on main. T124, T126, T128, T129, T131, T132, T138, T139, T140 and T141 are complete prerequisites; remaining blockers are T125, T127 and T130.
+T069 / issue #81 remains **Blocked** until the complete pre-freeze blocker set is Done and synchronized on main. T124, T126, T127, T128, T129, T131, T132, T138, T139, T140 and T141 are complete prerequisites; remaining blockers are T125 and T130.
 
 The immediate v1 frontier is therefore:
 
 ```text
 T123(done) -> T138(done) -> T139(done) -> T140(done) -> T141(done) -> T124(done)
 
-T123(done) ------------------------------------------------------------> T127(doing)
+T123(done) ------------------------------------------------------------> T127(done)
 
 T126(done)
 T128(done)
@@ -88,9 +90,9 @@ T129(done)
 T131(done)
 T132(done)
 
-parallel remaining P0: T125 + T127 + T130
+parallel remaining P0: T125 + T130
 
-T125 + T127 + T130 all Done
+T125 + T130 both Done
                   |
                   v
                 T069 -> T070 -> T071 -> v1.0.0
@@ -147,6 +149,7 @@ The audit found recurring classes of bugs that normal happy-path CI did not expo
 - T072 / PR #185: sole v1 Linux `libdbus-1` transport used by T064 and reserved for future T068 1.2 integration.
 - T123 / PR #284: deterministic lifetime-safe `State<T>` notification, observer-exception and reentrancy contract; merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99` after complete normal/path/final qualification.
 - T126 / PR #295: DesktopServices completion exception-boundary, terminal-drop and retained native cleanup hardening; merged as `be216d7a41999113472a0457827d43caad28cf15` after complete normal/path/final qualification.
+- T127 / PR #348: ScrollState observer/lifetime and retained-consumer hardening; merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5` after post-T141 reconciliation, exact-head CI/T066/T067, final T042/T052 qualification and independent peer review `5214429062`.
 - T128 / PR #296: Dispatcher/Animation exceptional recovery and cross-platform foreign-boundary containment hardening; merged as `ca65087b503aff04133394c5ef200cd7cae75e12` after complete normal/path/final qualification.
 - T129 / PR #345: retained invalidation lifetime safety with weak generation + stable NodeId resolution and stack-confined immediate-context preservation; merged as `e400695e4f106a35093029e2465e0aa5ed12393d` after exact-head CI/T044/T050/T066/T042/T052 qualification and independent peer review `5209343192`.
 - T131 / PR #339: Overlay/Dialog/popup/Tooltip transaction-safety hardening; merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d` after exact-head CI/T050/T066/T042/T052 qualification and independent peer review `5209008696`.
@@ -174,18 +177,18 @@ Fault injection is mandatory where normal execution cannot deterministically rep
 
 GitHub live state is authoritative. `#250` is Scheduler-only control state; current `AUTOMATION CYCLE — GNNN` issue comments are the Worker -> Scheduler event bus. Delivery W1/W2/W3/W4 are interchangeable with at most four source-changing lanes under the current scheduler capacity override. Integration owns independent final review, exact-head CI diagnosis, qualification, merge and completion/unlock bookkeeping; it never implements product features. Reporter is read-only.
 
-Scheduler/Delivery must treat explicit dependencies as hard gates. T124 is an umbrella after decomposition; the `T138 -> T139 -> T140 -> T141` chain is now complete and T124 is Done. T069 must remain blocked until T125, T127 and T130 are all Done and synchronized on main.
+Scheduler/Delivery must treat explicit dependencies as hard gates. T124 is an umbrella after decomposition; the `T138 -> T139 -> T140 -> T141` chain is now complete and T124 is Done. T069 must remain blocked until T125 and T130 are both Done and synchronized on main; T127 is now complete.
 
 Optimal parallelization before the freeze:
 
-1. reconcile T127 with current main after the T141 merge; because the reviewed candidate overlaps the merged public-consumer test surface, any reconciled head needs fresh exact-head CI and a fresh independent peer review before final qualification;
-2. continue independent T130 source correction and T125 source closeout, prioritizing any peer-review/qualification/merge handoff over widening source work;
-3. after T125, T127 and T130 are Done and synchronized on main, resume T069 whole-surface freeze;
+1. execute the Scheduler-authorized transactional canonical-stream replacements for T125 and T130 from the post-T127 main, preserving unrelated changes and retiring the old composition-invalid Draft streams;
+2. run fresh exact-head normal/path qualification, complete acceptance/tests/non-goals and self `CODE_REVIEW.md`, then obtain independent W2/W4 peer review handoffs before any final qualification;
+3. after T125 and T130 are Done and synchronized on main, resume T069 whole-surface freeze;
 4. then proceed T070 -> T071 on the exact frozen/RC baselines.
 
 ## Next actions
 
-1. Reconcile **T127 / #288** with current main after T141; do not reuse the prior peer review or launch T042/T052 on the composition-stale head.
-2. Continue **T130 / #291** and **T125 / #286** according to live closeout/review priority.
-3. Keep T069/#81 Blocked until **T125, T127 and T130** are Done and synchronized on main.
+1. Complete the post-T127 canonical-stream replacement/closeout for **T125 / #286** and **T130 / #291** according to the live Scheduler reservations.
+2. Prioritize any resulting exact-head peer-review/qualification/merge handoff over widening source work.
+3. Keep T069/#81 Blocked until **T125 and T130** are Done and synchronized on main.
 4. Keep T068/PR #241 parked for NativeUI 1.2.
