@@ -38,6 +38,38 @@ int main(int argc, char** argv) {
         scroll.set_offset({0.0f, 10000.0f});
         if (!example::near(scroll.offset().y, scroll.max_offset().y)) return example::fail("scroll offset did not clamp");
 
+        // T127: public builders must snapshot the lifetime token and immutable
+        // axis while their borrowed ScrollState is still alive. Destroying the
+        // owner after builder construction but before spec() must never cause
+        // spec() or a deferred factory to dereference the expired borrow.
+        {
+            auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Horizontal);
+            ui::Scroll builder{*state, ui::Spacer{400.0f, 100.0f}};
+            state.reset();
+            auto spec = std::move(builder).spec();
+            if (!spec.factory() || spec.children.size() != 1 ||
+                !spec.children.front().factory()) {
+                return example::fail("Scroll builder did not survive state teardown before spec");
+            }
+        }
+
+        {
+            auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+            ui::ScrollView builder{*state, ui::Spacer{100.0f, 400.0f}};
+            state.reset();
+            auto spec = std::move(builder).spec();
+            if (!spec.factory() || spec.children.size() != 3 ||
+                spec.children.front().children.size() != 1 ||
+                !spec.children.front().children.front().factory()) {
+                return example::fail("ScrollView builder did not survive state teardown before spec");
+            }
+            for (auto& child : spec.children) {
+                if (!child.factory()) {
+                    return example::fail("ScrollView deferred factory dereferenced dead state");
+                }
+            }
+        }
+
         // T127: the public Scroll builder and its realized retained component
         // borrow ScrollState without owning it. A dead owner must make both the
         // not-yet-realized factory and an already-realized tree inert rather
