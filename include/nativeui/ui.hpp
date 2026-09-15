@@ -476,22 +476,12 @@ private:
             OverlayHandle handle;
             try {
                 handle = show_overlay(std::move(command.overlay));
-                // A component popup is not published back to its opener until
-                // the retained overlay branch reaches the same safe checkpoint
-                // that input/paint will observe. If reconciliation throws after
-                // OverlayState::show() committed, the opener still has no
-                // usable handle and this command must roll that provisional
-                // publication back before the original exception propagates.
-                prepare_overlay_layout();
             } catch (...) {
+                // OverlayState::show() failed before a usable component popup
+                // was published. Reset opener/session state through the existing
+                // invalid-handle acknowledgement, then preserve the original
+                // exception.
                 auto failure = std::current_exception();
-                if (handle.valid()) {
-                    // The show command has not acknowledged the handle yet, so
-                    // there is no future retry owner. Use the terminal internal
-                    // cleanup seam to remove only this exact overlay while
-                    // containing any secondary invalidation failure.
-                    (void)overlay_state_->close_noexcept(handle);
-                }
                 try {
                     if (on_shown) on_shown({});
                 } catch (...) {
@@ -499,7 +489,26 @@ private:
                 std::rethrow_exception(failure);
             }
 
+            // Preserve the T035 publication point before retained focus
+            // reconciliation. ComboBox/PopupMenu opener suppression depends on
+            // the committed handle being visible while focus leaves the anchor.
             if (on_shown) on_shown(handle);
+
+            try {
+                // Retained preparation is still fallible after publication. On
+                // failure, revoke this exact popup and acknowledge an invalid
+                // handle below so opener/session state returns to retryable.
+                prepare_overlay_layout();
+            } catch (...) {
+                auto failure = std::current_exception();
+                (void)overlay_state_->close_noexcept(handle);
+                try {
+                    if (on_shown) on_shown({});
+                } catch (...) {
+                }
+                std::rethrow_exception(failure);
+            }
+
             enforce_new_modal_capture_barrier(platform);
             return;
         }
