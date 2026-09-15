@@ -595,7 +595,10 @@ private:
 
         // The pending generation/completion is the only durable repair state
         // once Dialog::complete() has transferred ownership to the UI. Do not
-        // move or clear it before the retained detach checkpoint succeeds.
+        // consume it until an executable copy has been prepared and the close
+        // transaction either commits or proves itself terminal. This matters
+        // when the Dialog controller is destroyed while its close is deferred:
+        // the UI-owned pending closure may then be the only remaining retry owner.
         const auto generation = dialog_state_->pending_completion_generation;
         prepare_overlay_layout();
 
@@ -605,10 +608,33 @@ private:
             return;
         }
 
-        auto completion = std::move(dialog_state_->pending_completion);
+        // Copy before mutating durable state so allocation failure leaves the
+        // original pending close intact. Move the original into local recovery
+        // storage, freeing the DialogState slot before invoking application code
+        // so a successful completion may reenter and create/defer a newer Dialog.
+        auto completion = dialog_state_->pending_completion;
+        auto durable_completion = std::move(dialog_state_->pending_completion);
         dialog_state_->pending_completion_generation = 0;
-        dialog_state_->pending_completion = {};
-        finish_dialog_completion(generation, std::move(completion));
+
+        try {
+            finish_dialog_completion(generation, std::move(completion));
+        } catch (...) {
+            // The deferred closure restores this generation before its fallible
+            // retained-overlay close. If that close fails, ownership is the
+            // precise signal that internal commit did not happen yet: restore
+            // the original UI-owned closure without allocating or invoking any
+            // callback during unwind. If ownership is already gone, the throw
+            // came after the internal transaction became terminal (for example
+            // from application completion) and must never be retried.
+            if (dialog_state_ && !dialog_state_->ui_tearing_down &&
+                dialog_state_->owns(generation) &&
+                dialog_state_->pending_completion_generation == 0 &&
+                !dialog_state_->pending_completion) {
+                dialog_state_->pending_completion_generation = generation;
+                dialog_state_->pending_completion = std::move(durable_completion);
+            }
+            throw;
+        }
     }
 
     [[nodiscard]] std::uint64_t newest_modal_id() const noexcept {

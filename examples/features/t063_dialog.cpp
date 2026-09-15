@@ -60,6 +60,7 @@ ui::UI make_ui(DemoState& state) {
 
 struct KeySinkState {
     int key_down_count{};
+    std::function<void()> on_key_down;
 };
 
 class KeySinkComponent final : public ui::Component {
@@ -73,7 +74,11 @@ public:
     }
 
     ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
-        if (event.type == ui::InputType::KeyDown) ++state_->key_down_count;
+        if (event.type == ui::InputType::KeyDown) {
+            ++state_->key_down_count;
+            auto callback = state_->on_key_down;
+            if (callback) callback();
+        }
         return ui::EventResult::Handled;
     }
 
@@ -505,6 +510,78 @@ int destructor_failure_contract() {
     return 0;
 }
 
+int deferred_destroyed_controller_recovery_contract() {
+    example::Platform platform;
+    ui::UI tree{ui::Spacer{320.0f, 180.0f}};
+    tree.resize({420.0f, 260.0f});
+    tree.activate(platform);
+
+    auto sink = std::make_shared<KeySinkState>();
+    std::unique_ptr<ui::Dialog> dialog;
+    int dismissed = 0;
+    sink->on_key_down = [&] {
+        if (!dialog) return;
+        (void)dialog->close();
+        dialog.reset();
+    };
+
+    ui::DialogSpec spec;
+    spec.title = "Deferred destruction repair";
+    spec.body = ui::make_spec(KeySink{sink});
+    dialog = std::make_unique<ui::Dialog>(tree);
+    if (dialog->show(std::move(spec), [&](ui::DialogResult result) {
+            if (result.kind == ui::DialogResultKind::Dismissed) ++dismissed;
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T131 deferred destroyed-controller setup failed");
+    }
+    tree.resize({420.0f, 260.0f});
+
+    bool fail_invalidation = false;
+    tree.set_invalidation_callback(std::function<void()>{[&] {
+        if (fail_invalidation) {
+            throw std::runtime_error{"T131 injected deferred destroyed-controller failure"};
+        }
+    }});
+    fail_invalidation = true;
+
+    bool threw = false;
+    try {
+        (void)tree.dispatch(example::key(ui::Key::Enter), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    fail_invalidation = false;
+    if (!threw || dialog || sink->key_down_count != 1 || dismissed != 0 ||
+        tree.overlay_entries().size() != 1) {
+        tree.clear_invalidation_callback();
+        return example::fail("T131 deferred close lost UI-owned repair state after controller destruction");
+    }
+
+    try {
+        (void)tree.dispatch(key_up(ui::Key::Enter), platform);
+    } catch (...) {
+        tree.clear_invalidation_callback();
+        return example::fail("T131 deferred destroyed-controller retry propagated after fault cleared");
+    }
+    tree.clear_invalidation_callback();
+    if (dismissed != 1 || !tree.overlay_entries().empty()) {
+        return example::fail("T131 deferred destroyed-controller retry did not finish exactly once");
+    }
+
+    ui::Dialog recovered{tree};
+    int recovered_completions = 0;
+    if (recovered.show(confirm_spec(false), [&](ui::DialogResult) {
+            ++recovered_completions;
+        }) != ui::DialogShowResult::Shown) {
+        return example::fail("T131 deferred destroyed-controller failure stranded Dialog Busy");
+    }
+    tree.resize({420.0f, 260.0f});
+    if (!recovered.close() || recovered_completions != 1 || recovered.active()) {
+        return example::fail("T131 Dialog slot was not reusable after deferred destroyed-controller repair");
+    }
+    return 0;
+}
+
 int whole_ui_teardown_suppresses_completion_contract() {
     example::Platform platform;
     int completions = 0;
@@ -845,6 +922,7 @@ int self_test() {
     if (const int result = deactivation_suppresses_completion_contract(); result != 0) return result;
     if (const int result = close_failure_transaction_contract(); result != 0) return result;
     if (const int result = destructor_failure_contract(); result != 0) return result;
+    if (const int result = deferred_destroyed_controller_recovery_contract(); result != 0) return result;
     if (const int result = whole_ui_teardown_suppresses_completion_contract(); result != 0) return result;
     if (const int result = throwing_completion_releases_slot_contract(); result != 0) return result;
     if (const int result = overlay_command_failure_recovery_contract(); result != 0) return result;
