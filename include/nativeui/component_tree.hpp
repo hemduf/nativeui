@@ -15,6 +15,7 @@
 #include <exception>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace ui {
@@ -37,7 +38,12 @@ private:
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
+#define ensure_layout ensure_layout_legacy
+#define layout_node layout_node_legacy
 #include <nativeui/detail/tree_layout.inc>
+#undef layout_node
+#undef ensure_layout
+#include <nativeui/detail/tree_layout_transaction.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
 #include <nativeui/detail/tree_focus_group.inc>

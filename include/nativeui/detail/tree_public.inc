@@ -68,11 +68,14 @@
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
-        viewport_ = viewport;
-        paint_dirty_.clear();
-        layout_node(*root_, viewport_rect());
-        layout_dirty_ = false;
-        invalidate_paint(viewport_rect());
+        auto transaction = begin_layout_publication(viewport);
+        try {
+            layout_node(*root_, viewport_rect());
+        } catch (...) {
+            rollback_layout_publication(std::move(transaction));
+            throw;
+        }
+        commit_layout_publication();
     }
 
     void activate_focus(PlatformServices& platform) {
@@ -217,7 +220,6 @@
 
         if (first_error) std::rethrow_exception(first_error);
     }
-
     [[nodiscard]] bool dirty() const noexcept {
         return layout_dirty_ || !paint_dirty_.empty();
     }
