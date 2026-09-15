@@ -66,7 +66,7 @@
         if (focusables_.empty() || !focus_active_) return;
         auto* node = focusables_[focused_index_];
         FocusContext context{
-            node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+            node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
         node->component->focus_changed(true, context);
     }
 
@@ -90,7 +90,7 @@
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
             FocusContext context{
-                node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+                node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
             node->component->focus_changed(false, context);
             invalidate_node_paint(*node);
         }

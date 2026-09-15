@@ -137,8 +137,8 @@
         InputContext context{
             node.bounds,
             platform,
-            paint_invalidator(node),
-            layout_invalidator(node),
+            unsafe_paint_invalidator(node),
+            unsafe_layout_invalidator(node),
             [this, &node] { set_pointer_capture(node); },
             [this, &node] { release_pointer_capture(node); }};
         try {

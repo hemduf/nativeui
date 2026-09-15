@@ -21,6 +21,8 @@ namespace detail {
 class OverlayService;
 } // namespace detail
 
+class Tree;
+
 struct FlexFactors {
     float grow{};
     float shrink{};
@@ -339,14 +341,25 @@ public:
 
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     /// Long-lived callback for state changes that only affect painting.
-    [[nodiscard]] std::function<void()> invalidator() const { return invalidate_; }
+    [[nodiscard]] std::function<void()> invalidator() const {
+        return invalidate_ ? invalidate_ : make_invalidator(invalidator_factory_.invalidate);
+    }
     /// Long-lived callback for state changes that can affect preferred size/layout.
-    [[nodiscard]] std::function<void()> layout_invalidator() const { return invalidate_layout_; }
+    [[nodiscard]] std::function<void()> layout_invalidator() const {
+        return invalidate_layout_ ? invalidate_layout_
+                                  : make_invalidator(invalidator_factory_.invalidate_layout);
+    }
     /// Long-lived callback for state changes that affect focus availability/scopes.
-    [[nodiscard]] std::function<void()> focus_invalidator() const { return invalidate_focus_; }
+    [[nodiscard]] std::function<void()> focus_invalidator() const {
+        return invalidate_focus_ ? invalidate_focus_
+                                 : make_invalidator(invalidator_factory_.invalidate_focus);
+    }
     /// Long-lived callback for local visibility/enabled/read-only state changes.
     [[nodiscard]] std::function<void()> availability_invalidator() const {
-        return invalidate_availability_ ? invalidate_availability_ : std::function<void()>{[] {}};
+        auto callback = invalidate_availability_
+                            ? invalidate_availability_
+                            : make_invalidator(invalidator_factory_.invalidate_availability);
+        return callback ? std::move(callback) : std::function<void()>{[] {}};
     }
     /// Borrowed per-UI T061 overlay seam. Null for trees compiled without a UI
     /// owner (direct internal component use, headless component fixtures).
@@ -355,11 +368,34 @@ public:
     }
 
 private:
+    friend class Tree;
+
+    using InvalidatorFactoryFn = std::function<void()> (*)(void*, NodeId);
+    struct InvalidatorFactory {
+        void* owner{};
+        InvalidatorFactoryFn invalidate{};
+        InvalidatorFactoryFn invalidate_layout{};
+        InvalidatorFactoryFn invalidate_focus{};
+        InvalidatorFactoryFn invalidate_availability{};
+    };
+
+    MountContext(NodeId node_id,
+                 InvalidatorFactory invalidator_factory,
+                 detail::OverlayService* overlay_service)
+        : node_id_(node_id),
+          invalidator_factory_(invalidator_factory),
+          overlay_service_(overlay_service) {}
+
+    [[nodiscard]] std::function<void()> make_invalidator(InvalidatorFactoryFn factory) const {
+        return factory ? factory(invalidator_factory_.owner, node_id_) : std::function<void()>{};
+    }
+
     NodeId node_id_{kInvalidNodeId};
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
     std::function<void()> invalidate_focus_;
     std::function<void()> invalidate_availability_;
+    InvalidatorFactory invalidator_factory_{};
     detail::OverlayService* overlay_service_{};
 };
 
