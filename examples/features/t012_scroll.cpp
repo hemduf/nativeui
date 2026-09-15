@@ -68,6 +68,45 @@ int main(int argc, char** argv) {
                 return example::fail("retained Scroll dereferenced a dead ScrollState");
             }
         }
+
+        // T127: the still-public ScrollComponent constructor also accepts a
+        // borrowed ScrollState directly. It must freeze immutable axis data and
+        // re-check owner lifetime after update_metrics() synchronously invokes
+        // observers, because one of those observers may destroy the state.
+        {
+            auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+            ui::ScrollComponent component{*state};
+            const std::vector<ui::ChildMetrics> child_metrics{
+                ui::ChildMetrics{{100.0f, 400.0f}}};
+            std::vector<ui::ChildPlacement> placements(1);
+
+            state->set_offset({0.0f, 250.0f});
+            auto destroyer = state->observe([&](ui::Point) { state.reset(); });
+            component.layout_children(
+                {0.0f, 0.0f, 100.0f, 300.0f}, child_metrics, placements);
+
+            if (state) {
+                return example::fail("ScrollComponent clamp observer did not destroy owner");
+            }
+            if (!example::near(placements.front().bounds.x, 0.0f) ||
+                !example::near(placements.front().bounds.y, 0.0f) ||
+                !example::near(placements.front().bounds.w, 100.0f) ||
+                !example::near(placements.front().bounds.h, 400.0f)) {
+                return example::fail("dead ScrollComponent did not fall back to safe placement");
+            }
+
+            const auto minimum = component.minimum_size(child_metrics);
+            if (!example::near(minimum.h, 0.0f)) {
+                return example::fail("dead ScrollComponent dereferenced ScrollState in sizing");
+            }
+            component.layout_children(
+                {0.0f, 0.0f, 120.0f, 320.0f}, child_metrics, placements);
+            if (!example::near(placements.front().bounds.x, 0.0f) ||
+                !example::near(placements.front().bounds.y, 0.0f)) {
+                return example::fail("dead ScrollComponent was not inert on later layout");
+            }
+            destroyer.reset();
+        }
         return 0;
     }
 
