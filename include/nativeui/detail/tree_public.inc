@@ -396,6 +396,18 @@
 
             return finish(EventResult::Ignored);
         } catch (...) {
+            // Pointer button routes can execute arbitrary cancellation, hover or
+            // focus callbacks after publishing interaction state but before the
+            // target input handler runs. If any such callback throws, terminate
+            // only framework-owned capture/interaction bookkeeping here; do not
+            // synthesize another user callback while unwinding.
+            if (event.type == InputType::PointerDown ||
+                event.type == InputType::PointerUp ||
+                event.type == InputType::PointerCancel) {
+                clear_pointer_capture();
+                pointer_interaction_active_ = false;
+            }
+
             // Restore only internal bookkeeping while unwinding. Pending
             // structural/availability work remains queued for the next safe
             // checkpoint; do not call component/user code from this recovery.
