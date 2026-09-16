@@ -9,6 +9,30 @@
 #include <utility>
 #include <vector>
 
+namespace ui::detail {
+
+struct DynamicReconcileFaultAccess {
+    static Node* first_dynamic(Tree& tree, Node& node) noexcept {
+        if (tree.dynamic_source(node)) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = first_dynamic(tree, *child)) return found;
+        }
+        return nullptr;
+    }
+
+    static bool reconcile_first(Tree& tree) {
+        if (!tree.root_) return false;
+        auto* owner = first_dynamic(tree, *tree.root_);
+        return owner ? tree.reconcile_dynamic_node(*owner) : false;
+    }
+
+    [[nodiscard]] static std::size_t focusable_count(const Tree& tree) noexcept {
+        return tree.focusables_.size();
+    }
+};
+
+} // namespace ui::detail
+
 namespace {
 
 struct HitState {
@@ -94,12 +118,144 @@ private:
     std::shared_ptr<ThrowingPaintState> state_;
 };
 
+struct FocusRollbackState {
+    bool focusable{};
+    bool throw_mount{};
+    bool throw_activate{};
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+    int destroyed{};
+};
+
+class FocusRollbackComponent final : public ui::Component {
+public:
+    FocusRollbackComponent(std::string name, std::shared_ptr<FocusRollbackState> state)
+        : name_(std::move(name)), state_(std::move(state)) {}
+
+    ~FocusRollbackComponent() override { ++state_->destroyed; }
+
+    [[nodiscard]] bool focusable() const noexcept override { return state_->focusable; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {40.0f, 20.0f};
+    }
+
+    void mount(ui::MountContext&) override {
+        ++state_->mounts;
+        if (state_->throw_mount) {
+            state_->throw_mount = false;
+            throw std::runtime_error(name_ + ".mount");
+        }
+    }
+
+    void activate(ui::LifecycleContext&) override {
+        ++state_->activates;
+        if (state_->throw_activate) {
+            state_->throw_activate = false;
+            throw std::runtime_error(name_ + ".activate");
+        }
+    }
+
+    void deactivate(ui::LifecycleContext&) override { ++state_->deactivates; }
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::string name_;
+    std::shared_ptr<FocusRollbackState> state_;
+};
+
+class FocusRollbackProbe {
+public:
+    FocusRollbackProbe(std::string name, std::shared_ptr<FocusRollbackState> state)
+        : name_(std::move(name)), state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto name = std::move(name_);
+        auto state = std::move(state_);
+        return ui::Spec{
+            [name = std::move(name), state = std::move(state)]() mutable {
+                return std::make_unique<FocusRollbackComponent>(
+                    std::move(name), std::move(state));
+            },
+            {}};
+    }
+
+private:
+    std::string name_;
+    std::shared_ptr<FocusRollbackState> state_;
+};
+
 bool red(ui::Rgba8 pixel) {
     return pixel.r > 220 && pixel.g < 40 && pixel.b < 40 && pixel.a > 220;
 }
 
 bool green(ui::Rgba8 pixel) {
     return pixel.g > 220 && pixel.r < 40 && pixel.b < 40 && pixel.a > 220;
+}
+
+void dynamic_focus_registry_rollback_contract(bool activation_failure) {
+    using Access = ui::detail::DynamicReconcileFaultAccess;
+
+    ui::State<bool> visible{false};
+    auto retained = std::make_shared<FocusRollbackState>();
+    auto inserted_focus = std::make_shared<FocusRollbackState>();
+    auto later = std::make_shared<FocusRollbackState>();
+    retained->focusable = true;
+    inserted_focus->focusable = true;
+    if (activation_failure) {
+        later->throw_activate = true;
+    } else {
+        later->throw_mount = true;
+    }
+
+    test::MockPlatform platform;
+    ui::Tree tree{ui::compile(
+        ui::Column{
+            FocusRollbackProbe{"retained", retained},
+            ui::If{
+                visible,
+                ui::Column{
+                    FocusRollbackProbe{"inserted-focus", inserted_focus},
+                    FocusRollbackProbe{"later", later}}}}
+            .spec())};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.activate_focus(platform);
+    NUI_CHECK(Access::focusable_count(tree) == 1);
+
+    visible.set(true);
+    std::string propagated;
+    try {
+        (void)Access::reconcile_first(tree);
+    } catch (const std::runtime_error& error) {
+        propagated = error.what();
+    }
+    NUI_CHECK(propagated == (activation_failure ? "later.activate" : "later.mount"));
+    NUI_CHECK(inserted_focus->destroyed == 1);
+    NUI_CHECK(later->destroyed == 1);
+    NUI_CHECK(Access::focusable_count(tree) == 1);
+
+    // Keep the next operation from retrying the failed insertion first. The
+    // retained-only desired state now matches the rollback checkpoint, so focus
+    // traversal/structure sync immediately exercises the surviving registry.
+    visible.set(false);
+    tree.focus_next(platform);
+    NUI_CHECK(Access::focusable_count(tree) == 1);
+
+    // A normal retry must mount/activate a fresh inserted subtree exactly once
+    // and republish its focusable node after the failed attempt was destroyed.
+    visible.set(true);
+    NUI_CHECK(Access::reconcile_first(tree));
+    tree.layout({160.0f, 80.0f});
+    NUI_CHECK(Access::focusable_count(tree) == 2);
+    NUI_CHECK(inserted_focus->mounts == 2);
+    NUI_CHECK(inserted_focus->activates == (activation_failure ? 2 : 1));
+    tree.focus_next(platform);
+
+    tree.deactivate_focus(platform);
+    tree.unmount();
 }
 
 void suite() {
@@ -204,6 +360,9 @@ void suite() {
         NUI_CHECK(canvas->getSaveCount() == baseline_save_count);
         NUI_CHECK(!tree.paint_dirty());
     }
+
+    dynamic_focus_registry_rollback_contract(false);
+    dynamic_focus_registry_rollback_contract(true);
 }
 
 } // namespace
