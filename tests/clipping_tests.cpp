@@ -3,6 +3,7 @@
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSurface.h"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -122,6 +123,8 @@ struct FocusRollbackState {
     bool focusable{};
     bool throw_mount{};
     bool throw_activate{};
+    std::function<void()> on_deactivate;
+    std::function<void()> on_unmount;
     int mounts{};
     int activates{};
     int deactivates{};
@@ -157,8 +160,16 @@ public:
         }
     }
 
-    void deactivate(ui::LifecycleContext&) override { ++state_->deactivates; }
-    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void deactivate(ui::LifecycleContext&) override {
+        ++state_->deactivates;
+        if (state_->on_deactivate) state_->on_deactivate();
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++state_->unmounts;
+        if (state_->on_unmount) state_->on_unmount();
+    }
+
     void paint(ui::PaintContext&) const override {}
 
 private:
@@ -225,6 +236,19 @@ void dynamic_focus_registry_rollback_contract(bool activation_failure) {
     tree.activate_focus(platform);
     NUI_CHECK(Access::focusable_count(tree) == 1);
 
+    std::size_t rollback_observations = 0;
+    bool rollback_saw_only_retained_focus = true;
+    auto observe_rollback_focus = [&] {
+        ++rollback_observations;
+        rollback_saw_only_retained_focus =
+            rollback_saw_only_retained_focus && Access::focusable_count(tree) == 1;
+    };
+    if (activation_failure) {
+        inserted_focus->on_deactivate = observe_rollback_focus;
+    } else {
+        inserted_focus->on_unmount = observe_rollback_focus;
+    }
+
     visible.set(true);
     std::string propagated;
     try {
@@ -233,9 +257,13 @@ void dynamic_focus_registry_rollback_contract(bool activation_failure) {
         propagated = error.what();
     }
     NUI_CHECK(propagated == (activation_failure ? "later.activate" : "later.mount"));
+    NUI_CHECK(rollback_observations == 1);
+    NUI_CHECK(rollback_saw_only_retained_focus);
     NUI_CHECK(inserted_focus->destroyed == 1);
     NUI_CHECK(later->destroyed == 1);
     NUI_CHECK(Access::focusable_count(tree) == 1);
+    inserted_focus->on_deactivate = {};
+    inserted_focus->on_unmount = {};
 
     // Keep the next operation from retrying the failed insertion first. The
     // retained-only desired state now matches the rollback checkpoint, so focus
