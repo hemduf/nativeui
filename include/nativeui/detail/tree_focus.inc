@@ -53,6 +53,7 @@
     std::size_t focus_semantic_running_{};
     NodeId pending_focus_target_{kInvalidNodeId};
     bool pending_focus_request_{};
+    bool fail_next_focus_invalidation_publication_for_testing_{};
 
     [[nodiscard]] Node* focus_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
@@ -61,6 +62,30 @@
     void queue_pending_focus(NodeId target) noexcept {
         pending_focus_target_ = target;
         pending_focus_request_ = true;
+    }
+
+    void publish_focus_transition_invalidation(
+        std::size_t index,
+        Node& node,
+        FocusTransitionPhase next_phase,
+        NodeId next_cursor) {
+        // DirtyRegion publication is the transaction boundary. Keep the
+        // transition at the invalidation phase until the dirty rectangle exists;
+        // an allocation failure before publication is therefore retryable.
+        if (fail_next_focus_invalidation_publication_for_testing_) {
+            fail_next_focus_invalidation_publication_for_testing_ = false;
+            throw std::bad_alloc{};
+        }
+        const auto exposed = paint_dirty_.add(
+            node.bounds.empty() ? viewport_rect() : node.bounds,
+            viewport_rect());
+
+        // Publication succeeded. Commit recovery progress before invoking the
+        // external invalidation callback so a callback throw cannot replay work
+        // that is already durably represented by paint_dirty_.
+        focus_transition_stack_[index].phase = next_phase;
+        focus_transition_stack_[index].cursor = next_cursor;
+        if (exposed && invalidation_callback_) invalidation_callback_(*exposed);
     }
 
     void execute_focus_transition(std::size_t index, PlatformServices& platform) {
@@ -90,8 +115,15 @@
                 }
                 case FocusTransitionPhase::InvalidateOld: {
                     const auto id = focus_transition_stack_[index].previous;
-                    focus_transition_stack_[index].phase = FocusTransitionPhase::Commit;
-                    if (auto* old = focus_transition_node(id)) invalidate_node_paint(*old);
+                    if (auto* old = focus_transition_node(id)) {
+                        publish_focus_transition_invalidation(
+                            index,
+                            *old,
+                            FocusTransitionPhase::Commit,
+                            focus_transition_stack_[index].cursor);
+                    } else {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::Commit;
+                    }
                     break;
                 }
                 case FocusTransitionPhase::Commit: {
@@ -138,10 +170,17 @@
                 }
                 case FocusTransitionPhase::InvalidateNew: {
                     const auto id = focus_transition_stack_[index].next;
-                    focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
-                    focus_transition_stack_[index].cursor =
-                        focus_transition_stack_[index].previous;
-                    if (auto* next = focus_transition_node(id)) invalidate_node_paint(*next);
+                    if (auto* next = focus_transition_node(id)) {
+                        publish_focus_transition_invalidation(
+                            index,
+                            *next,
+                            FocusTransitionPhase::FocusWithinLeave,
+                            focus_transition_stack_[index].previous);
+                    } else {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
+                        focus_transition_stack_[index].cursor =
+                            focus_transition_stack_[index].previous;
+                    }
                     break;
                 }
                 case FocusTransitionPhase::FocusWithinLeave: {
@@ -458,28 +497,21 @@
                 old->component->focus_changed(false, context);
             }
 
-            // Preserve the established successful-path ordering. Invalidation may
-            // itself throw; retaining the marker until the logical focus commit lets
-            // a later safe checkpoint finish framework work without retrying the
-            // already-started focus callback.
-            invalidate_node_paint(*old);
-
-            // clear_focus has already completed the application blur and old-node
-            // invalidation. Prepare the remaining semantic transition before
-            // publishing inactive focus so allocation failure cannot strand a
-            // committed focus-within suffix. The shared transition cursor advances
-            // before every observer callback, making a throwing observer at-most-once
-            // while preserving the unstarted ancestor suffix for the next safe
-            // checkpoint.
+            // Prepare the complete durable suffix before attempting old-node
+            // invalidation. If vector growth fails, focus_blur_started_ remains
+            // authoritative and the already-started blur is not replayed. The
+            // transition itself owns invalidation publication and all later work.
             FocusTransitionState transition{};
             transition.previous = old->id;
             transition.next = kInvalidNodeId;
             transition.cursor = transition.previous;
-            transition.phase = FocusTransitionPhase::Commit;
+            transition.phase = FocusTransitionPhase::InvalidateOld;
             focus_transition_stack_.push_back(transition);
             const auto index = focus_transition_stack_.size() - 1;
 
-            // From this point the durable transition owns recovery.
+            // From this point the durable transition owns recovery, including
+            // pre-publication allocation failure and post-publication callback
+            // failure at the paint boundary.
             focus_blur_started_ = kInvalidNodeId;
             focus_blur_started_from_availability_ = false;
             execute_focus_transition(index, platform);
