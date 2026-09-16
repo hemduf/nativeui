@@ -194,7 +194,10 @@
             }
         };
 
-        capture_error([&] { flush_dynamic_mutations(); });
+        // Terminal deactivation operates only on the last committed retained
+        // tree. Pending dynamic work stays durable for the next ordinary
+        // structural checkpoint instead of constructing nodes solely to tear
+        // them down in the same lifecycle transition.
         if (!active_) {
             if (first_error) std::rethrow_exception(first_error);
             return;
