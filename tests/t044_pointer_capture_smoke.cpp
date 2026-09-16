@@ -182,16 +182,14 @@ public:
 #endif
     }
 
+#if defined(__APPLE__)
+    bool position_pointer_inside(ui::StandaloneWindow& window, int offset) {
+        return post_mouse(window, kCGEventMouseMoved, false, false, offset);
+    }
+#endif
+
     bool pointer_down(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
-        if (!post_mouse(window, kCGEventMouseMoved, false, false)) return false;
-        // Deliver the positioning event before the press. On hosted macOS a
-        // freshly ordered third window can otherwise receive the key transition
-        // after the synthetic down has already been routed to the previous
-        // front window, making the destruction fixture test the runner timing
-        // instead of capture semantics.
-        [[NSRunLoop currentRunLoop]
-            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
         return post_mouse(window, kCGEventLeftMouseDown, false, true);
 #elif defined(_WIN32)
         return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTDOWN);
@@ -319,7 +317,7 @@ private:
         if (!view || !native_window || !screen) return false;
 
         const NSRect bounds = [view bounds];
-        NSPoint local = NSMakePoint(24.0, 24.0);
+        NSPoint local = NSMakePoint(24.0 + (outside ? 0.0 : static_cast<double>(extra)), 24.0);
         if (outside) {
             local = NSMakePoint(NSMaxX(bounds) + 48.0 + extra,
                                 NSMaxY(bounds) + 48.0 + extra);
@@ -431,6 +429,41 @@ private:
 #endif
 };
 
+bool deliver_pointer_down(ui::Application& application,
+                          NativePointerDriver& driver,
+                          ui::StandaloneWindow& window,
+                          const std::shared_ptr<CaptureState>& state,
+                          std::string_view stage) {
+#if defined(__APPLE__)
+    const int move_before = state->move;
+    constexpr int kMaxPositionAttempts = 20;
+    for (int attempt = 0; attempt < kMaxPositionAttempts && state->move == move_before; ++attempt) {
+        // A fixed delay after makeKeyAndOrderFront() is insufficient on a loaded
+        // hosted macOS runner: Quartz can still target the previously frontmost
+        // window. Require observable delivery to this exact retained view before
+        // pressing, alternating the point by one pixel so AppKit cannot coalesce
+        // repeated positioning events at an unchanged location.
+        if (!step(driver.position_pointer_inside(window, attempt & 1), stage,
+                  "position pointer inside focused view") ||
+            !pump(application, 2)) {
+            return false;
+        }
+    }
+    if (!expect(state->move > move_before,
+                stage,
+                "pointer positioning was not delivered to the focused view")) {
+        return false;
+    }
+#else
+    (void)state;
+#endif
+
+    if (!step(driver.pointer_down(window), stage, "pointer-down") || !pump(application)) {
+        return false;
+    }
+    return true;
+}
+
 bool run_outside_sequence(ui::Application& application,
                           NativePointerDriver& driver,
                           ui::StandaloneWindow& window,
@@ -443,7 +476,7 @@ bool run_outside_sequence(ui::Application& application,
     const int cancel_before = state->cancel;
 
     if (!step(driver.focus(window), stage, "focus") || !pump(application)) return false;
-    if (!step(driver.pointer_down(window), stage, "pointer-down") || !pump(application)) return false;
+    if (!deliver_pointer_down(application, driver, window, state, stage)) return false;
     if (!expect(state->down == down_before + 1, stage, "pointer down was not delivered")) return false;
     if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) {
         return false;
@@ -498,7 +531,7 @@ int main() {
     const int a_cancel_before = a_state->cancel;
     const int a_up_before = a_state->up;
     if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
-    if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A") || !pump(application)) return 1;
+    if (!deliver_pointer_down(application, driver, *a, a_state, "focus-loss")) return 1;
     if (!expect(driver.capture_owned_by(*a), "focus-loss", "A did not own native capture")) return 1;
     if (!step(driver.focus(*b), "focus-loss", "focus B") || !pump(application)) return 1;
     if (!expect(a_state->cancel == a_cancel_before + 1,
@@ -524,7 +557,7 @@ int main() {
         ui::WindowDesc{.title = "NativeUI T044 C", .size = {220.0f, 150.0f}, .resizable = true});
     if (!c->valid()) return fail("create-c", c->last_error());
     if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
-    if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C") || !pump(application)) return 1;
+    if (!deliver_pointer_down(application, driver, *c, c_state, "destroy-capture")) return 1;
     if (!expect(c_state->down == 1, "destroy-capture", "C did not receive pointer down")) return 1;
     c.reset();
     c_ui.reset();
