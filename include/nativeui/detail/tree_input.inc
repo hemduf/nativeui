@@ -60,9 +60,44 @@
     std::vector<PointerHoverTransitionState> pointer_hover_transition_stack_;
     std::size_t pointer_hover_transition_running_{};
     std::unique_ptr<PointerHoverTransitionState> pending_pointer_hover_transition_;
+    bool fail_next_input_context_preparation_for_testing_{};
 
     [[nodiscard]] Node* pointer_hover_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
+    }
+
+    [[nodiscard]] InputContext prepare_input_context(
+        Node& node, PlatformServices& platform) {
+        if (fail_next_input_context_preparation_for_testing_) {
+            fail_next_input_context_preparation_for_testing_ = false;
+            throw std::bad_alloc{};
+        }
+        return InputContext{
+            node.bounds,
+            platform,
+            unsafe_paint_invalidator(node),
+            unsafe_layout_invalidator(node),
+            [this, &node] { set_pointer_capture(node); },
+            [this, &node] { release_pointer_capture(node); }};
+    }
+
+    [[nodiscard]] EventResult send_prepared_to(
+        Node& node, const InputEvent& event, InputContext& context) {
+        try {
+            return node.component->input(event, context);
+        } catch (...) {
+            if (event.type == InputType::PointerDown ||
+                event.type == InputType::PointerUp ||
+                event.type == InputType::PointerCancel) {
+                // Component input may acquire or retain capture before throwing.
+                // Framework-only cleanup is noexcept and performs no component
+                // callback, so later pointer input starts from a coherent idle
+                // interaction instead of inheriting a failed native capture.
+                clear_pointer_capture();
+                pointer_interaction_active_ = false;
+            }
+            throw;
+        }
     }
 
     void queue_pending_pointer_hover_transition(
@@ -170,12 +205,15 @@
                         const auto following = current->parent
                             ? current->parent->id
                             : kInvalidNodeId;
-                        // InputEvent owns text/drop payloads; copy it before
-                        // advancing the recovery cursor. If preparation throws,
-                        // no application callback has started and retry is valid.
+                        // Prepare every fallible input-boundary object before
+                        // committing cursor progress. A preparation failure means
+                        // application input never began and this exact node stays
+                        // retryable; after cursor advance only Component::input is
+                        // allowed to throw, so begun callbacks remain at-most-once.
                         const auto leave = pointer_hover_transition_stack_[index].leave;
+                        auto context = prepare_input_context(*current, platform);
                         pointer_hover_transition_stack_[index].cursor = following;
-                        (void)send_to(*current, leave, platform);
+                        (void)send_prepared_to(*current, leave, context);
                         cursor = following;
                     }
                     if (pointer_hover_transition_stack_[index].cursor == kInvalidNodeId) {
@@ -355,28 +393,8 @@
 
     [[nodiscard]] EventResult send_to(
         Node& node, const InputEvent& event, PlatformServices& platform) {
-        InputContext context{
-            node.bounds,
-            platform,
-            unsafe_paint_invalidator(node),
-            unsafe_layout_invalidator(node),
-            [this, &node] { set_pointer_capture(node); },
-            [this, &node] { release_pointer_capture(node); }};
-        try {
-            return node.component->input(event, context);
-        } catch (...) {
-            if (event.type == InputType::PointerDown ||
-                event.type == InputType::PointerUp ||
-                event.type == InputType::PointerCancel) {
-                // Component input may acquire or retain capture before throwing.
-                // Framework-only cleanup is noexcept and performs no component
-                // callback, so later pointer input starts from a coherent idle
-                // interaction instead of inheriting a failed native capture.
-                clear_pointer_capture();
-                pointer_interaction_active_ = false;
-            }
-            throw;
-        }
+        auto context = prepare_input_context(node, platform);
+        return send_prepared_to(node, event, context);
     }
 
     std::unique_ptr<Node> root_;

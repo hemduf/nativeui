@@ -53,6 +53,7 @@
     std::size_t focus_semantic_running_{};
     NodeId pending_focus_target_{kInvalidNodeId};
     bool pending_focus_request_{};
+    bool fail_next_focus_invalidation_publication_for_testing_{};
 
     [[nodiscard]] Node* focus_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
@@ -61,6 +62,19 @@
     void queue_pending_focus(NodeId target) noexcept {
         pending_focus_target_ = target;
         pending_focus_request_ = true;
+    }
+
+    [[nodiscard]] std::optional<Rect> publish_focus_invalidation(Node& node) {
+        if (fail_next_focus_invalidation_publication_for_testing_) {
+            fail_next_focus_invalidation_publication_for_testing_ = false;
+            throw std::bad_alloc{};
+        }
+        return paint_dirty_.add(
+            node.bounds.empty() ? viewport_rect() : node.bounds, viewport_rect());
+    }
+
+    void notify_focus_invalidation(const std::optional<Rect>& exposed) {
+        if (exposed && invalidation_callback_) invalidation_callback_(*exposed);
     }
 
     void execute_focus_transition(std::size_t index, PlatformServices& platform) {
@@ -90,8 +104,16 @@
                 }
                 case FocusTransitionPhase::InvalidateOld: {
                     const auto id = focus_transition_stack_[index].previous;
+                    std::optional<Rect> exposed;
+                    if (auto* old = focus_transition_node(id)) {
+                        // Dirty-region publication is the fallible prepare/commit
+                        // boundary. Do not advance the durable phase until the
+                        // rectangle is actually retained. Once retained, however,
+                        // the exposure callback is begun work and is never replayed.
+                        exposed = publish_focus_invalidation(*old);
+                    }
                     focus_transition_stack_[index].phase = FocusTransitionPhase::Commit;
-                    if (auto* old = focus_transition_node(id)) invalidate_node_paint(*old);
+                    notify_focus_invalidation(exposed);
                     break;
                 }
                 case FocusTransitionPhase::Commit: {
@@ -138,10 +160,14 @@
                 }
                 case FocusTransitionPhase::InvalidateNew: {
                     const auto id = focus_transition_stack_[index].next;
+                    std::optional<Rect> exposed;
+                    if (auto* next = focus_transition_node(id)) {
+                        exposed = publish_focus_invalidation(*next);
+                    }
                     focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                     focus_transition_stack_[index].cursor =
                         focus_transition_stack_[index].previous;
-                    if (auto* next = focus_transition_node(id)) invalidate_node_paint(*next);
+                    notify_focus_invalidation(exposed);
                     break;
                 }
                 case FocusTransitionPhase::FocusWithinLeave: {
@@ -458,24 +484,15 @@
                 old->component->focus_changed(false, context);
             }
 
-            // Preserve the established successful-path ordering. Invalidation may
-            // itself throw; retaining the marker until the logical focus commit lets
-            // a later safe checkpoint finish framework work without retrying the
-            // already-started focus callback.
-            invalidate_node_paint(*old);
-
-            // clear_focus has already completed the application blur and old-node
-            // invalidation. Prepare the remaining semantic transition before
-            // publishing inactive focus so allocation failure cannot strand a
-            // committed focus-within suffix. The shared transition cursor advances
-            // before every observer callback, making a throwing observer at-most-once
-            // while preserving the unstarted ancestor suffix for the next safe
-            // checkpoint.
+            // The blur has begun, but no invalidation publication has committed yet.
+            // Prepare a durable suffix at InvalidateOld so allocation failure here
+            // leaves only the caller-independent begun-blur marker, while publication
+            // failure later leaves the same invalidation phase retryable.
             FocusTransitionState transition{};
             transition.previous = old->id;
             transition.next = kInvalidNodeId;
             transition.cursor = transition.previous;
-            transition.phase = FocusTransitionPhase::Commit;
+            transition.phase = FocusTransitionPhase::InvalidateOld;
             focus_transition_stack_.push_back(transition);
             const auto index = focus_transition_stack_.size() - 1;
 
