@@ -265,6 +265,9 @@ public:
     void set_command_handler(std::function<EventResult(Command)> handler) {
         tree_.set_global_command_handler(std::move(handler));
     }
+    void set_key_down_handler(std::function<EventResult(const InputEvent&)> handler) {
+        tree_.set_global_key_down_handler(std::move(handler));
+    }
     [[nodiscard]] bool dirty() const noexcept { return tree_.dirty(); }
     [[nodiscard]] bool layout_dirty() const noexcept { return tree_.layout_dirty(); }
     [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
