@@ -129,6 +129,7 @@ struct FocusRollbackState {
     int activates{};
     int deactivates{};
     int unmounts{};
+    int focus_ins{};
     int destroyed{};
 };
 
@@ -168,6 +169,10 @@ public:
     void unmount(ui::LifecycleContext&) override {
         ++state_->unmounts;
         if (state_->on_unmount) state_->on_unmount();
+    }
+
+    void focus_changed(bool focused, ui::FocusContext&) override {
+        if (focused) ++state_->focus_ins;
     }
 
     void paint(ui::PaintContext&) const override {}
@@ -286,6 +291,81 @@ void dynamic_focus_registry_rollback_contract(bool activation_failure) {
     tree.unmount();
 }
 
+void whole_tree_mount_rollback_reentrancy_contract() {
+    using Access = ui::detail::DynamicReconcileFaultAccess;
+
+    auto early = std::make_shared<FocusRollbackState>();
+    auto later = std::make_shared<FocusRollbackState>();
+    early->focusable = true;
+    later->throw_mount = true;
+
+    test::MockPlatform platform;
+    ui::Tree tree{ui::compile(
+        ui::Column{
+            FocusRollbackProbe{"early-root-focus", early},
+            FocusRollbackProbe{"later-root-failure", later}}
+            .spec())};
+
+    std::size_t rollback_observations = 0;
+    bool rollback_focus_hidden = true;
+    int nested_unmount_rejected = 0;
+    int nested_activation_rejected = 0;
+    early->on_unmount = [&] {
+        ++rollback_observations;
+        rollback_focus_hidden = rollback_focus_hidden &&
+            Access::focusable_count(tree) == 0 && early->focus_ins == 0;
+
+        tree.focus_next(platform);
+        rollback_focus_hidden = rollback_focus_hidden &&
+            Access::focusable_count(tree) == 0 && early->focus_ins == 0;
+
+        try {
+            tree.unmount();
+        } catch (const std::logic_error&) {
+            ++nested_unmount_rejected;
+        }
+        try {
+            tree.activate_focus(platform);
+        } catch (const std::logic_error&) {
+            ++nested_activation_rejected;
+        }
+    };
+
+    std::string propagated;
+    try {
+        tree.mount();
+    } catch (const std::runtime_error& error) {
+        propagated = error.what();
+    }
+
+    NUI_CHECK(propagated == "later-root-failure.mount");
+    NUI_CHECK(rollback_observations == 1);
+    NUI_CHECK(rollback_focus_hidden);
+    NUI_CHECK(nested_unmount_rejected == 1);
+    NUI_CHECK(nested_activation_rejected == 1);
+    NUI_CHECK(Access::focusable_count(tree) == 0);
+    NUI_CHECK(early->mounts == 1 && early->unmounts == 1);
+    NUI_CHECK(later->mounts == 1 && later->unmounts == 1);
+    NUI_CHECK(early->activates == 0 && later->activates == 0);
+    NUI_CHECK(early->focus_ins == 0);
+
+    // The throw seam is one-shot. A normal retry must publish the root focus
+    // registry exactly once and execute lifecycle hooks once for this new
+    // transition, proving no rollback state leaked into the next operation.
+    early->on_unmount = {};
+    tree.mount();
+    NUI_CHECK(Access::focusable_count(tree) == 1);
+    tree.layout({120.0f, 60.0f});
+    tree.activate_focus(platform);
+    NUI_CHECK(early->focus_ins == 1);
+    NUI_CHECK(early->mounts == 2 && later->mounts == 2);
+    NUI_CHECK(early->activates == 1 && later->activates == 1);
+
+    tree.deactivate_focus(platform);
+    tree.unmount();
+    NUI_CHECK(early->unmounts == 2 && later->unmounts == 2);
+}
+
 void suite() {
     // A clip viewport prevents an overflowing child from painting outside it.
     {
@@ -391,6 +471,7 @@ void suite() {
 
     dynamic_focus_registry_rollback_contract(false);
     dynamic_focus_registry_rollback_contract(true);
+    whole_tree_mount_rollback_reentrancy_contract();
 }
 
 } // namespace
