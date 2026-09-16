@@ -15,6 +15,18 @@ struct TreeTestAccess {
         tree.fail_next_dynamic_enqueue_for_testing_ = true;
     }
 
+    static void fail_next_focus_invalidation_publication(Tree& tree) noexcept {
+        tree.fail_next_focus_invalidation_publication_for_testing_ = true;
+    }
+
+    static void fail_next_hover_context_preparation(Tree& tree) noexcept {
+        tree.fail_next_hover_context_preparation_for_testing_ = true;
+    }
+
+    static void clear_paint_dirty(Tree& tree) noexcept {
+        tree.paint_dirty_.clear();
+    }
+
     static void seed_pending_focus(Tree& tree) noexcept {
         tree.pending_focus_target_ = kInvalidNodeId;
         tree.pending_focus_request_ = true;
@@ -321,6 +333,52 @@ public:
 
 private:
     std::shared_ptr<ReentrantBlurState> state_;
+};
+
+struct HoverLeaveState {
+    int leave_calls{};
+    bool throw_on_leave{};
+};
+
+class HoverLeaveProbeComponent final : public ui::Component {
+public:
+    explicit HoverLeaveProbeComponent(std::shared_ptr<HoverLeaveState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type != ui::InputType::PointerLeave) return ui::EventResult::Ignored;
+        ++state_->leave_calls;
+        if (state_->throw_on_leave) throw std::runtime_error("hover leave failure");
+        return ui::EventResult::Ignored;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<HoverLeaveState> state_;
+};
+
+class HoverLeaveProbe {
+public:
+    explicit HoverLeaveProbe(std::shared_ptr<HoverLeaveState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<HoverLeaveProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<HoverLeaveState> state_;
 };
 
 struct DynamicItem {
@@ -787,6 +845,149 @@ void focus_capture_and_lifetime_contract() {
     NUI_CHECK(log->observed_changes == 0);
 }
 
+void focus_invalidation_publication_boundary_contract() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<bool> first{false};
+        ui::State<bool> second{false};
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{ui::Toggle{"First", first}, ui::Toggle{"Second", second}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+        ui::TreeTestAccess::clear_paint_dirty(tree);
+
+        int invalidations = 0;
+        tree.set_invalidation_callback([&](ui::Rect) { ++invalidations; });
+        ui::TreeTestAccess::fail_next_focus_invalidation_publication(tree);
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(invalidations == 0);
+
+        bool recovery_threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Space), platform);
+        } catch (...) {
+            recovery_threw = true;
+        }
+        NUI_CHECK(!recovery_threw);
+        NUI_CHECK(invalidations == 2);
+        NUI_CHECK(second.get());
+    }
+
+    {
+        ui::State<bool> first{false};
+        ui::State<bool> second{false};
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{ui::Toggle{"First", first}, ui::Toggle{"Second", second}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+        ui::TreeTestAccess::clear_paint_dirty(tree);
+
+        int invalidations = 0;
+        bool throw_once = true;
+        tree.set_invalidation_callback([&](ui::Rect) {
+            ++invalidations;
+            if (throw_once) {
+                throw_once = false;
+                throw std::runtime_error("invalidation callback failure");
+            }
+        });
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(invalidations == 1);
+
+        bool recovery_threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Space), platform);
+        } catch (...) {
+            recovery_threw = true;
+        }
+        NUI_CHECK(!recovery_threw);
+        NUI_CHECK(invalidations == 2);
+        NUI_CHECK(second.get());
+    }
+}
+
+void hover_context_preparation_boundary_contract() {
+    test::MockPlatform platform;
+
+    {
+        auto first = std::make_shared<HoverLeaveState>();
+        auto second = std::make_shared<HoverLeaveState>();
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{HoverLeaveProbe{first}, HoverLeaveProbe{second}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), platform);
+        ui::TreeTestAccess::fail_next_hover_context_preparation(tree);
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 10.0f), platform);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(first->leave_calls == 0);
+
+        bool recovery_threw = false;
+        try {
+            (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 10.0f), platform);
+        } catch (...) {
+            recovery_threw = true;
+        }
+        NUI_CHECK(!recovery_threw);
+        NUI_CHECK(first->leave_calls == 1);
+    }
+
+    {
+        auto first = std::make_shared<HoverLeaveState>();
+        auto second = std::make_shared<HoverLeaveState>();
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{HoverLeaveProbe{first}, HoverLeaveProbe{second}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 10.0f, 10.0f), platform);
+        first->throw_on_leave = true;
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 10.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(first->leave_calls == 1);
+
+        bool recovery_threw = false;
+        try {
+            (void)tree.dispatch(test::pointer(ui::InputType::PointerMove, 100.0f, 10.0f), platform);
+        } catch (...) {
+            recovery_threw = true;
+        }
+        NUI_CHECK(!recovery_threw);
+        NUI_CHECK(first->leave_calls == 1);
+    }
+}
+
 void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
     ui::State<bool> visible{true};
     ui::State<bool> fallback{false};
@@ -797,8 +998,7 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
         ui::Row{
             ui::If{visible, ReentrantBlurProbe{blur}},
             ui::Toggle{"Fallback", fallback}}
-            .gap(4.0f)
-            .padding(0.0f)};
+            .gap(4.0f)};
     tree.resize({220.0f, 80.0f});
     tree.activate(platform);
     NUI_CHECK(blur->focus_in == 1);
@@ -998,6 +1198,8 @@ void suite() {
     keyed_contract();
     coalesced_writes_contract();
     focus_capture_and_lifetime_contract();
+    focus_invalidation_publication_boundary_contract();
+    hover_context_preparation_boundary_contract();
     dynamic_focus_clear_preserves_newer_reentrant_request_contract();
     lifecycle_terminalizes_pending_semantic_work_contract();
     focus_scope_rehome_contract();
