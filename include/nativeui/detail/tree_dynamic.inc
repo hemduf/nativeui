@@ -547,6 +547,15 @@
         maybe_throw_dynamic_reconcile_fault(2);
         auto prepared_desired_keys = desired_keys;
 
+        // Provisional mount mutates the Tree-wide focus registry by appending
+        // focusable nodes before the dynamic lifecycle transaction is committed.
+        // The retained prefix is stable across this insertion attempt, so a size
+        // checkpoint plus the prior focus cursor is sufficient for allocation-free
+        // rollback across one or many inserted roots.
+        const auto retained_focusables_size = focusables_.size();
+        const bool retained_focus_active = focus_active_;
+        const auto retained_focused_index = focused_index_;
+
         auto retained = std::move(owner.children);
         for (std::size_t i = 0; i < child_indices.size(); ++i) {
             if (inserted_flags[i]) {
@@ -590,6 +599,17 @@
         }
 
         if (insertion_error) {
+            // Remove every provisional focusable before rollback callbacks or
+            // attempted-node destruction can expose a stale raw pointer. This
+            // only shrinks the existing vector and cannot allocate or invoke user
+            // code. Restore the retained focus cursor from the same checkpoint.
+            while (focusables_.size() > retained_focusables_size) {
+                focusables_.pop_back();
+            }
+            focus_active_ = retained_focus_active &&
+                retained_focused_index < focusables_.size();
+            focused_index_ = focus_active_ ? retained_focused_index : 0;
+
             for (std::size_t i = owner.children.size(); i-- > 0;) {
                 if (!inserted_flags[i] || !mount_started[i]) continue;
                 if (activation_started[i]) {
@@ -627,9 +647,6 @@
                 refreshed->keys.swap(prepared_desired_keys);
             }
 
-            // focusables_ still describes the retained-only checkpoint because
-            // final focus publication is deliberately deferred until lifecycle
-            // succeeds. Rollback therefore has no focus allocation/rebuild path.
             mark_dynamic_structure_dirty(owner);
             std::rethrow_exception(insertion_error);
         }
