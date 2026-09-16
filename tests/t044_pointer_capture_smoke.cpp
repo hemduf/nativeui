@@ -216,6 +216,15 @@ public:
 #endif
     }
 
+    [[nodiscard]] bool button_released() const noexcept {
+#if defined(__APPLE__)
+        return !CGEventSourceButtonState(
+            kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft);
+#else
+        return true;
+#endif
+    }
+
     bool pointer_down(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
         // Routing readiness is observed separately by prime_pointer_route().
@@ -484,6 +493,20 @@ bool await_native_pointer_route(ui::Application& application,
 #endif
 }
 
+bool await_native_button_released(ui::Application& application,
+                                  const NativePointerDriver& driver,
+                                  std::string_view stage) {
+#if defined(__APPLE__)
+    if (pump_until(application, [&] { return driver.button_released(); })) return true;
+    return expect(false, stage, "native left-button session state remained pressed");
+#else
+    (void)application;
+    (void)driver;
+    (void)stage;
+    return true;
+#endif
+}
+
 bool run_outside_sequence(ui::Application& application,
                           NativePointerDriver& driver,
                           ui::StandaloneWindow& window,
@@ -497,6 +520,7 @@ bool run_outside_sequence(ui::Application& application,
 
     if (!step(driver.focus(window), stage, "focus") || !pump(application)) return false;
     if (!await_native_pointer_route(application, driver, window, state, stage)) return false;
+    if (!await_native_button_released(application, driver, stage)) return false;
     if (!step(driver.pointer_down(window), stage, "pointer-down")) return false;
     if (!pump_until(application, [&] { return state->down >= down_before + 1; })) {
         return expect(false, stage, "pointer down was not delivered");
@@ -569,6 +593,7 @@ int main() {
     const int a_up_before = a_state->up;
     if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *a, a_state, "focus-loss")) return 1;
+    if (!await_native_button_released(application, driver, "focus-loss")) return 1;
     if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A")) return 1;
     if (!pump_until(application, [&] { return a_state->down >= a_down_before + 1; })) {
         return fail("focus-loss", "pointer down A was not delivered");
@@ -604,6 +629,7 @@ int main() {
     if (!c->valid()) return fail("create-c", c->last_error());
     if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *c, c_state, "destroy-capture")) return 1;
+    if (!await_native_button_released(application, driver, "destroy-capture")) return 1;
     if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C")) return 1;
     if (!pump_until(application, [&] { return c_state->down >= 1; })) {
         return fail("destroy-capture", "C did not receive pointer down");
