@@ -73,8 +73,8 @@ private:
 #undef paint_invalidator
 #undef availability_invalidator
 #include <nativeui/detail/tree_focus.inc>
-#include <nativeui/detail/tree_t125_availability.inc>
 #include <nativeui/detail/tree_input.inc>
+#include <nativeui/detail/tree_t125_availability.inc>
 #include <nativeui/detail/tree_t125_semantic.inc>
 #include <nativeui/detail/tree_focus_group.inc>
 #define register_dynamic_node unsafe_register_dynamic_node
