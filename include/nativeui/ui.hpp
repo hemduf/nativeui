@@ -76,9 +76,11 @@ public:
     void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
+        if (tree_.lifecycle_transition_active()) return {};
         return tree_.measure_overlay_content(constraints);
     }
     void resize(Size viewport) {
+        if (tree_.lifecycle_transition_active()) return;
         viewport_ = viewport;
         prepare_overlay_layout();
     }
@@ -314,6 +316,7 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (tree_.lifecycle_transition_active()) return;
         if (!overlay_state_->entries.empty()) {
             prepare_overlay_layout();
             enforce_new_modal_capture_barrier(platform);
@@ -712,6 +715,7 @@ private:
     }
 
     void prepare_overlay_layout() {
+        if (tree_.lifecycle_transition_active()) return;
         // First pass makes root/anchor geometry authoritative for this viewport
         // and flushes pending T058 structural mutations. The overlay-specific
         // layout path deliberately skips a redundant recursive measurement of
@@ -794,6 +798,7 @@ inline void set_inspector_selected_node(UI& ui, NodeId id) {
 }
 
 inline InspectorSnapshot inspector_snapshot(UI& ui) {
+    if (ui.tree_.lifecycle_transition_active()) return {};
     return ui.tree_.inspector_snapshot();
 }
 

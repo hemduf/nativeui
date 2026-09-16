@@ -145,6 +145,195 @@ private:
     std::shared_ptr<LayoutFaultState> state_;
 };
 
+struct LifecycleRollbackReentryState {
+    bool throw_activate{};
+    int measures{};
+    int paints{};
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+    int destroyed{};
+    int rollback_callbacks{};
+    bool saw_nonempty_reentrant_measure{};
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+    std::size_t inspector_nodes_during_rollback{};
+#endif
+    std::function<void()> during_rollback;
+};
+
+class LifecycleRollbackReentryComponent final : public ui::Component {
+public:
+    explicit LifecycleRollbackReentryComponent(
+        std::shared_ptr<LifecycleRollbackReentryState> state)
+        : state_(std::move(state)) {}
+
+    ~LifecycleRollbackReentryComponent() override { ++state_->destroyed; }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        ++state_->measures;
+        return {80.0f, 30.0f};
+    }
+
+    void mount(ui::MountContext&) override { ++state_->mounts; }
+
+    void activate(ui::LifecycleContext&) override {
+        ++state_->activates;
+        if (state_->throw_activate) {
+            throw std::runtime_error("t130 rollback activate fault");
+        }
+    }
+
+    void deactivate(ui::LifecycleContext&) override {
+        ++state_->deactivates;
+        if (state_->throw_activate && state_->during_rollback) {
+            ++state_->rollback_callbacks;
+            state_->during_rollback();
+        }
+    }
+
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+
+    void paint(ui::PaintContext&) const override { ++state_->paints; }
+
+private:
+    std::shared_ptr<LifecycleRollbackReentryState> state_;
+};
+
+class LifecycleRollbackReentryProbe {
+public:
+    explicit LifecycleRollbackReentryProbe(
+        std::shared_ptr<LifecycleRollbackReentryState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = state_;
+        return ui::Spec{
+            [state] { return std::make_unique<LifecycleRollbackReentryComponent>(state); },
+            {}};
+    }
+
+private:
+    std::shared_ptr<LifecycleRollbackReentryState> state_;
+};
+
+void lifecycle_rollback_public_entrypoint_contract() {
+    // Direct Tree geometry entry points must not traverse provisional dynamic
+    // children while lifecycle rollback journals still hold raw Node* entries.
+    {
+        ui::State<bool> visible{false};
+        auto state = std::make_shared<LifecycleRollbackReentryState>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(
+            ui::If{visible, LifecycleRollbackReentryProbe{state}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        state->during_rollback = [&] {
+            const auto metrics = tree.measure(ui::Constraints::unbounded());
+            state->saw_nonempty_reentrant_measure =
+                metrics.preferred.w != 0.0f || metrics.preferred.h != 0.0f;
+            tree.layout({320.0f, 120.0f});
+        };
+        state->throw_activate = true;
+        visible.set(true);
+
+        bool threw = false;
+        try {
+            tree.layout({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "t130 rollback activate fault";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state->rollback_callbacks == 1);
+        NUI_CHECK(!state->saw_nonempty_reentrant_measure);
+        NUI_CHECK(state->measures == 0);
+
+        state->throw_activate = false;
+        state->during_rollback = {};
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK(state->activates == 2);
+        NUI_CHECK(state->measures > 0);
+
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // UI overlay geometry/paint plus inspector diagnostics obey the same
+    // per-Tree transaction barrier. Work queued by the rollback callback must
+    // survive for the next ordinary retained checkpoint, while another UI is
+    // unaffected by the first UI's active lifecycle token.
+    {
+        ui::State<bool> visible{false};
+        ui::State<bool> queued_visible{false};
+        auto failing = std::make_shared<LifecycleRollbackReentryState>();
+        auto queued = std::make_shared<LifecycleRollbackReentryState>();
+        auto independent = std::make_shared<LifecycleRollbackReentryState>();
+        test::MockPlatform platform;
+        test::MockPlatform independent_platform;
+        SkCanvas canvas;
+
+        ui::UI tree{
+            ui::Column{
+                ui::If{visible, LifecycleRollbackReentryProbe{failing}},
+                ui::If{queued_visible, LifecycleRollbackReentryProbe{queued}}
+            }.gap(2.0f)};
+        ui::UI second{LifecycleRollbackReentryProbe{independent}};
+
+        tree.resize({160.0f, 80.0f});
+        tree.activate(platform);
+        second.resize({80.0f, 40.0f});
+        second.activate(independent_platform);
+        const int independent_measures_before = independent->measures;
+
+        failing->during_rollback = [&] {
+            queued_visible.set(true);
+            const auto metrics = tree.measure(ui::Constraints::unbounded());
+            failing->saw_nonempty_reentrant_measure =
+                metrics.preferred.w != 0.0f || metrics.preferred.h != 0.0f;
+            tree.resize({320.0f, 120.0f});
+            tree.paint(canvas, platform);
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+            failing->inspector_nodes_during_rollback =
+                ui::debug::inspector_snapshot(tree).nodes.size();
+#endif
+            (void)second.measure(ui::Constraints::unbounded());
+        };
+        failing->throw_activate = true;
+        visible.set(true);
+
+        bool threw = false;
+        try {
+            tree.resize({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "t130 rollback activate fault";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(failing->rollback_callbacks == 1);
+        NUI_CHECK(!failing->saw_nonempty_reentrant_measure);
+        NUI_CHECK(failing->measures == 0);
+        NUI_CHECK(failing->paints == 0);
+        NUI_CHECK(queued->mounts == 0);
+        NUI_CHECK(independent->measures > independent_measures_before);
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+        NUI_CHECK(failing->inspector_nodes_during_rollback == 0);
+#endif
+
+        failing->throw_activate = false;
+        failing->during_rollback = {};
+        tree.resize({160.0f, 80.0f});
+        NUI_CHECK(failing->activates == 2);
+        NUI_CHECK(queued->mounts == 1);
+        NUI_CHECK(queued->activates == 1);
+        NUI_CHECK(failing->measures > 0);
+
+        tree.deactivate(platform);
+        second.deactivate(independent_platform);
+    }
+}
+
 void layout_exception_transaction_contract() {
     auto state = std::make_shared<LayoutFaultState>();
     ui::UI tree{LayoutFaultFixture{state}};
@@ -324,6 +513,7 @@ void suite() {
         }
     }
 
+    lifecycle_rollback_public_entrypoint_contract();
     layout_exception_transaction_contract();
 }
 

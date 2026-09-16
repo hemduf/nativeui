@@ -2,9 +2,58 @@
 
 #include <nativeui/command.hpp>
 
+#include <array>
+#include <cstdint>
 #include <memory>
 
 namespace {
+
+static_assert(static_cast<int>(ui::Key::None) == 0);
+static_assert(static_cast<int>(ui::Key::Tab) == 1);
+static_assert(static_cast<int>(ui::Key::Left) == 2);
+static_assert(static_cast<int>(ui::Key::Right) == 3);
+static_assert(static_cast<int>(ui::Key::Up) == 4);
+static_assert(static_cast<int>(ui::Key::Down) == 5);
+static_assert(static_cast<int>(ui::Key::Home) == 6);
+static_assert(static_cast<int>(ui::Key::End) == 7);
+static_assert(static_cast<int>(ui::Key::Backspace) == 8);
+static_assert(static_cast<int>(ui::Key::Delete) == 9);
+static_assert(static_cast<int>(ui::Key::Space) == 10);
+static_assert(static_cast<int>(ui::Key::Enter) == 11);
+static_assert(static_cast<int>(ui::Key::Escape) == 12);
+static_assert(static_cast<int>(ui::Key::A) == 13);
+static_assert(static_cast<int>(ui::Key::C) == 14);
+static_assert(static_cast<int>(ui::Key::V) == 15);
+static_assert(static_cast<int>(ui::Key::X) == 16);
+static_assert(static_cast<int>(ui::Key::Y) == 17);
+static_assert(static_cast<int>(ui::Key::Z) == 18);
+static_assert(static_cast<int>(ui::Key::Quit) == 19);
+static_assert(static_cast<int>(ui::Key::B) == 20);
+static_assert(static_cast<int>(ui::Key::D) == 21);
+static_assert(static_cast<int>(ui::Key::E) == 22);
+static_assert(static_cast<int>(ui::Key::F) == 23);
+static_assert(static_cast<int>(ui::Key::G) == 24);
+static_assert(static_cast<int>(ui::Key::H) == 25);
+static_assert(static_cast<int>(ui::Key::I) == 26);
+static_assert(static_cast<int>(ui::Key::J) == 27);
+static_assert(static_cast<int>(ui::Key::K) == 28);
+static_assert(static_cast<int>(ui::Key::L) == 29);
+static_assert(static_cast<int>(ui::Key::M) == 30);
+static_assert(static_cast<int>(ui::Key::N) == 31);
+static_assert(static_cast<int>(ui::Key::O) == 32);
+static_assert(static_cast<int>(ui::Key::P) == 33);
+static_assert(static_cast<int>(ui::Key::Q) == 34);
+static_assert(static_cast<int>(ui::Key::R) == 35);
+static_assert(static_cast<int>(ui::Key::S) == 36);
+static_assert(static_cast<int>(ui::Key::T) == 37);
+static_assert(static_cast<int>(ui::Key::U) == 38);
+static_assert(static_cast<int>(ui::Key::W) == 39);
+
+constexpr std::array<ui::Key, 26> kLetterKeys{
+    ui::Key::A, ui::Key::B, ui::Key::C, ui::Key::D, ui::Key::E, ui::Key::F, ui::Key::G,
+    ui::Key::H, ui::Key::I, ui::Key::J, ui::Key::K, ui::Key::L, ui::Key::M, ui::Key::N,
+    ui::Key::O, ui::Key::P, ui::Key::Q, ui::Key::R, ui::Key::S, ui::Key::T, ui::Key::U,
+    ui::Key::V, ui::Key::W, ui::Key::X, ui::Key::Y, ui::Key::Z};
 
 struct CommandProbeState {
     int command_events{};
@@ -56,18 +105,61 @@ private:
 
 void suite() {
     {
+        for (std::size_t i = 0; i < kLetterKeys.size(); ++i) {
+            const auto lower = static_cast<std::uint32_t>('a') + static_cast<std::uint32_t>(i);
+            const auto upper = static_cast<std::uint32_t>('A') + static_cast<std::uint32_t>(i);
+            NUI_CHECK(ui::detail::translate_ascii_key(lower, false) == kLetterKeys[i]);
+            NUI_CHECK(ui::detail::translate_ascii_key(upper, false) == kLetterKeys[i]);
+        }
+
+        NUI_CHECK(ui::detail::translate_ascii_key('P', true) == ui::Key::P);
+        NUI_CHECK(ui::detail::translate_ascii_key('p', true) == ui::Key::P);
+        NUI_CHECK(ui::detail::translate_ascii_key('Q', false) == ui::Key::Q);
+        NUI_CHECK(ui::detail::translate_ascii_key('q', false) == ui::Key::Q);
+        NUI_CHECK(ui::detail::translate_ascii_key('Q', true) == ui::Key::Quit);
+        NUI_CHECK(ui::detail::translate_ascii_key('q', true) == ui::Key::Quit);
+        NUI_CHECK(ui::detail::translate_ascii_key(' ', false) == ui::Key::Space);
+        NUI_CHECK(ui::detail::translate_ascii_key('0', false) == ui::Key::None);
+        NUI_CHECK(ui::detail::translate_ascii_key('@', false) == ui::Key::None);
+        NUI_CHECK(ui::detail::translate_ascii_key('[', false) == ui::Key::None);
+        NUI_CHECK(ui::detail::translate_ascii_key(0x100U, false) == ui::Key::None);
+    }
+
+    {
         ui::InputEvent event{};
         event.type = ui::InputType::KeyDown;
-        event.key = ui::Key::C;
-        event.ctrl = true;
-        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
         event.primary = true;
+
+        event.key = ui::Key::A;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::SelectAll);
+        event.key = ui::Key::C;
         NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Copy);
+        event.key = ui::Key::X;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Cut);
+        event.key = ui::Key::V;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Paste);
+        event.key = ui::Key::Y;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Redo);
         event.key = ui::Key::Z;
         NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Undo);
         event.shift = true;
         NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::Redo);
+
+        event.shift = false;
+        event.key = ui::Key::P;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
+        event.key = ui::Key::Q;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
+        event.key = ui::Key::W;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
+
         event.type = ui::InputType::TextInput;
+        event.key = ui::Key::C;
+        NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
+
+        event.type = ui::InputType::KeyDown;
+        event.primary = false;
+        event.ctrl = true;
         NUI_CHECK(ui::command_from_shortcut(event) == ui::Command::None);
     }
 
