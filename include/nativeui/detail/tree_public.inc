@@ -1,30 +1,27 @@
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {
-        // Transition recovery stacks are reused for ordinary focus/hover work so
-        // steady-state input does not allocate. Deeper re-entrant nesting may
-        // grow them before entering the corresponding nested callback.
         focus_transition_stack_.reserve(4);
         pointer_hover_transition_stack_.reserve(4);
     }
-    ~Tree() { unmount(); }
+
+    ~Tree() noexcept {
+        try {
+            unmount();
+        } catch (...) {
+        }
+    }
 
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
 
     void mount() {
         if (mounted_) return;
-        mounted_ = true;
-        focusables_.clear();
-        // A mount starts a new retained semantic lifecycle. Deferred recovery
-        // from an earlier session is never authoritative in this one, so retire
-        // it callback-free before any new lifecycle callback can observe state.
-        focus_transition_stack_.clear();
-        pending_focus_target_ = kInvalidNodeId;
-        pending_focus_request_ = false;
-        focus_blur_started_ = kInvalidNodeId;
-        focus_blur_started_from_availability_ = false;
-        availability_cleared_focus_ = nullptr;
-        pointer_hover_transition_stack_.clear();
-        pending_pointer_hover_transition_.reset();
+        reset_t125_semantic_recovery();
+        LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Mount, true};
+
+        std::vector<Node*> staged_focusables;
+        staged_focusables.swap(focusables_);
+        staged_focusables.clear();
+
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
@@ -35,47 +32,114 @@
             !root_->component->focusable() &&
             !root_->component->clips_children() &&
             !root_->component->is_focus_scope();
-        initialize_availability(*root_);
-        availability_structure_dirty_ = false;
-        mount_node(*root_);
-        invalidate_layout_from(*root_);
+
+        try {
+            initialize_availability(*root_);
+            availability_structure_dirty_ = false;
+            mount_node(*root_, &staged_focusables);
+            invalidate_layout_from(*root_);
+        } catch (...) {
+            try {
+                unmount_node(*root_);
+            } catch (...) {
+            }
+            staged_focusables.clear();
+            focusables_.swap(staged_focusables);
+            focusables_.clear();
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            active_ = false;
+            availability_structure_dirty_ = false;
+            focus_structure_dirty_ = true;
+            mounted_ = false;
+            reset_t125_semantic_recovery();
+            throw;
+        }
+
+        focusables_.swap(staged_focusables);
+        mounted_ = true;
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
+        if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
 
-    /// Immediately recompute layout for an externally supplied viewport (for
-    /// example a window resize), and dirty the complete new viewport.
     void layout(Size viewport) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
-        viewport_ = viewport;
-        paint_dirty_.clear();
-        layout_node(*root_, viewport_rect());
-        layout_dirty_ = false;
-        invalidate_paint(viewport_rect());
+        auto transaction = begin_layout_publication(viewport);
+        try {
+            layout_node(*root_, viewport_rect());
+        } catch (...) {
+            rollback_layout_publication(std::move(transaction));
+            throw;
+        }
+        commit_layout_publication();
     }
 
     void activate_focus(PlatformServices& platform) {
+        LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Activate, true};
+        if (!mounted_) return;
         flush_dynamic_mutations();
         if (active_) return;
+
         active_ = true;
-        activate_node(*root_);
-        active_platform_ = &platform;
-        sync_availability_structure(platform);
-        focus_structure_dirty_ = true;
-        sync_focus_structure(platform);
-        if (!focus_active_) {
-            if (auto* first = first_available_focusable()) set_focus(first, platform);
+        try {
+            activate_node(*root_);
+        } catch (...) {
+            try {
+                deactivate_node(*root_);
+            } catch (...) {
+            }
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            throw;
         }
-        invalidate_paint(viewport_rect());
+
+        active_platform_ = &platform;
+        try {
+            sync_availability_structure(platform);
+            focus_structure_dirty_ = true;
+            sync_focus_structure(platform);
+            if (!focus_active_) {
+                if (auto* first = first_available_focusable()) set_focus(first, platform);
+            }
+            invalidate_paint(viewport_rect());
+        } catch (...) {
+            const auto activation_error = std::current_exception();
+            lifecycle.release();
+            try {
+                deactivate_focus(platform);
+            } catch (...) {
+            }
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            std::rethrow_exception(activation_error);
+        }
     }
 
     void refresh_focus(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
@@ -83,33 +147,38 @@
         if (focusables_.empty() || !focus_active_) return;
         auto* node = focusables_[focused_index_];
         FocusContext context{
-            node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
+            node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, context);
     }
 
     void deactivate_focus(PlatformServices& platform) {
-        flush_dynamic_mutations();
-        if (!active_) return;
-        sync_availability_structure(platform);
+        LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Deactivate, true};
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
 
-        // Hover and capture callbacks must run while components and platform
-        // services are still active. Hover is presentation-only and is cleared
-        // independently from any in-flight captured interaction.
+        if (!active_) {
+            reset_t125_semantic_recovery();
+            return;
+        }
+        capture_error([&] { sync_availability_structure(platform); });
+
         InputEvent leave{};
         leave.type = InputType::PointerLeave;
-        (void)clear_pointer_hover(leave, platform);
-
-        // Cancel any in-flight pointer interaction while components and
-        // platform services are still active. This is the deterministic
-        // lifecycle boundary used for focus loss and view teardown.
-        (void)cancel_pointer_capture(platform);
+        capture_error([&] { (void)clear_pointer_hover(leave, platform); });
+        capture_error([&] { (void)cancel_pointer_capture(platform); });
 
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
             FocusContext context{
-                node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
-            node->component->focus_changed(false, context);
-            invalidate_node_paint(*node);
+                node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+            capture_error([&] { node->component->focus_changed(false, context); });
+            capture_error([&] { invalidate_node_paint(*node); });
         }
 
         focus_active_ = false;
@@ -117,58 +186,52 @@
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
-        deactivate_node(*root_);
+
+        capture_error([&] { deactivate_node(*root_); });
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
+        if (availability_structure_dirty_) {
+            capture_error([&] { sync_availability_inactive(); });
+        }
+        capture_error([&] { invalidate_paint(viewport_rect()); });
+        reset_t125_semantic_recovery();
 
-        // Only a successfully completed deactivation is a terminal semantic
-        // boundary. Retire prior-session focus/hover recovery now, after all
-        // user-facing lifecycle callbacks succeeded, without invoking callbacks.
-        focus_transition_stack_.clear();
-        pending_focus_target_ = kInvalidNodeId;
-        pending_focus_request_ = false;
-        focus_blur_started_ = kInvalidNodeId;
-        focus_blur_started_from_availability_ = false;
-        availability_cleared_focus_ = nullptr;
-        pointer_hover_transition_stack_.clear();
-        pending_pointer_hover_transition_.reset();
-
-        if (availability_structure_dirty_) sync_availability_inactive();
-        invalidate_paint(viewport_rect());
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void unmount() {
-        if (!mounted_ || !root_) return;
+        LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
+        if (!mounted_ || !root_) {
+            reset_t125_semantic_recovery();
+            return;
+        }
 
-        // Normal platform integrations deactivate before unmount so focused
-        // controls can release platform services. This fallback still runs the
-        // platform-neutral component lifecycle if a caller destroys an active
-        // tree directly.
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
+
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
-        // Unmount is terminal even when it is the fallback for an active Tree.
-        // Retire every deferred semantic/recovery payload without callbacks so
-        // a later mount cannot inherit focus or hover intent from this session.
-        focus_transition_stack_.clear();
-        pending_focus_target_ = kInvalidNodeId;
-        pending_focus_request_ = false;
-        focus_blur_started_ = kInvalidNodeId;
-        focus_blur_started_from_availability_ = false;
-        availability_cleared_focus_ = nullptr;
-        pointer_hover_transition_stack_.clear();
-        pending_pointer_hover_transition_.reset();
         active_platform_ = nullptr;
         if (active_) {
-            deactivate_node(*root_);
+            capture_error([&] { deactivate_node(*root_); });
             active_ = false;
         }
 
-        unmount_node(*root_);
+        capture_error([&] { unmount_node(*root_); });
         focusables_.clear();
         mounted_ = false;
+        reset_t125_semantic_recovery();
+
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     [[nodiscard]] bool dirty() const noexcept {
@@ -191,9 +254,6 @@
         return node->component->effective_availability();
     }
 
-    /// Install a logical-coordinate exposure callback. Existing accumulated
-    /// dirty rectangles are replayed so attaching a platform after initial
-    /// layout still schedules the first frame.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         invalidation_callback_ = std::move(callback);
         if (invalidation_callback_) {
@@ -201,7 +261,6 @@
         }
     }
 
-    /// Compatibility overload for callers that only support whole-view redraw.
     void set_invalidation_callback(std::function<void()> callback) {
         if (!callback) {
             set_invalidation_callback(std::function<void(Rect)>{});
@@ -211,20 +270,19 @@
             [callback = std::move(callback)](Rect) mutable { callback(); });
     }
 
-    /// Repaint the whole viewport without recomputing layout.
     void invalidate() { invalidate_paint(viewport_rect()); }
-    /// Repaint a logical rectangle, clipped to the current viewport.
     void invalidate(Rect rect) { invalidate_paint(rect); }
-    /// Recompute layout from the root before the next paint.
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
     void focus_next(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(1, platform);
     }
 
     void focus_previous(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(-1, platform);
@@ -234,47 +292,19 @@
         global_command_handler_ = std::move(handler);
     }
 
-    /// Mark that a pointer button interaction is in progress anywhere in this
-    /// tree. Retained presentation policies such as Tooltip consult the flag
-    /// through their interaction observers so a drag that starts outside the
-    /// anchor can never arm a hover-only presentation. The interaction ends
-    /// when PointerUp/PointerCancel routing completes.
     void begin_pointer_interaction() noexcept { pointer_interaction_active_ = true; }
     void end_pointer_interaction() noexcept { pointer_interaction_active_ = false; }
 
-    /// Route one input event according to the retained-mode targeting rules:
-    ///
-    /// - Tab/Shift+Tab is owned by the tree and never double-delivered;
-    /// - key/text/composition/tick events target the focused node while focus is active;
-    /// - PointerDown cancels an older capture, hit-tests the deepest interactive visual node,
-    ///   focuses its nearest focusable ancestor when one exists, then routes from the visual target;
-    /// - PointerMove/PointerWheel update the retained hover route, then route to the capture owner
-    ///   first when present, otherwise the current visual target;
-    /// - PointerLeave clears the previous retained hover route without cancelling capture;
-    /// - PointerUp updates hover, routes to the capture owner, then releases capture automatically;
-    /// - PointerCancel is delivered exactly once to the capture owner and clears capture;
-    /// - external drop offers/data hit-test a mounted tree even without window focus;
-    /// - ignored target events bubble through ancestors until handled or root.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
-        // An external drag source (for example Finder) owns keyboard focus.
-        // Drop targeting must remain available without activating this tree
-        // or restoring keyboard focus/text input as a side effect.
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
         if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
 
-        // Finish any retained hover route suffix from an earlier throwing
-        // callback before structural reconciliation can remove nodes that still
-        // belong to that semantic transition. The recovery cursor has already
-        // advanced past every callback that started, so no notification is retried.
         resume_pointer_hover_transitions(platform);
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
 
-        // Each dispatch frame owns exactly one depth increment. Keep the prior
-        // level explicit so nested dispatch restores its caller's depth rather
-        // than assuming zero, and so an exception can restore bookkeeping
-        // without invoking arbitrary user callbacks during unwind.
         const auto previous_dispatch_depth = dispatch_depth_;
         dispatch_depth_ = previous_dispatch_depth + 1;
         bool pointer_route_committed = false;
@@ -289,21 +319,11 @@
         };
 
         try {
-            // A dynamic structural root that is non-interactive, non-clipping and
-            // not a focus boundary contributes no pointer target of its own. When it
-            // currently retains exactly one child (the ordinary no-overlay UI case),
-            // start pointer hit testing at that child. Routing still bubbles through
-            // the parent, so structural callbacks/ownership semantics are unchanged.
             Node& pointer_hit_root =
                 pointer_passthrough_dynamic_root_ && root_->children.size() == 1
                     ? *root_->children.front()
                     : *root_;
 
-            // Pointer targeting is intentionally independent from keyboard focus.
-            // Reverse child order matches paint stacking: later/overlay children are
-            // input-frontmost. Inert visual/layout nodes retain the historic behavior
-            // of not blocking an interactive sibling below them unless they explicitly
-            // opt into pointer targetability. Inactive focus scopes remain unavailable.
             auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
                 if (inherited_clip.empty() || !inherited_clip.contains(point) ||
                     dynamic_teardown_quarantines(&node) ||
@@ -358,7 +378,6 @@
                     command_event.key = Key::None;
                     command_event.text.clear();
                 }
-
                 if (command_event.command == Command::None) return finish(EventResult::Ignored);
 
                 EventResult result = EventResult::Ignored;
@@ -384,8 +403,6 @@
             }
 
             if (event.type == InputType::PointerDown) {
-                // A new pointer-down starts a new interaction. Never leave an old
-                // owner captured if a previous interaction missed its PointerUp.
                 pointer_interaction_active_ = true;
                 if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
 
@@ -409,9 +426,7 @@
                 if (auto* owner = pointer_capture_owner()) {
                     return finish(route_from(*owner, event, platform));
                 }
-                if (target) {
-                    return finish(route_from(*target, event, platform));
-                }
+                if (target) return finish(route_from(*target, event, platform));
                 return finish(EventResult::Ignored);
             }
 
@@ -453,12 +468,6 @@
 
             return finish(EventResult::Ignored);
         } catch (...) {
-            // Before a pointer route commits, cancellation/hover/focus callbacks
-            // may have published temporary framework state. Terminate only that
-            // incomplete interaction without invoking user code. Once the target
-            // route has returned, however, capture/interaction is a valid semantic
-            // commit: a later finish/reconciliation failure must not silently
-            // discard it.
             if (!pointer_route_committed &&
                 (event.type == InputType::PointerDown ||
                  event.type == InputType::PointerUp ||
@@ -466,24 +475,20 @@
                 clear_pointer_capture();
                 pointer_interaction_active_ = false;
             }
-
-            // Restore only internal bookkeeping while unwinding. Pending
-            // structural/availability work remains queued for the next safe
-            // checkpoint; do not call component/user code from this recovery.
             dispatch_depth_ = previous_dispatch_depth;
             throw;
         }
     }
 
-    /// Explicitly cancel the active pointer capture, if any. The current owner
-    /// receives one PointerCancel event before capture is cleared.
     EventResult cancel_pointer(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         return cancel_pointer_capture(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
