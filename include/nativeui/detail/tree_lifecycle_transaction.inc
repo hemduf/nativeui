@@ -9,6 +9,56 @@
         return unsafe_layout_invalidator(node);
     }
 
+    // Lifecycle callbacks are arbitrary application code. Keep one per-Tree
+    // transition token so a callback cannot start an incompatible lifecycle
+    // transaction against state that is still provisional or rolling back.
+    enum class LifecycleTransition {
+        None,
+        Mount,
+        Activate,
+        Deactivate,
+        Unmount,
+    };
+
+    class LifecycleTransitionScope {
+    public:
+        LifecycleTransitionScope(
+            Tree& tree,
+            LifecycleTransition requested,
+            bool require_idle)
+            : tree_(tree), previous_(tree.lifecycle_transition_) {
+            if (require_idle && previous_ != LifecycleTransition::None) {
+                throw std::logic_error("nested Tree lifecycle transition");
+            }
+            if (previous_ == LifecycleTransition::None) {
+                tree_.lifecycle_transition_ = requested;
+                owns_ = true;
+            }
+        }
+
+        LifecycleTransitionScope(const LifecycleTransitionScope&) = delete;
+        LifecycleTransitionScope& operator=(const LifecycleTransitionScope&) = delete;
+
+        ~LifecycleTransitionScope() noexcept {
+            if (owns_) tree_.lifecycle_transition_ = previous_;
+        }
+
+        void release() noexcept {
+            if (!owns_) return;
+            tree_.lifecycle_transition_ = previous_;
+            owns_ = false;
+        }
+
+    private:
+        Tree& tree_;
+        LifecycleTransition previous_{LifecycleTransition::None};
+        bool owns_{};
+    };
+
+    [[nodiscard]] bool lifecycle_transition_active() const noexcept {
+        return lifecycle_transition_ != LifecycleTransition::None;
+    }
+
     // T130 transactions are short-lived and usually small. Keep the common
     // retained-tree journal on the caller stack so a fresh UI does not pay heap
     // allocation merely to make rollback possible. Larger/dynamic trees spill
@@ -91,7 +141,7 @@
     void mount_node_recorded(
         Node& node,
         MountTransitionJournal& journal,
-        bool publish_focusables) {
+        std::vector<Node*>* staged_focusables) {
         // Journal before the first fallible operation. The inline journal cannot
         // allocate for the common <=64-node path; overflow capacity, when needed,
         // was reserved before any lifecycle publication.
@@ -130,10 +180,12 @@
             overlay_service_};
         progress.component_started = true;
         node.component->mount(context);
-        if (publish_focusables && node.component->focusable()) focusables_.push_back(&node);
+        if (staged_focusables && node.component->focusable()) {
+            staged_focusables->push_back(&node);
+        }
 
         for (auto& child : node.children) {
-            mount_node_recorded(*child, journal, publish_focusables);
+            mount_node_recorded(*child, journal, staged_focusables);
         }
     }
 
@@ -189,22 +241,20 @@
         journal.clear();
     }
 
-    void mount_node(Node& node) {
+    void mount_node(Node& node, std::vector<Node*>* staged_focusables = nullptr) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Mount, false};
         MountTransitionJournal journal;
         failed_mount_root_ = nullptr;
-
-        // Whole-Tree mount publishes the initial focus registry as before. A
-        // non-root mount is a provisional retained insertion: its structure is
-        // already staged by the dynamic transaction, but its focusability must
-        // remain invisible until that transaction completes mount+activation and
-        // performs the existing staged focus-registry commit.
-        const bool publish_focusables = node.parent == nullptr;
         try {
-            // Reserve only spill capacity. The static multi_instance fixture has
-            // 47 nodes and remains entirely stack-backed; larger trees still get
-            // one bounded pre-publication allocation instead of geometric growth.
-            journal.reserve(retained_subtree_node_count(node));
-            mount_node_recorded(node, journal, publish_focusables);
+            // Prepare all storage that the mount walk itself needs before the
+            // first component callback. Root focus collection piggybacks this
+            // traversal; dynamic insertion passes no staging vector and keeps its
+            // existing post-lifecycle focus publication transaction.
+            const auto node_count = retained_subtree_node_count(node);
+            journal.reserve(node_count);
+            if (staged_focusables) staged_focusables->reserve(node_count);
+            mount_node_recorded(node, journal, staged_focusables);
         } catch (...) {
             rollback_failed_mount(journal, node);
             // Tree::mount()/dynamic reconciliation still invoke unmount_node()
@@ -248,6 +298,8 @@
     }
 
     void activate_node(Node& node) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Activate, false};
         ActivationTransitionJournal journal;
         failed_activation_root_ = nullptr;
         try {
@@ -261,6 +313,8 @@
     }
 
     void deactivate_node(Node& node) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Deactivate, false};
         if (failed_activation_root_ == &node) {
             failed_activation_root_ = nullptr;
             return;
@@ -269,6 +323,8 @@
     }
 
     void unmount_node(Node& node) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Unmount, false};
         if (failed_mount_root_ == &node) {
             failed_mount_root_ = nullptr;
             return;
@@ -283,5 +339,6 @@
         unmount_node_untracked(node);
     }
 
+    LifecycleTransition lifecycle_transition_{LifecycleTransition::None};
     Node* failed_mount_root_{};
     Node* failed_activation_root_{};

@@ -14,8 +14,16 @@
 
     void mount() {
         if (mounted_) return;
-        mounted_ = true;
-        focusables_.clear();
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Mount, true};
+
+        // Keep the committed focus registry empty for the complete mount
+        // transaction. Reuse its prior capacity as staging storage so root focus
+        // publication adds no second traversal and no callback-time allocation.
+        std::vector<Node*> staged_focusables;
+        staged_focusables.swap(focusables_);
+        staged_focusables.clear();
+
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
@@ -30,18 +38,20 @@
         try {
             initialize_availability(*root_);
             availability_structure_dirty_ = false;
-            mount_node(*root_);
+            mount_node(*root_, &staged_focusables);
             invalidate_layout_from(*root_);
         } catch (...) {
-            // mounted_ is provisional while component mount callbacks run. If
-            // any callback/fallible retained setup fails, complete best-effort
-            // rollback while the Tree is still internally mounted, then publish
-            // a clean inactive/unmounted state before propagating the original
-            // ordinary-C++ exception.
+            // Root lifecycle/focus state is still provisional here. The inner
+            // journal has already rolled back a mount-callback failure; the
+            // failed-root sentinel consumes this outer cleanup once. Failures
+            // after a completed mount walk still receive full best-effort
+            // teardown before the original exception is propagated.
             try {
                 unmount_node(*root_);
             } catch (...) {
             }
+            staged_focusables.clear();
+            focusables_.swap(staged_focusables);
             focusables_.clear();
             focus_active_ = false;
             clear_pointer_capture();
@@ -54,6 +64,11 @@
             mounted_ = false;
             throw;
         }
+
+        // Exact root-mount commit: both swaps/flag stores are no-throw and occur
+        // only after every mount callback plus retained setup has succeeded.
+        focusables_.swap(staged_focusables);
+        mounted_ = true;
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
@@ -79,6 +94,9 @@
     }
 
     void activate_focus(PlatformServices& platform) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Activate, true};
+        if (!mounted_) return;
         flush_dynamic_mutations();
         if (active_) return;
 
@@ -121,6 +139,11 @@
             invalidate_paint(viewport_rect());
         } catch (...) {
             const auto activation_error = std::current_exception();
+            // Recovery is a new terminal lifecycle transaction. Release the
+            // activation token before entering the public best-effort teardown;
+            // deactivate_focus() acquires its own token so its callbacks still
+            // cannot re-enter another lifecycle transition.
+            lifecycle.release();
             try {
                 deactivate_focus(platform);
             } catch (...) {
@@ -145,6 +168,7 @@
     }
 
     void refresh_focus(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
@@ -157,6 +181,8 @@
     }
 
     void deactivate_focus(PlatformServices& platform) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Deactivate, true};
         std::exception_ptr first_error;
         auto capture_error = [&first_error](auto&& callback) {
             try {
@@ -217,6 +243,8 @@
     }
 
     void unmount() {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) return;
 
         std::exception_ptr first_error;
@@ -298,12 +326,14 @@
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
     void focus_next(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(1, platform);
     }
 
     void focus_previous(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(-1, platform);
@@ -335,6 +365,7 @@
     /// - external drop offers/data hit-test a mounted tree even without window focus;
     /// - ignored target events bubble through ancestors until handled or root.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         // An external drag source (for example Finder) owns keyboard focus.
         // Drop targeting must remain available without activating this tree
         // or restoring keyboard focus/text input as a side effect.
@@ -514,12 +545,14 @@
     /// Explicitly cancel the active pointer capture, if any. The current owner
     /// receives one PointerCancel event before capture is cleared.
     EventResult cancel_pointer(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         return cancel_pointer_capture(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
