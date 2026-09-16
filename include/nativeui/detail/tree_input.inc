@@ -59,9 +59,23 @@
 
     std::vector<PointerHoverTransitionState> pointer_hover_transition_stack_;
     std::size_t pointer_hover_transition_running_{};
+    std::unique_ptr<PointerHoverTransitionState> pending_pointer_hover_transition_;
 
     [[nodiscard]] Node* pointer_hover_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
+    }
+
+    void queue_pending_pointer_hover_transition(
+        Node* next, const InputEvent& source_event) {
+        // Build the complete replacement before publishing it. InputEvent owns
+        // strings/vectors and its copy can allocate; allocation/copy failure
+        // therefore preserves any older pending request exactly.
+        auto pending = std::make_unique<PointerHoverTransitionState>();
+        pending->next = next ? next->id : kInvalidNodeId;
+        pending->leave = source_event;
+        pending->leave.type = InputType::PointerLeave;
+        pending->leave.delta = {};
+        pending_pointer_hover_transition_.swap(pending);
     }
 
     void execute_pointer_hover_transition(std::size_t index, PlatformServices& platform) {
@@ -184,6 +198,49 @@
         }
     }
 
+    void drain_one_pending_pointer_hover_transition(PlatformServices& platform) {
+        if (!pending_pointer_hover_transition_ || pointer_hover_transition_running_ != 0 ||
+            !pointer_hover_transition_stack_.empty()) {
+            return;
+        }
+
+        const auto next_id = pending_pointer_hover_transition_->next;
+        auto* next = pointer_hover_transition_node(next_id);
+        if (next_id != kInvalidNodeId && !next) {
+            // A structural callback may have removed the requested target before
+            // the safe checkpoint. The latest semantic route is then no target.
+            next = nullptr;
+        }
+        auto* const previous = pointer_hover_target_;
+        if (previous == next) {
+            pending_pointer_hover_transition_.reset();
+            return;
+        }
+
+        PointerHoverTransitionState transition{};
+        transition.previous = previous ? previous->id : kInvalidNodeId;
+        transition.next = next ? next->id : kInvalidNodeId;
+        // Copy before consuming the pending owner. If payload preparation throws,
+        // the request remains intact. The vector push may allocate as well and
+        // likewise happens before the pending semantic commit.
+        transition.leave = pending_pointer_hover_transition_->leave;
+        transition.phase = previous
+            ? PointerHoverTransitionPhase::ObserverLeave
+            : PointerHoverTransitionPhase::ObserverEnter;
+        transition.cursor = previous ? transition.previous : transition.next;
+        pointer_hover_transition_stack_.push_back(std::move(transition));
+        pending_pointer_hover_transition_.reset();
+
+        const auto index = pointer_hover_transition_stack_.size() - 1;
+        pointer_hover_target_ = next;
+        execute_pointer_hover_transition(index, platform);
+        if (index < pointer_hover_transition_stack_.size() &&
+            pointer_hover_transition_stack_[index].phase ==
+                PointerHoverTransitionPhase::Complete) {
+            pointer_hover_transition_stack_.pop_back();
+        }
+    }
+
     void resume_pointer_hover_transitions(PlatformServices& platform) {
         if (pointer_hover_transition_running_ != 0) return;
         while (!pointer_hover_transition_stack_.empty()) {
@@ -196,6 +253,12 @@
                 continue;
             }
             break;
+        }
+        if (pointer_hover_transition_stack_.empty()) {
+            // Drain at most one coalesced request per safe checkpoint. A callback
+            // from this follow-up may replace the pending target again, but it
+            // cannot recursively publish another hover transition on this stack.
+            drain_one_pending_pointer_hover_transition(platform);
         }
     }
 
@@ -230,23 +293,37 @@
 
     [[nodiscard]] bool update_pointer_hover_target(
         Node* target, const InputEvent& source_event, PlatformServices& platform) {
-        if (pointer_hover_transition_running_ == 0) {
-            resume_pointer_hover_transitions(platform);
+        if (pointer_hover_transition_running_ != 0 ||
+            !pointer_hover_transition_stack_.empty() || pending_pointer_hover_transition_) {
+            queue_pending_pointer_hover_transition(target, source_event);
+            if (pointer_hover_transition_running_ == 0) {
+                resume_pointer_hover_transitions(platform);
+            }
+            return true;
         }
+
         auto* const previous = pointer_hover_target_;
         if (previous == target) return false;
         begin_pointer_hover_transition(previous, target, source_event, platform);
+        if (pending_pointer_hover_transition_) resume_pointer_hover_transitions(platform);
         return true;
     }
 
     [[nodiscard]] bool clear_pointer_hover(
         const InputEvent& source_event, PlatformServices& platform) {
-        if (pointer_hover_transition_running_ == 0) {
-            resume_pointer_hover_transitions(platform);
+        if (pointer_hover_transition_running_ != 0 ||
+            !pointer_hover_transition_stack_.empty() || pending_pointer_hover_transition_) {
+            queue_pending_pointer_hover_transition(nullptr, source_event);
+            if (pointer_hover_transition_running_ == 0) {
+                resume_pointer_hover_transitions(platform);
+            }
+            return true;
         }
+
         auto* const previous = pointer_hover_target_;
         if (!previous) return false;
         begin_pointer_hover_transition(previous, nullptr, source_event, platform);
+        if (pending_pointer_hover_transition_) resume_pointer_hover_transitions(platform);
         return true;
     }
 

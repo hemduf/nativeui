@@ -50,9 +50,17 @@
 
     std::vector<FocusTransitionState> focus_transition_stack_;
     std::size_t focus_transition_running_{};
+    std::size_t focus_semantic_running_{};
+    NodeId pending_focus_target_{kInvalidNodeId};
+    bool pending_focus_request_{};
 
     [[nodiscard]] Node* focus_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
+    }
+
+    void queue_pending_focus(NodeId target) noexcept {
+        pending_focus_target_ = target;
+        pending_focus_request_ = true;
     }
 
     void execute_focus_transition(std::size_t index, PlatformServices& platform) {
@@ -260,7 +268,7 @@
     }
 
     void resume_focus_transitions(PlatformServices& platform) {
-        if (focus_transition_running_ != 0) return;
+        if (focus_transition_running_ != 0 || focus_semantic_running_ != 0) return;
         while (!focus_transition_stack_.empty()) {
             const auto index = focus_transition_stack_.size() - 1;
             execute_focus_transition(index, platform);
@@ -270,6 +278,10 @@
                 continue;
             }
             break;
+        }
+        if (focus_transition_stack_.empty() &&
+            availability_blur_started_ == kInvalidNodeId) {
+            drain_one_pending_focus_request(platform);
         }
     }
 
@@ -327,6 +339,65 @@
         return first;
     }
 
+    void drain_one_pending_focus_request(PlatformServices& platform) {
+        if (!pending_focus_request_ || focus_transition_running_ != 0 ||
+            focus_semantic_running_ != 0 || !focus_transition_stack_.empty()) {
+            return;
+        }
+
+        const auto requested = pending_focus_target_;
+        Node* next = nullptr;
+        if (requested != kInvalidNodeId) {
+            next = focus_transition_node(requested);
+            if (!focus_target_available(next)) {
+                pending_focus_request_ = false;
+                return;
+            }
+            if (auto* current_trap = trapping_scope_for(current_focus_node());
+                current_trap && !is_descendant_or_self(next, current_trap) &&
+                trapping_scope_for(next) == nullptr) {
+                pending_focus_request_ = false;
+                return;
+            }
+            const auto it = std::find(focusables_.begin(), focusables_.end(), next);
+            if (it == focusables_.end()) {
+                pending_focus_request_ = false;
+                return;
+            }
+            if (focus_active_ && focusables_[focused_index_] == next) {
+                pending_focus_request_ = false;
+                return;
+            }
+        } else if (!focus_active_ || focused_index_ >= focusables_.size()) {
+            pending_focus_request_ = false;
+            return;
+        }
+
+        auto* old = current_focus_node();
+        FocusTransitionState transition{};
+        transition.previous = old ? old->id : kInvalidNodeId;
+        transition.next = next ? next->id : kInvalidNodeId;
+        transition.cursor = transition.previous;
+        transition.phase = old ? FocusTransitionPhase::BlurOld : FocusTransitionPhase::Commit;
+
+        // Allocation is the last fallible operation before consuming the
+        // coalesced request. If push_back throws, the pending intent remains
+        // authoritative and can be retried at a later safe checkpoint.
+        focus_transition_stack_.push_back(transition);
+        pending_focus_request_ = false;
+        if (!next) {
+            availability_cleared_focus_ = syncing_availability_ ? old : nullptr;
+            availability_blur_started_ = kInvalidNodeId;
+        }
+
+        const auto index = focus_transition_stack_.size() - 1;
+        execute_focus_transition(index, platform);
+        if (index < focus_transition_stack_.size() &&
+            focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
+            focus_transition_stack_.pop_back();
+        }
+    }
+
     // Stable identity of an availability-driven focus-loss notification that
     // already entered application code but did not reach the retained commit
     // point. A later availability checkpoint may finish framework bookkeeping
@@ -334,71 +405,93 @@
     NodeId availability_blur_started_{kInvalidNodeId};
 
     void clear_focus(PlatformServices& platform) {
+        const bool resume_availability_blur =
+            syncing_availability_ && focus_active_ && focused_index_ < focusables_.size() &&
+            availability_blur_started_ == focusables_[focused_index_]->id;
+        if (!resume_availability_blur &&
+            (focus_transition_running_ != 0 || focus_semantic_running_ != 0 ||
+             !focus_transition_stack_.empty() || pending_focus_request_)) {
+            queue_pending_focus(kInvalidNodeId);
+            if (focus_transition_running_ == 0 && focus_semantic_running_ == 0) {
+                resume_focus_transitions(platform);
+            }
+            return;
+        }
+
         if (!focus_active_ || focused_index_ >= focusables_.size()) {
             focus_active_ = false;
             availability_blur_started_ = kInvalidNodeId;
             if (!syncing_availability_) availability_cleared_focus_ = nullptr;
             return;
         }
-        auto* old = focusables_[focused_index_];
-        if (syncing_availability_) {
-            // Preserve the exact target across adjacent availability passes. A
-            // State observer may queue a reversal (disabled -> enabled) for the
-            // next stable notification pass only after this reconciliation has
-            // returned. Keeping the retained node identity lets that synchronous
-            // follow-up pass restore focus without weakening State's stable-pass
-            // semantics. Dynamic reconciliation clears this pointer before a
-            // retained node is removed.
-            availability_cleared_focus_ = old;
-        } else {
-            availability_cleared_focus_ = nullptr;
+
+        ++focus_semantic_running_;
+        try {
+            auto* old = focusables_[focused_index_];
+            if (syncing_availability_) {
+                // Preserve the exact target across adjacent availability passes. A
+                // State observer may queue a reversal (disabled -> enabled) for the
+                // next stable notification pass only after this reconciliation has
+                // returned. Keeping the retained node identity lets that synchronous
+                // follow-up pass restore focus without weakening State's stable-pass
+                // semantics. Dynamic reconciliation clears this pointer before a
+                // retained node is removed.
+                availability_cleared_focus_ = old;
+            } else {
+                availability_cleared_focus_ = nullptr;
+            }
+
+            if (!resume_availability_blur) {
+                FocusContext context{
+                    old->bounds,
+                    platform,
+                    unsafe_paint_invalidator(*old),
+                    unsafe_layout_invalidator(*old)};
+                // Publish the stable identity only for availability reconciliation,
+                // immediately before entering user code. If it throws, leave focus
+                // logically active so the next pass can reconstruct the same rehome
+                // decision without invoking this callback again.
+                if (syncing_availability_) availability_blur_started_ = old->id;
+                old->component->focus_changed(false, context);
+            }
+
+            // Preserve the established successful-path ordering. Invalidation may
+            // itself throw; retaining the marker until the logical focus commit lets
+            // a later availability pass finish framework work without retrying the
+            // already-started focus callback.
+            invalidate_node_paint(*old);
+
+            // clear_focus has already completed the application blur and old-node
+            // invalidation. Prepare the remaining semantic transition before
+            // publishing inactive focus so allocation failure cannot strand a
+            // committed focus-within suffix. The shared transition cursor advances
+            // before every observer callback, making a throwing observer at-most-once
+            // while preserving the unstarted ancestor suffix for the next safe
+            // checkpoint.
+            FocusTransitionState transition{};
+            transition.previous = old->id;
+            transition.next = kInvalidNodeId;
+            transition.cursor = transition.previous;
+            transition.phase = FocusTransitionPhase::Commit;
+            focus_transition_stack_.push_back(transition);
+            const auto index = focus_transition_stack_.size() - 1;
+
+            // From this point the durable transition owns recovery, so the
+            // availability-specific pre-commit blur marker is no longer required.
+            availability_blur_started_ = kInvalidNodeId;
+            execute_focus_transition(index, platform);
+            if (index < focus_transition_stack_.size() &&
+                focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
+                focus_transition_stack_.pop_back();
+            }
+            --focus_semantic_running_;
+        } catch (...) {
+            --focus_semantic_running_;
+            focus_structure_dirty_ = true;
+            throw;
         }
 
-        const bool resume_availability_blur =
-            syncing_availability_ && availability_blur_started_ == old->id;
-        if (!resume_availability_blur) {
-            FocusContext context{
-                old->bounds,
-                platform,
-                unsafe_paint_invalidator(*old),
-                unsafe_layout_invalidator(*old)};
-            // Publish the stable identity only for availability reconciliation,
-            // immediately before entering user code. If it throws, leave focus
-            // logically active so the next pass can reconstruct the same rehome
-            // decision without invoking this callback again.
-            if (syncing_availability_) availability_blur_started_ = old->id;
-            old->component->focus_changed(false, context);
-        }
-
-        // Preserve the established successful-path ordering. Invalidation may
-        // itself throw; retaining the marker until the logical focus commit lets
-        // a later availability pass finish framework work without retrying the
-        // already-started focus callback.
-        invalidate_node_paint(*old);
-
-        // clear_focus has already completed the application blur and old-node
-        // invalidation. Prepare the remaining semantic transition before
-        // publishing inactive focus so allocation failure cannot strand a
-        // committed focus-within suffix. The shared transition cursor advances
-        // before every observer callback, making a throwing observer at-most-once
-        // while preserving the unstarted ancestor suffix for the next safe
-        // checkpoint.
-        FocusTransitionState transition{};
-        transition.previous = old->id;
-        transition.next = kInvalidNodeId;
-        transition.cursor = transition.previous;
-        transition.phase = FocusTransitionPhase::Commit;
-        focus_transition_stack_.push_back(transition);
-        const auto index = focus_transition_stack_.size() - 1;
-
-        // From this point the durable transition owns recovery, so the
-        // availability-specific pre-commit blur marker is no longer required.
-        availability_blur_started_ = kInvalidNodeId;
-        execute_focus_transition(index, platform);
-        if (index < focus_transition_stack_.size() &&
-            focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
-            focus_transition_stack_.pop_back();
-        }
+        if (pending_focus_request_) resume_focus_transitions(platform);
     }
 
     void move_focus(int direction, PlatformServices& platform) {
@@ -517,7 +610,6 @@
     }
 
     void set_focus(Node* node, PlatformServices& platform) {
-        if (focus_transition_running_ == 0) resume_focus_transitions(platform);
         if (!node || !focus_target_available(node)) return;
 
         // Pointer targeting and other direct focus moves must not let an
@@ -533,6 +625,15 @@
 
         const auto it = std::find(focusables_.begin(), focusables_.end(), node);
         if (it == focusables_.end()) return;
+
+        if (focus_transition_running_ != 0 || focus_semantic_running_ != 0 ||
+            !focus_transition_stack_.empty() || pending_focus_request_) {
+            queue_pending_focus(node->id);
+            if (focus_transition_running_ == 0 && focus_semantic_running_ == 0) {
+                resume_focus_transitions(platform);
+            }
+            return;
+        }
 
         const auto next_index = static_cast<std::size_t>(std::distance(focusables_.begin(), it));
         if (focus_active_ && next_index == focused_index_) return;
@@ -553,6 +654,7 @@
             focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
             focus_transition_stack_.pop_back();
         }
+        if (pending_focus_request_) resume_focus_transitions(platform);
     }
 
     [[nodiscard]] EventResult route_from(
