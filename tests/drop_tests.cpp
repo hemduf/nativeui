@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "t125_dynamic_recovery_tests.inc"
+
 namespace {
 
 struct DropState {
@@ -104,6 +106,7 @@ void borrowed_offer_unwind_contract() {
 }
 
 void suite() {
+    t125_dynamic_recovery::run();
     borrowed_offer_unwind_contract();
 
     auto state = std::make_shared<DropState>();
