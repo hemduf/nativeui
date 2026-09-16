@@ -154,13 +154,16 @@ public:
         NSView* view = native_view(window);
         NSWindow* native_window = view ? [view window] : nil;
         if (!native_window) return false;
+        [NSApp activate];
         [native_window makeKeyAndOrderFront:nil];
         [native_window orderFrontRegardless];
-        for (int attempt = 0; attempt < 20 && ![native_window isKeyWindow]; ++attempt) {
+        for (int attempt = 0;
+             attempt < 40 && (![NSApp isActive] || ![native_window isKeyWindow]);
+             ++attempt) {
             [[NSRunLoop currentRunLoop]
                 runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
         }
-        return [native_window isVisible] && [native_window isKeyWindow];
+        return [NSApp isActive] && [native_window isVisible] && [native_window isKeyWindow];
 #elif defined(_WIN32)
         HWND native_window = hwnd(window);
         if (!native_window) return false;
