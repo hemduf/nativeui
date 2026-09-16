@@ -79,11 +79,9 @@ private:
 #include <nativeui/detail/tree_focus_group.inc>
 #define register_dynamic_node unsafe_register_dynamic_node
 #define queue_dynamic_mutation queue_dynamic_mutation_t130_impl
-#define reconcile_dynamic_node reconcile_dynamic_node_t130_impl
 #define flush_dynamic_mutations flush_dynamic_mutations_t130_impl
 #include <nativeui/detail/tree_dynamic.inc>
 #undef flush_dynamic_mutations
-#undef reconcile_dynamic_node
 #undef queue_dynamic_mutation
 #undef register_dynamic_node
 #include <nativeui/detail/tree_t125_dynamic.inc>

@@ -3,6 +3,7 @@
 #include <functional>
 #include <new>
 #include <stdexcept>
+#include <vector>
 
 namespace ui::detail {
 
@@ -250,6 +251,47 @@ void factory_failure_preserves_captured_and_reentrant_work() {
     tree.unmount();
 }
 
+void quarantine_reuses_t130_desired_key_snapshot() {
+    struct KeyedItem {
+        int id{};
+    };
+
+    ui::State<std::vector<KeyedItem>> items{{KeyedItem{1}}};
+    int key_calls = 0;
+    bool reject_extra_key_call = false;
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(ui::make_spec(ui::ForEach<KeyedItem>{
+        items,
+        [&](const KeyedItem& item) {
+            ++key_calls;
+            if (reject_extra_key_call && key_calls > 2) {
+                throw std::runtime_error("duplicate desired-key snapshot");
+            }
+            return item.id;
+        },
+        [](const KeyedItem&) { return ui::Spacer{32.0f, 20.0f}; }}))};
+    tree.mount();
+    tree.layout({120.0f, 48.0f});
+    tree.activate_focus(platform);
+
+    key_calls = 0;
+    reject_extra_key_call = true;
+    items.set({KeyedItem{2}});
+
+    bool threw = false;
+    try {
+        tree.layout({120.0f, 48.0f});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(!threw);
+    NUI_CHECK(key_calls == 2);
+
+    tree.deactivate_focus(platform);
+    tree.unmount();
+}
+
 void teardown_quarantine_rejects_reentrant_pointer_publication() {
     ui::State<bool> visible{true};
     ui::State<bool> survivor_value{false};
@@ -303,6 +345,7 @@ void teardown_quarantine_rejects_reentrant_pointer_publication() {
 inline void run() {
     enqueue_failure_preserves_all_dirty_owners();
     factory_failure_preserves_captured_and_reentrant_work();
+    quarantine_reuses_t130_desired_key_snapshot();
     teardown_quarantine_rejects_reentrant_pointer_publication();
 }
 
