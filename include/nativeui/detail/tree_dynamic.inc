@@ -336,6 +336,8 @@
         }
 
         const auto current_keys = record->keys;
+        DynamicTeardownQuarantineScope teardown_quarantine{
+            *this, owner, current_keys, desired_keys};
         const auto teardown_epoch = structural_epoch_;
         bool removed_focus = false;
         NodeId removed_focus_restore_target{kInvalidNodeId};
