@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -91,6 +92,7 @@ struct ThrowingLifecycleState {
     bool throw_activate{};
     bool throw_deactivate{};
     bool throw_unmount{};
+    std::function<void()> on_deactivate;
     int mounts{};
     int activates{};
     int deactivates{};
@@ -121,6 +123,7 @@ public:
     void deactivate(ui::LifecycleContext&) override {
         ++state_->deactivates;
         record("deactivate");
+        if (state_->on_deactivate) state_->on_deactivate();
         if (state_->throw_deactivate) throw state_->name + ".deactivate";
     }
 
@@ -655,6 +658,52 @@ void suite() {
         tree.deactivate_focus(platform);
         NUI_CHECK(state->deactivates == 2);
         tree.unmount();
+    }
+
+    // T130 UI facade dispatch must obey the same lifecycle publication barrier
+    // as Tree dispatch/measure/layout/paint. A rollback callback must not let an
+    // outside PointerDown dismiss an already committed overlay while activation
+    // is still provisional.
+    {
+        test::MockPlatform platform;
+        auto state = std::make_shared<ThrowingLifecycleState>();
+        state->name = "ui-dispatch-rollback";
+        state->throw_activate = true;
+        ui::UI tree{throwing_lifecycle_spec(state)};
+        tree.resize({160.0f, 100.0f});
+
+        ui::OverlaySpec overlay;
+        overlay.placement = ui::OverlayPlacement::Center;
+        overlay.dismiss_on_outside_pointer_down = true;
+        overlay.content = ui::make_spec(ui::Spacer{40.0f, 20.0f});
+        auto handle = tree.show_overlay(std::move(overlay));
+        tree.resize({160.0f, 100.0f});
+        NUI_CHECK(handle.valid());
+
+        bool dispatch_handled = false;
+        state->on_deactivate = [&] {
+            ui::InputEvent event{};
+            event.type = ui::InputType::PointerDown;
+            event.position = {1.0f, 1.0f};
+            dispatch_handled = tree.dispatch(event, platform) == ui::EventResult::Handled;
+        };
+
+        std::string propagated;
+        try {
+            tree.activate(platform);
+        } catch (const std::string& error) {
+            propagated = error;
+        }
+        NUI_CHECK(propagated == "ui-dispatch-rollback.activate");
+        NUI_CHECK(!dispatch_handled);
+        NUI_CHECK(handle.valid());
+
+        state->throw_activate = false;
+        state->on_deactivate = {};
+        tree.activate(platform);
+        NUI_CHECK(tree.close_overlay(handle));
+        tree.resize({160.0f, 100.0f});
+        tree.deactivate(platform);
     }
 
     // T130 explicit deactivation propagates only after terminal Tree lifecycle
