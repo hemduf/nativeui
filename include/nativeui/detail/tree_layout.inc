@@ -249,6 +249,13 @@
                         rehome_scope = trapping_scope_for(focused);
                         focus_needs_rehome = true;
                         clear_focus(platform);
+                        // clear_focus now shares the generic durable focus transition
+                        // machinery with set_focus(). A successful transition may
+                        // retire availability_cleared_focus_ as ordinary focus work,
+                        // but availability reconciliation needs that identity to
+                        // survive until the queued State pass can either restore the
+                        // old target or select a compatible fallback.
+                        if (!availability_cleared_focus_) availability_cleared_focus_ = focused;
                     }
                 }
 
@@ -271,6 +278,27 @@
                 }
 
                 if (focus_changed && active_) sync_focus_structure(platform);
+
+                // A post-commit focus observer can throw after clear_focus() has
+                // already published inactive focus. In that case the stack-local
+                // focus_needs_rehome flag is lost when reconciliation unwinds, while
+                // availability_cleared_focus_ deliberately survives. Treat that
+                // retained identity as the durable rehome intent on subsequent safe
+                // availability checkpoints. Respect the original trapping-scope
+                // policy; if no target is currently available, keep the marker for
+                // a later State change instead of discarding recovery state.
+                if (active_ && !focus_active_ && availability_cleared_focus_) {
+                    Node* fallback = nullptr;
+                    auto* recovery_scope = trapping_scope_for(availability_cleared_focus_);
+                    if (recovery_scope &&
+                        recovery_scope->component->effective_availability().interactive()) {
+                        fallback = first_available_focusable(recovery_scope);
+                    } else {
+                        fallback = first_available_focusable();
+                    }
+                    if (fallback) set_focus(fallback, platform);
+                }
+
                 if (focus_needs_rehome && active_ && !focus_active_) {
                     Node* fallback = nullptr;
                     if (rehome_scope && rehome_scope->component->effective_availability().interactive()) {
