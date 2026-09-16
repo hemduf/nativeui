@@ -144,7 +144,7 @@ void t062_interaction_observer_suite() {
 }
 
 void t174_key_down_fallback_suite() {
-    // A focused text widget in one subtree may ignore an application shortcut;
+    // A focused TextInput in one subtree may ignore an application shortcut;
     // the sibling subtree is not part of routing and the final per-UI fallback
     // receives the original raw KeyDown exactly once.
     {
@@ -177,6 +177,29 @@ void t174_key_down_fallback_suite() {
         NUI_CHECK(observed.alt);
         NUI_CHECK(sibling->key_events == 0);
         NUI_CHECK(value.get() == "hello");
+    }
+
+    // TextArea shares the same focused-widget fallback contract.
+    {
+        test::MockPlatform platform;
+        ui::State<std::string> value{"one\ntwo"};
+        ui::UI tree{ui::TextArea{"Notes", value}};
+        tree.resize({320.0f, 140.0f});
+        tree.activate(platform);
+
+        int calls = 0;
+        tree.set_key_down_handler([&](const ui::InputEvent& event) {
+            ++calls;
+            NUI_CHECK(event.type == ui::InputType::KeyDown);
+            NUI_CHECK(event.key == ui::Key::G);
+            NUI_CHECK(event.primary);
+            return ui::EventResult::Handled;
+        });
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::G, false, true), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(calls == 1);
+        NUI_CHECK(value.get() == "one\ntwo");
     }
 
     // A handled focused component stops before the fallback.
@@ -246,6 +269,36 @@ void t174_key_down_fallback_suite() {
         NUI_CHECK(calls == 2);
     }
 
+    // Re-entrant clearing must not destroy the callable whose invocation is
+    // currently active. The clear applies to subsequent dispatches only.
+    {
+        test::MockPlatform platform;
+        ui::UI tree{ui::Spacer{40.0f, 40.0f}};
+        tree.resize({80.0f, 80.0f});
+        tree.activate(platform);
+
+        int calls = 0;
+        int completed = 0;
+        auto lifetime = std::make_shared<int>(42);
+        std::weak_ptr<int> lifetime_weak = lifetime;
+        tree.set_key_down_handler(
+            [&, lifetime = std::move(lifetime)](const ui::InputEvent&) {
+                ++calls;
+                tree.set_key_down_handler({});
+                NUI_CHECK(!lifetime_weak.expired());
+                NUI_CHECK(*lifetime == 42);
+                ++completed;
+                return ui::EventResult::Handled;
+            });
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::G), platform) == ui::EventResult::Handled);
+        NUI_CHECK(calls == 1);
+        NUI_CHECK(completed == 1);
+        NUI_CHECK(lifetime_weak.expired());
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::P), platform) == ui::EventResult::Ignored);
+        NUI_CHECK(calls == 1);
+    }
+
     // Chords normalized to Command stay exclusively on the Command route even
     // when that route resolves to Ignored.
     {
@@ -291,7 +344,7 @@ void t174_key_down_fallback_suite() {
         NUI_CHECK(calls == 0);
     }
 
-    // Only raw KeyDown is eligible for the fallback.
+    // Every explicitly excluded input family remains ineligible for the fallback.
     {
         test::MockPlatform platform;
         ui::UI tree{ui::Spacer{40.0f, 40.0f}};
@@ -303,16 +356,37 @@ void t174_key_down_fallback_suite() {
             return ui::EventResult::Handled;
         });
 
+        auto expect_ignored = [&](ui::InputEvent event) {
+            NUI_CHECK(tree.dispatch(event, platform) == ui::EventResult::Ignored);
+            NUI_CHECK(calls == 0);
+        };
+
         auto key_up = test::key(ui::Key::G);
         key_up.type = ui::InputType::KeyUp;
-        NUI_CHECK(tree.dispatch(key_up, platform) == ui::EventResult::Ignored);
-        NUI_CHECK(tree.dispatch(test::text("g"), platform) == ui::EventResult::Ignored);
-        NUI_CHECK(tree.dispatch(t174_composition(ui::CompositionType::Start), platform) ==
-                  ui::EventResult::Ignored);
-        NUI_CHECK(tree.dispatch(
-                      test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
-                  ui::EventResult::Ignored);
-        NUI_CHECK(calls == 0);
+        expect_ignored(std::move(key_up));
+        expect_ignored(test::text("g"));
+        expect_ignored(t174_composition(ui::CompositionType::Start));
+
+        ui::InputEvent tick{};
+        tick.type = ui::InputType::Tick;
+        expect_ignored(std::move(tick));
+
+        expect_ignored(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f));
+        expect_ignored(test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f));
+        expect_ignored(test::pointer(ui::InputType::PointerLeave, 20.0f, 20.0f));
+        expect_ignored(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f));
+        expect_ignored(test::pointer(ui::InputType::PointerCancel, 20.0f, 20.0f));
+        expect_ignored(test::pointer(ui::InputType::PointerWheel, 20.0f, 20.0f));
+
+        ui::InputEvent drop_offer{};
+        drop_offer.type = ui::InputType::DropOffer;
+        drop_offer.position = {20.0f, 20.0f};
+        expect_ignored(std::move(drop_offer));
+
+        ui::InputEvent drop_data{};
+        drop_data.type = ui::InputType::DropData;
+        drop_data.position = {20.0f, 20.0f};
+        expect_ignored(std::move(drop_data));
     }
 
     // Installing the fallback must not alter IME composition delivery or
