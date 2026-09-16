@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -392,6 +393,46 @@ void reentrant_focus_callback_rehomes_after_availability_reversal() {
     NUI_CHECK(platform.text_input_active);
 }
 
+void throwing_focus_callback_recovers_availability_reconciliation() {
+    test::MockPlatform platform;
+    ui::State<bool> enabled{true};
+    auto probe = std::make_shared<AvailabilityProbeState>();
+    bool throw_once = true;
+    probe->on_focus = [&](bool focused) {
+        if (!focused && throw_once) {
+            throw_once = false;
+            throw std::runtime_error("focus teardown failure");
+        }
+    };
+
+    ui::UI tree{ui::Enabled{enabled, AvailabilityProbe{probe}}};
+    tree.resize({100.0f, 40.0f});
+    tree.activate(platform);
+    NUI_CHECK(probe->focus_in == 1);
+
+    bool threw = false;
+    try {
+        enabled.set(false);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(tree.component_availability(probe->node_id)->enabled);
+
+    probe->on_focus = {};
+    tree.dispatch(test::key(ui::Key::A), platform);
+    const auto disabled = tree.component_availability(probe->node_id);
+    NUI_CHECK(disabled.has_value());
+    NUI_CHECK(!disabled->enabled);
+    NUI_CHECK(probe->key_down == 0);
+    NUI_CHECK(tree.layout_dirty());
+
+    enabled.set(true);
+    tree.dispatch(test::key(ui::Key::A), platform);
+    NUI_CHECK(tree.component_availability(probe->node_id)->enabled);
+    NUI_CHECK(probe->key_down == 1);
+}
+
 void two_trees_keep_availability_and_capture_isolated() {
     test::MockPlatform platform_a;
     test::MockPlatform platform_b;
@@ -427,6 +468,7 @@ void suite() {
     read_only_stays_targetable_and_is_paint_only();
     inherited_state_is_monotonic_and_equal_effective_updates_are_noops();
     reentrant_focus_callback_rehomes_after_availability_reversal();
+    throwing_focus_callback_recovers_availability_reconciliation();
     two_trees_keep_availability_and_capture_isolated();
 }
 
