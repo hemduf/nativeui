@@ -7,6 +7,38 @@
 #include <utility>
 #include <vector>
 
+namespace ui::detail {
+
+struct DynamicReconcileFaultAccess {
+    static void arm(Tree& tree, int stage) noexcept {
+        tree.dynamic_reconcile_fault_stage_ = stage;
+    }
+
+    [[nodiscard]] static int armed_stage(const Tree& tree) noexcept {
+        return tree.dynamic_reconcile_fault_stage_;
+    }
+
+    [[nodiscard]] static bool focus_rebuild_pending(const Tree& tree) noexcept {
+        return tree.dynamic_focus_rebuild_pending_;
+    }
+
+    static Node* first_dynamic(Tree& tree, Node& node) noexcept {
+        if (tree.dynamic_source(node)) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = first_dynamic(tree, *child)) return found;
+        }
+        return nullptr;
+    }
+
+    static bool reconcile_first(Tree& tree) {
+        if (!tree.root_) return false;
+        auto* owner = first_dynamic(tree, *tree.root_);
+        return owner ? tree.reconcile_dynamic_node(*owner) : false;
+    }
+};
+
+} // namespace ui::detail
+
 namespace {
 
 struct DynamicLog {
@@ -775,6 +807,153 @@ void dynamic_insert_activate_failure_contract() {
     NUI_CHECK(log->events.size() == event_count);
 }
 
+void dynamic_allocation_transaction_family_contract() {
+    using Access = ui::detail::DynamicReconcileFaultAccess;
+
+    // B1: allocation while preparing removal storage must happen before any
+    // deactivate/unmount callback or retained ownership move.
+    {
+        ui::State<std::vector<DynamicItem>> items{{
+            DynamicItem{"A", "A"}, DynamicItem{"B", "B"}}};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(
+            ui::ForEach<DynamicItem>{
+                items,
+                [](const DynamicItem& item) { return item.key; },
+                [log](const DynamicItem& item) { return DynamicProbe{item.name, log}; }}
+                .spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+        NUI_CHECK(log->events.size() == 4);
+
+        items.set({DynamicItem{"A", "A"}});
+        Access::arm(tree, 1);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(log->events.size() == 4);
+
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK(log->events.size() == 6);
+        NUI_CHECK(log->events[4] == "B.deactivate");
+        NUI_CHECK(log->events[5] == "B.unmount");
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // B2: the desired DynamicRecord key snapshot is fully owned before child
+    // publication. Injected bad_alloc therefore leaves the old empty structure,
+    // and a normal retry mounts/activates the child exactly once.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(ui::If{visible, DynamicProbe{"child", log}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        visible.set(true);
+        Access::arm(tree, 2);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(log->events.empty());
+
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // B3: focus-registry allocation may fail only after structure/lifecycle are
+    // coherent. The failure records a durable repair checkpoint; retry repairs
+    // focus state without remounting or reactivating the inserted child.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(ui::If{visible, DynamicProbe{"child", log}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        visible.set(true);
+        Access::arm(tree, 3);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(Access::focus_rebuild_pending(tree));
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+
+        NUI_CHECK(!Access::reconcile_first(tree));
+        NUI_CHECK(!Access::focus_rebuild_pending(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // Insertion callback rollback must itself stay out of the allocation/focus
+    // preparation path. Keeping stage 3 armed proves rollback did not attempt a
+    // focus rebuild that could replace the original callback exception.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto faults = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(
+            ui::If{visible, FaultingDynamicProbe{"child", log, faults}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        faults->throw_mount = true;
+        visible.set(true);
+        Access::arm(tree, 3);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "child.mount";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(Access::armed_stage(tree) == 3);
+        NUI_CHECK(!Access::focus_rebuild_pending(tree));
+
+        Access::arm(tree, 0);
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK(faults->mounts == 2);
+        NUI_CHECK(faults->activates == 1);
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+}
+
 void focus_capture_and_lifetime_contract() {
     ui::State<bool> visible{true};
     ui::State<int> observed{0};
@@ -919,6 +1098,7 @@ void suite() {
     dynamic_removal_lifecycle_failure_contract();
     dynamic_insert_mount_failure_contract();
     dynamic_insert_activate_failure_contract();
+    dynamic_allocation_transaction_family_contract();
     focus_capture_and_lifetime_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();

@@ -15,6 +15,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -24,6 +25,7 @@ namespace ui {
 
 namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
+struct DynamicReconcileFaultAccess;
 } // namespace detail
 
 class Dialog;
@@ -43,6 +45,7 @@ private:
     // this friendship is only an internal coordination seam.
     friend class Dialog;
     friend class UI;
+    friend struct detail::DynamicReconcileFaultAccess;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
