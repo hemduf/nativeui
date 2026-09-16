@@ -28,6 +28,26 @@ static_assert(static_cast<int>(ui::Key::X) == 16);
 static_assert(static_cast<int>(ui::Key::Y) == 17);
 static_assert(static_cast<int>(ui::Key::Z) == 18);
 static_assert(static_cast<int>(ui::Key::Quit) == 19);
+static_assert(static_cast<int>(ui::Key::B) == 20);
+static_assert(static_cast<int>(ui::Key::D) == 21);
+static_assert(static_cast<int>(ui::Key::E) == 22);
+static_assert(static_cast<int>(ui::Key::F) == 23);
+static_assert(static_cast<int>(ui::Key::G) == 24);
+static_assert(static_cast<int>(ui::Key::H) == 25);
+static_assert(static_cast<int>(ui::Key::I) == 26);
+static_assert(static_cast<int>(ui::Key::J) == 27);
+static_assert(static_cast<int>(ui::Key::K) == 28);
+static_assert(static_cast<int>(ui::Key::L) == 29);
+static_assert(static_cast<int>(ui::Key::M) == 30);
+static_assert(static_cast<int>(ui::Key::N) == 31);
+static_assert(static_cast<int>(ui::Key::O) == 32);
+static_assert(static_cast<int>(ui::Key::P) == 33);
+static_assert(static_cast<int>(ui::Key::Q) == 34);
+static_assert(static_cast<int>(ui::Key::R) == 35);
+static_assert(static_cast<int>(ui::Key::S) == 36);
+static_assert(static_cast<int>(ui::Key::T) == 37);
+static_assert(static_cast<int>(ui::Key::U) == 38);
+static_assert(static_cast<int>(ui::Key::W) == 39);
 
 constexpr std::array<ui::Key, 26> kLetterKeys{
     ui::Key::A, ui::Key::B, ui::Key::C, ui::Key::D, ui::Key::E, ui::Key::F, ui::Key::G,

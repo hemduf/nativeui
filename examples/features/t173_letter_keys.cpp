@@ -132,10 +132,17 @@ int run_self_test() {
             state->last_key != key || state->primary || state->shift) {
             return example::fail("focused component did not receive an unmodified letter KeyDown");
         }
+
+        event.type = ui::InputType::KeyUp;
+        tree.dispatch(event, platform);
+        if (state->last_type != ui::InputType::KeyUp ||
+            state->last_key != key || state->primary || state->shift) {
+            return example::fail("focused component did not receive an unmodified letter KeyUp");
+        }
     }
 
-    if (state->events != static_cast<int>(kLetterKeys.size())) {
-        return example::fail("not every A-Z KeyDown reached the focused component");
+    if (state->events != static_cast<int>(kLetterKeys.size() * 2U)) {
+        return example::fail("not every A-Z KeyDown/KeyUp reached the focused component");
     }
 
     ui::InputEvent palette = example::key(ui::Key::P, true);
