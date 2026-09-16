@@ -429,11 +429,11 @@ void suite() {
         NUI_CHECK(hover_log.size() == settled_count);
     }
 
-    // Dynamic teardown is a reentrant semantic transaction. The first blur may
-    // republish hover and capture into the still-attached subtree, including a
-    // throwing hover observer whose unstarted ancestor suffix must survive. The
-    // teardown barrier then terminalizes those owners exactly once and keeps the
-    // doomed subtree unreachable until detach.
+    // Dynamic teardown publishes a quarantine before arbitrary teardown
+    // callbacks run. Reentrant hover/capture attempts into a retiring subtree
+    // are rejected immediately rather than being published and cleaned up later.
+    // The subtree then detaches with no stale interaction owner, survivor input
+    // remains usable, and a second Tree stays isolated.
     {
         ui::State<bool> visible{true};
         auto doomed = std::make_shared<DynamicTeardownProbeState>();
@@ -473,15 +473,15 @@ void suite() {
         visible.set(false);
         teardown_tree.resize({240.0f, 60.0f});
 
-        NUI_CHECK(doomed->nested_hover_caught == 1);
-        NUI_CHECK(doomed->hover_enter == 2);
-        NUI_CHECK(doomed->hover_leave == 2);
-        NUI_CHECK(doomed->ancestor_hover_enter == 2);
-        NUI_CHECK(doomed->ancestor_hover_leave == 2);
-        NUI_CHECK(doomed->pointer_down == 1);
-        NUI_CHECK(doomed->pointer_cancel == 1);
-        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 1);
-        NUI_CHECK(teardown_platform.pointer_capture_end_count == 1);
+        NUI_CHECK(doomed->nested_hover_caught == 0);
+        NUI_CHECK(doomed->hover_enter == 1);
+        NUI_CHECK(doomed->hover_leave == 1);
+        NUI_CHECK(doomed->ancestor_hover_enter == 1);
+        NUI_CHECK(doomed->ancestor_hover_leave == 1);
+        NUI_CHECK(doomed->pointer_down == 0);
+        NUI_CHECK(doomed->pointer_cancel == 0);
+        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 0);
+        NUI_CHECK(teardown_platform.pointer_capture_end_count == 0);
 
         (void)teardown_tree.dispatch(
             test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f),
@@ -493,12 +493,12 @@ void suite() {
             test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f),
             teardown_platform);
         NUI_CHECK(survivor->pointer_down == 1);
-        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 2);
+        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 1);
         (void)teardown_tree.dispatch(
             test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f),
             teardown_platform);
         NUI_CHECK(survivor->pointer_up == 1);
-        NUI_CHECK(teardown_platform.pointer_capture_end_count == 2);
+        NUI_CHECK(teardown_platform.pointer_capture_end_count == 1);
 
         auto isolated = std::make_shared<DynamicTeardownProbeState>();
         test::MockPlatform isolated_platform;
@@ -510,7 +510,7 @@ void suite() {
             isolated_platform);
         NUI_CHECK(isolated->pointer_down == 1);
         NUI_CHECK(isolated_platform.pointer_capture_begin_count == 1);
-        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 2);
+        NUI_CHECK(teardown_platform.pointer_capture_begin_count == 1);
         (void)isolated_tree.dispatch(
             test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f),
             isolated_platform);

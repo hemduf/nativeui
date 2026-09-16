@@ -1,52 +1,43 @@
 #include "test_support.hpp"
 
-#include <functional>
 #include <map>
 #include <memory>
-#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace ui {
-struct TreeTestAccess {
-    static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
-        tree.fail_next_dynamic_enqueue_for_testing_ = true;
+namespace ui::detail {
+
+struct DynamicReconcileFaultAccess {
+    static void arm(Tree& tree, int stage) noexcept {
+        tree.dynamic_reconcile_fault_stage_ = stage;
     }
 
-    static void fail_next_focus_invalidation_publication(Tree& tree) noexcept {
-        tree.fail_next_focus_invalidation_publication_for_testing_ = true;
+    [[nodiscard]] static int armed_stage(const Tree& tree) noexcept {
+        return tree.dynamic_reconcile_fault_stage_;
     }
 
-    static void fail_next_input_context_preparation(Tree& tree) noexcept {
-        tree.fail_next_input_context_preparation_for_testing_ = true;
+    [[nodiscard]] static bool focus_rebuild_pending(const Tree& tree) noexcept {
+        return tree.dynamic_focus_rebuild_pending_;
     }
 
-    static void clear_paint_dirty(Tree& tree) noexcept {
-        tree.paint_dirty_.clear();
+    static Node* first_dynamic(Tree& tree, Node& node) noexcept {
+        if (tree.dynamic_source(node)) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = first_dynamic(tree, *child)) return found;
+        }
+        return nullptr;
     }
 
-    static void seed_pending_focus(Tree& tree) noexcept {
-        tree.pending_focus_target_ = kInvalidNodeId;
-        tree.pending_focus_request_ = true;
-    }
-
-    static void seed_pending_hover(Tree& tree) {
-        auto pending = std::make_unique<Tree::PointerHoverTransitionState>();
-        pending->next = kInvalidNodeId;
-        tree.pending_pointer_hover_transition_ = std::move(pending);
-    }
-
-    [[nodiscard]] static bool has_pending_focus(const Tree& tree) noexcept {
-        return tree.pending_focus_request_;
-    }
-
-    [[nodiscard]] static bool has_pending_hover(const Tree& tree) noexcept {
-        return static_cast<bool>(tree.pending_pointer_hover_transition_);
+    static bool reconcile_first(Tree& tree) {
+        if (!tree.root_) return false;
+        auto* owner = first_dynamic(tree, *tree.root_);
+        return owner ? tree.reconcile_dynamic_node(*owner) : false;
     }
 };
-} // namespace ui
+
+} // namespace ui::detail
 
 namespace {
 
@@ -112,68 +103,104 @@ private:
     std::shared_ptr<DynamicLog> log_;
 };
 
-class ThrowOnceDynamicProbe {
-public:
-    ThrowOnceDynamicProbe(
-        std::string name,
-        std::shared_ptr<DynamicLog> log,
-        std::shared_ptr<int> attempts)
-        : name_(std::move(name)), log_(std::move(log)), attempts_(std::move(attempts)) {}
-
-    ui::Spec spec() && {
-        auto name = std::move(name_);
-        auto log = std::move(log_);
-        auto attempts = std::move(attempts_);
-        return ui::Spec{
-            [name = std::move(name), log = std::move(log), attempts = std::move(attempts)] {
-                ++*attempts;
-                if (*attempts == 1) throw std::runtime_error("dynamic factory failure");
-                return std::make_unique<DynamicProbeComponent>(name, log);
-            },
-            {}};
-    }
-
-private:
-    std::string name_;
-    std::shared_ptr<DynamicLog> log_;
-    std::shared_ptr<int> attempts_;
+struct DynamicFaultPlan {
+    bool throw_mount{};
+    bool throw_activate{};
+    bool throw_deactivate{};
+    bool throw_unmount{};
+    int mounts{};
+    int activates{};
+    int deactivates{};
+    int unmounts{};
+    int destroyed{};
 };
 
-class ReentrantThrowOnceDynamicProbe {
+class FaultingDynamicProbeComponent final : public ui::Component {
 public:
-    ReentrantThrowOnceDynamicProbe(
+    FaultingDynamicProbeComponent(
         std::string name,
         std::shared_ptr<DynamicLog> log,
-        std::shared_ptr<int> attempts,
-        ui::State<bool>& reentrant_visible)
+        std::shared_ptr<DynamicFaultPlan> faults)
+        : name_(std::move(name)), log_(std::move(log)), faults_(std::move(faults)) {}
+
+    ~FaultingDynamicProbeComponent() override {
+        ++faults_->destroyed;
+        log_->events.push_back(name_ + ".destroy");
+    }
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    void mount(ui::MountContext& context) override {
+        ++faults_->mounts;
+        log_->events.push_back(name_ + ".mount");
+        log_->mounted_ids[name_].push_back(context.node_id());
+        maybe_throw(faults_->throw_mount, "mount");
+    }
+
+    void activate(ui::LifecycleContext&) override {
+        ++faults_->activates;
+        log_->events.push_back(name_ + ".activate");
+        maybe_throw(faults_->throw_activate, "activate");
+    }
+
+    void deactivate(ui::LifecycleContext&) override {
+        ++faults_->deactivates;
+        log_->events.push_back(name_ + ".deactivate");
+        maybe_throw(faults_->throw_deactivate, "deactivate");
+    }
+
+    void unmount(ui::LifecycleContext&) override {
+        ++faults_->unmounts;
+        log_->events.push_back(name_ + ".unmount");
+        maybe_throw(faults_->throw_unmount, "unmount");
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    void maybe_throw(bool& armed, const char* phase) {
+        if (!armed) return;
+        armed = false;
+        throw std::runtime_error(name_ + "." + phase);
+    }
+
+    std::string name_;
+    std::shared_ptr<DynamicLog> log_;
+    std::shared_ptr<DynamicFaultPlan> faults_;
+};
+
+class FaultingDynamicProbe {
+public:
+    FaultingDynamicProbe(
+        std::string name,
+        std::shared_ptr<DynamicLog> log,
+        std::shared_ptr<DynamicFaultPlan> faults,
+        std::vector<ui::Spec> children = {})
         : name_(std::move(name)),
           log_(std::move(log)),
-          attempts_(std::move(attempts)),
-          reentrant_visible_(&reentrant_visible) {}
+          faults_(std::move(faults)),
+          children_(std::move(children)) {}
 
     ui::Spec spec() && {
         auto name = std::move(name_);
         auto log = std::move(log_);
-        auto attempts = std::move(attempts_);
-        auto* reentrant_visible = reentrant_visible_;
+        auto faults = std::move(faults_);
+        auto children = std::move(children_);
         return ui::Spec{
-            [name = std::move(name), log = std::move(log), attempts = std::move(attempts),
-             reentrant_visible] {
-                ++*attempts;
-                if (*attempts == 1) {
-                    reentrant_visible->set(false);
-                    throw std::runtime_error("dynamic factory failure after reentrant mutation");
-                }
-                return std::make_unique<DynamicProbeComponent>(name, log);
+            [name = std::move(name), log = std::move(log), faults = std::move(faults)]() mutable {
+                return std::make_unique<FaultingDynamicProbeComponent>(
+                    std::move(name), std::move(log), std::move(faults));
             },
-            {}};
+            std::move(children)};
     }
 
 private:
     std::string name_;
     std::shared_ptr<DynamicLog> log_;
-    std::shared_ptr<int> attempts_;
-    ui::State<bool>* reentrant_visible_{};
+    std::shared_ptr<DynamicFaultPlan> faults_;
+    std::vector<ui::Spec> children_;
 };
 
 class LifetimeOrderProbeComponent final : public ui::Component {
@@ -283,301 +310,6 @@ private:
     ui::State<int>* observed_{};
 };
 
-struct ReentrantBlurState {
-    int focus_in{};
-    int focus_out{};
-    bool throw_on_focus_out{true};
-    std::function<void()> on_focus_out;
-};
-
-class ReentrantBlurComponent final : public ui::Component {
-public:
-    explicit ReentrantBlurComponent(std::shared_ptr<ReentrantBlurState> state)
-        : state_(std::move(state)) {}
-
-    [[nodiscard]] bool focusable() const noexcept override { return true; }
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {80.0f, 30.0f};
-    }
-    void paint(ui::PaintContext&) const override {}
-
-    void focus_changed(bool focused, ui::FocusContext&) override {
-        if (focused) {
-            ++state_->focus_in;
-            return;
-        }
-        ++state_->focus_out;
-        if (state_->on_focus_out) state_->on_focus_out();
-        if (state_->throw_on_focus_out) {
-            throw std::runtime_error("persistent dynamic blur failure");
-        }
-    }
-
-private:
-    std::shared_ptr<ReentrantBlurState> state_;
-};
-
-class ReentrantBlurProbe {
-public:
-    explicit ReentrantBlurProbe(std::shared_ptr<ReentrantBlurState> state)
-        : state_(std::move(state)) {}
-
-    ui::Spec spec() && {
-        auto state = std::move(state_);
-        return ui::Spec{
-            [state = std::move(state)] {
-                return std::make_unique<ReentrantBlurComponent>(state);
-            },
-            {}};
-    }
-
-private:
-    std::shared_ptr<ReentrantBlurState> state_;
-};
-
-struct HoverLeaveState {
-    int moves{};
-    int leaves{};
-    bool throw_on_leave{};
-};
-
-class HoverLeaveProbeComponent final : public ui::Component {
-public:
-    explicit HoverLeaveProbeComponent(std::shared_ptr<HoverLeaveState> state)
-        : state_(std::move(state)) {}
-
-    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {80.0f, 30.0f};
-    }
-    void paint(ui::PaintContext&) const override {}
-
-    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
-        if (event.type == ui::InputType::PointerMove) {
-            ++state_->moves;
-            return ui::EventResult::Handled;
-        }
-        if (event.type == ui::InputType::PointerLeave) {
-            ++state_->leaves;
-            if (state_->throw_on_leave) {
-                throw std::runtime_error("persistent pointer leave failure");
-            }
-        }
-        return ui::EventResult::Ignored;
-    }
-
-private:
-    std::shared_ptr<HoverLeaveState> state_;
-};
-
-class HoverLeaveProbe {
-public:
-    explicit HoverLeaveProbe(std::shared_ptr<HoverLeaveState> state)
-        : state_(std::move(state)) {}
-
-    ui::Spec spec() && {
-        auto state = std::move(state_);
-        return ui::Spec{
-            [state = std::move(state)] {
-                return std::make_unique<HoverLeaveProbeComponent>(state);
-            },
-            {}};
-    }
-
-private:
-    std::shared_ptr<HoverLeaveState> state_;
-};
-
-struct SemanticSuffixState {
-    int focus_leave{};
-    int hover_leave{};
-    int key_down{};
-    int pointer_moves{};
-    int nested_caught{};
-    bool throw_focus{};
-    bool throw_hover{};
-    std::function<void()> on_focus_leave;
-    std::function<void()> on_hover_leave;
-    std::function<void()> nested_dispatch;
-};
-
-class SemanticSuffixLeafComponent final
-    : public ui::Component,
-      public ui::detail::RetainedInteractionObserver {
-public:
-    explicit SemanticSuffixLeafComponent(std::shared_ptr<SemanticSuffixState> state)
-        : state_(std::move(state)) {}
-
-    [[nodiscard]] bool focusable() const noexcept override { return true; }
-    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {80.0f, 30.0f};
-    }
-    void paint(ui::PaintContext&) const override {}
-
-    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
-        if (event.type == ui::InputType::KeyDown) {
-            ++state_->key_down;
-            if (state_->nested_dispatch) state_->nested_dispatch();
-            return ui::EventResult::Handled;
-        }
-        if (event.type == ui::InputType::PointerMove) {
-            ++state_->pointer_moves;
-            return ui::EventResult::Handled;
-        }
-        return ui::EventResult::Ignored;
-    }
-
-    void retained_focus_within_changed(bool focused, bool, ui::Dispatcher) override {
-        if (focused) return;
-        ++state_->focus_leave;
-        if (state_->on_focus_leave) state_->on_focus_leave();
-        if (state_->throw_focus) {
-            throw std::runtime_error("persistent semantic focus leave failure");
-        }
-    }
-
-    void retained_pointer_hover_changed(bool hovered, bool, ui::Dispatcher) override {
-        if (hovered) return;
-        ++state_->hover_leave;
-        if (state_->on_hover_leave) state_->on_hover_leave();
-        if (state_->throw_hover) {
-            throw std::runtime_error("persistent semantic hover leave failure");
-        }
-    }
-
-private:
-    std::shared_ptr<SemanticSuffixState> state_;
-};
-
-class SemanticSuffixLeaf {
-public:
-    explicit SemanticSuffixLeaf(std::shared_ptr<SemanticSuffixState> state)
-        : state_(std::move(state)) {}
-
-    ui::Spec spec() && {
-        auto state = std::move(state_);
-        return ui::Spec{
-            [state = std::move(state)] {
-                return std::make_unique<SemanticSuffixLeafComponent>(state);
-            },
-            {}};
-    }
-
-private:
-    std::shared_ptr<SemanticSuffixState> state_;
-};
-
-struct SemanticAncestorState {
-    int focus_leave{};
-    int hover_leave{};
-};
-
-class SemanticAncestorComponent final
-    : public ui::Component,
-      public ui::detail::RetainedInteractionObserver {
-public:
-    explicit SemanticAncestorComponent(std::shared_ptr<SemanticAncestorState> state)
-        : state_(std::move(state)) {}
-
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>& children) const override {
-        return children.empty() ? ui::Size{} : children.front().preferred;
-    }
-
-    void layout_children(
-        ui::Rect bounds,
-        const std::vector<ui::ChildMetrics>&,
-        std::vector<ui::ChildPlacement>& placements) const override {
-        if (!placements.empty()) placements.front().bounds = bounds;
-    }
-
-    void paint(ui::PaintContext&) const override {}
-
-    void retained_focus_within_changed(bool focused, bool, ui::Dispatcher) override {
-        if (!focused) ++state_->focus_leave;
-    }
-
-    void retained_pointer_hover_changed(bool hovered, bool, ui::Dispatcher) override {
-        if (!hovered) ++state_->hover_leave;
-    }
-
-private:
-    std::shared_ptr<SemanticAncestorState> state_;
-};
-
-class SemanticAncestor {
-public:
-    template <class Child>
-    SemanticAncestor(std::shared_ptr<SemanticAncestorState> state, Child&& child)
-        : state_(std::move(state)), child_(ui::make_spec(std::forward<Child>(child))) {}
-
-    ui::Spec spec() && {
-        auto state = std::move(state_);
-        std::vector<ui::Spec> children;
-        children.push_back(std::move(child_));
-        return ui::Spec{
-            [state = std::move(state)] {
-                return std::make_unique<SemanticAncestorComponent>(state);
-            },
-            std::move(children)};
-    }
-
-private:
-    std::shared_ptr<SemanticAncestorState> state_;
-    ui::Spec child_;
-};
-
-struct RecoveryTargetState {
-    int key_down{};
-    int pointer_moves{};
-};
-
-class RecoveryTargetComponent final : public ui::Component {
-public:
-    explicit RecoveryTargetComponent(std::shared_ptr<RecoveryTargetState> state)
-        : state_(std::move(state)) {}
-
-    [[nodiscard]] bool focusable() const noexcept override { return true; }
-    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
-    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
-        return {80.0f, 30.0f};
-    }
-    void paint(ui::PaintContext&) const override {}
-
-    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
-        if (event.type == ui::InputType::KeyDown) {
-            ++state_->key_down;
-            return ui::EventResult::Handled;
-        }
-        if (event.type == ui::InputType::PointerMove) {
-            ++state_->pointer_moves;
-            return ui::EventResult::Handled;
-        }
-        return ui::EventResult::Ignored;
-    }
-
-private:
-    std::shared_ptr<RecoveryTargetState> state_;
-};
-
-class RecoveryTarget {
-public:
-    explicit RecoveryTarget(std::shared_ptr<RecoveryTargetState> state)
-        : state_(std::move(state)) {}
-
-    ui::Spec spec() && {
-        auto state = std::move(state_);
-        return ui::Spec{
-            [state = std::move(state)] {
-                return std::make_unique<RecoveryTargetComponent>(state);
-            },
-            {}};
-    }
-
-private:
-    std::shared_ptr<RecoveryTargetState> state_;
-};
-
 struct DynamicItem {
     std::string key;
     std::string name;
@@ -636,6 +368,140 @@ private:
     ui::State<bool>* visible_{};
     std::shared_ptr<LoopState> state_;
 };
+
+FaultingDynamicProbe faulting_subtree(
+    const std::shared_ptr<DynamicLog>& log,
+    const std::shared_ptr<DynamicFaultPlan>& parent,
+    const std::shared_ptr<DynamicFaultPlan>& first,
+    const std::shared_ptr<DynamicFaultPlan>& second,
+    const std::shared_ptr<DynamicFaultPlan>& third) {
+    std::vector<ui::Spec> children;
+    children.push_back(FaultingDynamicProbe{"first", log, first}.spec());
+    children.push_back(FaultingDynamicProbe{"second", log, second}.spec());
+    children.push_back(FaultingDynamicProbe{"third", log, third}.spec());
+    return FaultingDynamicProbe{"parent", log, parent, std::move(children)};
+}
+
+void partial_lifecycle_rollback_contract() {
+    auto log = std::make_shared<DynamicLog>();
+    auto parent = std::make_shared<DynamicFaultPlan>();
+    auto first = std::make_shared<DynamicFaultPlan>();
+    auto second = std::make_shared<DynamicFaultPlan>();
+    auto third = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(faulting_subtree(log, parent, first, second, third).spec())};
+
+    // RED before T130 exact-progress rollback: the recursive cleanup used to
+    // call third.unmount even though third.mount had never begun.
+    second->throw_mount = true;
+    bool mount_threw = false;
+    try {
+        tree.mount();
+    } catch (const std::runtime_error& error) {
+        mount_threw = std::string{error.what()} == "second.mount";
+    }
+    NUI_CHECK(mount_threw);
+    NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1);
+    NUI_CHECK(third->mounts == 0);
+    NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+    NUI_CHECK(third->unmounts == 0);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.mount", "first.mount", "second.mount",
+        "second.unmount", "first.unmount", "parent.unmount"}));
+
+    log->events.clear();
+    tree.mount();
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.mount", "first.mount", "second.mount", "third.mount"}));
+
+    // The same exact-progress rule applies to activation. The untouched third
+    // sibling must not receive deactivate when second.activate aborts traversal.
+    log->events.clear();
+    second->throw_activate = true;
+    bool activate_threw = false;
+    try {
+        tree.activate_focus(platform);
+    } catch (const std::runtime_error& error) {
+        activate_threw = std::string{error.what()} == "second.activate";
+    }
+    NUI_CHECK(activate_threw);
+    NUI_CHECK(parent->activates == 1 && first->activates == 1 && second->activates == 1);
+    NUI_CHECK(third->activates == 0);
+    NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+    NUI_CHECK(third->deactivates == 0);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "parent.activate", "first.activate", "second.activate",
+        "second.deactivate", "first.deactivate", "parent.deactivate"}));
+
+    log->events.clear();
+    tree.activate_focus(platform);
+    tree.deactivate_focus(platform);
+    tree.unmount();
+}
+
+void dynamic_partial_lifecycle_rollback_contract() {
+    // Dynamic insertion delegates to the same lifecycle helpers but previously
+    // tracked progress only at inserted-root granularity. A fault in the second
+    // descendant therefore over-rolled the untouched third sibling.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto parent = std::make_shared<DynamicFaultPlan>();
+        auto first = std::make_shared<DynamicFaultPlan>();
+        auto second = std::make_shared<DynamicFaultPlan>();
+        auto third = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::UI tree{ui::If{visible, faulting_subtree(log, parent, first, second, third)}};
+        tree.resize({160.0f, 80.0f});
+        tree.activate(platform);
+
+        second->throw_mount = true;
+        visible.set(true);
+        bool threw = false;
+        try {
+            tree.resize({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "second.mount";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1);
+        NUI_CHECK(third->mounts == 0);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1);
+        NUI_CHECK(third->unmounts == 0);
+    }
+
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto parent = std::make_shared<DynamicFaultPlan>();
+        auto first = std::make_shared<DynamicFaultPlan>();
+        auto second = std::make_shared<DynamicFaultPlan>();
+        auto third = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::UI tree{ui::If{visible, faulting_subtree(log, parent, first, second, third)}};
+        tree.resize({160.0f, 80.0f});
+        tree.activate(platform);
+
+        second->throw_activate = true;
+        visible.set(true);
+        bool threw = false;
+        try {
+            tree.resize({160.0f, 80.0f});
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "second.activate";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(parent->mounts == 1 && first->mounts == 1 && second->mounts == 1 && third->mounts == 1);
+        NUI_CHECK(parent->activates == 1 && first->activates == 1 && second->activates == 1);
+        NUI_CHECK(third->activates == 0);
+        NUI_CHECK(parent->deactivates == 1 && first->deactivates == 1 && second->deactivates == 1);
+        NUI_CHECK(third->deactivates == 0);
+        NUI_CHECK(parent->unmounts == 1 && first->unmounts == 1 && second->unmounts == 1 && third->unmounts == 1);
+    }
+}
 
 void conditional_contract() {
     ui::State<bool> visible{true};
@@ -717,172 +583,6 @@ void replacement_destroys_before_insert_contract() {
     NUI_CHECK((log->events == std::vector<std::string>{
         "old.mount", "old.activate", "old.deactivate", "old.unmount", "old.destroy",
         "new.mount", "new.activate"}));
-}
-
-void factory_failure_preserves_pending_dynamic_owners_contract() {
-    ui::State<int> selected{1};
-    ui::State<bool> second_visible{true};
-    auto log = std::make_shared<DynamicLog>();
-    auto attempts = std::make_shared<int>(0);
-    test::MockPlatform platform;
-
-    ui::UI tree{
-        ui::Column{
-            ui::Switch<int>{selected}
-                .when(1, DynamicProbe{"old", log})
-                .when(2, ThrowOnceDynamicProbe{"recovered", log, attempts}),
-            ui::If{second_visible, DynamicProbe{"second", log}}
-        }.gap(4.0f).padding(0.0f)};
-    tree.resize({160.0f, 80.0f});
-    tree.activate(platform);
-    NUI_CHECK((log->events == std::vector<std::string>{
-        "old.mount", "second.mount", "old.activate", "second.activate"}));
-
-    selected.set(2);
-    second_visible.set(false);
-
-    bool threw = false;
-    try {
-        tree.resize({160.0f, 80.0f});
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-    NUI_CHECK(*attempts == 1);
-    NUI_CHECK((log->events == std::vector<std::string>{
-        "old.mount", "second.mount", "old.activate", "second.activate",
-        "old.deactivate", "old.unmount"}));
-
-    tree.resize({160.0f, 80.0f});
-    NUI_CHECK(*attempts == 2);
-    NUI_CHECK((log->events == std::vector<std::string>{
-        "old.mount", "second.mount", "old.activate", "second.activate",
-        "old.deactivate", "old.unmount",
-        "recovered.mount", "recovered.activate",
-        "second.deactivate", "second.unmount"}));
-
-    second_visible.set(true);
-    tree.resize({160.0f, 80.0f});
-    NUI_CHECK(log->mounted_ids.at("second").size() == 2);
-    NUI_CHECK(log->events[10] == "second.mount");
-    NUI_CHECK(log->events[11] == "second.activate");
-}
-
-void factory_failure_preserves_reentrant_dynamic_mutation_contract() {
-    ui::State<int> selected{1};
-    ui::State<bool> second_visible{true};
-    auto log = std::make_shared<DynamicLog>();
-    auto attempts = std::make_shared<int>(0);
-    test::MockPlatform platform;
-
-    ui::UI tree{
-        ui::Column{
-            ui::Switch<int>{selected}
-                .when(1, DynamicProbe{"old", log})
-                .when(2, ReentrantThrowOnceDynamicProbe{
-                    "recovered", log, attempts, second_visible}),
-            ui::If{second_visible, DynamicProbe{"second", log}}
-        }.gap(4.0f).padding(0.0f)};
-    tree.resize({160.0f, 80.0f});
-    tree.activate(platform);
-    NUI_CHECK(log->mounted_ids.at("old").size() == 1);
-    NUI_CHECK(log->mounted_ids.at("second").size() == 1);
-
-    selected.set(2);
-
-    bool threw = false;
-    try {
-        tree.resize({160.0f, 80.0f});
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-    NUI_CHECK(*attempts == 1);
-    NUI_CHECK(!second_visible.get());
-
-    tree.resize({160.0f, 80.0f});
-    NUI_CHECK(*attempts == 2);
-    NUI_CHECK(log->mounted_ids.at("recovered").size() == 1);
-    NUI_CHECK(log->events.back() == "second.unmount");
-
-    second_visible.set(true);
-    tree.resize({160.0f, 80.0f});
-    NUI_CHECK(log->mounted_ids.at("second").size() == 2);
-    NUI_CHECK(log->events.back() == "second.activate");
-}
-
-void enqueue_allocation_failure_preserves_dynamic_work_contract() {
-    ui::State<bool> visible{true};
-    auto log = std::make_shared<DynamicLog>();
-    test::MockPlatform platform;
-
-    ui::Tree tree{ui::compile(ui::make_spec(ui::If{visible, DynamicProbe{"child", log}}))};
-    tree.mount();
-    tree.layout({160.0f, 80.0f});
-    tree.activate_focus(platform);
-    NUI_CHECK((log->events == std::vector<std::string>{"child.mount", "child.activate"}));
-
-    ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
-    bool threw = false;
-    try {
-        visible.set(false);
-    } catch (const std::bad_alloc&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-    NUI_CHECK((log->events == std::vector<std::string>{"child.mount", "child.activate"}));
-
-    tree.layout({160.0f, 80.0f});
-    NUI_CHECK((log->events == std::vector<std::string>{
-        "child.mount", "child.activate", "child.deactivate", "child.unmount"}));
-
-    visible.set(true);
-    tree.layout({160.0f, 80.0f});
-    NUI_CHECK(log->mounted_ids.at("child").size() == 2);
-    NUI_CHECK(log->events[4] == "child.mount");
-    NUI_CHECK(log->events[5] == "child.activate");
-}
-
-void enqueue_failure_preserves_previously_dirty_owner_contract() {
-    ui::State<bool> first_visible{true};
-    ui::State<bool> second_visible{true};
-    auto log = std::make_shared<DynamicLog>();
-    test::MockPlatform platform;
-
-    ui::Tree tree{ui::compile(ui::make_spec(
-        ui::Column{
-            ui::If{first_visible, DynamicProbe{"first", log}},
-            ui::If{second_visible, DynamicProbe{"second", log}}
-        }.gap(4.0f).padding(0.0f)))};
-    tree.mount();
-    tree.layout({160.0f, 80.0f});
-    tree.activate_focus(platform);
-    NUI_CHECK(log->mounted_ids.at("first").size() == 1);
-    NUI_CHECK(log->mounted_ids.at("second").size() == 1);
-
-    first_visible.set(false);
-    ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
-    bool threw = false;
-    try {
-        second_visible.set(false);
-    } catch (const std::bad_alloc&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-
-    tree.layout({160.0f, 80.0f});
-    NUI_CHECK(log->events.size() == 8);
-    NUI_CHECK(log->events[4] == "first.deactivate");
-    NUI_CHECK(log->events[5] == "first.unmount");
-    NUI_CHECK(log->events[6] == "second.deactivate");
-    NUI_CHECK(log->events[7] == "second.unmount");
-
-    first_visible.set(true);
-    tree.layout({160.0f, 80.0f});
-    NUI_CHECK(log->mounted_ids.at("first").size() == 2);
-    second_visible.set(true);
-    tree.layout({160.0f, 80.0f});
-    NUI_CHECK(log->mounted_ids.at("second").size() == 2);
 }
 
 void keyed_contract() {
@@ -999,6 +699,261 @@ void coalesced_writes_contract() {
         "child.mount", "child.activate"}));
 }
 
+void dynamic_removal_lifecycle_failure_contract() {
+    ui::State<std::vector<DynamicItem>> items{{
+        DynamicItem{"A", "A"},
+        DynamicItem{"B", "B"},
+    }};
+    auto log = std::make_shared<DynamicLog>();
+    auto a_faults = std::make_shared<DynamicFaultPlan>();
+    auto b_faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::ForEach<DynamicItem>{
+        items,
+        [](const DynamicItem& item) { return item.key; },
+        [log, a_faults, b_faults](const DynamicItem& item) {
+            return FaultingDynamicProbe{
+                item.name, log, item.key == "A" ? a_faults : b_faults};
+        }
+    }};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    b_faults->throw_deactivate = true;
+    b_faults->throw_unmount = true;
+    items.set({});
+
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "B.deactivate");
+    }
+    NUI_CHECK(threw);
+
+    const std::vector<std::string> expected_prefix{
+        "A.mount", "B.mount", "A.activate", "B.activate",
+        "B.deactivate", "B.unmount", "A.deactivate", "A.unmount"};
+    NUI_CHECK(log->events.size() == expected_prefix.size() + 2);
+    for (std::size_t i = 0; i < expected_prefix.size(); ++i) {
+        NUI_CHECK(log->events[i] == expected_prefix[i]);
+    }
+    NUI_CHECK(a_faults->destroyed == 1);
+    NUI_CHECK(b_faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
+}
+
+void dynamic_insert_mount_failure_contract() {
+    ui::State<bool> visible{false};
+    auto log = std::make_shared<DynamicLog>();
+    auto faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::If{visible, FaultingDynamicProbe{"child", log, faults}}};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    faults->throw_mount = true;
+    visible.set(true);
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "child.mount");
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.unmount", "child.destroy"}));
+    NUI_CHECK(faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
+}
+
+void dynamic_insert_activate_failure_contract() {
+    ui::State<bool> visible{false};
+    auto log = std::make_shared<DynamicLog>();
+    auto faults = std::make_shared<DynamicFaultPlan>();
+    test::MockPlatform platform;
+
+    ui::UI tree{ui::If{visible, FaultingDynamicProbe{"child", log, faults}}};
+    tree.resize({160.0f, 80.0f});
+    tree.activate(platform);
+
+    faults->throw_activate = true;
+    visible.set(true);
+    bool threw = false;
+    try {
+        tree.resize({160.0f, 80.0f});
+    } catch (const std::runtime_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "child.activate");
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK((log->events == std::vector<std::string>{
+        "child.mount", "child.activate", "child.deactivate", "child.unmount",
+        "child.destroy"}));
+    NUI_CHECK(faults->destroyed == 1);
+
+    const auto event_count = log->events.size();
+    tree.deactivate(platform);
+    NUI_CHECK(log->events.size() == event_count);
+}
+
+void dynamic_allocation_transaction_family_contract() {
+    using Access = ui::detail::DynamicReconcileFaultAccess;
+
+    // B1: allocation while preparing removal storage must happen before any
+    // deactivate/unmount callback or retained ownership move.
+    {
+        ui::State<std::vector<DynamicItem>> items{{
+            DynamicItem{"A", "A"}, DynamicItem{"B", "B"}}};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(
+            ui::ForEach<DynamicItem>{
+                items,
+                [](const DynamicItem& item) { return item.key; },
+                [log](const DynamicItem& item) { return DynamicProbe{item.name, log}; }}
+                .spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+        NUI_CHECK(log->events.size() == 4);
+
+        items.set({DynamicItem{"A", "A"}});
+        Access::arm(tree, 1);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(log->events.size() == 4);
+
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK(log->events.size() == 6);
+        NUI_CHECK(log->events[4] == "B.deactivate");
+        NUI_CHECK(log->events[5] == "B.unmount");
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // B2: the desired DynamicRecord key snapshot is fully owned before child
+    // publication. Injected bad_alloc therefore leaves the old empty structure,
+    // and a normal retry mounts/activates the child exactly once.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(ui::If{visible, DynamicProbe{"child", log}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        visible.set(true);
+        Access::arm(tree, 2);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(log->events.empty());
+
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // B3: focus-registry allocation may fail only after structure/lifecycle are
+    // coherent. The failure records a durable repair checkpoint; retry repairs
+    // focus state without remounting or reactivating the inserted child.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(ui::If{visible, DynamicProbe{"child", log}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        visible.set(true);
+        Access::arm(tree, 3);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(Access::focus_rebuild_pending(tree));
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+
+        NUI_CHECK(!Access::reconcile_first(tree));
+        NUI_CHECK(!Access::focus_rebuild_pending(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK((log->events == std::vector<std::string>{
+            "child.mount", "child.activate"}));
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+
+    // Insertion callback rollback must itself stay out of the allocation/focus
+    // preparation path. Keeping stage 3 armed proves rollback did not attempt a
+    // focus rebuild that could replace the original callback exception.
+    {
+        ui::State<bool> visible{false};
+        auto log = std::make_shared<DynamicLog>();
+        auto faults = std::make_shared<DynamicFaultPlan>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(
+            ui::If{visible, FaultingDynamicProbe{"child", log, faults}}.spec())};
+        tree.mount();
+        tree.layout({160.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        faults->throw_mount = true;
+        visible.set(true);
+        Access::arm(tree, 3);
+        bool threw = false;
+        try {
+            (void)Access::reconcile_first(tree);
+        } catch (const std::runtime_error& error) {
+            threw = std::string{error.what()} == "child.mount";
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(Access::armed_stage(tree) == 3);
+        NUI_CHECK(!Access::focus_rebuild_pending(tree));
+
+        Access::arm(tree, 0);
+        NUI_CHECK(Access::reconcile_first(tree));
+        tree.layout({160.0f, 80.0f});
+        NUI_CHECK(faults->mounts == 2);
+        NUI_CHECK(faults->activates == 1);
+        tree.deactivate_focus(platform);
+        tree.unmount();
+    }
+}
+
 void focus_capture_and_lifetime_contract() {
     ui::State<bool> visible{true};
     ui::State<int> observed{0};
@@ -1025,375 +980,6 @@ void focus_capture_and_lifetime_contract() {
 
     observed.set(1);
     NUI_CHECK(log->observed_changes == 0);
-}
-
-void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
-    ui::State<bool> visible{true};
-    ui::State<bool> fallback{false};
-    auto blur = std::make_shared<ReentrantBlurState>();
-    test::MockPlatform platform;
-
-    ui::UI tree{
-        ui::Row{
-            ui::If{visible, ReentrantBlurProbe{blur}},
-            ui::Toggle{"Fallback", fallback}}
-            .gap(4.0f)};
-    tree.resize({220.0f, 80.0f});
-    tree.activate(platform);
-    NUI_CHECK(blur->focus_in == 1);
-
-    blur->on_focus_out = [&] {
-        (void)tree.dispatch(test::key(ui::Key::Tab), platform);
-    };
-    visible.set(false);
-
-    bool first_threw = false;
-    try {
-        tree.resize({220.0f, 80.0f});
-    } catch (const std::runtime_error&) {
-        first_threw = true;
-    }
-    NUI_CHECK(first_threw);
-    NUI_CHECK(blur->focus_out == 1);
-
-    bool recovery_threw = false;
-    try {
-        (void)tree.dispatch(test::key(ui::Key::Space), platform);
-    } catch (const std::runtime_error&) {
-        recovery_threw = true;
-    }
-    NUI_CHECK(!recovery_threw);
-    NUI_CHECK(blur->focus_out == 1);
-    NUI_CHECK(fallback.get());
-
-    auto space_up = test::key(ui::Key::Space);
-    space_up.type = ui::InputType::KeyUp;
-    (void)tree.dispatch(space_up, platform);
-
-    (void)tree.dispatch(test::key(ui::Key::Space), platform);
-    NUI_CHECK(!fallback.get());
-    NUI_CHECK(blur->focus_out == 1);
-}
-
-void focus_invalidation_prepare_publish_commit_contract() {
-    {
-        auto blur = std::make_shared<ReentrantBlurState>();
-        blur->throw_on_focus_out = false;
-        ui::State<bool> fallback{false};
-        test::MockPlatform platform;
-        ui::Tree tree{ui::compile(ui::make_spec(
-            ui::Row{ReentrantBlurProbe{blur}, ui::Toggle{"Fallback", fallback}}.gap(4.0f)))};
-        tree.mount();
-        tree.layout({220.0f, 80.0f});
-        tree.activate_focus(platform);
-        ui::TreeTestAccess::clear_paint_dirty(tree);
-
-        int invalidations = 0;
-        tree.set_invalidation_callback([&](ui::Rect) { ++invalidations; });
-        ui::TreeTestAccess::fail_next_focus_invalidation_publication(tree);
-
-        bool threw = false;
-        try {
-            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
-        } catch (const std::bad_alloc&) {
-            threw = true;
-        }
-        NUI_CHECK(threw);
-        NUI_CHECK(blur->focus_out == 1);
-        NUI_CHECK(invalidations == 0);
-
-        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
-                  ui::EventResult::Handled);
-        NUI_CHECK(blur->focus_out == 1);
-        NUI_CHECK(fallback.get());
-        NUI_CHECK(invalidations == 2);
-    }
-
-    {
-        auto blur = std::make_shared<ReentrantBlurState>();
-        blur->throw_on_focus_out = false;
-        ui::State<bool> fallback{false};
-        test::MockPlatform platform;
-        ui::Tree tree{ui::compile(ui::make_spec(
-            ui::Row{ReentrantBlurProbe{blur}, ui::Toggle{"Fallback", fallback}}.gap(4.0f)))};
-        tree.mount();
-        tree.layout({220.0f, 80.0f});
-        tree.activate_focus(platform);
-        ui::TreeTestAccess::clear_paint_dirty(tree);
-
-        int invalidations = 0;
-        bool throw_once = true;
-        tree.set_invalidation_callback([&](ui::Rect) {
-            ++invalidations;
-            if (throw_once) {
-                throw_once = false;
-                throw std::runtime_error("invalidation callback failure");
-            }
-        });
-
-        bool threw = false;
-        try {
-            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
-        } catch (const std::runtime_error&) {
-            threw = true;
-        }
-        NUI_CHECK(threw);
-        NUI_CHECK(blur->focus_out == 1);
-        NUI_CHECK(invalidations == 1);
-
-        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
-                  ui::EventResult::Handled);
-        NUI_CHECK(blur->focus_out == 1);
-        NUI_CHECK(fallback.get());
-        NUI_CHECK(invalidations == 2);
-    }
-}
-
-void hover_input_preparation_boundary_contract() {
-    auto first = std::make_shared<HoverLeaveState>();
-    auto second = std::make_shared<HoverLeaveState>();
-    test::MockPlatform platform;
-    ui::Tree tree{ui::compile(ui::make_spec(
-        ui::Row{HoverLeaveProbe{first}, HoverLeaveProbe{second}}.gap(4.0f)))};
-    tree.mount();
-    tree.layout({220.0f, 80.0f});
-    tree.activate_focus(platform);
-
-    NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(first->moves == 1);
-
-    ui::TreeTestAccess::fail_next_input_context_preparation(tree);
-    bool prepare_threw = false;
-    try {
-        (void)tree.dispatch(
-            test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform);
-    } catch (const std::bad_alloc&) {
-        prepare_threw = true;
-    }
-    NUI_CHECK(prepare_threw);
-    NUI_CHECK(first->leaves == 0);
-    NUI_CHECK(second->moves == 0);
-
-    NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(first->leaves == 1);
-    NUI_CHECK(second->moves == 1);
-
-    second->throw_on_leave = true;
-    bool callback_threw = false;
-    try {
-        (void)tree.dispatch(
-            test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform);
-    } catch (const std::runtime_error&) {
-        callback_threw = true;
-    }
-    NUI_CHECK(callback_threw);
-    NUI_CHECK(second->leaves == 1);
-
-    NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(second->leaves == 1);
-    NUI_CHECK(first->moves == 2);
-}
-
-void semantic_suffix_survives_measure_and_layout_contract() {
-    for (int checkpoint = 0; checkpoint < 2; ++checkpoint) {
-        ui::State<bool> visible{true};
-        auto leaf = std::make_shared<SemanticSuffixState>();
-        auto ancestor = std::make_shared<SemanticAncestorState>();
-        auto target = std::make_shared<RecoveryTargetState>();
-        test::MockPlatform platform;
-
-        ui::Tree tree{ui::compile(ui::make_spec(
-            ui::Row{
-                SemanticAncestor{
-                    ancestor,
-                    ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
-                RecoveryTarget{target}}
-                .gap(4.0f)))};
-        tree.mount();
-        tree.layout({220.0f, 80.0f});
-        tree.activate_focus(platform);
-
-        leaf->throw_focus = true;
-        leaf->on_focus_leave = [&] {
-            visible.set(false);
-            if (checkpoint == 0) {
-                (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
-            } else {
-                tree.layout({220.0f, 80.0f});
-            }
-        };
-
-        bool threw = false;
-        try {
-            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
-        } catch (const std::runtime_error&) {
-            threw = true;
-        }
-        NUI_CHECK(threw);
-        NUI_CHECK(leaf->focus_leave == 1);
-        NUI_CHECK(ancestor->focus_leave == 0);
-        NUI_CHECK(!visible.get());
-
-        if (checkpoint == 0) {
-            (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
-            (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
-        } else {
-            tree.layout({220.0f, 80.0f});
-            tree.layout({220.0f, 80.0f});
-        }
-        NUI_CHECK(leaf->focus_leave == 1);
-        NUI_CHECK(ancestor->focus_leave == 1);
-
-        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
-                  ui::EventResult::Handled);
-        NUI_CHECK(target->key_down == 1);
-        NUI_CHECK(leaf->focus_leave == 1);
-        NUI_CHECK(ancestor->focus_leave == 1);
-    }
-}
-
-void semantic_hover_suffix_survives_public_checkpoint_contract() {
-    ui::State<bool> visible{true};
-    auto leaf = std::make_shared<SemanticSuffixState>();
-    auto ancestor = std::make_shared<SemanticAncestorState>();
-    auto target = std::make_shared<RecoveryTargetState>();
-    test::MockPlatform platform;
-
-    ui::Tree tree{ui::compile(ui::make_spec(
-        ui::Row{
-            SemanticAncestor{
-                ancestor,
-                ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
-            RecoveryTarget{target}}
-            .gap(4.0f)))};
-    tree.mount();
-    tree.layout({220.0f, 80.0f});
-    tree.activate_focus(platform);
-
-    NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(leaf->pointer_moves == 1);
-
-    leaf->throw_hover = true;
-    leaf->on_hover_leave = [&] {
-        visible.set(false);
-        tree.layout({220.0f, 80.0f});
-    };
-
-    bool threw = false;
-    try {
-        (void)tree.dispatch(
-            test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-    NUI_CHECK(leaf->hover_leave == 1);
-    NUI_CHECK(ancestor->hover_leave == 0);
-
-    tree.refresh_focus(platform);
-    tree.refresh_focus(platform);
-    NUI_CHECK(leaf->hover_leave == 1);
-    NUI_CHECK(ancestor->hover_leave == 1);
-
-    NUI_CHECK(tree.dispatch(
-                  test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(target->pointer_moves == 1);
-    NUI_CHECK(leaf->hover_leave == 1);
-    NUI_CHECK(ancestor->hover_leave == 1);
-}
-
-void nested_dispatch_finish_preserves_semantic_suffix_contract() {
-    ui::State<bool> visible{true};
-    auto leaf = std::make_shared<SemanticSuffixState>();
-    auto ancestor = std::make_shared<SemanticAncestorState>();
-    auto target = std::make_shared<RecoveryTargetState>();
-    test::MockPlatform platform;
-
-    ui::Tree tree{ui::compile(ui::make_spec(
-        ui::Row{
-            SemanticAncestor{
-                ancestor,
-                ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
-            RecoveryTarget{target}}
-            .gap(4.0f)))};
-    tree.mount();
-    tree.layout({220.0f, 80.0f});
-    tree.activate_focus(platform);
-
-    leaf->throw_focus = true;
-    leaf->on_focus_leave = [&] { visible.set(false); };
-    leaf->nested_dispatch = [&] {
-        try {
-            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
-        } catch (const std::runtime_error&) {
-            ++leaf->nested_caught;
-        }
-    };
-
-    NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(leaf->nested_caught == 1);
-    NUI_CHECK(leaf->focus_leave == 1);
-    NUI_CHECK(ancestor->focus_leave == 1);
-    NUI_CHECK(!visible.get());
-
-    NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(target->key_down == 1);
-    NUI_CHECK(leaf->focus_leave == 1);
-    NUI_CHECK(ancestor->focus_leave == 1);
-
-    auto isolated = std::make_shared<RecoveryTargetState>();
-    ui::Tree second{ui::compile(ui::make_spec(RecoveryTarget{isolated}))};
-    second.mount();
-    second.layout({100.0f, 40.0f});
-    second.activate_focus(platform);
-    NUI_CHECK(second.dispatch(test::key(ui::Key::Space), platform) ==
-              ui::EventResult::Handled);
-    NUI_CHECK(isolated->key_down == 1);
-    NUI_CHECK(target->key_down == 1);
-}
-
-void lifecycle_terminalizes_pending_semantic_work_contract() {
-    ui::State<bool> value{false};
-    test::MockPlatform platform;
-    ui::Tree tree{ui::compile(ui::make_spec(ui::Toggle{"Value", value}))};
-    tree.mount();
-    tree.layout({160.0f, 80.0f});
-    tree.activate_focus(platform);
-
-    ui::TreeTestAccess::seed_pending_focus(tree);
-    NUI_CHECK(ui::TreeTestAccess::has_pending_focus(tree));
-    tree.deactivate_focus(platform);
-    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
-
-    ui::TreeTestAccess::seed_pending_focus(tree);
-    ui::TreeTestAccess::seed_pending_hover(tree);
-    tree.unmount();
-    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
-    NUI_CHECK(!ui::TreeTestAccess::has_pending_hover(tree));
-
-    ui::TreeTestAccess::seed_pending_focus(tree);
-    ui::TreeTestAccess::seed_pending_hover(tree);
-    tree.mount();
-    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
-    NUI_CHECK(!ui::TreeTestAccess::has_pending_hover(tree));
-
-    tree.layout({160.0f, 80.0f});
-    tree.activate_focus(platform);
-    (void)tree.dispatch(test::key(ui::Key::Space), platform);
-    NUI_CHECK(value.get());
-    tree.deactivate_focus(platform);
-    tree.unmount();
 }
 
 void focus_scope_rehome_contract() {
@@ -1427,7 +1013,6 @@ void focus_scope_rehome_contract() {
     dynamic_visible.set(false);
     tree.resize({320.0f, 120.0f});
     tree.dispatch(test::key(ui::Key::Space), platform);
-
     NUI_CHECK(!outside.get());
     NUI_CHECK(fallback_value.get());
 }
@@ -1503,23 +1088,18 @@ void bounded_reconciliation_contract() {
 }
 
 void suite() {
+    partial_lifecycle_rollback_contract();
+    dynamic_partial_lifecycle_rollback_contract();
     conditional_contract();
     switch_contract();
     replacement_destroys_before_insert_contract();
-    factory_failure_preserves_pending_dynamic_owners_contract();
-    factory_failure_preserves_reentrant_dynamic_mutation_contract();
-    enqueue_allocation_failure_preserves_dynamic_work_contract();
-    enqueue_failure_preserves_previously_dirty_owner_contract();
     keyed_contract();
     coalesced_writes_contract();
+    dynamic_removal_lifecycle_failure_contract();
+    dynamic_insert_mount_failure_contract();
+    dynamic_insert_activate_failure_contract();
+    dynamic_allocation_transaction_family_contract();
     focus_capture_and_lifetime_contract();
-    dynamic_focus_clear_preserves_newer_reentrant_request_contract();
-    focus_invalidation_prepare_publish_commit_contract();
-    hover_input_preparation_boundary_contract();
-    semantic_suffix_survives_measure_and_layout_contract();
-    semantic_hover_suffix_survives_public_checkpoint_contract();
-    nested_dispatch_finish_preserves_semantic_suffix_contract();
-    lifecycle_terminalizes_pending_semantic_work_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();
     bounded_reconciliation_contract();

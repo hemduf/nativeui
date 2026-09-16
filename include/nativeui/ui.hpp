@@ -76,6 +76,7 @@ public:
     void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
+        if (tree_.lifecycle_transition_active()) return {};
         return tree_.measure_overlay_content(constraints);
     }
     void resize(Size viewport) {
@@ -110,6 +111,7 @@ public:
     }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
         // before ordinary retained routing so a focused TextInput/custom body
         // cannot consume Escape ahead of the enabled Cancel action/Dismissed
@@ -317,6 +319,7 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (tree_.lifecycle_transition_active()) return;
         if (!overlay_state_->entries.empty()) {
             prepare_overlay_layout();
             enforce_new_modal_capture_barrier(platform);
@@ -715,6 +718,7 @@ private:
     }
 
     void prepare_overlay_layout() {
+        if (tree_.lifecycle_transition_active()) return;
         // First pass makes root/anchor geometry authoritative for this viewport
         // and flushes pending T058 structural mutations. The overlay-specific
         // layout path deliberately skips a redundant recursive measurement of

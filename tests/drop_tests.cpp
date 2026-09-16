@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "t125_dynamic_recovery_tests.inc"
+#include "t125_quarantine_epoch_tests.inc"
+
 namespace {
 
 struct DropState {
@@ -79,8 +82,6 @@ void borrowed_offer_unwind_contract() {
         NUI_CHECK(!decided);
         decided = true;
 
-        // Nested native dispatch must restore the exact outer borrow rather
-        // than forcing the temporary state to a blind null/false value.
         {
             ui::detail::ScopedBorrowState nested{active_offer, decided, &nested_offer};
             NUI_CHECK(active_offer == &nested_offer);
@@ -95,15 +96,14 @@ void borrowed_offer_unwind_contract() {
         threw = true;
     }
 
-    // This is the state observed after the foreign callback's dispatch body
-    // unwinds and before its catch-all returns through the native ABI. A later
-    // accept/reject path therefore cannot consume the stale callback-frame ptr.
     NUI_CHECK(threw);
     NUI_CHECK(active_offer == nullptr);
     NUI_CHECK(!decided);
 }
 
 void suite() {
+    t125_dynamic_recovery::run();
+    t125_quarantine_epoch::run();
     borrowed_offer_unwind_contract();
 
     auto state = std::make_shared<DropState>();
@@ -133,7 +133,6 @@ void suite() {
     NUI_CHECK(state->data_type == "text/uri-list");
     NUI_CHECK(state->payload == uri);
 
-    // A background drop does not implicitly activate keyboard/command input.
     auto key_probe = std::make_shared<test::ProbeState>();
     auto background_state = std::make_shared<DropState>();
     test::MockPlatform background_platform;
@@ -154,8 +153,6 @@ void suite() {
     NUI_CHECK(background_state->data_events == 0);
     NUI_CHECK(state->data_events == 1);
 
-    // Non-focusable custom components still receive drops through deepest-node
-    // hit testing, which is independent from keyboard focusability.
     NUI_CHECK(state->offer_position.x == 70.0f);
     NUI_CHECK(state->data_position.y == 55.0f);
 
@@ -166,8 +163,6 @@ void suite() {
     tree.dispatch(unknown, platform);
     NUI_CHECK(platform.drop_reject_count == 1);
 
-    // Finder (and any external drag source) owns keyboard focus during a
-    // drag. Losing window focus must not disable an otherwise live target.
     tree.deactivate(platform);
     NUI_CHECK(tree.dispatch(offer, platform) == ui::EventResult::Handled);
     NUI_CHECK(state->offers == 3);
@@ -176,7 +171,6 @@ void suite() {
     NUI_CHECK(state->data_events == 2);
     NUI_CHECK(state->payload == uri);
 
-    // Hit testing and rejection still apply after focus loss.
     const int offers_before = state->offers;
     auto outside = offer;
     outside.position = {301.0f, 40.0f};
@@ -185,8 +179,6 @@ void suite() {
     NUI_CHECK(tree.dispatch(unknown, platform) == ui::EventResult::Handled);
     NUI_CHECK(platform.drop_reject_count == 2);
 
-    // Background drops still obey inherited enabled/visibility state, and
-    // changing that state while inactive takes effect without reactivation.
     ui::State<bool> enabled{false};
     ui::State<ui::VisibilityMode> visibility{ui::VisibilityMode::Visible};
     auto gated_state = std::make_shared<DropState>();
@@ -205,7 +197,6 @@ void suite() {
     NUI_CHECK(gated.dispatch(data, platform) == ui::EventResult::Handled);
     NUI_CHECK(gated_state->offers == 1 && gated_state->data_events == 1);
 
-    // Mount lifetime, unlike keyboard activation, is a drop-delivery gate.
     auto mounted_state = std::make_shared<DropState>();
     ui::Tree mounted_tree{ui::compile(ui::make_spec(DropTarget{mounted_state}))};
     mounted_tree.layout({300.0f, 160.0f});

@@ -145,31 +145,21 @@
     void sync_availability_inactive() {
         if (!availability_structure_dirty_ || !root_) return;
 
-        try {
-            std::vector<PendingAvailability> pending;
-            pending.reserve(focusables_.size() + 8);
-            collect_availability(*root_, ComponentAvailability{}, pending);
-            availability_structure_dirty_ = false;
+        std::vector<PendingAvailability> pending;
+        pending.reserve(focusables_.size() + 8);
+        collect_availability(*root_, ComponentAvailability{}, pending);
+        availability_structure_dirty_ = false;
 
-            bool layout_changed = false;
-            bool focus_changed = false;
-            bool paint_changed = false;
-            apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
+        bool layout_changed = false;
+        bool focus_changed = false;
+        bool paint_changed = false;
+        apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
 
-            if (focus_changed) focus_structure_dirty_ = true;
-            if (layout_changed) {
-                invalidate_layout_from(*root_);
-            } else if (paint_changed) {
-                invalidate_paint(viewport_rect());
-            }
-        } catch (...) {
-            // Preserve a conservative retained checkpoint using only no-throw
-            // state writes. The next safe caller recomputes availability and
-            // layout; no application callback is invoked during unwind.
-            availability_structure_dirty_ = true;
-            focus_structure_dirty_ = true;
-            layout_dirty_ = true;
-            throw;
+        if (focus_changed) focus_structure_dirty_ = true;
+        if (layout_changed) {
+            invalidate_layout_from(*root_);
+        } else if (paint_changed) {
+            invalidate_paint(viewport_rect());
         }
     }
 
@@ -185,123 +175,34 @@
     void sync_availability_structure(PlatformServices& platform) {
         if (!availability_structure_dirty_ || syncing_availability_ || !root_) return;
 
-        const bool previous_syncing = syncing_availability_;
         syncing_availability_ = true;
         Node* rehome_scope = nullptr;
         bool focus_needs_rehome = false;
         constexpr int kMaxReconcilePasses = 16;
 
-        try {
-            for (int pass = 0; pass < kMaxReconcilePasses && availability_structure_dirty_; ++pass) {
-                availability_structure_dirty_ = false;
+        for (int pass = 0; pass < kMaxReconcilePasses && availability_structure_dirty_; ++pass) {
+            availability_structure_dirty_ = false;
 
-                std::vector<PendingAvailability> pending;
-                pending.reserve(focusables_.size() + 8);
-                collect_availability(*root_, ComponentAvailability{}, pending);
+            std::vector<PendingAvailability> pending;
+            pending.reserve(focusables_.size() + 8);
+            collect_availability(*root_, ComponentAvailability{}, pending);
 
-                bool any_change = false;
-                for (const auto& change : pending) {
-                    if (!(change.value == change.node->component->effective_availability())) {
-                        any_change = true;
-                        break;
-                    }
+            bool any_change = false;
+            for (const auto& change : pending) {
+                if (!(change.value == change.node->component->effective_availability())) {
+                    any_change = true;
+                    break;
                 }
-                if (!any_change) {
-                    // A teardown callback can reverse the state that triggered
-                    // focus loss before the pending availability snapshot is
-                    // applied. In that case there is no availability delta on the
-                    // next pass, but focus still needs to be restored explicitly.
-                    if (focus_needs_rehome && active_ && !focus_active_) {
-                        Node* fallback = nullptr;
-                        if (rehome_scope &&
-                            rehome_scope->component->effective_availability().interactive()) {
-                            fallback = first_available_focusable(rehome_scope);
-                        } else {
-                            fallback = first_available_focusable();
-                        }
-                        if (fallback) set_focus(fallback, platform);
-                        focus_needs_rehome = false;
-                        rehome_scope = nullptr;
-                    }
-                    continue;
-                }
-
-                if (auto* capture = pointer_capture_owner()) {
-                    if (!pending_availability_for(pending, capture).interactive()) {
-                        (void)cancel_pointer_capture(platform);
-                    }
-                }
-
-                // A hover route whose target becomes Hidden/Collapsed/Disabled is no
-                // longer an eligible interaction. Retained hover presentation must
-                // observe PointerLeave exactly as if the pointer had moved away;
-                // otherwise a delayed policy such as Tooltip could still fire while
-                // its anchor is unavailable.
-                if (pointer_hover_target_ &&
-                    !pending_availability_for(pending, pointer_hover_target_).interactive()) {
-                    InputEvent leave{};
-                    leave.type = InputType::PointerLeave;
-                    (void)clear_pointer_hover(leave, platform);
-                }
-
-                if (auto* focused = current_focus_node()) {
-                    if (!pending_availability_for(pending, focused).interactive()) {
-                        rehome_scope = trapping_scope_for(focused);
-                        focus_needs_rehome = true;
-                        clear_focus(platform);
-                        // clear_focus now shares the generic durable focus transition
-                        // machinery with set_focus(). A successful transition may
-                        // retire availability_cleared_focus_ as ordinary focus work,
-                        // but availability reconciliation needs that identity to
-                        // survive until the queued State pass can either restore the
-                        // old target or select a compatible fallback.
-                        if (!availability_cleared_focus_) availability_cleared_focus_ = focused;
-                    }
-                }
-
-                // PointerCancel/focus callbacks are allowed to mutate State. If they
-                // changed availability, discard this snapshot and recompute before
-                // applying suppression so callbacks always observe the old valid
-                // interaction context.
-                if (availability_structure_dirty_) continue;
-
-                bool layout_changed = false;
-                bool focus_changed = false;
-                bool paint_changed = false;
-                apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
-
-                if (focus_changed) focus_structure_dirty_ = true;
-                if (layout_changed) {
-                    invalidate_layout_from(*root_);
-                } else if (paint_changed) {
-                    invalidate_paint(viewport_rect());
-                }
-
-                if (focus_changed && active_) sync_focus_structure(platform);
-
-                // A post-commit focus observer can throw after clear_focus() has
-                // already published inactive focus. In that case the stack-local
-                // focus_needs_rehome flag is lost when reconciliation unwinds, while
-                // availability_cleared_focus_ deliberately survives. Treat that
-                // retained identity as the durable rehome intent on subsequent safe
-                // availability checkpoints. Respect the original trapping-scope
-                // policy; if no target is currently available, keep the marker for
-                // a later State change instead of discarding recovery state.
-                if (active_ && !focus_active_ && availability_cleared_focus_) {
-                    Node* fallback = nullptr;
-                    auto* recovery_scope = trapping_scope_for(availability_cleared_focus_);
-                    if (recovery_scope &&
-                        recovery_scope->component->effective_availability().interactive()) {
-                        fallback = first_available_focusable(recovery_scope);
-                    } else {
-                        fallback = first_available_focusable();
-                    }
-                    if (fallback) set_focus(fallback, platform);
-                }
-
+            }
+            if (!any_change) {
+                // A teardown callback can reverse the state that triggered
+                // focus loss before the pending availability snapshot is
+                // applied. In that case there is no availability delta on the
+                // next pass, but focus still needs to be restored explicitly.
                 if (focus_needs_rehome && active_ && !focus_active_) {
                     Node* fallback = nullptr;
-                    if (rehome_scope && rehome_scope->component->effective_availability().interactive()) {
+                    if (rehome_scope &&
+                        rehome_scope->component->effective_availability().interactive()) {
                         fallback = first_available_focusable(rehome_scope);
                     } else {
                         fallback = first_available_focusable();
@@ -310,20 +211,68 @@
                     focus_needs_rehome = false;
                     rehome_scope = nullptr;
                 }
+                continue;
             }
-            syncing_availability_ = previous_syncing;
-        } catch (...) {
-            // The pending snapshot may be only partially applied when arbitrary
-            // component/focus/invalidation code throws. Keep reconciliation and
-            // layout conservatively dirty without allocating or calling back;
-            // the next safe checkpoint recomputes from current State values.
-            availability_structure_dirty_ = true;
-            focus_structure_dirty_ = true;
-            layout_dirty_ = true;
-            syncing_availability_ = previous_syncing;
-            throw;
+
+            if (auto* capture = pointer_capture_owner()) {
+                if (!pending_availability_for(pending, capture).interactive()) {
+                    (void)cancel_pointer_capture(platform);
+                }
+            }
+
+            // A hover route whose target becomes Hidden/Collapsed/Disabled is no
+            // longer an eligible interaction. Retained hover presentation must
+            // observe PointerLeave exactly as if the pointer had moved away;
+            // otherwise a delayed policy such as Tooltip could still fire while
+            // its anchor is unavailable.
+            if (pointer_hover_target_ &&
+                !pending_availability_for(pending, pointer_hover_target_).interactive()) {
+                InputEvent leave{};
+                leave.type = InputType::PointerLeave;
+                (void)clear_pointer_hover(leave, platform);
+            }
+
+            if (auto* focused = current_focus_node()) {
+                if (!pending_availability_for(pending, focused).interactive()) {
+                    rehome_scope = trapping_scope_for(focused);
+                    focus_needs_rehome = true;
+                    clear_focus(platform);
+                }
+            }
+
+            // PointerCancel/focus callbacks are allowed to mutate State. If they
+            // changed availability, discard this snapshot and recompute before
+            // applying suppression so callbacks always observe the old valid
+            // interaction context.
+            if (availability_structure_dirty_) continue;
+
+            bool layout_changed = false;
+            bool focus_changed = false;
+            bool paint_changed = false;
+            apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
+
+            if (focus_changed) focus_structure_dirty_ = true;
+            if (layout_changed) {
+                invalidate_layout_from(*root_);
+            } else if (paint_changed) {
+                invalidate_paint(viewport_rect());
+            }
+
+            if (focus_changed && active_) sync_focus_structure(platform);
+            if (focus_needs_rehome && active_ && !focus_active_) {
+                Node* fallback = nullptr;
+                if (rehome_scope && rehome_scope->component->effective_availability().interactive()) {
+                    fallback = first_available_focusable(rehome_scope);
+                } else {
+                    fallback = first_available_focusable();
+                }
+                if (fallback) set_focus(fallback, platform);
+                focus_needs_rehome = false;
+                rehome_scope = nullptr;
+            }
         }
 
+        syncing_availability_ = false;
         if (availability_structure_dirty_) {
             // A hostile callback loop must not recurse without bound. Preserve
             // the dirty bit and schedule another deterministic reconciliation.
@@ -458,29 +407,65 @@
         for (auto& child : node.children) activate_node(*child);
     }
 
+    static void remember_current_exception(std::exception_ptr& first_error) noexcept {
+        if (!first_error) first_error = std::current_exception();
+    }
+
     void deactivate_node(Node& node) {
+        std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-            deactivate_node(**it);
+            try {
+                deactivate_node(**it);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
-        node.component->deactivate(context);
+        try {
+            node.component->deactivate(context);
+        } catch (...) {
+            remember_current_exception(first_error);
+        }
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void unmount_node(Node& node) {
+        std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-            unmount_node(**it);
+            try {
+                unmount_node(**it);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         LifecycleContext context{
             node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
-        node.component->unmount(context);
+        try {
+            node.component->unmount(context);
+        } catch (...) {
+            remember_current_exception(first_error);
+        }
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
-            binding->set_theme_change_invalidator({});
+            try {
+                binding->set_theme_change_invalidator({});
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
         if (auto* source = dynamic_source(node)) {
-            source->set_structure_invalidator({});
-            unregister_dynamic_node(node.id);
+            try {
+                source->set_structure_invalidator({});
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
+            try {
+                unregister_dynamic_node(node.id);
+            } catch (...) {
+                remember_current_exception(first_error);
+            }
         }
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void paint_node(
