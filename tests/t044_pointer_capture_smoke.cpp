@@ -154,13 +154,25 @@ public:
         NSView* view = native_view(window);
         NSWindow* native_window = view ? [view window] : nil;
         if (!native_window) return false;
+
+        // A hosted runner can report a window key/visible before AppKit has
+        // activated the process as a session-event routing target. Establish
+        // the application side of that native boundary explicitly, then observe
+        // both application and window readiness before any semantic input.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        [NSApp activateIgnoringOtherApps:YES];
+#pragma clang diagnostic pop
         [native_window makeKeyAndOrderFront:nil];
         [native_window orderFrontRegardless];
-        for (int attempt = 0; attempt < 20 && ![native_window isKeyWindow]; ++attempt) {
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            if ([NSApp isActive] && [native_window isVisible] && [native_window isKeyWindow]) {
+                return true;
+            }
             [[NSRunLoop currentRunLoop]
                 runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
         }
-        return [native_window isVisible] && [native_window isKeyWindow];
+        return [NSApp isActive] && [native_window isVisible] && [native_window isKeyWindow];
 #elif defined(_WIN32)
         HWND native_window = hwnd(window);
         if (!native_window) return false;
@@ -182,16 +194,22 @@ public:
 #endif
     }
 
+    // Non-semantic native routing probe. On macOS this is deliberately only a
+    // mouse-move: callers may retry it while waiting for delivery without ever
+    // duplicating the semantic PointerDown that starts the capture contract.
+    bool prime_pointer_route(ui::StandaloneWindow& window) {
+#if defined(__APPLE__)
+        return post_mouse(window, kCGEventMouseMoved, false, false);
+#else
+        (void)window;
+        return true;
+#endif
+    }
+
     bool pointer_down(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
-        if (!post_mouse(window, kCGEventMouseMoved, false, false)) return false;
-        // Deliver the positioning event before the press. On hosted macOS a
-        // freshly ordered third window can otherwise receive the key transition
-        // after the synthetic down has already been routed to the previous
-        // front window, making the destruction fixture test the runner timing
-        // instead of capture semantics.
-        [[NSRunLoop currentRunLoop]
-            runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        // Routing readiness is observed separately by prime_pointer_route().
+        // The semantic down itself is posted exactly once.
         return post_mouse(window, kCGEventLeftMouseDown, false, true);
 #elif defined(_WIN32)
         return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTDOWN);
@@ -431,6 +449,31 @@ private:
 #endif
 };
 
+bool await_native_pointer_route(ui::Application& application,
+                                NativePointerDriver& driver,
+                                ui::StandaloneWindow& window,
+                                const std::shared_ptr<CaptureState>& state,
+                                std::string_view stage) {
+#if defined(__APPLE__)
+    const int move_before = state->move;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        if (!step(driver.prime_pointer_route(window), stage, "routing-readiness probe")) {
+            return false;
+        }
+        if (!pump(application, 2)) return false;
+        if (state->move > move_before) return true;
+    }
+    return expect(false, stage, "native routing readiness probe was not delivered");
+#else
+    (void)application;
+    (void)driver;
+    (void)window;
+    (void)state;
+    (void)stage;
+    return true;
+#endif
+}
+
 bool run_outside_sequence(ui::Application& application,
                           NativePointerDriver& driver,
                           ui::StandaloneWindow& window,
@@ -443,6 +486,7 @@ bool run_outside_sequence(ui::Application& application,
     const int cancel_before = state->cancel;
 
     if (!step(driver.focus(window), stage, "focus") || !pump(application)) return false;
+    if (!await_native_pointer_route(application, driver, window, state, stage)) return false;
     if (!step(driver.pointer_down(window), stage, "pointer-down") || !pump(application)) return false;
     if (!expect(state->down == down_before + 1, stage, "pointer down was not delivered")) return false;
     if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) {
@@ -498,6 +542,7 @@ int main() {
     const int a_cancel_before = a_state->cancel;
     const int a_up_before = a_state->up;
     if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
+    if (!await_native_pointer_route(application, driver, *a, a_state, "focus-loss")) return 1;
     if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A") || !pump(application)) return 1;
     if (!expect(driver.capture_owned_by(*a), "focus-loss", "A did not own native capture")) return 1;
     if (!step(driver.focus(*b), "focus-loss", "focus B") || !pump(application)) return 1;
@@ -524,6 +569,7 @@ int main() {
         ui::WindowDesc{.title = "NativeUI T044 C", .size = {220.0f, 150.0f}, .resizable = true});
     if (!c->valid()) return fail("create-c", c->last_error());
     if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
+    if (!await_native_pointer_route(application, driver, *c, c_state, "destroy-capture")) return 1;
     if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C") || !pump(application)) return 1;
     if (!expect(c_state->down == 1, "destroy-capture", "C did not receive pointer down")) return 1;
     c.reset();

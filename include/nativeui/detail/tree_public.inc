@@ -1,13 +1,29 @@
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {}
-    ~Tree() { unmount(); }
+    ~Tree() noexcept {
+        try {
+            unmount();
+        } catch (...) {
+            // Destructor-driven teardown is containment-only. unmount() has
+            // already completed best-effort retained cleanup and restored Tree
+            // lifecycle invariants before propagating its first component error.
+        }
+    }
 
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
 
     void mount() {
         if (mounted_) return;
-        mounted_ = true;
-        focusables_.clear();
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Mount, true};
+
+        // Keep the committed focus registry empty for the complete mount
+        // transaction. Reuse its prior capacity as staging storage so root focus
+        // publication adds no second traversal and no callback-time allocation.
+        std::vector<Node*> staged_focusables;
+        staged_focusables.swap(focusables_);
+        staged_focusables.clear();
+
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
@@ -18,13 +34,45 @@
             !root_->component->focusable() &&
             !root_->component->clips_children() &&
             !root_->component->is_focus_scope();
-        initialize_availability(*root_);
-        availability_structure_dirty_ = false;
-        mount_node(*root_);
-        invalidate_layout_from(*root_);
+
+        try {
+            initialize_availability(*root_);
+            availability_structure_dirty_ = false;
+            mount_node(*root_, &staged_focusables);
+            invalidate_layout_from(*root_);
+        } catch (...) {
+            // Root lifecycle/focus state is still provisional here. The inner
+            // journal has already rolled back a mount-callback failure; the
+            // failed-root sentinel consumes this outer cleanup once. Failures
+            // after a completed mount walk still receive full best-effort
+            // teardown before the original exception is propagated.
+            try {
+                unmount_node(*root_);
+            } catch (...) {
+            }
+            staged_focusables.clear();
+            focusables_.swap(staged_focusables);
+            focusables_.clear();
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            active_ = false;
+            availability_structure_dirty_ = false;
+            focus_structure_dirty_ = true;
+            mounted_ = false;
+            throw;
+        }
+
+        // Exact root-mount commit: both swaps/flag stores are no-throw and occur
+        // only after every mount callback plus retained setup has succeeded.
+        focusables_.swap(staged_focusables);
+        mounted_ = true;
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
+        if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
@@ -32,33 +80,97 @@
     /// Immediately recompute layout for an externally supplied viewport (for
     /// example a window resize), and dirty the complete new viewport.
     void layout(Size viewport) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
-        viewport_ = viewport;
-        paint_dirty_.clear();
-        layout_node(*root_, viewport_rect());
-        layout_dirty_ = false;
-        invalidate_paint(viewport_rect());
+        auto transaction = begin_layout_publication(viewport);
+        try {
+            layout_node(*root_, viewport_rect());
+        } catch (...) {
+            rollback_layout_publication(std::move(transaction));
+            throw;
+        }
+        commit_layout_publication();
     }
 
     void activate_focus(PlatformServices& platform) {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Activate, true};
+        if (!mounted_) return;
         flush_dynamic_mutations();
         if (active_) return;
+
+        // active_ is provisional while the component activation traversal runs.
+        // Keep the historic callback ordering, but do not leave that provisional
+        // state published if a component throws before platform/focus commit.
         active_ = true;
-        activate_node(*root_);
-        active_platform_ = &platform;
-        sync_availability_structure(platform);
-        focus_structure_dirty_ = true;
-        sync_focus_structure(platform);
-        if (!focus_active_) {
-            if (auto* first = first_available_focusable()) set_focus(first, platform);
+        try {
+            activate_node(*root_);
+        } catch (...) {
+            try {
+                deactivate_node(*root_);
+            } catch (...) {
+            }
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            throw;
         }
-        invalidate_paint(viewport_rect());
+
+        // Component activation is only the first fallible stage. Availability
+        // reconciliation, focus publication and paint invalidation may also
+        // invoke application code after active/platform state has become
+        // provisional. Treat the complete activation as one transaction: if a
+        // later stage fails, run the ordinary best-effort deactivation path and
+        // preserve the original activation exception.
+        active_platform_ = &platform;
+        try {
+            sync_availability_structure(platform);
+            focus_structure_dirty_ = true;
+            sync_focus_structure(platform);
+            if (!focus_active_) {
+                if (auto* first = first_available_focusable()) set_focus(first, platform);
+            }
+            invalidate_paint(viewport_rect());
+        } catch (...) {
+            const auto activation_error = std::current_exception();
+            // Recovery is a new terminal lifecycle transaction. Release the
+            // activation token before entering the public best-effort teardown;
+            // deactivate_focus() acquires its own token so its callbacks still
+            // cannot re-enter another lifecycle transition.
+            lifecycle.release();
+            try {
+                deactivate_focus(platform);
+            } catch (...) {
+                // deactivate_focus() commits terminal Tree/platform state before
+                // propagating its first teardown error. Activation owns the
+                // original failure, so teardown diagnostics must not replace it.
+            }
+
+            // Defensive framework-only terminalization keeps this recovery
+            // correct if a future teardown stage gains a new pre-commit failure.
+            // No application callback is invoked from this fallback.
+            focus_active_ = false;
+            clear_pointer_capture();
+            pointer_hover_target_ = nullptr;
+            pointer_interaction_active_ = false;
+            active_platform_ = nullptr;
+            reset_focus_scope_cache(*root_);
+            focus_structure_dirty_ = true;
+            active_ = false;
+            std::rethrow_exception(activation_error);
+        }
     }
 
     void refresh_focus(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
@@ -66,70 +178,108 @@
         if (focusables_.empty() || !focus_active_) return;
         auto* node = focusables_[focused_index_];
         FocusContext context{
-            node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
+            node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, context);
     }
 
     void deactivate_focus(PlatformServices& platform) {
-        flush_dynamic_mutations();
-        if (!active_) return;
-        sync_availability_structure(platform);
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Deactivate, true};
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
 
-        // Hover and capture callbacks must run while components and platform
-        // services are still active. Hover is presentation-only and is cleared
-        // independently from any in-flight captured interaction.
+        capture_error([&] { flush_dynamic_mutations(); });
+        if (!active_) {
+            if (first_error) std::rethrow_exception(first_error);
+            return;
+        }
+        capture_error([&] { sync_availability_structure(platform); });
+
+        // Hover/capture/focus callbacks are arbitrary application code. During
+        // native teardown they may fail, but every remaining lifecycle phase
+        // still has to run while PlatformServices is alive so the Tree cannot
+        // retain a pointer to a destroyed view.
         InputEvent leave{};
         leave.type = InputType::PointerLeave;
-        (void)clear_pointer_hover(leave, platform);
-
-        // Cancel any in-flight pointer interaction while components and
-        // platform services are still active. This is the deterministic
-        // lifecycle boundary used for focus loss and view teardown.
-        (void)cancel_pointer_capture(platform);
+        capture_error([&] { (void)clear_pointer_hover(leave, platform); });
+        capture_error([&] { (void)cancel_pointer_capture(platform); });
 
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
             FocusContext context{
-                node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
-            node->component->focus_changed(false, context);
-            invalidate_node_paint(*node);
+                node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+            capture_error([&] { node->component->focus_changed(false, context); });
+            capture_error([&] { invalidate_node_paint(*node); });
         }
 
+        // Commit authoritative interaction/platform state even when one of the
+        // callbacks above failed. clear_pointer_capture() is noexcept and still
+        // releases the native capture boundary while this PlatformServices
+        // instance is alive. T125 owns cancellation-guard recovery itself.
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
-        deactivate_node(*root_);
+
+        capture_error([&] { deactivate_node(*root_); });
+
+        // Tree lifecycle state commits before the first retained exception is
+        // propagated. A later activation therefore executes a real transition
+        // instead of observing a stale active/platform state from the dead view.
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
-        if (availability_structure_dirty_) sync_availability_inactive();
-        invalidate_paint(viewport_rect());
+        if (availability_structure_dirty_) {
+            capture_error([&] { sync_availability_inactive(); });
+        }
+        capture_error([&] { invalidate_paint(viewport_rect()); });
+
+        if (first_error) std::rethrow_exception(first_error);
     }
 
     void unmount() {
+        LifecycleTransitionScope lifecycle{
+            *this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) return;
+
+        std::exception_ptr first_error;
+        auto capture_error = [&first_error](auto&& callback) {
+            try {
+                callback();
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        };
 
         // Normal platform integrations deactivate before unmount so focused
         // controls can release platform services. This fallback still runs the
         // platform-neutral component lifecycle if a caller destroys an active
-        // tree directly.
+        // tree directly. Teardown is best-effort: preserve the first component
+        // exception, finish every remaining phase, publish terminal Tree state,
+        // then propagate only for this ordinary explicit C++ entry point.
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
         active_platform_ = nullptr;
         if (active_) {
-            deactivate_node(*root_);
+            capture_error([&] { deactivate_node(*root_); });
             active_ = false;
         }
 
-        unmount_node(*root_);
+        capture_error([&] { unmount_node(*root_); });
         focusables_.clear();
         mounted_ = false;
-    }
 
+        if (first_error) std::rethrow_exception(first_error);
+    }
     [[nodiscard]] bool dirty() const noexcept {
         return layout_dirty_ || !paint_dirty_.empty();
     }
@@ -178,12 +328,14 @@
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
     void focus_next(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(1, platform);
     }
 
     void focus_previous(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         move_focus(-1, platform);
@@ -215,6 +367,7 @@
     /// - external drop offers/data hit-test a mounted tree even without window focus;
     /// - ignored target events bubble through ancestors until handled or root.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         // An external drag source (for example Finder) owns keyboard focus.
         // Drop targeting must remain available without activating this tree
         // or restoring keyboard focus/text input as a side effect.
@@ -394,12 +547,14 @@
     /// Explicitly cancel the active pointer capture, if any. The current owner
     /// receives one PointerCancel event before capture is cleared.
     EventResult cancel_pointer(PlatformServices& platform) {
+        if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         return cancel_pointer_capture(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
