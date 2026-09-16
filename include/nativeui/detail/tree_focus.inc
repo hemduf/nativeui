@@ -375,9 +375,30 @@
         // a later availability pass finish framework work without retrying the
         // already-started focus callback.
         invalidate_node_paint(*old);
-        focus_active_ = false;
+
+        // clear_focus has already completed the application blur and old-node
+        // invalidation. Prepare the remaining semantic transition before
+        // publishing inactive focus so allocation failure cannot strand a
+        // committed focus-within suffix. The shared transition cursor advances
+        // before every observer callback, making a throwing observer at-most-once
+        // while preserving the unstarted ancestor suffix for the next safe
+        // checkpoint.
+        FocusTransitionState transition{};
+        transition.previous = old->id;
+        transition.next = kInvalidNodeId;
+        transition.cursor = transition.previous;
+        transition.phase = FocusTransitionPhase::Commit;
+        focus_transition_stack_.push_back(transition);
+        const auto index = focus_transition_stack_.size() - 1;
+
+        // From this point the durable transition owns recovery, so the
+        // availability-specific pre-commit blur marker is no longer required.
         availability_blur_started_ = kInvalidNodeId;
-        notify_focus_within_transition(old, nullptr, platform);
+        execute_focus_transition(index, platform);
+        if (index < focus_transition_stack_.size() &&
+            focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
+            focus_transition_stack_.pop_back();
+        }
     }
 
     void move_focus(int direction, PlatformServices& platform) {

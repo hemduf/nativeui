@@ -67,6 +67,75 @@ private:
     std::shared_ptr<PersistentBlurProbeState> state_;
 };
 
+struct FocusWithinProbeState {
+    int leave_calls{};
+    bool throw_on_leave{};
+};
+
+class FocusWithinProbeComponent final
+    : public ui::Component,
+      public ui::detail::RetainedInteractionObserver {
+public:
+    explicit FocusWithinProbeComponent(std::shared_ptr<FocusWithinProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] ui::Size minimum_size(
+        const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().minimum;
+    }
+
+    [[nodiscard]] ui::Constraints child_constraints(
+        const ui::Constraints& constraints, std::size_t, std::size_t) const override {
+        return constraints;
+    }
+
+    void layout_children(
+        ui::Rect bounds,
+        const std::vector<ui::ChildMetrics>&,
+        std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+    void retained_focus_within_changed(bool within, bool, ui::Dispatcher) override {
+        if (within) return;
+        ++state_->leave_calls;
+        if (state_->throw_on_leave) {
+            throw std::runtime_error("persistent focus-within teardown failure");
+        }
+    }
+
+private:
+    std::shared_ptr<FocusWithinProbeState> state_;
+};
+
+class FocusWithinProbe {
+public:
+    template <class Child>
+    FocusWithinProbe(std::shared_ptr<FocusWithinProbeState> state, Child&& child)
+        : state_(std::move(state)), child_(ui::make_spec(std::forward<Child>(child))) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        std::vector<ui::Spec> children;
+        children.push_back(std::move(child_));
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<FocusWithinProbeComponent>(state);
+            },
+            std::move(children)};
+    }
+
+private:
+    std::shared_ptr<FocusWithinProbeState> state_;
+    ui::Spec child_;
+};
+
 void suite() {
     // Neutral input normalization: regular Tab keeps its modifier state while
     // AppKit BackTab U+0019 always means reverse traversal.
@@ -152,6 +221,59 @@ void suite() {
 
         recovery.dispatch(test::key(ui::Key::Space), recovery_platform);
         NUI_CHECK(probe->focus_out == 1);
+        NUI_CHECK(fallback.get());
+    }
+
+    // T125 closeout: after clear_focus publishes inactive focus, focus-within
+    // leave observers must retain per-callback progress. A throwing inner
+    // observer is entered once, the unstarted outer suffix does not run during
+    // unwind, and the next safe dispatch completes that suffix without replay.
+    {
+        ui::State<bool> enabled{true};
+        ui::State<bool> fallback_enabled{false};
+        ui::State<bool> fallback{false};
+        auto focus = std::make_shared<PersistentBlurProbeState>();
+        focus->throw_on_focus_out = false;
+        auto inner = std::make_shared<FocusWithinProbeState>();
+        inner->throw_on_leave = true;
+        auto outer = std::make_shared<FocusWithinProbeState>();
+
+        ui::UI recovery{
+            ui::Row{
+                FocusWithinProbe{
+                    outer,
+                    FocusWithinProbe{
+                        inner,
+                        ui::Enabled{enabled, PersistentBlurProbe{focus}}}},
+                ui::Enabled{fallback_enabled, ui::Toggle{"Fallback", fallback}}}
+                .gap(4.0f)};
+
+        test::MockPlatform recovery_platform;
+        recovery.resize({260.0f, 80.0f});
+        recovery.activate(recovery_platform);
+        NUI_CHECK(focus->focus_in == 1);
+
+        bool threw = false;
+        try {
+            enabled.set(false);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(focus->focus_out == 1);
+        NUI_CHECK(inner->leave_calls == 1);
+        NUI_CHECK(outer->leave_calls == 0);
+
+        // This safe checkpoint resumes only the unstarted suffix. No callback
+        // from the failed transition is executed during the preceding unwind.
+        (void)recovery.dispatch(test::key(ui::Key::Space), recovery_platform);
+        NUI_CHECK(inner->leave_calls == 1);
+        NUI_CHECK(outer->leave_calls == 1);
+
+        // The tree remains routable after semantic recovery.
+        fallback_enabled.set(true);
+        (void)recovery.dispatch(test::key(ui::Key::Tab), recovery_platform);
+        (void)recovery.dispatch(test::key(ui::Key::Space), recovery_platform);
         NUI_CHECK(fallback.get());
     }
 
