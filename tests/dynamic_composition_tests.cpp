@@ -388,6 +388,196 @@ private:
     std::shared_ptr<HoverLeaveState> state_;
 };
 
+struct SemanticSuffixState {
+    int focus_leave{};
+    int hover_leave{};
+    int key_down{};
+    int pointer_moves{};
+    int nested_caught{};
+    bool throw_focus{};
+    bool throw_hover{};
+    std::function<void()> on_focus_leave;
+    std::function<void()> on_hover_leave;
+    std::function<void()> nested_dispatch;
+};
+
+class SemanticSuffixLeafComponent final
+    : public ui::Component,
+      public ui::detail::RetainedInteractionObserver {
+public:
+    explicit SemanticSuffixLeafComponent(std::shared_ptr<SemanticSuffixState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::KeyDown) {
+            ++state_->key_down;
+            if (state_->nested_dispatch) state_->nested_dispatch();
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerMove) {
+            ++state_->pointer_moves;
+            return ui::EventResult::Handled;
+        }
+        return ui::EventResult::Ignored;
+    }
+
+    void retained_focus_within_changed(bool focused, bool, ui::Dispatcher) override {
+        if (focused) return;
+        ++state_->focus_leave;
+        if (state_->on_focus_leave) state_->on_focus_leave();
+        if (state_->throw_focus) {
+            throw std::runtime_error("persistent semantic focus leave failure");
+        }
+    }
+
+    void retained_pointer_hover_changed(bool hovered, bool, ui::Dispatcher) override {
+        if (hovered) return;
+        ++state_->hover_leave;
+        if (state_->on_hover_leave) state_->on_hover_leave();
+        if (state_->throw_hover) {
+            throw std::runtime_error("persistent semantic hover leave failure");
+        }
+    }
+
+private:
+    std::shared_ptr<SemanticSuffixState> state_;
+};
+
+class SemanticSuffixLeaf {
+public:
+    explicit SemanticSuffixLeaf(std::shared_ptr<SemanticSuffixState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<SemanticSuffixLeafComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<SemanticSuffixState> state_;
+};
+
+struct SemanticAncestorState {
+    int focus_leave{};
+    int hover_leave{};
+};
+
+class SemanticAncestorComponent final
+    : public ui::Component,
+      public ui::detail::RetainedInteractionObserver {
+public:
+    explicit SemanticAncestorComponent(std::shared_ptr<SemanticAncestorState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>& children) const override {
+        return children.empty() ? ui::Size{} : children.front().preferred;
+    }
+
+    void layout_children(
+        ui::Rect bounds,
+        const std::vector<ui::ChildMetrics>&,
+        std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements.front().bounds = bounds;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+    void retained_focus_within_changed(bool focused, bool, ui::Dispatcher) override {
+        if (!focused) ++state_->focus_leave;
+    }
+
+    void retained_pointer_hover_changed(bool hovered, bool, ui::Dispatcher) override {
+        if (!hovered) ++state_->hover_leave;
+    }
+
+private:
+    std::shared_ptr<SemanticAncestorState> state_;
+};
+
+class SemanticAncestor {
+public:
+    template <class Child>
+    SemanticAncestor(std::shared_ptr<SemanticAncestorState> state, Child&& child)
+        : state_(std::move(state)), child_(ui::make_spec(std::forward<Child>(child))) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        std::vector<ui::Spec> children;
+        children.push_back(std::move(child_));
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<SemanticAncestorComponent>(state);
+            },
+            std::move(children)};
+    }
+
+private:
+    std::shared_ptr<SemanticAncestorState> state_;
+    ui::Spec child_;
+};
+
+struct RecoveryTargetState {
+    int key_down{};
+    int pointer_moves{};
+};
+
+class RecoveryTargetComponent final : public ui::Component {
+public:
+    explicit RecoveryTargetComponent(std::shared_ptr<RecoveryTargetState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::KeyDown) {
+            ++state_->key_down;
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerMove) {
+            ++state_->pointer_moves;
+            return ui::EventResult::Handled;
+        }
+        return ui::EventResult::Ignored;
+    }
+
+private:
+    std::shared_ptr<RecoveryTargetState> state_;
+};
+
+class RecoveryTarget {
+public:
+    explicit RecoveryTarget(std::shared_ptr<RecoveryTargetState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<RecoveryTargetComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<RecoveryTargetState> state_;
+};
+
 struct DynamicItem {
     std::string key;
     std::string name;
@@ -563,9 +753,6 @@ void factory_failure_preserves_pending_dynamic_owners_contract() {
         "old.mount", "second.mount", "old.activate", "second.activate",
         "old.deactivate", "old.unmount"}));
 
-    // The failed owner and the still-unprocessed sibling owner must both be
-    // retried on the next safe checkpoint. The reconciliation guard must also
-    // be restored rather than poisoning all future dynamic work.
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(*attempts == 2);
     NUI_CHECK((log->events == std::vector<std::string>{
@@ -613,10 +800,6 @@ void factory_failure_preserves_reentrant_dynamic_mutation_contract() {
     NUI_CHECK(*attempts == 1);
     NUI_CHECK(!second_visible.get());
 
-    // The second owner became dirty from inside the first owner's failing
-    // replacement factory, after this reconciliation pass had captured its
-    // initial work. The retry checkpoint must recover both the failed owner
-    // and that reentrant mutation rather than silently dropping either one.
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(*attempts == 2);
     NUI_CHECK(log->mounted_ids.at("recovered").size() == 1);
@@ -649,9 +832,6 @@ void enqueue_allocation_failure_preserves_dynamic_work_contract() {
     NUI_CHECK(threw);
     NUI_CHECK((log->events == std::vector<std::string>{"child.mount", "child.activate"}));
 
-    // The state write committed before the observer enqueue failed. The
-    // no-allocation retry marker must recover that exact logical mutation at
-    // the next safe checkpoint, then leave future enqueue/flush work usable.
     tree.layout({160.0f, 80.0f});
     NUI_CHECK((log->events == std::vector<std::string>{
         "child.mount", "child.activate", "child.deactivate", "child.unmount"}));
@@ -680,9 +860,6 @@ void enqueue_failure_preserves_previously_dirty_owner_contract() {
     NUI_CHECK(log->mounted_ids.at("first").size() == 1);
     NUI_CHECK(log->mounted_ids.at("second").size() == 1);
 
-    // Queue one owner successfully, then make a later owner fail while trying
-    // to join the same pending batch. Recovery must retain the already-dirty
-    // owner as well as the logical mutation whose precise enqueue failed.
     first_visible.set(false);
     ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
     bool threw = false;
@@ -757,7 +934,6 @@ void keyed_contract() {
     NUI_CHECK((log->events == std::vector<std::string>{
         "A.mount", "B.mount", "A.activate", "B.activate", "C.mount", "C.activate"}));
 
-    // Remove, prepend, append and middle-insert all preserve unchanged keys.
     items.set({DynamicItem{"C", "C"}, DynamicItem{"A", "A"}});
     tree.resize({160.0f, 80.0f});
     NUI_CHECK(log->events.size() == 8);
@@ -785,7 +961,6 @@ void keyed_contract() {
     NUI_CHECK(log->mounted_ids.at("A").front() == a_id);
     NUI_CHECK(log->mounted_ids.at("C").size() == 1);
 
-    // Changing a logical key forces one old teardown and one new retained node.
     items.set({
         DynamicItem{"G", "G"}, DynamicItem{"C", "C"}, DynamicItem{"F", "F"},
         DynamicItem{"A", "A"}, DynamicItem{"E", "E"}});
@@ -867,10 +1042,6 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
     tree.activate(platform);
     NUI_CHECK(blur->focus_in == 1);
 
-    // Dynamic removal calls clear_focus outside availability reconciliation.
-    // While A's blur is running, nested Tab asks for the surviving C/fallback
-    // focus owner. That newer request must survive A's persistently throwing
-    // callback and the dynamic owner's later retry.
     blur->on_focus_out = [&] {
         (void)tree.dispatch(test::key(ui::Key::Tab), platform);
     };
@@ -895,24 +1066,16 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
     NUI_CHECK(blur->focus_out == 1);
     NUI_CHECK(fallback.get());
 
-    // Complete the first Space activation before probing a second ordinary
-    // operation. test::key() creates KeyDown events; repeating it without a
-    // KeyUp would exercise Toggle's pressed-key latch rather than recovery.
     auto space_up = test::key(ui::Key::Space);
     space_up.type = ui::InputType::KeyUp;
     (void)tree.dispatch(space_up, platform);
 
-    // The removed owner has completed reconciliation and future ordinary work
-    // remains usable even though the obsolete A blur would still throw if replayed.
     (void)tree.dispatch(test::key(ui::Key::Space), platform);
     NUI_CHECK(!fallback.get());
     NUI_CHECK(blur->focus_out == 1);
 }
 
 void focus_invalidation_prepare_publish_commit_contract() {
-    // Pre-publication allocation failure: the old invalidation remains retryable,
-    // while the already-started blur is not replayed. The resumed transition then
-    // publishes both old/new paint work and routes the normal next key to fallback.
     {
         auto blur = std::make_shared<ReentrantBlurState>();
         blur->throw_on_focus_out = false;
@@ -946,9 +1109,6 @@ void focus_invalidation_prepare_publish_commit_contract() {
         NUI_CHECK(invalidations == 2);
     }
 
-    // Post-publication callback failure: once DirtyRegion owns the exposure, the
-    // callback is begun work and is never replayed. Recovery advances to the new
-    // focus owner; exactly one later invalidation belongs to that new owner.
     {
         auto blur = std::make_shared<ReentrantBlurState>();
         blur->throw_on_focus_out = false;
@@ -1004,9 +1164,6 @@ void hover_input_preparation_boundary_contract() {
               ui::EventResult::Handled);
     NUI_CHECK(first->moves == 1);
 
-    // Event payload copy succeeds, but complete InputContext preparation fails.
-    // The cursor must still name the first node so the next safe checkpoint
-    // delivers its PointerLeave exactly once before routing to the new target.
     ui::TreeTestAccess::fail_next_input_context_preparation(tree);
     bool prepare_threw = false;
     try {
@@ -1025,8 +1182,6 @@ void hover_input_preparation_boundary_contract() {
     NUI_CHECK(first->leaves == 1);
     NUI_CHECK(second->moves == 1);
 
-    // Once the callback body begins, cursor progress is committed first. A
-    // persistently throwing leave is therefore not retried on the next checkpoint.
     second->throw_on_leave = true;
     bool callback_threw = false;
     try {
@@ -1045,6 +1200,169 @@ void hover_input_preparation_boundary_contract() {
     NUI_CHECK(first->moves == 2);
 }
 
+void semantic_suffix_survives_measure_and_layout_contract() {
+    for (int checkpoint = 0; checkpoint < 2; ++checkpoint) {
+        ui::State<bool> visible{true};
+        auto leaf = std::make_shared<SemanticSuffixState>();
+        auto ancestor = std::make_shared<SemanticAncestorState>();
+        auto target = std::make_shared<RecoveryTargetState>();
+        test::MockPlatform platform;
+
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{
+                SemanticAncestor{
+                    ancestor,
+                    ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
+                RecoveryTarget{target}}
+                .gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+
+        leaf->throw_focus = true;
+        leaf->on_focus_leave = [&] {
+            visible.set(false);
+            if (checkpoint == 0) {
+                (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
+            } else {
+                tree.layout({220.0f, 80.0f});
+            }
+        };
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(leaf->focus_leave == 1);
+        NUI_CHECK(ancestor->focus_leave == 0);
+        NUI_CHECK(!visible.get());
+
+        if (checkpoint == 0) {
+            (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
+            (void)tree.measure(ui::Constraints::loose({220.0f, 80.0f}));
+        } else {
+            tree.layout({220.0f, 80.0f});
+            tree.layout({220.0f, 80.0f});
+        }
+        NUI_CHECK(leaf->focus_leave == 1);
+        NUI_CHECK(ancestor->focus_leave == 1);
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(target->key_down == 1);
+        NUI_CHECK(leaf->focus_leave == 1);
+        NUI_CHECK(ancestor->focus_leave == 1);
+    }
+}
+
+void semantic_hover_suffix_survives_public_checkpoint_contract() {
+    ui::State<bool> visible{true};
+    auto leaf = std::make_shared<SemanticSuffixState>();
+    auto ancestor = std::make_shared<SemanticAncestorState>();
+    auto target = std::make_shared<RecoveryTargetState>();
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(ui::make_spec(
+        ui::Row{
+            SemanticAncestor{
+                ancestor,
+                ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
+            RecoveryTarget{target}}
+            .gap(4.0f)))};
+    tree.mount();
+    tree.layout({220.0f, 80.0f});
+    tree.activate_focus(platform);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(leaf->pointer_moves == 1);
+
+    leaf->throw_hover = true;
+    leaf->on_hover_leave = [&] {
+        visible.set(false);
+        tree.layout({220.0f, 80.0f});
+    };
+
+    bool threw = false;
+    try {
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(leaf->hover_leave == 1);
+    NUI_CHECK(ancestor->hover_leave == 0);
+
+    tree.refresh_focus(platform);
+    tree.refresh_focus(platform);
+    NUI_CHECK(leaf->hover_leave == 1);
+    NUI_CHECK(ancestor->hover_leave == 1);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(target->pointer_moves == 1);
+    NUI_CHECK(leaf->hover_leave == 1);
+    NUI_CHECK(ancestor->hover_leave == 1);
+}
+
+void nested_dispatch_finish_preserves_semantic_suffix_contract() {
+    ui::State<bool> visible{true};
+    auto leaf = std::make_shared<SemanticSuffixState>();
+    auto ancestor = std::make_shared<SemanticAncestorState>();
+    auto target = std::make_shared<RecoveryTargetState>();
+    test::MockPlatform platform;
+
+    ui::Tree tree{ui::compile(ui::make_spec(
+        ui::Row{
+            SemanticAncestor{
+                ancestor,
+                ui::If{visible, ui::Row{SemanticSuffixLeaf{leaf}}}},
+            RecoveryTarget{target}}
+            .gap(4.0f)))};
+    tree.mount();
+    tree.layout({220.0f, 80.0f});
+    tree.activate_focus(platform);
+
+    leaf->throw_focus = true;
+    leaf->on_focus_leave = [&] { visible.set(false); };
+    leaf->nested_dispatch = [&] {
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::runtime_error&) {
+            ++leaf->nested_caught;
+        }
+    };
+
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(leaf->nested_caught == 1);
+    NUI_CHECK(leaf->focus_leave == 1);
+    NUI_CHECK(ancestor->focus_leave == 1);
+    NUI_CHECK(!visible.get());
+
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(target->key_down == 1);
+    NUI_CHECK(leaf->focus_leave == 1);
+    NUI_CHECK(ancestor->focus_leave == 1);
+
+    auto isolated = std::make_shared<RecoveryTargetState>();
+    ui::Tree second{ui::compile(ui::make_spec(RecoveryTarget{isolated}))};
+    second.mount();
+    second.layout({100.0f, 40.0f});
+    second.activate_focus(platform);
+    NUI_CHECK(second.dispatch(test::key(ui::Key::Space), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(isolated->key_down == 1);
+    NUI_CHECK(target->key_down == 1);
+}
+
 void lifecycle_terminalizes_pending_semantic_work_contract() {
     ui::State<bool> value{false};
     test::MockPlatform platform;
@@ -1053,15 +1371,11 @@ void lifecycle_terminalizes_pending_semantic_work_contract() {
     tree.layout({160.0f, 80.0f});
     tree.activate_focus(platform);
 
-    // A completed deactivate is a terminal active-session boundary. Pending
-    // focus intent must not survive to the next activation.
     ui::TreeTestAccess::seed_pending_focus(tree);
     NUI_CHECK(ui::TreeTestAccess::has_pending_focus(tree));
     tree.deactivate_focus(platform);
     NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
 
-    // Unmount must retire both focus and hover deferred semantic payloads even
-    // when they exist while inactive, and mount must defensively start clean.
     ui::TreeTestAccess::seed_pending_focus(tree);
     ui::TreeTestAccess::seed_pending_hover(tree);
     tree.unmount();
@@ -1114,9 +1428,6 @@ void focus_scope_rehome_contract() {
     tree.resize({320.0f, 120.0f});
     tree.dispatch(test::key(ui::Key::Space), platform);
 
-    // Removing the focused dynamic child must obey the still-active trapping
-    // FocusScope and rehome inside it rather than escaping to the first global
-    // focusable node.
     NUI_CHECK(!outside.get());
     NUI_CHECK(fallback_value.get());
 }
@@ -1154,9 +1465,6 @@ void nested_focus_scope_rehome_contract() {
     NUI_CHECK(!global_value.get());
     NUI_CHECK(!outer_fallback.get());
 
-    // The nearest trap is removed with the focused child, but the surviving
-    // outer trap still owns focus. Rehoming must climb to that scope rather
-    // than escaping to the global first focusable.
     inner_visible.set(false);
     tree.resize({360.0f, 120.0f});
     tree.dispatch(test::key(ui::Key::Space), platform);
@@ -1208,6 +1516,9 @@ void suite() {
     dynamic_focus_clear_preserves_newer_reentrant_request_contract();
     focus_invalidation_prepare_publish_commit_contract();
     hover_input_preparation_boundary_contract();
+    semantic_suffix_survives_measure_and_layout_contract();
+    semantic_hover_suffix_survives_public_checkpoint_contract();
+    nested_dispatch_finish_preserves_semantic_suffix_contract();
     lifecycle_terminalizes_pending_semantic_work_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();
