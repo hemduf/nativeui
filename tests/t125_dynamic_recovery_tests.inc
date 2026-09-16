@@ -260,8 +260,7 @@ void teardown_quarantine_rejects_reentrant_pointer_publication() {
         ui::Row{
             ui::If{visible, QuarantineProbe{doomed}},
             ui::Toggle{"Survivor", survivor_value}}
-            .gap(8.0f)
-            .padding(0.0f)))};
+            .gap(8.0f)))};
     tree.mount();
     tree.layout({220.0f, 64.0f});
     tree.activate_focus(platform);
