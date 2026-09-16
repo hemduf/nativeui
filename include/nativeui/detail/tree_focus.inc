@@ -279,8 +279,7 @@
             }
             break;
         }
-        if (focus_transition_stack_.empty() &&
-            availability_blur_started_ == kInvalidNodeId) {
+        if (focus_transition_stack_.empty() && focus_blur_started_ == kInvalidNodeId) {
             drain_one_pending_focus_request(platform);
         }
     }
@@ -387,7 +386,8 @@
         pending_focus_request_ = false;
         if (!next) {
             availability_cleared_focus_ = syncing_availability_ ? old : nullptr;
-            availability_blur_started_ = kInvalidNodeId;
+            focus_blur_started_ = kInvalidNodeId;
+            focus_blur_started_from_availability_ = false;
         }
 
         const auto index = focus_transition_stack_.size() - 1;
@@ -398,17 +398,18 @@
         }
     }
 
-    // Stable identity of an availability-driven focus-loss notification that
-    // already entered application code but did not reach the retained commit
-    // point. A later availability checkpoint may finish framework bookkeeping
-    // for this exact node without retrying the already-started callback.
-    NodeId availability_blur_started_{kInvalidNodeId};
+    // Stable identity of a direct clear-focus notification that already entered
+    // application code but did not reach the retained commit point. This is
+    // caller-independent so dynamic removal, focus-structure reconciliation and
+    // availability reconciliation all share the same at-most-once callback rule.
+    NodeId focus_blur_started_{kInvalidNodeId};
+    bool focus_blur_started_from_availability_{};
 
     void clear_focus(PlatformServices& platform) {
-        const bool resume_availability_blur =
-            syncing_availability_ && focus_active_ && focused_index_ < focusables_.size() &&
-            availability_blur_started_ == focusables_[focused_index_]->id;
-        if (!resume_availability_blur &&
+        const bool resume_started_blur =
+            focus_active_ && focused_index_ < focusables_.size() &&
+            focus_blur_started_ == focusables_[focused_index_]->id;
+        if (!resume_started_blur &&
             (focus_transition_running_ != 0 || focus_semantic_running_ != 0 ||
              !focus_transition_stack_.empty() || pending_focus_request_)) {
             queue_pending_focus(kInvalidNodeId);
@@ -420,7 +421,8 @@
 
         if (!focus_active_ || focused_index_ >= focusables_.size()) {
             focus_active_ = false;
-            availability_blur_started_ = kInvalidNodeId;
+            focus_blur_started_ = kInvalidNodeId;
+            focus_blur_started_from_availability_ = false;
             if (!syncing_availability_) availability_cleared_focus_ = nullptr;
             return;
         }
@@ -441,23 +443,24 @@
                 availability_cleared_focus_ = nullptr;
             }
 
-            if (!resume_availability_blur) {
+            if (!resume_started_blur) {
                 FocusContext context{
                     old->bounds,
                     platform,
                     unsafe_paint_invalidator(*old),
                     unsafe_layout_invalidator(*old)};
-                // Publish the stable identity only for availability reconciliation,
-                // immediately before entering user code. If it throws, leave focus
-                // logically active so the next pass can reconstruct the same rehome
-                // decision without invoking this callback again.
-                if (syncing_availability_) availability_blur_started_ = old->id;
+                // Publish caller-independent started-callback identity immediately
+                // before application code. Recovery may finish framework bookkeeping
+                // but must never re-enter this already-started blur merely because
+                // the original caller retries its semantic operation.
+                focus_blur_started_ = old->id;
+                focus_blur_started_from_availability_ = syncing_availability_;
                 old->component->focus_changed(false, context);
             }
 
             // Preserve the established successful-path ordering. Invalidation may
             // itself throw; retaining the marker until the logical focus commit lets
-            // a later availability pass finish framework work without retrying the
+            // a later safe checkpoint finish framework work without retrying the
             // already-started focus callback.
             invalidate_node_paint(*old);
 
@@ -476,9 +479,9 @@
             focus_transition_stack_.push_back(transition);
             const auto index = focus_transition_stack_.size() - 1;
 
-            // From this point the durable transition owns recovery, so the
-            // availability-specific pre-commit blur marker is no longer required.
-            availability_blur_started_ = kInvalidNodeId;
+            // From this point the durable transition owns recovery.
+            focus_blur_started_ = kInvalidNodeId;
+            focus_blur_started_from_availability_ = false;
             execute_focus_transition(index, platform);
             if (index < focus_transition_stack_.size() &&
                 focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
@@ -583,16 +586,16 @@
         resume_focus_transitions(platform);
         if (!focus_structure_dirty_) return;
 
-        // A failed availability-driven blur can be cancelled by a re-entrant
-        // state reversal before the next checkpoint. If the same node is still
-        // the authoritative, available focus target, the aborted transition no
-        // longer needs completion; retire only the framework marker without
-        // invoking application code.
-        if (availability_blur_started_ != kInvalidNodeId) {
+        // Only an availability-origin failed blur can be cancelled by an
+        // availability reversal. Generic direct-clear recovery must keep its
+        // begun-callback identity until the retrying semantic owner finishes it.
+        if (focus_blur_started_from_availability_ &&
+            focus_blur_started_ != kInvalidNodeId) {
             auto* focused = current_focus_node();
-            if (!focused || focused->id != availability_blur_started_ ||
+            if (!focused || focused->id != focus_blur_started_ ||
                 focus_target_available(focused)) {
-                availability_blur_started_ = kInvalidNodeId;
+                focus_blur_started_ = kInvalidNodeId;
+                focus_blur_started_from_availability_ = false;
             }
         }
 

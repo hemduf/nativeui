@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <new>
@@ -12,6 +13,25 @@ namespace ui {
 struct TreeTestAccess {
     static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
         tree.fail_next_dynamic_enqueue_for_testing_ = true;
+    }
+
+    static void seed_pending_focus(Tree& tree) noexcept {
+        tree.pending_focus_target_ = kInvalidNodeId;
+        tree.pending_focus_request_ = true;
+    }
+
+    static void seed_pending_hover(Tree& tree) {
+        auto pending = std::make_unique<Tree::PointerHoverTransitionState>();
+        pending->next = kInvalidNodeId;
+        tree.pending_pointer_hover_transition_ = std::move(pending);
+    }
+
+    [[nodiscard]] static bool has_pending_focus(const Tree& tree) noexcept {
+        return tree.pending_focus_request_;
+    }
+
+    [[nodiscard]] static bool has_pending_hover(const Tree& tree) noexcept {
+        return static_cast<bool>(tree.pending_pointer_hover_transition_);
     }
 };
 } // namespace ui
@@ -249,6 +269,58 @@ public:
 private:
     std::shared_ptr<DynamicLog> log_;
     ui::State<int>* observed_{};
+};
+
+struct ReentrantBlurState {
+    int focus_in{};
+    int focus_out{};
+    bool throw_on_focus_out{true};
+    std::function<void()> on_focus_out;
+};
+
+class ReentrantBlurComponent final : public ui::Component {
+public:
+    explicit ReentrantBlurComponent(std::shared_ptr<ReentrantBlurState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    void focus_changed(bool focused, ui::FocusContext&) override {
+        if (focused) {
+            ++state_->focus_in;
+            return;
+        }
+        ++state_->focus_out;
+        if (state_->on_focus_out) state_->on_focus_out();
+        if (state_->throw_on_focus_out) {
+            throw std::runtime_error("persistent dynamic blur failure");
+        }
+    }
+
+private:
+    std::shared_ptr<ReentrantBlurState> state_;
+};
+
+class ReentrantBlurProbe {
+public:
+    explicit ReentrantBlurProbe(std::shared_ptr<ReentrantBlurState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<ReentrantBlurComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<ReentrantBlurState> state_;
 };
 
 struct DynamicItem {
@@ -715,6 +787,94 @@ void focus_capture_and_lifetime_contract() {
     NUI_CHECK(log->observed_changes == 0);
 }
 
+void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
+    ui::State<bool> visible{true};
+    ui::State<bool> fallback{false};
+    auto blur = std::make_shared<ReentrantBlurState>();
+    test::MockPlatform platform;
+
+    ui::UI tree{
+        ui::Row{
+            ui::If{visible, ReentrantBlurProbe{blur}},
+            ui::Toggle{"Fallback", fallback}}
+            .gap(4.0f)
+            .padding(0.0f)};
+    tree.resize({220.0f, 80.0f});
+    tree.activate(platform);
+    NUI_CHECK(blur->focus_in == 1);
+
+    // Dynamic removal calls clear_focus outside availability reconciliation.
+    // While A's blur is running, nested Tab asks for the surviving C/fallback
+    // focus owner. That newer request must survive A's persistently throwing
+    // callback and the dynamic owner's later retry.
+    blur->on_focus_out = [&] {
+        (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+    };
+    visible.set(false);
+
+    bool first_threw = false;
+    try {
+        tree.resize({220.0f, 80.0f});
+    } catch (const std::runtime_error&) {
+        first_threw = true;
+    }
+    NUI_CHECK(first_threw);
+    NUI_CHECK(blur->focus_out == 1);
+
+    bool recovery_threw = false;
+    try {
+        (void)tree.dispatch(test::key(ui::Key::Space), platform);
+    } catch (const std::runtime_error&) {
+        recovery_threw = true;
+    }
+    NUI_CHECK(!recovery_threw);
+    NUI_CHECK(blur->focus_out == 1);
+    NUI_CHECK(fallback.get());
+
+    // The removed owner has completed reconciliation and future ordinary work
+    // remains usable even though the obsolete A blur would still throw if replayed.
+    (void)tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(!fallback.get());
+    NUI_CHECK(blur->focus_out == 1);
+}
+
+void lifecycle_terminalizes_pending_semantic_work_contract() {
+    ui::State<bool> value{false};
+    test::MockPlatform platform;
+    ui::Tree tree{ui::compile(ui::make_spec(ui::Toggle{"Value", value}))};
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.activate_focus(platform);
+
+    // A completed deactivate is a terminal active-session boundary. Pending
+    // focus intent must not survive to the next activation.
+    ui::TreeTestAccess::seed_pending_focus(tree);
+    NUI_CHECK(ui::TreeTestAccess::has_pending_focus(tree));
+    tree.deactivate_focus(platform);
+    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
+
+    // Unmount must retire both focus and hover deferred semantic payloads even
+    // when they exist while inactive, and mount must defensively start clean.
+    ui::TreeTestAccess::seed_pending_focus(tree);
+    ui::TreeTestAccess::seed_pending_hover(tree);
+    tree.unmount();
+    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
+    NUI_CHECK(!ui::TreeTestAccess::has_pending_hover(tree));
+
+    ui::TreeTestAccess::seed_pending_focus(tree);
+    ui::TreeTestAccess::seed_pending_hover(tree);
+    tree.mount();
+    NUI_CHECK(!ui::TreeTestAccess::has_pending_focus(tree));
+    NUI_CHECK(!ui::TreeTestAccess::has_pending_hover(tree));
+
+    tree.layout({160.0f, 80.0f});
+    tree.activate_focus(platform);
+    (void)tree.dispatch(test::key(ui::Key::Space), platform);
+    NUI_CHECK(value.get());
+    tree.deactivate_focus(platform);
+    tree.unmount();
+}
+
 void focus_scope_rehome_contract() {
     ui::State<bool> scope_active{true};
     ui::State<bool> dynamic_visible{true};
@@ -838,6 +998,8 @@ void suite() {
     keyed_contract();
     coalesced_writes_contract();
     focus_capture_and_lifetime_contract();
+    dynamic_focus_clear_preserves_newer_reentrant_request_contract();
+    lifecycle_terminalizes_pending_semantic_work_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();
     bounded_reconciliation_contract();
