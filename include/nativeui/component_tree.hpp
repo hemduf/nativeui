@@ -12,6 +12,7 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <functional>
 #include <limits>
 #include <memory>
 #include <new>
@@ -65,6 +66,39 @@ private:
 #include <nativeui/detail/tree_dynamic.inc>
 #undef register_dynamic_node
 #include <nativeui/detail/tree_retained_invalidation.inc>
+
+    // Keep the currently executing callback alive across re-entrant replacement
+    // or clearing. Installing a non-empty handler may allocate, but dispatch only
+    // copies shared ownership and therefore performs no heap allocation.
+    class KeyDownHandlerSlot final {
+    public:
+        using Handler = std::function<EventResult(const InputEvent&)>;
+
+        KeyDownHandlerSlot& operator=(Handler handler) {
+            if (!handler) {
+                handler_.reset();
+                return *this;
+            }
+
+            auto replacement = std::make_shared<const Handler>(std::move(handler));
+            handler_ = std::move(replacement);
+            return *this;
+        }
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return static_cast<bool>(handler_);
+        }
+
+        EventResult operator()(const InputEvent& event) const {
+            const auto handler = handler_;
+            return handler ? (*handler)(event) : EventResult::Ignored;
+        }
+
+    private:
+        std::shared_ptr<const Handler> handler_;
+    };
+
+    KeyDownHandlerSlot global_key_down_handler_;
 };
 
 #include <nativeui/detail/tree_compile.inc>
