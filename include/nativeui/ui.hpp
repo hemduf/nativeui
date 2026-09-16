@@ -111,6 +111,7 @@ public:
     }
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
         // before ordinary retained routing so a focused TextInput/custom body
         // cannot consume Escape ahead of the enabled Cancel action/Dismissed
