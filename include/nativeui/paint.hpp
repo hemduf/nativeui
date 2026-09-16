@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -94,7 +95,19 @@ public:
     };
 
     explicit Painter(SkCanvas& canvas) : canvas_(canvas) {}
-    ~Painter() { assert(save_depth_ == 0 && "Painter destroyed with unbalanced save stack"); }
+    ~Painter() noexcept {
+        // Framework-owned tree scopes may be unwinding because component paint
+        // threw before the matching manual pop. Restore every outstanding save
+        // before the Painter leaves the stack so the same SkCanvas is usable by
+        // the next frame. Component-local imbalance remains diagnosed by the
+        // StateGuard that wraps every component paint callback.
+        [[maybe_unused]] const bool balanced = save_depth_ == 0;
+        const bool unwinding = std::uncaught_exceptions() > 0;
+        while (save_depth_ > 0) restore_unchecked();
+        if (!unwinding) {
+            assert(balanced && "Painter destroyed with unbalanced save stack");
+        }
+    }
 
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
     [[nodiscard]] StateGuard scoped_state() noexcept { return StateGuard{*this}; }

@@ -1,4 +1,5 @@
     [[nodiscard]] debug::InspectorSnapshot inspector_snapshot() {
+        if (lifecycle_transition_active()) return {};
         flush_dynamic_mutations();
 
         debug::InspectorSnapshot snapshot;
@@ -61,6 +62,7 @@
     [[nodiscard]] debug::InspectorSnapshot paint_with_inspector_snapshot(
         SkCanvas& canvas,
         PlatformServices& platform) {
+        if (lifecycle_transition_active()) return {};
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
