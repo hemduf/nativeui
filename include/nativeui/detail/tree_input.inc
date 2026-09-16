@@ -156,4 +156,3 @@
     DirtyRegion paint_dirty_;
     std::function<void(Rect)> invalidation_callback_;
     std::function<EventResult(Command)> global_command_handler_;
-    std::function<EventResult(const InputEvent&)> global_key_down_handler_;
