@@ -22,7 +22,7 @@
     }
 
     void set_pointer_capture(Node& node) noexcept {
-        if (cancelling_pointer_capture_) return;
+        if (cancelling_pointer_capture_ || dynamic_teardown_quarantines(&node)) return;
         if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) return;
 
         if (pointer_capture_.node) clear_pointer_capture();
@@ -249,6 +249,11 @@
             // the safe checkpoint. The latest semantic route is then no target.
             next = nullptr;
         }
+        if (dynamic_teardown_quarantines(next)) {
+            // A pending request may predate the teardown barrier. It is safe to
+            // retire as no target while the node still exists, before detach.
+            next = nullptr;
+        }
         auto* const previous = pointer_hover_target_;
         if (previous == next) {
             pending_pointer_hover_transition_.reset();
@@ -331,6 +336,7 @@
 
     [[nodiscard]] bool update_pointer_hover_target(
         Node* target, const InputEvent& source_event, PlatformServices& platform) {
+        if (dynamic_teardown_quarantines(target)) target = nullptr;
         if (pointer_hover_transition_running_ != 0 ||
             !pointer_hover_transition_stack_.empty() || pending_pointer_hover_transition_) {
             queue_pending_pointer_hover_transition(target, source_event);
