@@ -284,11 +284,11 @@ void exception_recovery_contracts() {
         NUI_CHECK(activations == 2);
     }
 
-    // T125 required regression: T130 owns lifecycle commit semantics, while
-    // T125 owns restoration of the dynamic reconciliation engine. A throw-once
-    // deactivate hook must not leave reconciling_dynamic_ wedged: the next safe
-    // checkpoint retries the pending structural work and later mutations remain
-    // executable.
+    // T125 required regression: T130 owns lifecycle commit semantics. Even if a
+    // dynamic deactivate hook throws, T130 completes best-effort unmount/removal
+    // and propagates the first exception. T125 must restore reconciliation state
+    // without replaying the already-started lifecycle hook; later mutations must
+    // remain executable.
     {
         test::MockPlatform platform;
         ui::State<bool> visible{true};
@@ -308,10 +308,12 @@ void exception_recovery_contracts() {
         }
         NUI_CHECK(threw);
         NUI_CHECK(state->deactivations == 1);
-        NUI_CHECK(state->unmounts == 0);
+        NUI_CHECK(state->unmounts == 1);
 
+        // The committed removal is already authoritative; recovery must not
+        // replay the lifecycle callback solely because it threw.
         tree.resize({180.0f, 64.0f});
-        NUI_CHECK(state->deactivations == 2);
+        NUI_CHECK(state->deactivations == 1);
         NUI_CHECK(state->unmounts == 1);
 
         visible.set(true);
@@ -321,7 +323,7 @@ void exception_recovery_contracts() {
 
         visible.set(false);
         tree.resize({180.0f, 64.0f});
-        NUI_CHECK(state->deactivations == 3);
+        NUI_CHECK(state->deactivations == 2);
         NUI_CHECK(state->unmounts == 2);
     }
 }
