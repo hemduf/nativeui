@@ -57,25 +57,46 @@ Exact-head normal/path workflows are all green: CI `35134851097`, Package Contra
 
 Final-candidate T042 Lifecycle Stress `35140156948` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35140156810` is green for release contracts, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Review records `5226938758` and `5227314927` contain zero Blocking/Important findings. #291 is closed with `status:done`.
 
+### T125 is Done
+
+**T125 / #286 / PR #382 merged as `401d73983c2103fae1e48c1984a982277088e060`.** Frozen executable head `da4386626837b8cedf9d7f17bc6e8b150aa99921` closes retained dispatch/reconciliation/cancellation unwind safety while composing on T130's lifecycle/layout/paint transaction model.
+
+Delivered invariants:
+
+- dispatch, availability, dynamic reconciliation and pointer-cancellation guards restore exact previous state after exceptions;
+- a user/component callback that already started is not automatically retried solely because it threw;
+- focus/hover transition suffixes and coalesced pending intents use stable retained identity and valid safe checkpoints rather than raw retry pointers;
+- mount/deactivate/unmount terminalize pending T125 semantic recovery state so old focus/hover requests cannot replay after Tree reuse;
+- captured, unprocessed and re-entrant dynamic owners survive a failing reconciliation pass;
+- dirty-owner enqueue allocation failure preserves a bounded per-Tree recovery marker without synchronous user-code fallback;
+- dynamic teardown quarantine blocks hover/focus/capture publication into nodes committed for removal, reuses T130's already-computed desired-key snapshot and introduces no duplicate user key callback;
+- quarantine authority is tied to the publishing structural epoch so a re-entrant structural reversal immediately retires provisional authority and T130 safely abandons the stale removal pass;
+- throwing pointer Down/Up/Cancel and nested cancellation cannot leave retained/native capture or interaction state wedged;
+- Pugl transient drop-offer/decision borrows restore exact nested prior state before existing foreign-ABI catch boundaries;
+- all recovery state remains per Tree or stack-local with no mutable process-global/singleton/`thread_local` state.
+
+Exact-head normal/path workflows are all green: CI `35150662534`, Package Contracts `35150662688`, T044 `35150662518`, T050 `35150662564`, T060 `35150662729`, T064 `35150662700`, T065 `35150662562`, T066 `35150662456`, T072 `35150662919`.
+
+Final-candidate T042 Lifecycle Stress `35153051058` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35153050940` is green for the release contract, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Self-review `5228579161` and independent review `5228585872` contain zero Blocking/Important findings; no unresolved review thread remained and privacy review is clean.
+
 ### Remaining v1 pre-freeze work
 
-- **T125 / #286 — Doing, P0.** Retained dispatch/reconciliation/cancellation unwind safety is now the only non-Done hard safety prerequisite among T123–T132 for T069.
-- **T174 / #409 — Blocked by T125, P1.** It adds a public per-UI unhandled-KeyDown fallback and is intentionally composed on final T125 dispatch semantics. After T125 merges, finish/requalify T174 or explicitly retarget it post-v1 before freezing public API.
-- **T069 / #81 — Blocked.** T130 is satisfied; T125 remains a hard dependency. T174 must also be resolved or deliberately moved post-v1 before the final API freeze begins.
+- **T174 / #409 / PR #410 — Ready / P1.** T125 is satisfied. Resume the existing PR on current `main`, reconcile only as composition requires, re-run the fallback callback-throw/command/text/IME/isolation matrix and merge when exact-head review/qualification is green. If planning deliberately moves T174 post-v1, record that decision before T069 starts.
+- **T069 / #81 — Blocked by the T174 pre-freeze decision.** All T123–T132 safety prerequisites are now Done; T069 may resume as soon as T174 is Done or explicitly moved post-v1.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** It does not block 1.0.
 
 Current path:
 
 ```text
-T130(done)
-T125(doing) -> T174(blocked; finish or retarget) -> T069 -> T070 -> T122/docs -> T071 -> v1.0.0
-T068 ---------------------------------------------------------------> 1.2
+T125(done) -> T174(ready; finish or retarget) -> T069 -> T070 -> T122/docs -> T071 -> v1.0.0
+T068 -----------------------------------------------------------------> 1.2
 ```
 
 ## Completed safety foundations relevant to v1
 
 - **T123 / #281:** deterministic lifetime-safe `State<T>` notifications, observer mutation/reentrancy and throwing-observer recovery.
 - **T124 / #282 + T138/T139/T140/T141:** stable `Binding<T>` value/lifetime contract and completed migration of standard/retained state consumers.
+- **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety, pending-work preservation, dynamic enqueue-failure recovery and transient native-borrow hardening.
 - **T126 / #287:** DesktopServices completion/native exception boundaries and deterministic capacity cleanup.
 - **T127 / #288:** `ScrollState` lifetime, observer reentrancy/exception semantics and retained-consumer lifetime gating.
 - **T128 / #289:** Dispatcher accepted-work durability and Animation callback-exception progress/recovery.
@@ -130,8 +151,7 @@ Recovery sequence for any new session:
 
 ## Next actions
 
-1. Finish **T125 / #286 / PR #382** with one complete remaining failure-family audit/correction, exact-head qualification, review and merge.
-2. After T125 merges, resume **T174 / #409 / PR #410** on final T125 semantics, or explicitly move it post-v1 before the freeze.
-3. Resume **T069 / #81 / PR #269** only after every hard dependency is Done and T174 is resolved/retargeted.
-4. Then execute T070 reference application/Getting Started, explicitly scheduled v1 documentation closeout including T122 where applicable, and T071 on one exact RC SHA.
-5. Keep T068/PR #241 parked for NativeUI 1.2.
+1. Resume **T174 / #409 / PR #410** on final T125/current-main semantics and finish it through exact-head review/qualification/merge, or explicitly move it post-v1 before the freeze.
+2. Resume **T069 / #81 / PR #269** once T174 is Done or explicitly retargeted outside v1.
+3. Then execute T070 reference application/Getting Started, explicitly scheduled v1 documentation closeout including T122 where applicable, and T071 on one exact RC SHA.
+4. Keep T068/PR #241 parked for NativeUI 1.2.
