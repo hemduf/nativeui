@@ -12,6 +12,7 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -64,6 +65,7 @@ private:
 #include <nativeui/detail/tree_dynamic.inc>
 #undef register_dynamic_node
 #include <nativeui/detail/tree_retained_invalidation.inc>
+    std::function<EventResult(const InputEvent&)> global_key_down_handler_;
 };
 
 #include <nativeui/detail/tree_compile.inc>
