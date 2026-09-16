@@ -29,6 +29,250 @@
         }
     }
 
+    enum class FocusTransitionPhase {
+        BlurOld,
+        InvalidateOld,
+        Commit,
+        FocusNew,
+        InvalidateNew,
+        FocusWithinLeave,
+        FocusWithinEnter,
+        Descendant,
+        Complete,
+    };
+
+    struct FocusTransitionState {
+        NodeId previous{kInvalidNodeId};
+        NodeId next{kInvalidNodeId};
+        NodeId cursor{kInvalidNodeId};
+        FocusTransitionPhase phase{FocusTransitionPhase::BlurOld};
+    };
+
+    std::vector<FocusTransitionState> focus_transition_stack_;
+    std::size_t focus_transition_running_{};
+
+    [[nodiscard]] Node* focus_transition_node(NodeId id) noexcept {
+        return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
+    }
+
+    void execute_focus_transition(std::size_t index, PlatformServices& platform) {
+        ++focus_transition_running_;
+        try {
+            while (index < focus_transition_stack_.size() &&
+                   focus_transition_stack_[index].phase != FocusTransitionPhase::Complete) {
+                switch (focus_transition_stack_[index].phase) {
+                case FocusTransitionPhase::BlurOld: {
+                    const auto id = focus_transition_stack_[index].previous;
+                    auto* old = focus_transition_node(id);
+                    if (!old) {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::Commit;
+                        break;
+                    }
+                    FocusContext context{
+                        old->bounds,
+                        platform,
+                        unsafe_paint_invalidator(*old),
+                        unsafe_layout_invalidator(*old)};
+                    // Preparation above may allocate. Advance only once the next
+                    // operation is the application callback itself: if it throws,
+                    // recovery never invokes that already-started callback again.
+                    focus_transition_stack_[index].phase = FocusTransitionPhase::InvalidateOld;
+                    old->component->focus_changed(false, context);
+                    break;
+                }
+                case FocusTransitionPhase::InvalidateOld: {
+                    const auto id = focus_transition_stack_[index].previous;
+                    focus_transition_stack_[index].phase = FocusTransitionPhase::Commit;
+                    if (auto* old = focus_transition_node(id)) invalidate_node_paint(*old);
+                    break;
+                }
+                case FocusTransitionPhase::Commit: {
+                    const auto next_id = focus_transition_stack_[index].next;
+                    auto* next = focus_transition_node(next_id);
+                    if (!next) {
+                        focus_active_ = false;
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
+                        focus_transition_stack_[index].cursor =
+                            focus_transition_stack_[index].previous;
+                        break;
+                    }
+                    const auto it = std::find(focusables_.begin(), focusables_.end(), next);
+                    if (it == focusables_.end()) {
+                        focus_active_ = false;
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
+                        focus_transition_stack_[index].cursor =
+                            focus_transition_stack_[index].previous;
+                        break;
+                    }
+                    focused_index_ = static_cast<std::size_t>(
+                        std::distance(focusables_.begin(), it));
+                    focus_active_ = true;
+                    focus_transition_stack_[index].phase = FocusTransitionPhase::FocusNew;
+                    break;
+                }
+                case FocusTransitionPhase::FocusNew: {
+                    const auto id = focus_transition_stack_[index].next;
+                    auto* next = focus_transition_node(id);
+                    if (!next) {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
+                        focus_transition_stack_[index].cursor =
+                            focus_transition_stack_[index].previous;
+                        break;
+                    }
+                    FocusContext context{
+                        next->bounds,
+                        platform,
+                        unsafe_paint_invalidator(*next),
+                        unsafe_layout_invalidator(*next)};
+                    focus_transition_stack_[index].phase = FocusTransitionPhase::InvalidateNew;
+                    next->component->focus_changed(true, context);
+                    break;
+                }
+                case FocusTransitionPhase::InvalidateNew: {
+                    const auto id = focus_transition_stack_[index].next;
+                    focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
+                    focus_transition_stack_[index].cursor =
+                        focus_transition_stack_[index].previous;
+                    if (auto* next = focus_transition_node(id)) invalidate_node_paint(*next);
+                    break;
+                }
+                case FocusTransitionPhase::FocusWithinLeave: {
+                    const auto next_id = focus_transition_stack_[index].next;
+                    auto* const next = focus_transition_node(next_id);
+                    auto cursor = focus_transition_stack_[index].cursor;
+                    while (cursor != kInvalidNodeId) {
+                        auto* current = focus_transition_node(cursor);
+                        if (!current) {
+                            focus_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = current->parent
+                            ? current->parent->id
+                            : kInvalidNodeId;
+                        if (next && is_descendant_or_self(next, current)) {
+                            focus_transition_stack_[index].cursor = following;
+                            cursor = following;
+                            continue;
+                        }
+                        if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                                current->component.get())) {
+                            const auto dispatcher = detail::dispatcher_for_platform(platform);
+                            // The dispatcher is prepared before the cursor moves.
+                            // Once the cursor advances, only the callback can throw.
+                            focus_transition_stack_[index].cursor = following;
+                            observer->retained_focus_within_changed(
+                                false, pointer_interaction_active_, dispatcher);
+                        } else {
+                            focus_transition_stack_[index].cursor = following;
+                        }
+                        cursor = following;
+                    }
+                    if (focus_transition_stack_[index].cursor == kInvalidNodeId) {
+                        focus_transition_stack_[index].phase =
+                            FocusTransitionPhase::FocusWithinEnter;
+                        focus_transition_stack_[index].cursor =
+                            focus_transition_stack_[index].next;
+                    }
+                    break;
+                }
+                case FocusTransitionPhase::FocusWithinEnter: {
+                    const auto previous_id = focus_transition_stack_[index].previous;
+                    auto* const previous = focus_transition_node(previous_id);
+                    auto cursor = focus_transition_stack_[index].cursor;
+                    while (cursor != kInvalidNodeId) {
+                        auto* current = focus_transition_node(cursor);
+                        if (!current) {
+                            focus_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = current->parent
+                            ? current->parent->id
+                            : kInvalidNodeId;
+                        if (previous && is_descendant_or_self(previous, current)) {
+                            focus_transition_stack_[index].cursor = following;
+                            cursor = following;
+                            continue;
+                        }
+                        if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                                current->component.get())) {
+                            const auto dispatcher = detail::dispatcher_for_platform(platform);
+                            focus_transition_stack_[index].cursor = following;
+                            observer->retained_focus_within_changed(
+                                true, pointer_interaction_active_, dispatcher);
+                        } else {
+                            focus_transition_stack_[index].cursor = following;
+                        }
+                        cursor = following;
+                    }
+                    if (focus_transition_stack_[index].cursor == kInvalidNodeId) {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::Descendant;
+                        if (auto* next = focus_transition_node(
+                                focus_transition_stack_[index].next)) {
+                            focus_transition_stack_[index].cursor =
+                                next->parent ? next->parent->id : kInvalidNodeId;
+                        }
+                    }
+                    break;
+                }
+                case FocusTransitionPhase::Descendant: {
+                    const auto next_id = focus_transition_stack_[index].next;
+                    auto* const next = focus_transition_node(next_id);
+                    auto cursor = focus_transition_stack_[index].cursor;
+                    while (next && cursor != kInvalidNodeId) {
+                        auto* ancestor = focus_transition_node(cursor);
+                        if (!ancestor) {
+                            focus_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = ancestor->parent
+                            ? ancestor->parent->id
+                            : kInvalidNodeId;
+                        const Rect descendant_bounds{
+                            next->bounds.x - ancestor->bounds.x,
+                            next->bounds.y - ancestor->bounds.y,
+                            next->bounds.w,
+                            next->bounds.h};
+                        focus_transition_stack_[index].cursor = following;
+                        ancestor->component->descendant_focus_changed(descendant_bounds);
+                        cursor = following;
+                    }
+                    if (!next || focus_transition_stack_[index].cursor == kInvalidNodeId) {
+                        focus_transition_stack_[index].phase = FocusTransitionPhase::Complete;
+                        if (!syncing_availability_ || !focus_structure_dirty_) {
+                            availability_cleared_focus_ = nullptr;
+                        }
+                    }
+                    break;
+                }
+                case FocusTransitionPhase::Complete:
+                    break;
+                }
+            }
+            --focus_transition_running_;
+        } catch (...) {
+            --focus_transition_running_;
+            // Transition state is already advanced past every callback that
+            // entered application code. Keep the suffix durable for the next
+            // safe focus checkpoint and never invoke callbacks during unwind.
+            focus_structure_dirty_ = true;
+            throw;
+        }
+    }
+
+    void resume_focus_transitions(PlatformServices& platform) {
+        if (focus_transition_running_ != 0) return;
+        while (!focus_transition_stack_.empty()) {
+            const auto index = focus_transition_stack_.size() - 1;
+            execute_focus_transition(index, platform);
+            if (index < focus_transition_stack_.size() &&
+                focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
+                focus_transition_stack_.pop_back();
+                continue;
+            }
+            break;
+        }
+    }
+
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
         if (!node || !node->component->effective_availability().interactive()) return false;
         for (auto* current = node; current; current = current->parent) {
@@ -222,6 +466,7 @@
     }
 
     void sync_focus_structure(PlatformServices& platform) {
+        resume_focus_transitions(platform);
         if (!focus_structure_dirty_) return;
 
         // A failed availability-driven blur can be cancelled by a re-entrant
@@ -251,6 +496,7 @@
     }
 
     void set_focus(Node* node, PlatformServices& platform) {
+        if (focus_transition_running_ == 0) resume_focus_transitions(platform);
         if (!node || !focus_target_available(node)) return;
 
         // Pointer targeting and other direct focus moves must not let an
@@ -271,32 +517,20 @@
         if (focus_active_ && next_index == focused_index_) return;
 
         auto* old = current_focus_node();
-        if (old) {
-            FocusContext old_context{
-                old->bounds, platform, unsafe_paint_invalidator(*old), unsafe_layout_invalidator(*old)};
-            old->component->focus_changed(false, old_context);
-            invalidate_node_paint(*old);
-        }
+        FocusTransitionState transition{};
+        transition.previous = old ? old->id : kInvalidNodeId;
+        transition.next = node->id;
+        transition.cursor = transition.previous;
+        transition.phase = old ? FocusTransitionPhase::BlurOld : FocusTransitionPhase::Commit;
 
-        focused_index_ = next_index;
-        focus_active_ = true;
-
-        FocusContext new_context{
-            node->bounds, platform, unsafe_paint_invalidator(*node), unsafe_layout_invalidator(*node)};
-        node->component->focus_changed(true, new_context);
-        invalidate_node_paint(*node);
-        notify_focus_within_transition(old, node, platform);
-
-        for (auto* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
-            ancestor->component->descendant_focus_changed(Rect{
-                node->bounds.x - ancestor->bounds.x,
-                node->bounds.y - ancestor->bounds.y,
-                node->bounds.w,
-                node->bounds.h});
-        }
-
-        if (!syncing_availability_ || !focus_structure_dirty_) {
-            availability_cleared_focus_ = nullptr;
+        // Prepare the durable transition before publishing focus state or
+        // entering application code. Allocation failure leaves old focus intact.
+        focus_transition_stack_.push_back(transition);
+        const auto index = focus_transition_stack_.size() - 1;
+        execute_focus_transition(index, platform);
+        if (index < focus_transition_stack_.size() &&
+            focus_transition_stack_[index].phase == FocusTransitionPhase::Complete) {
+            focus_transition_stack_.pop_back();
         }
     }
 
