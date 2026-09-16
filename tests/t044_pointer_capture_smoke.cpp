@@ -129,12 +129,12 @@ bool pump(ui::Application& application, int iterations = 8) {
 
 template <class Predicate>
 bool pump_until(ui::Application& application, Predicate&& predicate, int attempts = 40) {
-    if (predicate()) return true;
+    if (predicate()) return pump(application);
     for (int attempt = 0; attempt < attempts; ++attempt) {
         if (!pump(application, 2)) return false;
-        if (predicate()) return true;
+        if (predicate()) return pump(application);
     }
-    return predicate();
+    return false;
 }
 
 class NativePointerDriver final {
@@ -164,11 +164,6 @@ public:
         NSView* view = native_view(window);
         NSWindow* native_window = view ? [view window] : nil;
         if (!native_window) return false;
-
-        // A hosted runner can report a window key/visible before AppKit has
-        // activated the process as a session-event routing target. Establish
-        // the application side of that native boundary explicitly, then observe
-        // both application and window readiness before any semantic input.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         [NSApp activateIgnoringOtherApps:YES];
@@ -204,9 +199,6 @@ public:
 #endif
     }
 
-    // Non-semantic native routing probe. On macOS this is deliberately only a
-    // mouse-move: callers may retry it while waiting for delivery without ever
-    // duplicating the semantic PointerDown that starts the capture contract.
     bool prime_pointer_route(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
         return post_mouse(window, kCGEventMouseMoved, false, false);
@@ -218,8 +210,6 @@ public:
 
     bool pointer_down(ui::StandaloneWindow& window) {
 #if defined(__APPLE__)
-        // Routing readiness is observed separately by prime_pointer_route().
-        // The semantic down itself is posted exactly once.
         return post_mouse(window, kCGEventLeftMouseDown, false, true);
 #elif defined(_WIN32)
         return move_cursor_inside(window) && send_left_button(MOUSEEVENTF_LEFTDOWN);
@@ -345,7 +335,6 @@ private:
         NSWindow* native_window = view ? [view window] : nil;
         NSScreen* screen = native_window ? [native_window screen] : nil;
         if (!view || !native_window || !screen) return false;
-
         const NSRect bounds = [view bounds];
         NSPoint local = NSMakePoint(24.0, 24.0);
         if (outside) {
@@ -362,7 +351,6 @@ private:
             std::clamp<double>(CGRectGetMaxY(display_bounds) - cocoa_screen.y,
                                CGRectGetMinY(display_bounds),
                                CGRectGetMaxY(display_bounds) - 1.0));
-
         CGEventRef event = CGEventCreateMouseEvent(nullptr, type, quartz_point, kCGMouseButtonLeft);
         if (!event) return false;
         if (held) CGEventSetIntegerValueField(event, kCGMouseEventButtonNumber, 0);
@@ -394,7 +382,6 @@ private:
                                                   int margin) noexcept {
         const HWND native_window = hwnd(window);
         if (!native_window) return false;
-
         RECT client{};
         if (!GetClientRect(native_window, &client)) return false;
         POINT top_left{client.left, client.top};
@@ -403,12 +390,10 @@ private:
             !ClientToScreen(native_window, &bottom_right)) {
             return false;
         }
-
         const int virtual_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         const int virtual_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
         const int virtual_right = virtual_left + GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1;
         const int virtual_bottom = virtual_top + GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1;
-
         POINT target{};
         if (bottom_right.x + margin <= virtual_right) {
             target.x = bottom_right.x + margin;
@@ -417,7 +402,6 @@ private:
         } else {
             return false;
         }
-
         const int client_mid_y = top_left.y + (bottom_right.y - top_left.y) / 2;
         target.y = std::clamp(client_mid_y, virtual_top, virtual_bottom);
         return SetCursorPos(target.x, target.y) != FALSE;
@@ -438,7 +422,6 @@ private:
         if (!display_) return false;
         const Window native_window = xwindow(window);
         if (!native_window) return false;
-
         XWindowAttributes attributes{};
         if (!XGetWindowAttributes(display_, native_window, &attributes)) return false;
         Window child{};
@@ -501,31 +484,26 @@ bool run_outside_sequence(ui::Application& application,
     if (!pump_until(application, [&] { return state->down >= down_before + 1; })) {
         return expect(false, stage, "pointer down was not delivered");
     }
-    if (!expect(state->down == down_before + 1, stage, "pointer down was delivered more than once")) {
-        return false;
-    }
-    if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) {
-        return false;
-    }
+    if (!expect(state->down == down_before + 1, stage, "pointer down was delivered more than once")) return false;
+    if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) return false;
 
     if (!step(driver.drag_outside(window, 0), stage, "first outside motion") || !pump(application)) return false;
     if (!step(driver.drag_outside(window, 20), stage, "second outside motion")) return false;
-    if (!pump_until(application, [&] { return state->drag_move >= drag_before + 2; })) {
+    if (!pump_until(application, [&] {
+            return state->drag_move >= drag_before + 2 &&
+                   state->outside_drag_move >= outside_before + 2;
+        })) {
         return expect(false, stage, "outside drag motion was lost");
     }
     if (!expect(state->outside_drag_move >= outside_before + 2,
                 stage,
-                "drag events were not delivered with out-of-view coordinates")) {
-        return false;
-    }
+                "drag events were not delivered with out-of-view coordinates")) return false;
 
     if (!step(driver.pointer_up_outside(window), stage, "outside pointer-up")) return false;
     if (!pump_until(application, [&] { return state->up >= up_before + 1; })) {
         return expect(false, stage, "outside pointer up was lost");
     }
-    if (!expect(state->up == up_before + 1, stage, "outside pointer up was delivered more than once")) {
-        return false;
-    }
+    if (!expect(state->up == up_before + 1, stage, "outside pointer up was delivered more than once")) return false;
     if (!expect(state->cancel == cancel_before, stage, "normal outside release synthesized cancel")) return false;
     if (!expect(driver.capture_clear(), stage, "native capture remained after pointer up")) return false;
     return true;
@@ -543,11 +521,9 @@ int main() {
     ui::UI a_ui{CaptureProbe{a_state}};
     ui::UI b_ui{CaptureProbe{b_state}};
 
-    auto a = std::make_unique<ui::StandaloneWindow>(
-        application, a_ui,
+    auto a = std::make_unique<ui::StandaloneWindow>(application, a_ui,
         ui::WindowDesc{.title = "NativeUI T044 A", .size = {240.0f, 160.0f}, .resizable = true});
-    auto b = std::make_unique<ui::StandaloneWindow>(
-        application, b_ui,
+    auto b = std::make_unique<ui::StandaloneWindow>(application, b_ui,
         ui::WindowDesc{.title = "NativeUI T044 B", .size = {240.0f, 160.0f}, .resizable = true});
     if (!a->valid()) return fail("create-a", a->last_error());
     if (!b->valid()) return fail("create-b", b->last_error());
@@ -567,56 +543,41 @@ int main() {
     if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *a, a_state, "focus-loss")) return 1;
     if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A")) return 1;
-    if (!pump_until(application, [&] { return a_state->down >= a_down_before + 1; })) {
-        return fail("focus-loss", "pointer down A was not delivered");
-    }
-    if (!expect(a_state->down == a_down_before + 1,
-                "focus-loss", "pointer down A was delivered more than once")) return 1;
+    if (!pump_until(application, [&] { return a_state->down >= a_down_before + 1; })) return fail("focus-loss", "pointer down A was not delivered");
+    if (!expect(a_state->down == a_down_before + 1, "focus-loss", "pointer down A was delivered more than once")) return 1;
     if (!expect(driver.capture_owned_by(*a), "focus-loss", "A did not own native capture")) return 1;
     if (!step(driver.focus(*b), "focus-loss", "focus B")) return 1;
-    if (!pump_until(application, [&] { return a_state->cancel >= a_cancel_before + 1; })) {
-        return fail("focus-loss", "focus loss did not cancel toolkit capture");
-    }
-    if (!expect(a_state->cancel == a_cancel_before + 1,
-                "focus-loss", "focus loss did not cancel toolkit capture exactly once")) return 1;
+    if (!pump_until(application, [&] { return a_state->cancel >= a_cancel_before + 1; })) return fail("focus-loss", "focus loss did not cancel toolkit capture");
+    if (!expect(a_state->cancel == a_cancel_before + 1, "focus-loss", "focus loss did not cancel toolkit capture exactly once")) return 1;
     if (!expect(driver.capture_clear(), "focus-loss", "native capture remained after focus loss")) return 1;
 
 #if defined(__linux__)
     const int b_move_before = b_state->move;
-    if (!step(driver.move_inside_while_held(*b), "focus-loss-x11", "move inside B while held") ||
-        !pump(application)) return 1;
-    if (!expect(b_state->move > b_move_before,
-                "focus-loss-x11", "motion remained grabbed by A after A lost focus")) return 1;
+    if (!step(driver.move_inside_while_held(*b), "focus-loss-x11", "move inside B while held") || !pump(application)) return 1;
+    if (!expect(b_state->move > b_move_before, "focus-loss-x11", "motion remained grabbed by A after A lost focus")) return 1;
 #endif
 
     if (!step(driver.release_button(*b), "focus-loss", "release button") || !pump(application)) return 1;
-    if (!expect(a_state->up == a_up_before,
-                "focus-loss", "cancelled capture later received a duplicate pointer up")) return 1;
+    if (!expect(a_state->up == a_up_before, "focus-loss", "cancelled capture later received a duplicate pointer up")) return 1;
 
     auto c_state = std::make_shared<CaptureState>();
     auto c_ui = std::make_unique<ui::UI>(CaptureProbe{c_state});
-    auto c = std::make_unique<ui::StandaloneWindow>(
-        application, *c_ui,
+    auto c = std::make_unique<ui::StandaloneWindow>(application, *c_ui,
         ui::WindowDesc{.title = "NativeUI T044 C", .size = {220.0f, 150.0f}, .resizable = true});
     if (!c->valid()) return fail("create-c", c->last_error());
     if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *c, c_state, "destroy-capture")) return 1;
     if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C")) return 1;
-    if (!pump_until(application, [&] { return c_state->down >= 1; })) {
-        return fail("destroy-capture", "C did not receive pointer down");
-    }
-    if (!expect(c_state->down == 1,
-                "destroy-capture", "C received pointer down more than once")) return 1;
+    if (!pump_until(application, [&] { return c_state->down >= 1; })) return fail("destroy-capture", "C did not receive pointer down");
+    if (!expect(c_state->down == 1, "destroy-capture", "C received pointer down more than once")) return 1;
     c.reset();
     c_ui.reset();
     if (!pump(application)) return 1;
     if (!expect(driver.capture_clear(), "destroy-capture", "native capture survived view destruction")) return 1;
 #if defined(__linux__)
     const int b_move_after_destroy = b_state->move;
-    if (!step(driver.move_inside_while_held(*b), "destroy-capture-x11", "move inside B after destroy") ||
-        !pump(application)) return 1;
-    if (!expect(b_state->move > b_move_after_destroy,
-                "destroy-capture-x11", "destroyed view retained the X11 pointer grab")) return 1;
+    if (!step(driver.move_inside_while_held(*b), "destroy-capture-x11", "move inside B after destroy") || !pump(application)) return 1;
+    if (!expect(b_state->move > b_move_after_destroy, "destroy-capture-x11", "destroyed view retained the X11 pointer grab")) return 1;
 #endif
     if (!step(driver.release_button(*b), "destroy-capture", "release button") || !pump(application)) return 1;
 
