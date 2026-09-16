@@ -183,6 +183,14 @@
         return false;
     }
 
+    [[nodiscard]] bool dynamic_teardown_quarantines(const Node* candidate) const noexcept {
+        if (!candidate) return false;
+        for (const auto* root : dynamic_teardown_quarantine_roots_) {
+            if (root && is_descendant_or_self(candidate, root)) return true;
+        }
+        return false;
+    }
+
     [[nodiscard]] NodeId surviving_trapping_scope_for_removal(
         Node* focused,
         const Node& owner,
@@ -278,7 +286,13 @@
 
             if (auto* capture = pointer_capture_owner();
                 subtree_is_being_removed(capture, owner, current_keys, desired_keys)) {
-                (void)cancel_pointer_capture(*active_platform_);
+                try {
+                    (void)cancel_pointer_capture(*active_platform_);
+                } catch (...) {
+                    pointer_interaction_active_ = false;
+                    throw;
+                }
+                pointer_interaction_active_ = false;
             }
 
             if (auto* focused = current_focus_node();
@@ -312,7 +326,14 @@
             }
         }
 
-        Node* retained_focus = current_focus_node();
+        std::vector<Node*> teardown_roots;
+        teardown_roots.reserve(owner.children.size());
+        for (std::size_t i = 0; i < owner.children.size(); ++i) {
+            if (!contains_dynamic_key(desired_keys, current_keys[i])) {
+                teardown_roots.push_back(owner.children[i].get());
+            }
+        }
+
         clear_removed_focus_restore_targets(*root_, owner, current_keys, desired_keys);
         if (availability_cleared_focus_ &&
             subtree_is_being_removed(
@@ -320,13 +341,89 @@
             availability_cleared_focus_ = nullptr;
         }
 
-        // Removed siblings tear down in reverse retained order, matching normal
-        // child-to-parent/reverse-sibling lifecycle semantics.
-        for (std::size_t i = owner.children.size(); i-- > 0;) {
-            if (contains_dynamic_key(desired_keys, current_keys[i])) continue;
-            if (active_) deactivate_node(*owner.children[i]);
-            unmount_node(*owner.children[i]);
+        if (!teardown_roots.empty()) {
+            // Publish a per-Tree, allocation-free interaction barrier only after
+            // every potentially allocating snapshot above has succeeded. While
+            // the removed nodes remain attached for their semantic/lifecycle
+            // callbacks, new hit-test, focus, hover and capture publication into
+            // those subtrees is rejected. The previous barrier is restored
+            // exactly before detach, or during exceptional recovery.
+            std::vector<Node*> previous_quarantine;
+            previous_quarantine.swap(dynamic_teardown_quarantine_roots_);
+            dynamic_teardown_quarantine_roots_.swap(teardown_roots);
+            auto restore_quarantine = [this, &previous_quarantine]() noexcept {
+                dynamic_teardown_quarantine_roots_.swap(previous_quarantine);
+            };
+
+            try {
+                if (active_ && active_platform_) {
+                    // A pre-barrier teardown callback may already have published
+                    // a durable semantic suffix or reacquired focus/capture in a
+                    // doomed subtree. Finish unstarted suffix work while the nodes
+                    // are alive, then terminalize every raw interaction owner.
+                    resume_pointer_hover_transitions(*active_platform_);
+                    resume_focus_transitions(*active_platform_);
+
+                    if (dynamic_teardown_quarantines(pointer_hover_target_)) {
+                        InputEvent leave{};
+                        leave.type = InputType::PointerLeave;
+                        (void)clear_pointer_hover(leave, *active_platform_);
+                    }
+
+                    if (auto* capture = pointer_capture_owner();
+                        dynamic_teardown_quarantines(capture)) {
+                        try {
+                            (void)cancel_pointer_capture(*active_platform_);
+                        } catch (...) {
+                            pointer_interaction_active_ = false;
+                            throw;
+                        }
+                        pointer_interaction_active_ = false;
+                    }
+
+                    if (auto* focused = current_focus_node();
+                        dynamic_teardown_quarantines(focused)) {
+                        if (!removed_focus) {
+                            removed_focus_restore_target =
+                                removed_trapping_scope_restore_target_for_removal(
+                                    focused, owner, current_keys, desired_keys);
+                            surviving_focus_scope = surviving_trapping_scope_for_removal(
+                                focused, owner, current_keys, desired_keys);
+                            removed_focus = true;
+                        }
+                        clear_focus(*active_platform_);
+                    }
+
+                    if (availability_cleared_focus_ &&
+                        dynamic_teardown_quarantines(availability_cleared_focus_)) {
+                        availability_cleared_focus_ = nullptr;
+                    }
+                }
+
+                // Removed siblings tear down in reverse retained order, matching
+                // normal child-to-parent/reverse-sibling lifecycle semantics. The
+                // quarantine stays active across every arbitrary lifecycle callback,
+                // so a later callback cannot recreate an earlier hover/capture/focus
+                // owner in a subtree that is about to be destroyed.
+                for (std::size_t i = owner.children.size(); i-- > 0;) {
+                    if (contains_dynamic_key(desired_keys, current_keys[i])) continue;
+                    if (active_) deactivate_node(*owner.children[i]);
+                    unmount_node(*owner.children[i]);
+                }
+            } catch (...) {
+                // Framework-only recovery: no allocation and no component callback.
+                // Nodes are still attached here, so restoring the exact previous
+                // quarantine makes the retained tree valid for the later retry.
+                restore_quarantine();
+                throw;
+            }
+            restore_quarantine();
         }
+
+        // Lifecycle callbacks can legitimately move focus to a surviving node.
+        // Capture the authoritative focus only after teardown semantics settle,
+        // immediately before the callback-free detach/ownership commit.
+        Node* retained_focus = current_focus_node();
 
         // Detach retained and removed nodes into separate ownership before any
         // replacement factory is invoked. The retained-only intermediate tree
@@ -520,6 +617,7 @@
 
     std::vector<DynamicRecord> dynamic_records_;
     std::vector<NodeId> dirty_dynamic_nodes_;
+    std::vector<Node*> dynamic_teardown_quarantine_roots_;
     NodeId next_node_id_{1};
     std::uint64_t structural_epoch_{};
     bool runtime_node_ids_initialized_{};
