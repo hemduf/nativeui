@@ -65,9 +65,11 @@ public:
         if (rects_.size() > kMaxRects) {
             Rect bounds{};
             for (const auto item : rects_) bounds = unite(bounds, item);
-            // reserve() above guarantees enough storage for the pre-collapse
-            // final_size, so shrinking to one element is allocation-free.
-            rects_.assign(1, bounds);
+            // Capacity for final_size was secured before mutation. Rect is a
+            // trivial value type, so collapsing in place is allocation-free and
+            // cannot fail after publication has begun.
+            rects_.front() = bounds;
+            rects_.resize(1);
             merged = bounds;
         }
         return merged;
