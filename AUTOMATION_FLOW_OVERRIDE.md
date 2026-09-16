@@ -55,6 +55,25 @@ For every `REVIEW_FIX`, Scheduler should publish an `on_review_fix_applied` rese
 
 Reservations consume worker attention, not a source-changing lane. A reservation that becomes true preempts that worker's ordinary SOURCE/fallback work.
 
+### 3.1 Mandatory idle-worker documentation fallback
+
+A conditional reservation is **not active work** while its trigger is false. Scheduler and Delivery workers MUST distinguish `RESERVED_WAIT` from immediately executable work.
+
+When a worker has no immediately executable higher-priority implementation, review, review-fix, qualification/integration-support, or explicit blocker-resolution assignment, that worker MUST advance **T122 — V1 documentation completion** rather than wait idle.
+
+Rules:
+
+1. `RESERVED_WAIT` workers keep their reservation but execute T122 documentation until the reservation becomes actionable.
+2. T122 fallback is documentation-only, granular, conflict-aware, and safely interruptible between coherent units.
+3. When the reserved or other higher-priority assignment becomes executable, it preempts T122 at the next worker/event boundary.
+4. Multiple workers may advance T122 concurrently only after synchronizing current documentation state and claiming distinct documentation units where possible.
+5. Documentation fallback does not consume a product source-changing lane and does not justify weakening closeout, review, CI, or merge gates.
+6. Convergence/head-budget limits on product SOURCE work do not disable documentation fallback.
+7. Scheduler and Reporter MUST expose both a worker's pending reservation and its active T122 fallback assignment. A worker must never be reported as productively assigned merely because it is on standby.
+8. While T122 has remaining documentation work, target worker execution utilization is **4/4** even when product source-changing utilization is intentionally lower.
+
+This fallback is an orchestration invariant, not an optional scheduling preference. A worker waiting idle with only a false conditional reservation while T122 has actionable documentation is an orchestration defect.
+
 ## 4. Mid-cycle self-service review claim
 
 At the beginning of every Delivery run, before executing the snapshot `primary`, inspect the current cycle events and live PR state for:
@@ -146,6 +165,7 @@ At every new generation Scheduler must consume all head-valid mid-cycle `CLAIMED
 - `review_fix_worker` when applicable;
 - reviewed/current head and observed base;
 - conditional reservations still pending;
+- active T122 documentation fallback assignments for workers whose reservations remain non-executable;
 - main-composition checkpoint status for closeout candidates.
 
 Stale claims whose head changed are discarded.
@@ -173,6 +193,8 @@ Reporter should distinguish throughput caused by draining a backlog of nearly-fi
 - average/maximum branch age behind current `main` at the composition checkpoint;
 - count of qualification runs invalidated by subsequent composition-relevant main changes;
 - count of review/Integration starvation SLO breaches;
-- source-lane utilization separately from closeout worker utilization.
+- source-lane utilization separately from closeout worker utilization;
+- worker execution utilization, including active T122 fallback work separately from product SOURCE/review work;
+- count of idle-worker invariant breaches (`RESERVED_WAIT` with no active T122 fallback while documentation remained actionable).
 
-A healthy scheduler may intentionally show fewer simultaneous source-changing lanes while merge throughput and critical-path completion improve.
+A healthy scheduler may intentionally show fewer simultaneous source-changing lanes while merge throughput and critical-path completion improve. It should not leave executable worker capacity idle when T122 documentation remains actionable.

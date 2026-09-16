@@ -72,6 +72,7 @@
     }
 
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
+        if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
@@ -79,6 +80,7 @@
     /// Immediately recompute layout for an externally supplied viewport (for
     /// example a window resize), and dirty the complete new viewport.
     void layout(Size viewport) {
+        if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;

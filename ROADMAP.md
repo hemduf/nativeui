@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-15
+**Updated:** 2026-09-16
 
 NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -20,7 +20,9 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 
 ## Current execution snapshot
 
-Current `main` includes T127 / PR #348 merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`, T141 / PR #372 merged as `bf816a0318f0d0cd87819e8404c2425e11a537e2`, T129 / PR #345 merged as `e400695e4f106a35093029e2465e0aa5ed12393d`, T131 / PR #339 merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d`, T140 / PR #358 merged as `3e96491e1723418f17dea1eb173e1444d3006d0d`, T132 / PR #342 merged as `c2f381363d57e48df96f02d5d52b3e8a6571b478`, T139 / PR #350 merged as `61950a9f40145368dba709e755ee8f0c06ae411b`, T138 / PR #343 merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`, T128 / PR #296 merged as `ca65087b503aff04133394c5ef200cd7cae75e12`, T126 / PR #295 merged as `be216d7a41999113472a0457827d43caad28cf15`, T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+Current `main` includes T173 / PR #403 merged as `2d692a781537593fe686da19be330c0cdd24c4b6`, T127 / PR #348 merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`, T141 / PR #372 merged as `bf816a0318f0d0cd87819e8404c2425e11a537e2`, T129 / PR #345 merged as `e400695e4f106a35093029e2465e0aa5ed12393d`, T131 / PR #339 merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d`, T140 / PR #358 merged as `3e96491e1723418f17dea1eb173e1444d3006d0d`, T132 / PR #342 merged as `c2f381363d57e48df96f02d5d52b3e8a6571b478`, T139 / PR #350 merged as `61950a9f40145368dba709e755ee8f0c06ae411b`, T138 / PR #343 merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`, T128 / PR #296 merged as `ca65087b503aff04133394c5ef200cd7cae75e12`, T126 / PR #295 merged as `be216d7a41999113472a0457827d43caad28cf15`, T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+
+T173 / issue #401 / PR #403 is complete and merged as `2d692a781537593fe686da19be330c0cdd24c4b6`. Frozen exact head `afb577f6556a8ad36524c0d2db0013abd95783be` passed normal CI `35100711190`, Package Contracts `35100711185`, T060 Application Contract `35100711272`, T065 Platform Dispatcher `35100711181`, T066 Window Controls `35100711265`, final-candidate T042 Lifecycle Stress `35102133059` and T052 v0.1 Release Gate `35102133276`, including the exact-head T051 benchmark. Mandatory exact-head peer review `5223294153` recorded `REVIEW_PASS` with zero Blocking/Important findings. The public keyboard API now exposes the complete ASCII alphabet A-Z without changing any pre-existing `Key` numeric value, preserves existing Primary+A/C/V/X/Y/Z commands and Primary+Q close behavior, keeps text/IME semantics separate, and includes exhaustive lowercase/uppercase translation, A-Z KeyDown/KeyUp retained routing and `Primary+Shift+P` coverage in the dedicated feature example.
 
 T127 / issue #288 / PR #348 is complete and merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`. Frozen exact head `c17cfca1dc53a921782c09d45e547482c854733b` passed normal CI `35001985912`, T066 Window Controls `35001986036`, T067 Virtual List Contract `35001985913`, final-candidate T042 Lifecycle Stress `35010483243` and T052 v0.1 Release Gate `35010483184`. Mandatory exact-head peer review `5214429062` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W3 independent from source/current-head worker W2. `ScrollState` now uses stable per-instance lifetime/observer control with deterministic latest-write reentrancy and throwing-observer recovery; retained Scroll/ScrollView/scrollbar/VirtualList consumers gate borrowed-state access across callbacks with lifetime tokens; stable scrolling no longer clones the full callback list. The head was explicitly reconciled against the post-T141 composition and fully requalified before merge. T127 is now satisfied as a T069 prerequisite; the remaining pre-freeze blockers are T125 and T130.
 
@@ -79,6 +81,8 @@ platform/package:  T053(done) -> T047(done) -> T048(done)
 critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
                    T041(done) -> T043(done) -> T066(done)
 
+input/API:          T173(done) — complete public ASCII A-Z key exposure
+
 state/safety:       T123(done) -> T138(done) -> T139(done) -> T140(done) -> T141(done) -> T124(done)
                     T123(done) -> T127(done)
                     T126(done)
@@ -95,7 +99,7 @@ release:            T124(done) + T125 + T127(done) + T130 + T129(done) + T131(do
 post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
 ```
 
-The historical platform/styling prerequisites are complete, and the September 14 pre-freeze safety audit added hard blockers before T069. The T124 umbrella chain T138 -> T139 -> T140 -> T141 is now complete and final integrated Binding qualification passed on the exact T141 head. T126, T127, T128, T129, T131 and T132 are also Done. T069 remains Blocked only until T125 and T130 are Done and synchronized on main. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
+The historical platform/styling prerequisites are complete, and the September 14 pre-freeze safety audit added hard blockers before T069. The T124 umbrella chain T138 -> T139 -> T140 -> T141 is now complete and final integrated Binding qualification passed on the exact T141 head. T126, T127, T128, T129, T131, T132 and T173 are also Done. T069 remains Blocked only until T125 and T130 are Done and synchronized on main. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
 
 ## Milestone 0 — Baseline hardening
 
@@ -107,7 +111,7 @@ The historical platform/styling prerequisites are complete, and the September 14
 
 ## Milestone 2 — Input, focus and gestures
 
-**Complete baseline.** T013–T018 provide event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop primitives.
+**Complete for the current v1 input scope.** T013–T018 provide event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop primitives. T173 / PR #403 extends the frozen-adjacent public keyboard API to the complete ASCII alphabet A-Z while preserving every pre-existing enum value, existing command mappings, Primary+Q close semantics and TextInput/IME separation; exhaustive translation/routing coverage and the dedicated feature example are merged and fully qualified.
 
 ## Milestone 3 — Rendering and graphics
 
@@ -299,12 +303,12 @@ T049(done) ---------------------------------------------------------------------
 T044(done) -------------------------------------------------------------------------------------------> T071
 ```
 
-T123, T124, T126, T127, T128, T129, T131, T132, T138, T139, T140 and T141 are complete. T069 is the final v1 public API freeze but remains blocked until T125 and T130 are Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
+T123, T124, T126, T127, T128, T129, T131, T132, T138, T139, T140, T141 and T173 are complete. T069 is the final v1 public API freeze but remains blocked until T125 and T130 are Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
 
 ## Immediate cross-lane plan
 
-1. Execute the Scheduler-authorized transactional canonical-stream replacements for T125/#286 and T130/#291 from the post-T127 main, preserving unrelated main changes and retiring the old composition-invalid Draft streams.
-2. Run fresh exact-head normal/path qualification, complete acceptance/tests/non-goals and self `CODE_REVIEW.md`, then obtain independent W2/W4 peer reviews before Integration final qualification.
+1. Execute the Scheduler-authorized transactional canonical-stream replacements for T125/#286 and T130/#291 from current main, preserving unrelated main changes and retiring composition-invalid Draft streams.
+2. Run fresh exact-head normal/path qualification, complete acceptance/tests/non-goals and self `CODE_REVIEW.md`, then obtain independent peer reviews before Integration final qualification.
 3. Keep T069/#81 Blocked until T125 and T130 are Done and synchronized on main; then perform one whole-surface API-freeze audit before Ready/final gates.
 4. After T069 completes, re-evaluate T070 directly; after T070, re-evaluate T071 on the exact frozen/RC baseline.
 5. Keep T068/PR #241 parked for 1.2.
