@@ -1,6 +1,7 @@
 #include "example_support.hpp"
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -74,6 +75,34 @@ private:
     std::shared_ptr<ShortcutState> state_;
 };
 
+class ConstructionProbeComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {20.0f, 20.0f};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
+class ConstructionProbe {
+public:
+    explicit ConstructionProbe(std::shared_ptr<int> constructions)
+        : constructions_(std::move(constructions)) {}
+
+    ui::Spec spec() && {
+        auto constructions = std::move(constructions_);
+        return ui::Spec{
+            [constructions = std::move(constructions)] {
+                ++*constructions;
+                return std::make_unique<ConstructionProbeComponent>();
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<int> constructions_;
+};
+
 ui::InputEvent primary_key(ui::Key key) {
     auto event = example::key(key);
     event.ctrl = true;
@@ -126,6 +155,51 @@ int run_self_test() {
     tree.set_key_down_handler({});
     if (tree.dispatch(primary_key(ui::Key::G), platform) != ui::EventResult::Ignored) {
         return example::fail("clearing the fallback did not restore Ignored behavior");
+    }
+
+    // T125 composition regression: a throwing fallback must restore the exact
+    // dispatch depth. The following successful fallback queues an If mutation;
+    // the new branch must be reconciled before dispatch returns. A stale depth
+    // would suppress the outermost reconciliation checkpoint and leave the
+    // construction count at zero.
+    ui::State<bool> reveal{false};
+    auto constructions = std::make_shared<int>(0);
+    ui::UI recovery_tree{ui::Column{
+        ui::Spacer{20.0f, 20.0f},
+        ui::If{reveal, ConstructionProbe{constructions}},
+    }};
+    example::Platform recovery_platform;
+    recovery_tree.resize({120.0f, 80.0f});
+    recovery_tree.activate(recovery_platform);
+
+    bool inject_failure = true;
+    recovery_tree.set_key_down_handler([&](const ui::InputEvent&) {
+        if (inject_failure) {
+            inject_failure = false;
+            throw std::runtime_error("injected T174 fallback failure");
+        }
+        reveal.set(true);
+        return ui::EventResult::Handled;
+    });
+
+    bool threw = false;
+    try {
+        (void)recovery_tree.dispatch(example::key(ui::Key::G), recovery_platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    if (!threw) {
+        return example::fail("throwing KeyDown fallback did not propagate");
+    }
+    if (*constructions != 0) {
+        return example::fail("failed fallback unexpectedly published dynamic work");
+    }
+    if (recovery_tree.dispatch(example::key(ui::Key::P), recovery_platform) !=
+        ui::EventResult::Handled) {
+        return example::fail("KeyDown fallback did not recover after exception unwind");
+    }
+    if (*constructions != 1) {
+        return example::fail("dispatch depth was not restored before fallback recovery");
     }
 
     return 0;
