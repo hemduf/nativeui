@@ -7,321 +7,153 @@ NativeUI is a reusable C++20 desktop retained-mode UI toolkit: Pugl owns native 
 ## Execution rules
 
 - explicit GitHub `Dependencies:` are hard gates;
-- resume existing canonical branches/PRs before creating work;
-- among Ready work, prefer priority and downstream unblock value;
-- behavior/configuration changes use RED -> GREEN -> REFACTOR;
-- implementation progress and issue conformity are separate; Done/merge requires an explicit issue-to-code/test evidence matrix with no unchecked requirement;
-- code-changing tickets require exact-head normal validation and a final `CODE_REVIEW.md` record with no Blocking/Important finding;
-- use `CI_POLICY.md`: Draft for active implementation, then Draft -> Ready only for a frozen executable candidate to trigger T042/T052 qualification;
-- NativeUI-owned targets must compile with zero unapproved warnings and the default empty `NATIVEUI_ALLOWED_WARNINGS`;
-- unrelated lanes may continue only within repository concurrency rules while another PR waits exclusively on external CI;
-- every completion cycle synchronizes issue status, `CONTEXT.md` and this roadmap;
-- feature tickets ship an interactive example plus deterministic `--self-test`.
+- finish the current merge-near ticket before widening source work;
+- behavior/configuration changes use local RED -> GREEN -> REFACTOR and coherent published batches;
+- code-changing tickets require exact-head normal/path qualification and the complete `CODE_REVIEW.md` record with no Blocking/Important finding;
+- keep implementation PRs Draft while executable source/tests/build/workflows change;
+- Draft -> Ready is reserved for a frozen candidate and triggers T042/T052 final qualification;
+- any executable source/test/build/workflow change after final qualification invalidates the candidate; pure completion/project-state documentation does not;
+- NativeUI-owned targets compile with zero unapproved warnings and the default empty `NATIVEUI_ALLOWED_WARNINGS`;
+- every completion cycle synchronizes the issue, `CONTEXT.md`, this roadmap and relevant automation status;
+- never place personal information in tickets, source, tests, examples, fixtures or generated metadata.
 
 ## Current execution snapshot
 
-Current `main` includes T173 / PR #403 merged as `2d692a781537593fe686da19be330c0cdd24c4b6`, T127 / PR #348 merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`, T141 / PR #372 merged as `bf816a0318f0d0cd87819e8404c2425e11a537e2`, T129 / PR #345 merged as `e400695e4f106a35093029e2465e0aa5ed12393d`, T131 / PR #339 merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d`, T140 / PR #358 merged as `3e96491e1723418f17dea1eb173e1444d3006d0d`, T132 / PR #342 merged as `c2f381363d57e48df96f02d5d52b3e8a6571b478`, T139 / PR #350 merged as `61950a9f40145368dba709e755ee8f0c06ae411b`, T138 / PR #343 merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`, T128 / PR #296 merged as `ca65087b503aff04133394c5ef200cd7cae75e12`, T126 / PR #295 merged as `be216d7a41999113472a0457827d43caad28cf15`, T123 / PR #284 merged as `839a7b082f94e0bef3b688cc7bcc2074e6cbfb99`, T039 / PR #260 squash-merged as `1b998491306ae3fff9771339bedca7e14007f355`, T040 / PR #259 squash-merged as `df82860fd141a37140c67dc96e1326dbf9d87403`, T049 / PR #258 squash-merged as `24d5b2265360917a37e1ab7d5846a0348b305485`, T038 / PR #218 squash-merged as `8d81a0803a9c7f9b191d1fd4232d975adb39bf36`, T064 / PR #240 merged as `5e9798f6637af8d6275379002fa8116f167115f7`, plus completed T044, T072, T066, T062 with its post-merge completeness fix, T063, T035, T043, T061, T067, T045, T037, T058, T036, T065, T034 and T060.
+### T130 — Done
 
-T173 / issue #401 / PR #403 is complete and merged as `2d692a781537593fe686da19be330c0cdd24c4b6`. Frozen exact head `afb577f6556a8ad36524c0d2db0013abd95783be` passed normal CI `35100711190`, Package Contracts `35100711185`, T060 Application Contract `35100711272`, T065 Platform Dispatcher `35100711181`, T066 Window Controls `35100711265`, final-candidate T042 Lifecycle Stress `35102133059` and T052 v0.1 Release Gate `35102133276`, including the exact-head T051 benchmark. Mandatory exact-head peer review `5223294153` recorded `REVIEW_PASS` with zero Blocking/Important findings. The public keyboard API now exposes the complete ASCII alphabet A-Z without changing any pre-existing `Key` numeric value, preserves existing Primary+A/C/V/X/Y/Z commands and Primary+Q close behavior, keeps text/IME semantics separate, and includes exhaustive lowercase/uppercase translation, A-Z KeyDown/KeyUp retained routing and `Primary+Shift+P` coverage in the dedicated feature example.
+**T130 / issue #291 / PR #408 is complete and merged as `e65e317d6584ae440f1f041b8187a63d18b2aa6a`.**
 
-T127 / issue #288 / PR #348 is complete and merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`. Frozen exact head `c17cfca1dc53a921782c09d45e547482c854733b` passed normal CI `35001985912`, T066 Window Controls `35001986036`, T067 Virtual List Contract `35001985913`, final-candidate T042 Lifecycle Stress `35010483243` and T052 v0.1 Release Gate `35010483184`. Mandatory exact-head peer review `5214429062` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W3 independent from source/current-head worker W2. `ScrollState` now uses stable per-instance lifetime/observer control with deterministic latest-write reentrancy and throwing-observer recovery; retained Scroll/ScrollView/scrollbar/VirtualList consumers gate borrowed-state access across callbacks with lifetime tokens; stable scrolling no longer clones the full callback list. The head was explicitly reconciled against the post-T141 composition and fully requalified before merge. T127 is now satisfied as a T069 prerequisite; the remaining pre-freeze blockers are T125 and T130.
+Frozen executable head `4c40b881fa13ea0f9839ae415059744f6107c62d` delivered the consolidated lifecycle/layout/paint/native exception-safety closeout:
 
-T141 / issue #306 / PR #372 is complete and merged as `bf816a0318f0d0cd87819e8404c2425e11a537e2`. Frozen exact head `71635725e7929c5e43e00f7df19bee2fa56783d1` passed normal CI `34978181978`, Package Contracts `34978181993`, T066 Window Controls `34978182056`, final-candidate T042 Lifecycle Stress `34992041153` and T052 v0.1 Release Gate `34992041092`. Mandatory exact-head peer review `5211779234` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W1 independent from source/current-head worker W4. Retained `If`/`Switch`/`ForEach`, FocusScope and StyleScope now retain `Binding<T>` values while legacy `State<T>&` syntax forwards through `.binding()`; Structure/focus/style invalidation semantics, retained-owner teardown safety, installed/relocated source compatibility and two-UI isolation remain qualified. T141 completes the T138 -> T139 -> T140 -> T141 chain and satisfies the T124 integrated qualification/closeout requirement.
+- no-throw, best-effort retained and native teardown;
+- exact-progress lifecycle transactions and rollback for mount/activate/deactivate/unmount;
+- lifecycle publication barriers across retained Tree/UI measure/layout/paint/dispatch/inspector paths;
+- transaction-safe dynamic insertion/removal with durable per-Tree retry state and staged focus-registry repair;
+- terminal deactivation that does not construct pending desired children solely to tear them down;
+- transactional layout rollback with dirty/repaint preservation;
+- Painter/SkCanvas unwind balancing and deterministic failed-paint recovery;
+- staged ViewCore partial-construction cleanup across native resource acquisition stages;
+- deterministic T044 macOS native readiness/button-state synchronization without retrying semantic PointerDown/PointerUp;
+- multi-instance isolation with no mutable process-global/singleton/`thread_local` recovery state.
 
-T129 / issue #290 / PR #345 is complete and merged as `e400695e4f106a35093029e2465e0aa5ed12393d`. Frozen exact head `b32a6433277a19f2e3f263af2ffc274fed6fc505` passed normal CI `34953250223`, T044 Native Pointer Capture `34953250187`, T050 Inspector Contract `34953250193`, T066 Window Controls `34953250282`, final-candidate T042 Lifecycle Stress `34964143716` and T052 v0.1 Release Gate `34964143596`. Mandatory exact-head peer review `5209343192` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W1 independent from source/current-head worker W2. Long-lived MountContext/theme/dynamic invalidators now use a per-Tree weak lifetime generation plus stable NodeId resolution, identities retire before terminal teardown, explicit unmount/remount rotates the generation, whole-Tree stale callbacks are harmless, replacement identities remain monotonic/non-reused, and stack-confined Input/Focus/Lifecycle contexts remain on immediate invalidators. T129 is satisfied as an independent T069 prerequisite; remaining pre-freeze blockers are T125 and T130.
+Exact-head normal/path qualification is green for CI `35134851097`, Package Contracts `35134851013`, T044 `35134851103`, T050 `35134851018`, T060 `35134851051`, T064 `35134851039`, T065 `35134851008`, T066 `35134851040` and T072 `35134850948`. The initial Windows CI failure was an external Mesa download transport reset after a successful build; a targeted same-head rerun passed Mesa and Windows tests without source changes.
 
-T131 / issue #293 / PR #339 is complete and merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d`. Frozen exact head `bbdcf5d8cc58ac0f9a3386e48e4903c5737e9de0` passed normal CI `34947959869`, T050 Inspector Contract `34947959856`, T066 Window Controls `34947959862`, final-candidate T042 Lifecycle Stress `34961037609` and T052 v0.1 Release Gate `34961037565`. Mandatory exact-head peer review `5209008696` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W4 independent from source/current-head worker W1. Overlay show/close publication, Dialog slot/completion/destructor behavior, ComboBox/PopupMenu recovery, Tooltip coherence and component overlay-command checkpoints now preserve explicit recoverable transaction boundaries under injected failure, owner destruction and reentrancy without adding global recovery state or a second retained transaction system. T131 is satisfied as an independent T069 prerequisite; T069 remains blocked by the other remaining AND prerequisites.
+Final-candidate T042 Lifecycle Stress `35140156948` passed Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35140156810` passed release contracts, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Review records `5226938758` and `5227314927` report zero Blocking/Important findings. Privacy review is clean.
 
-T140 / issue #305 / PR #358 is complete and merged as `3e96491e1723418f17dea1eb173e1444d3006d0d`. Frozen exact head `5472ea1d0691724e78c01e1424ca8ad803a9fcbd` passed normal CI `34949901455` and T066 Window Controls `34949901516`, then final-candidate T042 Lifecycle Stress `34960645830` and T052 v0.1 Release Gate `34960645611`. Mandatory exact-head peer review `5208676715` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W1 independent from source/current-head worker W4. Standard writable stateful families now use `Binding<T>` internally while legacy `State<T>&` compatibility, existing invalidation classes, two-UI isolation and the no-reactive-scheduler constraint remain preserved. T141 subsequently completed the retained-composition/style/focus migration and final T124 qualification.
+### T125 — Done
 
-T132 / issue #294 / PR #342 is complete and merged. Frozen exact source head `027e895ed8670158eead1d5c722c387f74a7448f` passed normal CI `34908565263`, T060 Application Contract `34908565154`, T064 Desktop Services Contract `34908565205`, T065 Dispatcher Contract `34908565174`, T065 Platform Dispatcher `34908565239`, T066 Window Controls `34908565163` and Package Contracts `34908565192`, then final-candidate T042 Lifecycle Stress `34911130032` and T052 v0.1 Release Gate `34911130054`. Mandatory exact-head second peer review `5204033991` reported `REVIEW_PASS` with zero Blocking/Important findings and reviewer independence from current-head modifier W1. Standalone close lifecycle control now remains deferred through an owner-local checkpoint when normal Dispatcher enqueue rejects or throws, including real component/input and native-close failure regressions, pending-destruction silence, exact-once completion and two-window isolation. T132 is satisfied as a pre-freeze T069 prerequisite but directly unlocks no product ticket because the remaining AND blockers are still non-Done.
+**T125 / issue #286 / PR #382 is complete and merged as `401d73983c2103fae1e48c1984a982277088e060`.**
 
-T139 / issue #304 / PR #350 is complete and merged. Frozen exact source head `f8e9729f5d967c8168335ae63e9800a0bb0b6ef4` passed normal CI `34895438606`, Package Contracts `34895438615` and T066 Window Controls `34895438808`, then final-candidate T042 Lifecycle Stress `34901397463` and T052 v0.1 Release Gate `34901397478`. Mandatory exact-head second peer review `5203042503` reported `REVIEW_PASS` with zero Blocking/Important findings and reviewer independence from the W4 review-fix author. Representative Knob/Toggle/TextInput entry points now accept `Binding<T>` directly while legacy `State<T>&` syntax forwards unchanged; behavior tests cover exactly-once mutation, targeted external invalidation, public/installed consumer compilation, and the mandatory T139 feature example. T140 and T141 subsequently completed the remaining Binding migration chain.
+Frozen executable head `da4386626837b8cedf9d7f17bc6e8b150aa99921` closes the retained dispatch/reconciliation/cancellation exception-safety blocker while preserving T130 as the lifecycle/layout/paint transaction authority:
 
-T138 / issue #303 / PR #343 is complete and merged. Frozen current-main-synchronized source head `268c2e4c00307e894ba02f56304174225ef49b50` passed normal CI `34854738551`, Package Contracts `34854738531` and T066 Window Controls `34854738635`, then final-candidate T042 Lifecycle Stress `34856470278` and T052 v0.1 Release Gate `34856470266`. Initial final-gate attempts encountered external CPM/Skia download failures; those were classified as infrastructure and targeted reruns produced genuine terminal green results. Independent current-main Integration review `5198976168` reported zero Blocking/Important findings. The core public `Binding<T>` value/lifetime contract is merged and underpins the completed T139-T141 migration layers.
+- `dispatch_depth_`, availability reconciliation, dynamic reconciliation and pointer-cancellation guards restore exact prior state across exception unwind;
+- begun focus/hover callbacks are not automatically replayed solely because they threw; durable suffix/pending work resumes only at valid retained checkpoints;
+- pending focus/hover semantic work is terminalized across mount/deactivate/unmount boundaries so stale requests cannot leak into later Tree reuse;
+- dynamic reconciliation preserves captured, unprocessed and re-entrant owners after callback failure and recovers dirty-owner enqueue allocation failure through bounded per-Tree state;
+- dynamic teardown quarantine blocks interaction publication into doomed subtrees while reusing T130's already-computed desired-key snapshot, avoiding duplicate user key callbacks;
+- quarantine authority is structural-epoch scoped so a re-entrant structural reversal immediately retires provisional quarantine authority before T130 abandons the stale removal pass;
+- throwing PointerDown/PointerUp/PointerCancel and nested cancellation cannot permanently wedge pointer interaction/capture state;
+- transient Pugl drop offer/decision borrows restore exact nested prior state before existing foreign-ABI containment;
+- recovery remains per-Tree or stack-local with no mutable process-global/singleton/`thread_local` state.
 
-T128 / issue #289 / PR #296 is complete and merged. Frozen source head `ce58df7758e960c329f26394bad44ce4c7b4efc1` passed normal CI `34848275511`, T051 Release Benchmarks `34848275318`, T064 Desktop Services Contract `34848275472`, T065 Dispatcher Contract `34848275470`, T065 Platform Dispatcher `34848275371`, T066 Window Controls `34848275349`, then final-candidate T042 Lifecycle Stress `34853025047` and T052 v0.1 Release Gate `34853023976`. Independent final `CODE_REVIEW.md` review `5198631295` reported zero Blocking/Important findings. Accepted Dispatcher work now remains durable after a neighboring callback throws without retrying the begun callback or allocating a recovery queue; failing animation entries become terminal before propagation while sibling scheduling remains live; completion is at-most-once; and a real platform expose/paint exception is contained at the foreign event-loop boundary on Linux, Windows and macOS. T128 is satisfied as one pre-freeze T069 prerequisite and directly unlocks no child ticket.
+Exact-head normal/path qualification is green for CI `35150662534`, Package Contracts `35150662688`, T044 `35150662518`, T050 `35150662564`, T060 `35150662729`, T064 `35150662700`, T065 `35150662562`, T066 `35150662456` and T072 `35150662919`.
 
-T126 / issue #287 / PR #295 is complete and merged. Frozen executable head `4ae5dae65f86cc34bd3177f91ad3e6db7403b02d` passed normal CI `34844330034`, T064 Desktop Services Contract `34844329931`, Package Contracts `34844329951`, T066 Window Controls `34844330127`, then final-candidate T042 Lifecycle Stress `34846694493` and T052 v0.1 Release Gate `34846694353`. Independent final `CODE_REVIEW.md` review `5197980748` reported zero Blocking/Important findings. The delivered contract makes DesktopServices completion terminal before fallible Dispatcher marshalling, contains exceptions at AppKit/native/worker boundaries, makes retained panel cleanup deterministic and ensures queue rejection/allocation failure cannot strand request capacity or fall back to application code on a backend thread. T126 is now satisfied as one pre-freeze T069 prerequisite and directly unlocks no additional child ticket.
+Final-candidate T042 Lifecycle Stress `35153051058` passed Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35153050940` passed the release contract, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Self-review `5228579161` and independent review `5228585872` report zero Blocking/Important findings; no unresolved review thread remained and privacy review is clean.
 
-T123 / issue #281 / PR #284 is complete and merged. Frozen executable head `f2c5cada877df82d8936f9dd545d796c0ab5156e` passed normal CI `34837857267`, T066 Window Controls `34837857292`, then final-candidate T042 Lifecycle Stress `34841171641` and T052 v0.1 Release Gate `34841171493`. Independent final `CODE_REVIEW.md` review `5197372173` reported zero Blocking/Important findings. The delivered contract freezes deterministic lifetime-safe `State<T>` notification passes, recursive latest-write coalescing, observer add/remove behavior, subscription/source lifetime, explicit equality requirements, steady-state non-cloning listener storage and deterministic throwing-observer recovery/pending-write policy. T123 now unblocks the completed T127 and T124 chains.
+### Active pre-freeze work
 
-T039 / issue #39 / PR #260 is complete and merged. Frozen executable head `3cf0c8e33cb472648cef880ece780dbda6b3fd38` passed normal CI `34778524773`, T066 Window Controls `34778524854`, then final-candidate T042 Lifecycle Stress `34779287474` and T052 v0.1 Release Gate `34779287449`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered scoped-style contract provides typed lexical `StyleScope` inheritance, retained-ancestry resolution, exact outer/inner/component precedence, bounded paint-vs-layout invalidation, structural removal/restoration/reinsertion, T058 dynamic ancestry, sibling/two-UI isolation and deterministic headless acceptance evidence.
+- **T174 / #409 / PR #410 — Ready, P1:** per-UI fallback for unhandled raw KeyDown shortcuts. T125 is now satisfied; retarget/reconcile the existing PR onto current `main`, requalify the exact resulting head and merge when green, or explicitly retarget T174 post-v1 before the API freeze.
+- **T069 / #81 — Blocked by the T174 pre-freeze decision.** All T123–T132 hard safety prerequisites are now Done. T069 may start once T174 is either Done or explicitly moved post-v1 so no new public API straddles the freeze.
+- **T068 / #80 / PR #241 — deferred to 1.2:** not a v1 blocker.
 
-T040 / issue #40 / PR #259 is complete and merged. Frozen executable head `9bf6b9a49bf68ef4fe2bb38e1a602a0181aea39f` passed normal CI plus T051 Release Benchmarks, T064 Desktop Services, both T065 Dispatcher workflows and T066 Window Controls, then final-candidate T042 Lifecycle Stress `34770340801` and T052 v0.1 Release Gate `34770340828`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered animation layer provides exact cubic easing, deterministic semi-implicit spring integration, one coalesced T065 wake per active context, explicit retained Paint/Layout invalidation targets, per-context reduced motion, finite/invalid configuration rejection, teardown-safe cancellation and zero idle timer/redraw behavior.
-
-T049 / issue #49 / PR #258 is complete and merged. Frozen executable head `58bad47cdc7095f261a812cd34fb38e23e2c5af2` passed normal CI `34765491619`, T066 Window Controls `34765491618`, then final-candidate T042 Lifecycle Stress `34767252432` and T052 v0.1 Release Gate `34767252389`. Independent final `CODE_REVIEW.md` review reported zero Blocking/Important findings. The delivered gallery is one standalone public-API-only visual catalogue covering required layout, text, standard controls, values, collections/navigation, Canvas/Image/SVG resources and representative interaction/style states, with deterministic self-test, static public/private boundary guards and instance-owned demo state.
-
-T038 / issue #38 / PR #218 is complete and merged. Frozen executable head `401ff95808b96636b3edb644ef8dd5902f0db749` passed normal CI, T044 Native Pointer Capture, T066 Window Controls and T067 Virtual List Contract, then final-candidate T042 Lifecycle Stress `34758523505` and T052 v0.1 Release Gate `34758523484`. Independent final `CODE_REVIEW.md` review `5190751522` reported zero Blocking/Important findings. T038/T039/T040 styling work is now complete and no longer blocks the v1 release frontier.
-
-T064 / issue #76 / PR #240 is complete and merged. Frozen current-main-synchronized executable head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed normal CI, T064 Desktop Services, T072 Linux D-Bus, T066 Window Controls, T065 Platform Dispatcher, T060 Application, T044 Native Pointer Capture, Package Contracts, T042 Lifecycle Stress and T052 v0.1 Release Gate. The final requirement-to-implementation/test review and current-main composition re-certification report no Blocking/Important finding.
-
-T072 / issue #84 / PR #185 is complete and merged. Its final executable candidate passed normal CI, T072 Linux D-Bus Contract, T060 Application Contract, T065 Platform Dispatcher, T067 Virtual List Contract, T042 Lifecycle Stress and T052 v0.1 Release Gate with a clean final `CODE_REVIEW.md` review.
-
-T062 / issue #74 / PR #226 is complete and merged as `7269310995adad1e7b474b6cea319644fc8020f4`; PR #245 / `86c12e8472a82cd929a95c24705995dfa871bbf5` closes its post-merge completeness gaps.
-
-T066 / issue #78 / PR #237 is complete and merged as `c0140e725ac33b0a3ca315124a3d20091b96a173`. Its frozen executable candidate passed normal/path-scoped validation plus final-candidate T042/T052 qualification, and the final requirement-to-implementation/test review recorded no Blocking/Important finding.
-
-T044 / issue #44 / PR #145 is complete and merged as `d4a61888c2d6bc096774de5a71dba8ad82cdff29`. Frozen implementation/test head `b16861f8db07e5292ebbfd40e5f21c00234b0f2a` passed exact-head normal/path validation plus final-candidate T042/T052 qualification. Reviews `5185659103` and `5186332658` record the complete #44 Outcome A/B and `CODE_REVIEW.md` evidence matrix with no Blocking/Important finding.
-
-T050 / issue #50 / PR #238 delivers the opt-in retained-tree debug inspector. Frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` is synchronized with its qualified baseline, preserves the T044/T064/T066 contracts, and passed normal macOS/Windows/Linux CI, Linux ASan+UBSan, Package Contracts, T066, T072 and the dedicated inspector OFF/ON matrix; the inspector-ON build also passed all 65 registered headless tests.
-
-Current dependency frontier:
+## Current dependency frontier
 
 ```text
-style:             T037(done) -> T038(done) -> T039(done)
-                                      +-------> T040(done) with T065(done)
+state/safety:
+  T123(done) -> T138(done) -> T139(done) -> T140(done) -> T141(done) -> T124(done)
+  T123(done) -> T127(done)
+  T125(done)
+  T126(done)
+  T128(done)
+  T129(done)
+  T130(done)
+  T131(done)
+  T132(done)
 
-gallery/release:   T038(done) -> T049(done) -----------------> T071
+remaining pre-freeze public-surface decision:
+  T174(ready; finish or retarget before freeze)
+      |
+      +----> T069(blocked until T174 resolved)
 
-platform/package:  T053(done) -> T047(done) -> T048(done)
-                                       |-> T054(done)
-                                       +-> T056(done) + T022(done) -> T057(done)
+release:
+  T174 resolved -> T069 -> T070 -> T122/docs closeout -> T071 -> v1.0.0
+  T049(done) -------------------------------------------------------> T071
+  T044(done) -------------------------------------------------------> T071
 
-critical platform: T060(done) -> T065(done) -> T072(done) -> T064(done)
-                   T041(done) -> T043(done) -> T066(done)
-
-input/API:          T173(done) — complete public ASCII A-Z key exposure
-
-state/safety:       T123(done) -> T138(done) -> T139(done) -> T140(done) -> T141(done) -> T124(done)
-                    T123(done) -> T127(done)
-                    T126(done)
-                    T128(done)
-                    T129(done)
-                    T131(done)
-                    T132(done)
-                    T125 + T130 in parallel where safe
-
-release:            T124(done) + T125 + T127(done) + T130 + T129(done) + T131(done) + T132(done) -> T069 -> T070 -> T071 -> v1.0.0
-                    T049(done) ---------------------------------------------------------------------> T071
-                    T044(done) ---------------------------------------------------------------------> T071
-
-post-1.0:           T068 is explicitly deferred to NativeUI 1.2 and does not block T069/T070/T071.
+post-1.0:
+  T068 ------------------------------------------------------------> 1.2
 ```
 
-The historical platform/styling prerequisites are complete, and the September 14 pre-freeze safety audit added hard blockers before T069. The T124 umbrella chain T138 -> T139 -> T140 -> T141 is now complete and final integrated Binding qualification passed on the exact T141 head. T126, T127, T128, T129, T131, T132 and T173 are also Done. T069 remains Blocked only until T125 and T130 are Done and synchronized on main. T068/PR #241 stays parked for 1.2 and is excluded from the v1 release critical path.
+## Milestone status
 
-## Milestone 0 — Baseline hardening
+### Milestone 0 — Baseline hardening
 
-**Complete.** T001–T006 provide core/state tests, retained lifecycle, public-header split and invalidation foundations. #163 / PR #181 makes unapproved NativeUI-owned compiler warnings Blocking.
+**Complete.** Core/state tests, retained lifecycle foundations, public-header split and invalidation foundations are established; unapproved NativeUI-owned compiler warnings are Blocking.
 
-## Milestone 1 — Layout system
+### Milestone 1 — Layout system
 
-**Complete.** T007–T012 provide constraints, alignment/distribution, flex, grid, scroll state/layout and clipping/overflow foundations.
+**Complete.** Constraints, alignment/distribution, flex, grid, scroll layout/state and clipping/overflow foundations are delivered. T130 hardens layout publication/recovery under exceptions.
 
-## Milestone 2 — Input, focus and gestures
+### Milestone 2 — Input, focus and gestures
 
-**Complete for the current v1 input scope.** T013–T018 provide event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop primitives. T173 / PR #403 extends the frozen-adjacent public keyboard API to the complete ASCII alphabet A-Z while preserving every pre-existing enum value, existing command mappings, Primary+Q close semantics and TextInput/IME separation; exhaustive translation/routing coverage and the dedicated feature example are merged and fully qualified.
+**Complete for the existing v1 input surface, with T174 pending a pre-freeze decision.** Event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop are delivered. T173 completed public ASCII A-Z key exposure without changing pre-existing enum values. T125 now hardens dispatch/reconciliation/cancellation unwind behavior. T174 is the only remaining public input-surface addition that must either land or move post-v1 before the freeze.
 
-## Milestone 3 — Rendering and graphics
+### Milestone 3 — Rendering and graphics
 
-**Complete.** T019–T024 provide transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests.
+**Complete.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees framework-owned Painter/SkCanvas unwind balance and failed-frame recovery.
 
-## Milestone 4 — Text system
+### Milestone 4 — Text system
 
-**Complete.** T025–T029 provide text editing, Label/fonts/fallback, TextArea, UTF-8 selection/navigation and platform IME composition bridges.
+**Complete.** Text editing, Label/fonts/fallback, TextArea, UTF-8 selection/navigation and platform IME composition bridges are delivered.
 
-## Milestone 5 — Standard widget set
+### Milestone 5 — Standard widget set
 
-**Complete for the v1 standard-widget scope.**
+**Complete for the v1 standard-widget scope.** Button, Checkbox/Radio, Slider/RangeSlider, ProgressBar/Meter, ScrollView, ComboBox/PopupMenu and ListView/Tabs are delivered and remain covered by the safety/final qualification gates.
 
-- T030 Button — PR #94.
-- T031 Checkbox/Radio — PR #95.
-- T032 Slider/RangeSlider — PR #115.
-- T033 ProgressBar/Meter — PR #123.
-- T034 ScrollView — PR #135.
-- T035 ComboBox/PopupMenu — PR #225; policy over T061 with immutable open snapshots, exact keyboard/pointer/focus semantics, deterministic goldens and standalone/embedded smoke.
-- T036 ListView/Tabs — PR #155; #212 / PR #213 adds deterministic hover presentation.
+### Milestone 6 — Styling, theme and animation
 
-## Milestone 6 — Styling, theme and animation
+**Complete.** T037–T040 provide typed Theme/style state, retained StyleScope inheritance and deterministic animation/reduced-motion behavior. T128 hardens exceptional animation progress/recovery.
 
-**Complete. T037, T038, T039 and T040 are Done.**
+### Milestone 7 — Platform and embedded robustness
 
-T037 / PR #151 provides typed per-UI Theme values and representative control theme binding. T038 / PR #218 provides the typed shared `VisualState`, per-widget style families, deterministic interaction precedence, state-aware paint-vs-layout invalidation, geometry stability/isolation evidence, representative goldens and dedicated self-tests. T039 / PR #260 provides typed lexical retained `StyleScope` inheritance, ancestry-authoritative dynamic insertion/removal, structural restoration evidence and scoped invalidation. T040 / PR #259 provides the deterministic tween/spring animation layer over T065, explicit retained Paint/Layout invalidation routes and per-context reduced-motion policy without introducing another scheduler.
+**Complete for the current v1 platform surface.** T043 resize/scale, T044 pointer capture, T053 macOS Objective-C runtime identity, T060 Application ownership, T064 DesktopServices, T065 Dispatcher, T066 window controls and T072 Linux D-Bus are delivered. T125/T126/T128/T130/T132 close the relevant dispatch, completion, scheduler, teardown and deferred-lifecycle failure boundaries.
 
-## Milestone 7 — Platform and embedded robustness
+### Milestone 8 — Packaging, virtualization, overlays and release convergence
 
-Delivered foundations include plug-in host isolation, standalone ownership Decision B, T042 lifecycle stress, T053 Objective-C runtime identity, T060 Application ownership, T065 Dispatcher/timers, T045 accessibility architecture and T043 resize/scale negotiation.
+**In final pre-freeze convergence.** Delivered foundations include T047/T048 packaging, T049 gallery, T050 inspector, T051/T052 qualification, T054/T056/T057 helpers/resources, T058 dynamic composition, T061/T062/T063 overlay/Tooltip/Dialog, T067 virtualized ListView and the completed safety series T123/T124/T125/T126/T127/T128/T129/T130/T131/T132/T138/T139/T140/T141.
 
-### T043 — Resize/scale negotiation
+The remaining sequence is:
 
-**Complete in PR #142.** Public/component geometry remains logical while native/framebuffer geometry is physical; per-view finite-positive scale, authoritative configure snapshots, exact request/echo behavior, fractional conversion, embedded parent authority and reentrancy-safe preferred-size notification are qualified.
+1. resume T174 / #409 / PR #410 on final T125 semantics and merge when green, or explicitly retarget it post-v1;
+2. resume T069 / #81 for the whole public-surface audit and v1 freeze;
+3. validate the T070 reference application/Getting Started against that frozen surface;
+4. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
+5. run T071 validation/release-only on one exact RC SHA.
 
-### T044 — OS pointer capture qualification
+## Completed safety closeouts relevant to the v1 freeze
 
-**Complete in PR #145 / issue #44.** The evidence-gated decision procedure is finalized per platform:
+- **T123 / #281:** deterministic lifetime-safe `State<T>` observer/reentrancy/throw semantics.
+- **T124 / #282 + T138–T141:** stable `Binding<T>` lifetime/value contract and migration of retained/stateful consumers.
+- **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety, pending-work preservation, dynamic enqueue failure recovery and transient native-borrow hardening, merged in PR #382.
+- **T126 / #287:** DesktopServices exceptional completion/native boundaries.
+- **T127 / #288:** `ScrollState` lifetime/reentrancy and retained-consumer safety.
+- **T128 / #289:** Dispatcher accepted-work preservation and Animation exceptional recovery.
+- **T129 / #290:** lifetime-safe retained invalidation callbacks.
+- **T130 / #291:** lifecycle/layout/paint/native construction/teardown exception safety, merged in PR #408.
+- **T131 / #293:** Overlay/Dialog/popup/Tooltip transaction failure safety.
+- **T132 / #294:** failure-safe standalone close lifecycle-control deferral.
+- **T173 / #401:** complete public ASCII A-Z key exposure and routing coverage.
 
-- **macOS: Outcome A.** Pinned Pugl capture is sufficient; no T044 macOS capture backend was added. Native CGEvent outside-view motion/up, focus-loss, destruction and isolation evidence is green.
-- **Windows: Outcome B.** Pinned Pugl owns acquisition; T044 records the concrete HWND at retained capture start and releases only that same HWND on retained cancellation. Outside-view evidence uses real `SetCursorPos` + `SendInput`, so delivery depends on native capture rather than direct window messaging.
-- **Linux/X11: Outcome B.** X11 ButtonPress supplies the active grab; retained cancellation explicitly releases it with `XUngrabPointer`/`XSync`. A narrow per-view focus visibility seam exposes the FocusIn/FocusOut transitions consumed internally by the pinned Pugl XIC path so mandatory focus-loss cancellation remains deterministic.
+## Release policy
 
-All capture bookkeeping remains per view, widgets stay platform-neutral, exactly-once up/cancel and teardown/isolation paths are covered, Linux sanitizer coverage is green, and no Objective-C runtime-visible class/category/swizzle/+load was introduced. Final normal/path and T042/T052 gates are green with no Blocking/Important review finding.
-
-### T066 — Standalone window controls
-
-**Complete in PR #237 / issue #78.** V1 scope is limited to logical min/max constraints, runtime title/show/hide/size control and deterministic close lifecycle on T060 Application-owned windows:
-
-- finite/order validation, initial clamp and atomic runtime constraint updates preserve T043 native-authoritative configure semantics;
-- UTF-8 title and idempotent show/hide do not recreate or remount UI;
-- user/native close supports veto, accepted close is deferred through T065, and programmatic `request_close()` bypasses veto;
-- reentrant `request_close()` inside veto wins over Cancel and duplicate close requests cannot duplicate `on_closed`;
-- direct C++ destruction is callback-silent, suppresses pending accepted-close completion and still unregisters exactly once through T060 quit policy;
-- close callbacks run outside internal teardown/Application locks and per-window state remains isolated;
-- native macOS/Windows/Linux control/close coverage, pure state tests, two-window destroy-A/survivor-B coverage and deterministic feature `--self-test` are qualified;
-- final normal/path and T042/T052 gates are green with no Blocking/Important review finding.
-
-## Milestone 8 — Packaging, virtualization, overlays and release convergence
-
-Delivered foundations include T047/T048 package consumption, T049 component gallery, T050 debug inspector, T051 performance qualification, T052 v0.1 release gate, T054 application helper, T056 binary data, T057 ResourceManager, T058 dynamic composition, T061 overlay/portal infrastructure, T067 fixed-height virtualized ListView, T062 Tooltip, T063 Dialog, T064 DesktopServices, T072 Linux D-Bus transport and T045 semantic architecture. T123 is complete as the hardened state-observer baseline, T126 is complete as the hardened DesktopServices exceptional-completion boundary, T127 is complete as the hardened ScrollState lifetime/reentrant-observer and retained-consumer boundary, T128 is complete as the hardened Dispatcher/Animation exceptional-recovery boundary, T129 is complete as the retained invalidation lifetime-safety boundary, T131 is complete as the Overlay/Dialog/popup/Tooltip transactional-failure boundary, T132 is complete as the failure-safe standalone close lifecycle-control boundary, T138 is complete as the core public Binding value/lifetime contract, T139 is complete as the representative Binding-backed widget entry-point/source-compatibility layer, T140 is complete as the standard Binding-backed stateful-widget-family migration, T141 is complete as the retained dynamic/style/focus Binding migration and integrated T124 qualification, and T124 is complete as the Binding umbrella closeout. The remaining pre-freeze safety blockers are T125 and T130.
-
-### T049 — Public component gallery
-
-**Complete in PR #258 / issue #49, merged as `24d5b2265360917a37e1ab7d5846a0348b305485`.** One standalone public-API-only gallery keeps the focused feature examples canonical while providing a discoverable manual-QA surface for layout/containers, text, standard controls, values, collections/navigation, Canvas/Image/SVG and representative T038 interaction/style states. Its deterministic `--self-test` constructs/renders all retained gallery sections, exercises representative input/state changes and a second independent gallery instance. Static discovery coverage rejects private `nativeui/detail`, Pugl, Skia and platform includes. Frozen executable head `58bad47cdc7095f261a812cd34fb38e23e2c5af2` passed normal CI, T066 and final T042/T052 qualification with zero Blocking/Important final-review findings.
-
-### T050 — Debug inspector / overlay
-
-PR #238 / issue #50 adds a passive, opt-in diagnostic layer rather than a second retained-tree system:
-
-- build option `NATIVEUI_ENABLE_INSPECTOR` defaults OFF, with runtime activation and per-UI inspector state compiled only when enabled;
-- each `ui::UI` owns enabled/selected state independently; no current-inspector singleton, mutable process registry or `thread_local` instance state is introduced;
-- immutable value snapshots expose NodeId, parent/depth/order, stable debug label, logical bounds, effective clip, layout/paint dirty state, focus/capture and effective T059 availability without leaking raw runtime pointers;
-- stale/destroyed NodeId queries are safe and previously copied snapshots remain self-contained;
-- enabling/disabling or changing the selected NodeId requests one paint invalidation only and never creates layout dirtiness or a timer/tick loop;
-- normal root and T061 application overlay content paint first; the diagnostic pass then draws node/clip/dirty/selection/focus/capture information and restores Painter/SkCanvas state;
-- the inspector receives no hit testing, pointer/keyboard input or focus and does not consume T061 overlay slots;
-- deterministic tests cover hierarchy/child order, dirty state/regions, stale IDs, focus/capture/clip/availability, selected-node emphasis, keyboard/pointer non-interception, canvas-state preservation, no-continuous-redraw behavior and two-UI isolation;
-- infrastructure scope intentionally requires deterministic inspector/headless fixtures rather than a new normal feature API example;
-- frozen executable head `fc0cd452bc442e83ae89fac04d227922cfc4a450` passed inspector OFF/ON, the full 65-test inspector-ON headless suite, normal CI on macOS/Windows/Linux, Linux ASan+UBSan, Package Contracts, T066 and T072 with no Blocking/Important review finding.
-
-### Build/example registration hardening
-
-**Complete in PR #235 / issue #234.** Canonical `examples/features/tNNN_<feature>.cpp` sources are auto-discovered by root CMake with deterministic ordering, `CONFIGURE_DEPENDS` and malformed-name rejection.
-
-### T061 — Generic overlay / portal layer
-
-**Complete in PR #216.** One generic retained in-view overlay/portal layer per UI using T058 structural reconciliation, including deterministic placement, modal focus/capture behavior, anchor tracking, no-click-through dismissal, reentrant show/close safety and standalone/EmbeddedView parity.
-
-### T067 — Fixed-height virtualized ListView
-
-**Complete in PR #219 with startup regression closure in PR #233.** The required 100k example is constrained to the real viewport, startup materialization remains bounded, and the production `--self-test` is executed by dedicated CI.
-
-### T063 — Dialog
-
-**Complete in PR #227 / issue #75.** Dialog remains policy over T061 rather than a second modal/window manager. It provides one active Dialog slot per UI, validated action/result IDs, Default/Cancel semantics, styleable backdrop, bounded centered sizing, fixed title/actions, T034 scrolling for overflow, no-click-through pointer behavior, trapped focus/restoration, child-first Enter behavior, Escape Cancel/Dismissed policy, exact-once completion, safe controller/UI teardown, per-UI isolation and close-before-callback reentrancy.
-
-### T062 — Tooltip
-
-**Complete in PR #226 / issue #74, with PR #245 closing post-merge completeness gaps.** A text-only retained decorator over T061/T065: exact 500 ms default delay with zero-delay checkpoint deferral, one per-instance timer/eligibility controller, no warm-up or cross-anchor reuse, shared hover/focus delay with full restart on new transitions, a `NonModal`/`Auto`/`Ignore` overlay that is non-focusable and non-hit-testable, deterministic dismissal and suppression, semantic help through T045 semantics, and native standalone/EmbeddedView qualification.
-
-### T072 — Bounded Linux D-Bus transport
-
-**Complete in PR #185 / issue #84.** It provides the sole Linux D-Bus layer for T064 and future T068 1.2 integration:
-
-- system `libdbus-1` only, no public D-Bus API/type leakage;
-- one private session connection + one joinable I/O thread per transport;
-- only the explicit process-wide `dbus_threads_init_default()` once-initialization;
-- exact 1,024/256/256 request/subscription/object-path limits with registered client ownership;
-- exactly-once request terminal states and T065-only UI callback marshalling;
-- teardown-safe queued callback suppression;
-- bounded signal/object-path services and a closed owned C++ value codec;
-- immutable provider-read boundary for future T068 read-only queries, with mutation/actions marshalled to UI;
-- one lazy shared transport per T060 Application and the independently owned EmbeddedView boundary required by T068;
-- package/install integration and Linux prerequisite documentation.
-
-### T064 — Cross-platform DesktopServices
-
-**Complete in PR #240 / issue #76, merged as `5e9798f6637af8d6275379002fa8116f167115f7`.** The delivered bounded service contract is:
-
-- callback-only open-file, open-files, save-file, select-directory and absolute HTTP(S) URL operations;
-- callbacks always cross the owning T065 Dispatcher, including immediate Busy/ResourceLimit/Unsupported/InvalidArgument failures and accepted inline backend completion;
-- exact one active chooser and sixteen active URL requests per DesktopServices owner, monotonic non-zero owner-local IDs, stale/cross-owner cancellation isolation, exactly-once completion and capacity release before application callback;
-- exact filter/suggested-filename/cardinality/path/URL validation with no hidden request queue;
-- `StandaloneWindow::desktop_services()` is lazy and view-owned; built-in EmbeddedView remains side-effect-free/Unsupported unless an embedding owner injects a backend;
-- macOS uses `NSOpenPanel` / `NSSavePanel` + `NSWorkspace`, with no new NativeUI Objective-C runtime-visible class/category/swizzle/+load;
-- Windows uses `IFileOpenDialog` / `IFileSaveDialog` on request-owned joinable STA workers, `ShellExecuteW` for URL launch and request-local same-STA cancellation without GIT/process registry/raw cross-apartment dialog state;
-- Linux/X11 uses XDG Desktop Portal FileChooser/OpenURI through T072 only, preserves T072 hard-quota `ResourceLimit`, uses parent-window routing and Request.Close, and adds no GTK/Qt/zenity/shell fallback or overflow transport;
-- native macOS/Windows/Linux qualification, package integration and `examples/features/t064_desktop_services.cpp --self-test` are complete.
-
-Frozen current-main-synchronized head `ac1ebe13fe61e39bd5ba9bdb4cd5e75bfb795ca7` passed exact-head normal/path-scoped validation and final-candidate T042/T052. The final requirement-to-implementation/test matrix and `CODE_REVIEW.md` audit report zero remaining Blocking/Important findings.
-
-### T126 — DesktopServices exceptional completion hardening
-
-**Complete in PR #295 / issue #287, merged as `be216d7a41999113472a0457827d43caad28cf15`.** The T064 service now has explicit exceptional completion semantics: native/backend completion is terminal before fallible UI marshalling; `Dispatcher::post()` rejection and exception-before-enqueue are terminal delivery drops with deterministic capacity release and no backend-thread callback fallback; AppKit completion blocks contain C++ exceptions and retained panels are released exactly once through exceptional paths; Windows worker completion boundaries contain coordinator exceptions; Linux/T072 continues through the common contained path. Exact-head normal/path checks and T042/T052 final qualification are green, and independent review `5197980748` records zero Blocking/Important findings.
-
-### T127 — ScrollState lifetime and reentrant observer hardening
-
-**Complete in PR #348 / issue #288, merged as `9129d5e841bf969fecd215ba46bbd0b955f3e3f5`.** Frozen exact head `c17cfca1dc53a921782c09d45e547482c854733b` passed normal CI `35001985912`, T066 Window Controls `35001986036`, T067 Virtual List Contract `35001985913`, T042 Lifecycle Stress `35010483243` and T052 v0.1 Release Gate `35010483184`. Exact-head independent peer review `5214429062` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W3 independent from current-head/source worker W2. ScrollState observer mutation now follows the hardened T123-style per-instance transaction/lifetime model: same-value suppression, stable pass values, remove-before-turn, add-next-pass, deterministic latest-write coalescing, explicit throw recovery and outliving subscriptions. Retained Scroll/ScrollView/scrollbar/VirtualList borrowers are lifetime-gated across mutation callbacks and teardown, pointer capture is released on teardown, and steady notification avoids full callback-list cloning. The final head was reconciled against the merged T141 composition before fresh exact-head qualification and peer review.
-
-### T128 — Dispatcher/Animation exceptional recovery hardening
-
-**Complete in PR #296 / issue #289, merged as `ca65087b503aff04133394c5ef200cd7cae75e12`.** Dispatcher callbacks that have not begun remain durable across a neighboring throwing callback and preserve FIFO ordering ahead of reentrant/newer posts without a second recovery queue; shutdown still discards pending work deterministically. Animation write/invalidation/completion failures terminalize the begun entry before propagation and preserve or deterministically terminate sibling scheduling so no active entry is stranded without progress. Reduced-motion/immediate exceptional paths are deterministic and completion remains at-most-once. Exact-head CI/T051/T064/T065/T066 plus T042/T052 final qualification are green, the cross-platform native exception-boundary smoke executes on Linux/Windows/macOS, and independent review `5198631295` records zero Blocking/Important findings.
-
-### T129 — Retained invalidation lifetime safety
-
-**Complete in PR #345 / issue #290, merged as `e400695e4f106a35093029e2465e0aa5ed12393d`.** Frozen exact head `b32a6433277a19f2e3f263af2ffc274fed6fc505` passed normal CI `34953250223`, T044 Native Pointer Capture `34953250187`, T050 Inspector Contract `34953250193`, T066 Window Controls `34953250282`, T042 Lifecycle Stress `34964143716` and T052 v0.1 Release Gate `34964143596`. Exact-head independent peer review `5209343192` recorded `REVIEW_PASS` with zero Blocking/Important findings and reviewer W1 independent from current-head/source worker W2. Long-lived retained paint/layout/focus/availability, theme and dynamic invalidation routes use a single per-Tree weak lifetime generation plus stable NodeId lookup; stale node, reentrant terminal-subtree, explicit unmount/remount, whole-Tree teardown, animation, overlay/dialog and VirtualList cases are safe no-ops after identity retirement. Stack-confined InputContext, FocusContext and LifecycleContext remain on immediate factories, preserving T129 non-goals and the final T052 performance/allocation gate.
-
-### T131 — Overlay/Dialog transactional failure safety
-
-**Complete in PR #339 / issue #293, merged as `bb5deb1f9a3c22adfa853338080ddc943ac1193d`.** Frozen exact head `bbdcf5d8cc58ac0f9a3386e48e4903c5737e9de0` passed normal CI `34947959869`, T050 Inspector Contract `34947959856`, T066 Window Controls `34947959862`, T042 Lifecycle Stress `34961037609` and T052 v0.1 Release Gate `34961037565`. Exact-head independent peer review `5209008696` recorded `REVIEW_PASS` with zero Blocking/Important findings. Overlay show/close, Dialog close/completion/destructor, ComboBox/PopupMenu component overlay commands and Tooltip presentation/hide now preserve recoverable transaction ownership across structural invalidation/reconciliation failure, callback-driven owner destruction and reentrancy; application callbacks/actions that have begun are never retried, whole-UI Dialog teardown remains silent, and recovery state remains bounded and instance-owned.
-
-### T132 — Standalone close deferral failure safety
-
-**Complete in PR #342 / issue #294, merged as `c2f381363d57e48df96f02d5d52b3e8a6571b478`.** Close-control enqueue failure no longer causes synchronous teardown from an active callback stack or permanently wedges lifecycle state. Requesting/Pending close phases remain durable owner-local work, while transient post bookkeeping is cleared transactionally on rejection, exception-before-enqueue, callback start and teardown. Application-owned windows consume close lifecycle work from a bounded owner checkpoint after native dispatch and Dispatcher draining; the legacy standalone polling path uses the same safe-point semantics. Deterministic T066 regressions cover queue saturation and throw-before-enqueue from real component/input callbacks, native close request/completion faults, reentrant veto precedence, pending destruction, exact-once completion, two-window isolation and last-window quit bookkeeping across macOS/Windows/Linux. Frozen head `027e895ed8670158eead1d5c722c387f74a7448f` passed the complete development matrix plus final T042/T052 qualification; independent second peer review `5204033991` reported zero Blocking/Important findings.
-
-### T138 — Core Binding value/lifetime contract
-
-**Complete in PR #343 / issue #303, merged as `1f63d9a4778773102f162618ad5ffd34f2bc6497`.** `Binding<T>` and `State<T>::binding()` share the hardened T123 control block without retaining a raw State owner pointer/reference. State destruction invalidates the logical source while retained storage remains readable; invalid writes are no-ops and new observations are inactive. Copy/move/source isolation, Binding-driven mutation/observation/reentrancy, callback-driven owner destruction, public header shape and installed/relocated package use are covered. Frozen synchronized head `268c2e4c00307e894ba02f56304174225ef49b50` passed CI, Package Contracts, T066 and final T042/T052 qualification with independent current-main review `5198976168` reporting zero Blocking/Important findings.
-
-### T139 — Binding-backed widget entry points
-
-**Complete in PR #350 / issue #304, merged as `61950a9f40145368dba709e755ee8f0c06ae411b`.** Representative Knob, Toggle and TextInput builders/components retain `Binding<T>` canonically while explicit legacy `State<T>&` overloads forward through `state.binding()` without implicit-conversion ambiguity. Pointer/keyboard edits preserve exactly-once State notification and external State changes preserve targeted paint-only invalidation for the covered families. Public-header and installed/relocated T048 consumer fixtures compile both Binding and legacy syntax, and `examples/features/t139_binding_widgets.cpp` provides the required public-API interactive/self-test coverage. Frozen head `f8e9729f5d967c8168335ae63e9800a0bb0b6ef4` passed CI, Package Contracts, T066, T042 and T052; independent second peer review `5203042503` reported zero Blocking/Important findings. T140 and T141 subsequently completed the remaining Binding migration chain.
-
-### T140 — Binding-backed standard stateful widget families
-
-**Complete in PR #358 / issue #305, merged as `3e96491e1723418f17dea1eb173e1444d3006d0d`.** Frozen exact head `5472ea1d0691724e78c01e1424ca8ad803a9fcbd` passed normal CI `34949901455`, T066 Window Controls `34949901516`, T042 Lifecycle Stress `34960645830` and T052 v0.1 Release Gate `34960645611`. Exact-head independent peer review `5208676715` recorded `REVIEW_PASS` with zero Blocking/Important findings. Checkbox/Radio, Slider/RangeSlider, TextArea, List/Tabs and ComboBox now retain canonical `Binding<T>` paths while legacy `State<T>&` entry points, exact invalidation classifications, synchronous-destruction safety and two-UI isolation remain preserved. T141 subsequently completed the retained-composition/style/focus migration and integrated T124 qualification.
-
-### T141 — Binding-aware retained composition/style/focus closeout
-
-**Complete in PR #372 / issue #306, merged as `bf816a0318f0d0cd87819e8404c2425e11a537e2`.** Frozen exact head `71635725e7929c5e43e00f7df19bee2fa56783d1` passed CI `34978181978`, Package Contracts `34978181993`, T066 Window Controls `34978182056`, T042 Lifecycle Stress `34992041153` and T052 v0.1 Release Gate `34992041092`. Exact-head peer review `5211779234` recorded `REVIEW_PASS`, Blocking=0 and Important=0 with reviewer independence. Dynamic `If`/`Switch`/`ForEach`, FocusScope and StyleScope retain Binding values while legacy State syntax remains source-compatible, T058 Structure semantics and style/focus invalidation remain intact, retained owner teardown is safe, and the integrated T124 source-compatibility/invalidation/isolation matrix is green. T124 is therefore complete as an umbrella closeout rather than a separate implementation PR.
-
-### T068 — Native accessibility bridges (post-1.0)
-
-T068 is explicitly deferred to NativeUI 1.2 and no longer blocks T069, T070, T071 or the NativeUI 1.0 release. Preserve the existing canonical Draft PR #241; do not consume a v1 delivery lane unless the ticket is explicitly reprioritized.
-
-### Final v1 release path
-
-```text
-T123(done) -> T138(done) -> T139(done) -> T140(done) -> T141(done) -> T124(done) ----------------+
-T123(done) -> T127(done) -------------------------------------------------------------------------|
-T126(done) ----------------------------------------------------------------------------------------|
-T128(done) ----------------------------------------------------------------------------------------|
-T129(done) ----------------------------------------------------------------------------------------|
-T131(done) ----------------------------------------------------------------------------------------|
-T132(done) ----------------------------------------------------------------------------------------|
-T125 + T130 ---------------------------------------------------------------------------------------+-> T069 -> T070 -> T071 -> v1.0.0
-T049(done) -------------------------------------------------------------------------------------------> T071
-T044(done) -------------------------------------------------------------------------------------------> T071
-```
-
-T123, T124, T126, T127, T128, T129, T131, T132, T138, T139, T140, T141 and T173 are complete. T069 is the final v1 public API freeze but remains blocked until T125 and T130 are Done. T070 validates the reference application/Getting Started against the frozen API. T071 is validation/release-only on one exact RC SHA; defects found there return to their canonical fix ticket.
-
-## Immediate cross-lane plan
-
-1. Execute the Scheduler-authorized transactional canonical-stream replacements for T125/#286 and T130/#291 from current main, preserving unrelated main changes and retiring composition-invalid Draft streams.
-2. Run fresh exact-head normal/path qualification, complete acceptance/tests/non-goals and self `CODE_REVIEW.md`, then obtain independent peer reviews before Integration final qualification.
-3. Keep T069/#81 Blocked until T125 and T130 are Done and synchronized on main; then perform one whole-surface API-freeze audit before Ready/final gates.
-4. After T069 completes, re-evaluate T070 directly; after T070, re-evaluate T071 on the exact frozen/RC baseline.
-5. Keep T068/PR #241 parked for 1.2.
-
-## Prioritization rule
-
-```text
-core correctness
-  -> layout/input/render/text foundations
-  -> widgets/styles/overlays/platform services
-  -> pre-freeze safety/lifetime convergence
-  -> public API freeze
-  -> reference package/release
-```
-
-Independent tickets may progress concurrently only when explicit dependencies, shared-file conflict risk and repository concurrency rules allow it.
+T069 freezes only the backend-neutral v1 public API after every hard dependency is Done and any pending pre-freeze public feature such as T174 is resolved. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

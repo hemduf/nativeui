@@ -13,23 +13,13 @@
                 static_cast<float>(puglGetScaleFactor(view_)),
                 [this](Size viewport) { ui_.resize(viewport); });
             record_scale_observation(geometry_.last_scale_observation_valid());
-            if (!logical) {
-                // Zero/non-finite native extents are transient non-renderable
-                // states. Preserve the last valid logical viewport until a
-                // positive configure arrives.
-                return PUGL_SUCCESS;
-            }
+            if (!logical) return PUGL_SUCCESS;
 
-            // Logical size constraints are DPI-independent. Re-apply their
-            // physical Pugl hints only when the authoritative view scale changes.
             if (geometry_.last_valid_scale() != previous_scale &&
                 !apply_size_constraints()) {
                 last_error_ = "Failed to refresh logical window size constraints";
             }
 
-            // refresh_focus() replays focus_changed(true) on the focused text
-            // editor, which republishes its candidate rectangle using the new
-            // layout and scale factor exactly once at the platform boundary.
             ui_.refresh_focus(services_);
             preferred_measure_dirty_ = true;
             flush_preferred_size_notification();
@@ -37,10 +27,6 @@
         }
 
         case PUGL_UPDATE:
-            // XIM signals preedit-done before Xutf8LookupString returns a
-            // possible commit. By the next Pugl update, any same-cycle text
-            // event has already been consumed, so a remaining pending end is
-            // a genuine composition cancellation.
             nativeuiImeFlushPendingCancel(ime_bridge_);
             flush_preferred_size_notification();
             return PUGL_SUCCESS;
@@ -58,8 +44,6 @@
             return PUGL_SUCCESS;
 
         case PUGL_CLOSE:
-            // StandaloneWindow owns T066 veto/deferred completion. Embedded or
-            // compatibility callers without a callback retain direct close.
             if (close_callback_) {
                 close_callback_();
             } else {
@@ -208,11 +192,7 @@
                     }
                 }
 
-                // Pugl owns this offer object only for the duration of the
-                // callback frame. Restore the exact previous borrow/decision
-                // state before the outer noexcept event thunk contains any
-                // exception. The scope guard performs scalar assignments only.
-                ScopedBorrowState offer_borrow{
+                detail::ScopedBorrowState offer_borrow{
                     active_drop_offer_, drop_offer_decided_, &event->offer};
                 (void)ui_.dispatch(input, services_);
                 if (!drop_offer_decided_) {
@@ -226,7 +206,6 @@
                 return PUGL_SUCCESS;
             }
 
-            // Clipboard paste remains a separate text-input path.
             for (uint32_t i = 0; i < count; ++i) {
                 const char* type = puglGetClipboardType(view_, clipboard, i);
                 if (type && std::strncmp(type, "text/", 5) == 0) {
@@ -309,5 +288,36 @@
     std::string last_error_;
     std::function<void()> close_callback_;
 };
+
+NativeViewConstructionFaultResult exercise_native_view_construction_fault(
+    UI& ui,
+    PlatformServices& services,
+    NativeParentHandle parent,
+    Size size,
+    NativeViewConstructionFaultStage stage) noexcept {
+    NativeViewConstructionFaultResult result{};
+    try {
+        ViewCore core{
+            ui,
+            services,
+            PUGL_MODULE,
+            WindowDesc{
+                .title = "NativeUI T130 construction fault probe",
+                .size = size,
+                .resizable = true,
+            },
+            parent,
+            nullptr,
+            {},
+            stage,
+            &result};
+        result.unexpected_success = true;
+    } catch (const NativeViewConstructionFault&) {
+        result.injected_failure = true;
+    } catch (...) {
+        result.unexpected_failure = true;
+    }
+    return result;
+}
 
 } // namespace

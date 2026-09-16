@@ -4,141 +4,117 @@
 
 This file is a read-only planning snapshot derived from live GitHub state. It is not a Scheduler database and does not assign workers. If this file conflicts with current issues, pull requests, reviews or checks, live GitHub wins.
 
-See [`AUTOMATION.md`](AUTOMATION.md) for the current deterministic delivery model.
+See [`AUTOMATION.md`](AUTOMATION.md) for the deterministic serialized delivery model.
 
 ## Automation state
 
 ```text
-legacy Scheduler: suspended / retired
-legacy Reporter state: suspended / retired
-legacy W1-W4 worker assignments: retired
+legacy Scheduler: retired
+legacy Reporter state: retired
+legacy W1-W4 persistent assignments: retired
 implementation/source-changing lanes: 1
-review: independent, on demand for frozen candidate
+review: independent phase on demand for frozen candidate
 fallback work: disabled
 GitHub: sole durable source of truth
 ```
 
-Open control-plane issues from the retired scheduler are to be closed as not planned. Product tickets remain open and are scheduled through their normal issue/PR state.
+## Completed current closeout
+
+**T125 / #286 / PR #382 is Done.**
+
+- frozen executable head: `da4386626837b8cedf9d7f17bc6e8b150aa99921`;
+- merged to `main` as `401d73983c2103fae1e48c1984a982277088e060`;
+- normal/path qualification: CI + Package Contracts + T044/T050/T060/T064/T065/T066/T072 all green;
+- final T042 Lifecycle Stress `35153051058`: green on Linux ASan+UBSan, Linux X11, macOS and Windows;
+- final T052 v0.1 Release Gate `35153050940`: green, including clean Linux/macOS/Windows bootstraps and exact-head T051 performance/allocation benchmark;
+- self-review `5228579161` and independent review `5228585872`: 0 Blocking / 0 Important;
+- no unresolved review thread remained;
+- `CONTEXT.md`, `ROADMAP.md` and this planning snapshot synchronized in the completion cycle;
+- no personal information introduced in source/tests/examples/generated metadata.
+
+T125 required several inherited review/qualification iterations before the serialized model converged on the final candidate. The final Ready head remained executable-code frozen through T042/T052 and merged immediately when the full gate became green.
+
+## Previous closeout
+
+**T130 / #291 / PR #408 is Done.**
+
+- frozen executable head: `4c40b881fa13ea0f9839ae415059744f6107c62d`;
+- merged to `main` as `e65e317d6584ae440f1f041b8187a63d18b2aa6a`;
+- normal/path qualification and final T042/T052 were green;
+- final reviews reported 0 Blocking / 0 Important.
 
 ## Current v1 critical path
 
-The v1 freeze is still blocked by T125 and T130. Both already have canonical PRs and substantial existing work, so the new model finishes them instead of creating replacement branches.
+The T123–T132 safety frontier is now fully Done. The next serialized source-changing ticket is T174, whose only blocker was T125.
 
 Planned serialized order:
 
 ```text
-1. T125 / #286 / PR #382   P0 closeout
-2. T130 / #291 / PR #383   P0 closeout
-3. T174 / #409 / PR #410   resolve before public API freeze
-4. T069 / #81 / PR #269    P0 v1 public API freeze
-5. T070 children            v1 reference app / Getting Started
-6. T122 / #280              remaining v1 documentation, scheduled explicitly
-7. T071 / #83               P0 exact-SHA v1 release gate
+1. T174 / #409 / PR #410   finish on final T125 semantics or explicitly retarget post-v1
+2. T069 / #81 / PR #269    P0 v1 public API freeze
+3. T070 children            reference app / Getting Started
+4. T122 / #280              remaining v1 documentation, explicitly scheduled
+5. T071 / #83               exact-SHA v1 release gate
 ```
 
 T068 / #80 remains deferred to 1.2 and is outside the v1 delivery lane.
 
-### Why T174 is before T069
+## Step 1 — T174 / #409 / PR #410
 
-T174 adds a public `UI` API and therefore must not silently cross the v1 public API freeze. After T125 and T130 close, finish T174 on its existing PR or explicitly retarget it post-v1 before starting the final T069 freeze. The default plan is to finish the existing T174 work because it is already active and reviewed; no second branch should be created.
+Current live planning state after T125 completion: **Ready / P1**.
 
-## Step 1 — T125 / #286 / PR #382
-
-Current known state from the retired final scheduler snapshot:
-
-- P0 v1 freeze blocker;
-- canonical PR exists;
-- exact-head qualification was green on the then-current head;
-- one Blocking semantic-continuation family remained around preservation of the unstarted focus/hover ancestor suffix during structural reconciliation;
-- the branch required current-main composition reconciliation before final closeout.
-
-New execution rule:
-
-1. re-fetch live PR/head/main and discard stale scheduler assignments;
-2. audit the complete focus/hover/reconciliation failure family once;
-3. implement one coherent correction batch with deterministic regressions;
-4. qualify the replacement exact head;
-5. complete self review;
-6. independent reviewer inspects the exact head;
-7. correct any complete review finding set coherently;
-8. merge immediately when the full gate is green;
-9. close #286 and synchronize `CONTEXT.md` / `ROADMAP.md`.
-
-No T130, T174 or fallback source changes start while T125 remains executable.
-
-## Step 2 — T130 / #291 / PR #383
-
-After T125 reaches a terminal merged/blocked state, resume the existing T130 PR.
-
-The last retired scheduler snapshot recorded four Blocking families to revalidate against live state:
-
-1. unwind-safe restoration of dynamic reconciliation guards;
-2. preservation/commit semantics for dirty owners across fallible reconciliation;
-3. inspector access through the correct lifecycle boundary;
-4. macOS T044 native-routing readiness before the exactly-once semantic PointerDown.
+T174 adds a public per-UI fallback for unhandled raw KeyDown shortcuts. Its existing candidate was intentionally composed on T125's dispatch unwind/reconciliation contract.
 
 Execution:
 
-- re-fetch live head/checks/reviews before editing;
-- confirm which findings still apply;
-- fix the complete surviving family in one bounded batch rather than four remote micro-cycles;
-- run exact-head qualification and the complete #291 acceptance matrix;
-- perform independent exact-head review;
-- merge immediately when green;
-- synchronize issue / `CONTEXT.md` / `ROADMAP.md`.
+1. resume PR #410 rather than creating another branch;
+2. re-fetch current `main`, PR head, issue matrix, checks, reviews and threads;
+3. retarget/reconcile onto final T125/current `main` only as composition requires;
+4. verify T125's canonical dispatch recovery remains unchanged;
+5. run the fallback callback-throw/recovery, command/text/IME/isolation and feature-example matrix;
+6. run exact-head normal/path qualification;
+7. complete self-review and independent frozen-head review;
+8. transition Draft -> Ready only for the frozen final candidate;
+9. run T042/T052 where applicable and merge immediately when the complete gate is green;
+10. synchronize #409, `CONTEXT.md`, `ROADMAP.md` and this snapshot.
 
-## Step 3 — T174 / #409 / PR #410
+If product planning deliberately moves T174 post-v1 instead, record that decision in #409 and the T069 freeze record before T069 starts. Do not leave a new public-API ticket implicitly straddling the freeze.
 
-T174 is parked while the two P0 freeze blockers are being closed. It is not a fallback assignment.
+## Step 2 — T069 / #81 / PR #269
 
-When its turn arrives:
+Current live planning state: **Blocked / P0** pending the T174 pre-freeze decision.
 
-- resume PR #410 rather than creating a replacement;
-- rebase/reconcile only if composition requires it;
-- compose against the final T125 dispatch semantics;
-- complete required callback-throw/recovery qualification;
-- run independent review and merge when green.
+All T123–T132 hard safety prerequisites are now Done. T069 may resume once T174 is either:
 
-If product planning deliberately moves T174 post-v1 instead, record that scope change in #409 and T069 before T069 freezes the API. Do not leave the decision implicit.
+- Done and merged; or
+- explicitly retargeted outside v1 because it adds public API.
 
-## Step 4 — T069 / #81 / PR #269
+Then reconcile the canonical T069 PR with current `main` and execute the whole public-surface inventory/freeze/validation defined by #81. No new v1 public API should land behind the freeze.
 
-Start/resume the final API freeze only after:
+## Step 3 — T070 / reference app and Getting Started
 
-- T125 is Done;
-- T130 is Done;
-- T174 is either Done or explicitly retargeted outside v1.
+After T069 freezes the public API, execute T070 children in dependency order. Keep the serialized pilot: finish each source-changing child through review/merge before starting the next unless the automation policy is deliberately changed.
 
-Then reconcile the canonical T069 PR with current main and execute the whole public-surface inventory / freeze / validation defined by #81. No new v1 public API should be allowed to land behind the freeze.
+## Step 4 — T122 / #280
 
-## Step 5 — T070 / reference app and Getting Started
+T122 remains a real v1 documentation ticket, not idle-worker fallback work. Schedule it explicitly against the frozen/final v1 surface.
 
-After T069 freezes the public API, execute T070 children in dependency order. Although some children are independent after their shared foundation, automation remains serialized during the pilot. Parallelism is not reintroduced merely because the DAG permits it.
+## Step 5 — T071 / #83
 
-Prefer finishing each child completely through review/merge before opening the next source-changing child.
-
-## Step 6 — T122 / #280
-
-T122 remains a real v1 documentation ticket but is no longer an idle-worker fallback.
-
-Schedule it explicitly when its documentation can be completed against the frozen/final v1 surface. Documentation edits should not run concurrently merely to keep unused worker capacity occupied.
-
-## Step 7 — T071 / #83
-
-Run the release gate only after v1 dependencies and open-issue policy are satisfied.
-
-T071 remains validation-only: choose one exact release-candidate SHA and do not hide implementation fixes inside the release gate. Any behavior defect becomes a focused ticket, is merged first, then a new RC SHA is selected.
+T071 is validation/release-only. Choose one exact release-candidate SHA after all v1 dependencies and open-issue policy are satisfied. Any behavior defect becomes a focused canonical ticket; merge the fix first, then select a new RC SHA.
 
 ## Pilot metrics
 
-For the next 5–10 completed tickets record:
+For the next completed tickets continue recording:
 
+- issue selected -> first coherent PR head;
+- first coherent head -> frozen-head review;
+- review -> merge;
+- total issue -> merge time;
 - qualification heads per ticket;
 - review-fix cycles;
 - stale-head/composition invalidations;
-- issue-to-merge time;
-- time from frozen head to independent review;
-- time from final green to merge;
-- manual orchestration recoveries.
+- infrastructure-only reruns;
+- merges requiring manual orchestration recovery.
 
-Do not increase automated source parallelism until these measurements show that serialized delivery is converging reliably.
+T130 and T125 now contribute completed serialized-delivery data points. T125 demonstrates that a long inherited branch can still converge under the serialized model when source changes stop at a frozen reviewed head, normal/path qualification completes, Ready triggers T042/T052, and merge happens immediately after the full green gate.
