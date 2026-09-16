@@ -14,8 +14,17 @@
         if (mounted_) return;
         mounted_ = true;
         focusables_.clear();
+        // A mount starts a new retained semantic lifecycle. Deferred recovery
+        // from an earlier session is never authoritative in this one, so retire
+        // it callback-free before any new lifecycle callback can observe state.
         focus_transition_stack_.clear();
+        pending_focus_target_ = kInvalidNodeId;
+        pending_focus_request_ = false;
+        focus_blur_started_ = kInvalidNodeId;
+        focus_blur_started_from_availability_ = false;
+        availability_cleared_focus_ = nullptr;
         pointer_hover_transition_stack_.clear();
+        pending_pointer_hover_transition_.reset();
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
@@ -112,6 +121,19 @@
         reset_focus_scope_cache(*root_);
         focus_structure_dirty_ = true;
         active_ = false;
+
+        // Only a successfully completed deactivation is a terminal semantic
+        // boundary. Retire prior-session focus/hover recovery now, after all
+        // user-facing lifecycle callbacks succeeded, without invoking callbacks.
+        focus_transition_stack_.clear();
+        pending_focus_target_ = kInvalidNodeId;
+        pending_focus_request_ = false;
+        focus_blur_started_ = kInvalidNodeId;
+        focus_blur_started_from_availability_ = false;
+        availability_cleared_focus_ = nullptr;
+        pointer_hover_transition_stack_.clear();
+        pending_pointer_hover_transition_.reset();
+
         if (availability_structure_dirty_) sync_availability_inactive();
         invalidate_paint(viewport_rect());
     }
@@ -127,8 +149,17 @@
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
+        // Unmount is terminal even when it is the fallback for an active Tree.
+        // Retire every deferred semantic/recovery payload without callbacks so
+        // a later mount cannot inherit focus or hover intent from this session.
         focus_transition_stack_.clear();
+        pending_focus_target_ = kInvalidNodeId;
+        pending_focus_request_ = false;
+        focus_blur_started_ = kInvalidNodeId;
+        focus_blur_started_from_availability_ = false;
+        availability_cleared_focus_ = nullptr;
         pointer_hover_transition_stack_.clear();
+        pending_pointer_hover_transition_.reset();
         active_platform_ = nullptr;
         if (active_) {
             deactivate_node(*root_);
