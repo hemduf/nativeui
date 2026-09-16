@@ -416,6 +416,14 @@
         std::vector<bool> inserted_flags;
         next_children.reserve(desired_keys.size());
         inserted_flags.reserve(desired_keys.size());
+
+        // Progress bookkeeping is part of the prepare phase. These vectors may
+        // allocate, so construct them before moving retained ownership out of
+        // owner.children or publishing the desired key set. After this point the
+        // insertion transaction itself adds no allocation solely for rollback.
+        std::vector<bool> mount_started(desired_keys.size(), false);
+        std::vector<bool> activation_started(desired_keys.size(), false);
+
         auto retained = std::move(owner.children);
         for (const auto& key : desired_keys) {
             const auto retained_it = std::find(retained_keys.begin(), retained_keys.end(), key);
@@ -447,8 +455,6 @@
         // transaction. If mount/activate throws, unwind every inserted root
         // whose lifecycle started, detach all inserted roots, restore the
         // retained-only key checkpoint, and rethrow the original exception.
-        std::vector<bool> mount_started(owner.children.size(), false);
-        std::vector<bool> activation_started(owner.children.size(), false);
         std::exception_ptr insertion_error;
         for (std::size_t i = 0; i < owner.children.size(); ++i) {
             if (!inserted_flags[i]) continue;
@@ -489,19 +495,25 @@
                 }
             }
 
+            // Recovery must not allocate after structural publication. Compact
+            // retained children in-place inside the already-owned vector, then
+            // move that storage back to owner.children. unique_ptr moves and a
+            // shrinking resize are noexcept, so the original lifecycle failure
+            // remains the exception that escapes this transaction.
             auto attempted_children = std::move(owner.children);
-            std::vector<std::unique_ptr<Node>> rollback_retained;
-            rollback_retained.reserve(retained_keys.size());
+            std::size_t retained_count = 0;
             for (std::size_t i = 0; i < attempted_children.size(); ++i) {
-                if (!inserted_flags[i] && attempted_children[i]) {
-                    rollback_retained.push_back(std::move(attempted_children[i]));
+                if (inserted_flags[i] || !attempted_children[i]) continue;
+                if (retained_count != i) {
+                    attempted_children[retained_count] = std::move(attempted_children[i]);
                 }
+                ++retained_count;
             }
-            owner.children = std::move(rollback_retained);
+            attempted_children.resize(retained_count);
+            owner.children = std::move(attempted_children);
             if (auto* refreshed = dynamic_record(owner.id)) refreshed->keys = retained_keys;
             rebuild_focusables_after_structure(retained_focus);
             mark_dynamic_structure_dirty(owner);
-            attempted_children.clear();
             std::rethrow_exception(insertion_error);
         }
 
