@@ -26,11 +26,11 @@ namespace ui {
 namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
 struct DynamicReconcileFaultAccess;
+struct T125DynamicFaultAccess;
 } // namespace detail
 
 class Dialog;
 class UI;
-struct TreeTestAccess;
 
 class Tree {
 public:
@@ -42,7 +42,7 @@ public:
 private:
     friend class Dialog;
     friend class UI;
-    friend struct TreeTestAccess;
+    friend struct detail::T125DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>

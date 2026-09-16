@@ -4,15 +4,15 @@
 #include <new>
 #include <stdexcept>
 
-namespace ui {
+namespace ui::detail {
 
-struct TreeTestAccess {
+struct T125DynamicFaultAccess {
     static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
         tree.fail_next_dynamic_enqueue_for_testing_ = true;
     }
 };
 
-} // namespace ui
+} // namespace ui::detail
 
 namespace t125_dynamic_recovery {
 
@@ -176,7 +176,7 @@ void enqueue_failure_preserves_all_dirty_owners() {
     NUI_CHECK(second->mounts == 1 && second->activates == 1);
 
     first_visible.set(false);
-    ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
+    ui::detail::T125DynamicFaultAccess::fail_next_dynamic_enqueue(tree);
     bool threw = false;
     try {
         second_visible.set(false);
