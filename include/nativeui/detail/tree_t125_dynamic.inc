@@ -21,42 +21,6 @@
         queue_dynamic_mutation_t130_impl(owner);
     }
 
-    bool reconcile_dynamic_node(Node& owner) {
-        std::vector<NodeId> quarantine;
-        if (auto* source = dynamic_source(owner)) {
-            if (auto* record = dynamic_record(owner.id);
-                record && record->keys.size() == owner.children.size()) {
-                auto desired_keys = source->desired_keys();
-                if (!has_duplicate_dynamic_keys(desired_keys) && desired_keys != record->keys) {
-                    quarantine.reserve(owner.children.size());
-                    for (std::size_t i = 0; i < owner.children.size(); ++i) {
-                        if (!contains_dynamic_key(desired_keys, record->keys[i])) {
-                            quarantine.push_back(owner.children[i]->id);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (quarantine.empty()) return reconcile_dynamic_node_t130_impl(owner);
-
-        std::vector<NodeId> previous_quarantine;
-        previous_quarantine.swap(dynamic_teardown_quarantine_ids_);
-        dynamic_teardown_quarantine_ids_.swap(quarantine);
-        auto restore_quarantine = [this, &previous_quarantine]() noexcept {
-            dynamic_teardown_quarantine_ids_.swap(previous_quarantine);
-        };
-
-        try {
-            const bool changed = reconcile_dynamic_node_t130_impl(owner);
-            restore_quarantine();
-            return changed;
-        } catch (...) {
-            restore_quarantine();
-            throw;
-        }
-    }
-
     void flush_dynamic_mutations() {
         if (reconciling_dynamic_ || !root_ ||
             (dirty_dynamic_nodes_.empty() && !dynamic_reconcile_retry_all_)) {
@@ -118,5 +82,4 @@
         }
     }
 
-    std::vector<NodeId> dynamic_teardown_quarantine_ids_;
     bool fail_next_dynamic_enqueue_for_testing_{};
