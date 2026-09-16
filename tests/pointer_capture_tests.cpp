@@ -93,6 +93,149 @@ private:
     std::shared_ptr<CaptureState> state_;
 };
 
+struct HoverRecoveryState {
+    int enter{};
+    int move{};
+};
+
+class HoverRecoveryComponent final
+    : public ui::Component,
+      public ui::detail::RetainedInteractionObserver {
+public:
+    explicit HoverRecoveryComponent(std::shared_ptr<HoverRecoveryState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {100.0f, 60.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::PointerMove) {
+            ++state_->move;
+            return ui::EventResult::Handled;
+        }
+        return ui::EventResult::Ignored;
+    }
+
+    void retained_pointer_hover_changed(bool hovered, bool, ui::Dispatcher) override {
+        if (!hovered) return;
+        ++state_->enter;
+        throw std::runtime_error("persistent hover observer failure");
+    }
+
+private:
+    std::shared_ptr<HoverRecoveryState> state_;
+};
+
+class HoverRecoveryProbe {
+public:
+    explicit HoverRecoveryProbe(std::shared_ptr<HoverRecoveryState> state)
+        : state_(std::move(state)) {}
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state] { return std::make_unique<HoverRecoveryComponent>(state); }, {}};
+    }
+private:
+    std::shared_ptr<HoverRecoveryState> state_;
+};
+
+struct PostRouteCaptureState {
+    int down{};
+    int move{};
+    int cancel{};
+};
+
+class PostRouteCaptureComponent final : public ui::Component {
+public:
+    PostRouteCaptureComponent(
+        std::shared_ptr<PostRouteCaptureState> state,
+        ui::State<bool>& reveal)
+        : state_(std::move(state)), reveal_(&reveal) {}
+
+    [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {100.0f, 60.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
+        switch (event.type) {
+        case ui::InputType::PointerDown:
+            ++state_->down;
+            context.capture_pointer();
+            reveal_->set(true);
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerMove:
+            ++state_->move;
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerCancel:
+            ++state_->cancel;
+            return ui::EventResult::Handled;
+        default:
+            return ui::EventResult::Ignored;
+        }
+    }
+
+private:
+    std::shared_ptr<PostRouteCaptureState> state_;
+    ui::State<bool>* reveal_{};
+};
+
+class PostRouteCaptureProbe {
+public:
+    PostRouteCaptureProbe(
+        std::shared_ptr<PostRouteCaptureState> state,
+        ui::State<bool>& reveal)
+        : state_(std::move(state)), reveal_(&reveal) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        auto* reveal = reveal_;
+        return ui::Spec{
+            [state, reveal] {
+                return std::make_unique<PostRouteCaptureComponent>(state, *reveal);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<PostRouteCaptureState> state_;
+    ui::State<bool>* reveal_{};
+};
+
+class ThrowOnceDynamicLeafComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {10.0f, 10.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+};
+
+class ThrowOnceDynamicLeaf {
+public:
+    explicit ThrowOnceDynamicLeaf(std::shared_ptr<int> attempts)
+        : attempts_(std::move(attempts)) {}
+
+    ui::Spec spec() && {
+        auto attempts = std::move(attempts_);
+        return ui::Spec{
+            [attempts] {
+                ++*attempts;
+                if (*attempts == 1) {
+                    throw std::runtime_error("finish reconciliation failure");
+                }
+                return std::make_unique<ThrowOnceDynamicLeafComponent>();
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<int> attempts_;
+};
+
 void suite() {
     test::MockPlatform platform;
 
@@ -456,6 +599,83 @@ void suite() {
 
         NUI_CHECK(tree.dispatch(copy, platform) == ui::EventResult::Handled);
         NUI_CHECK(ui::TreeTestAccess::dispatch_depth(tree) == 0);
+    }
+
+    // T125 B2: publishing a new hover target before retained observer delivery
+    // must not strand the transition when an observer throws. The same-target
+    // follow-up resumes only the unstarted suffix; the persistent enter callback
+    // is not retried and ordinary PointerMove routing remains usable.
+    {
+        auto state = std::make_shared<HoverRecoveryState>();
+        ui::UI tree{HoverRecoveryProbe{state}};
+        tree.resize({120.0f, 80.0f});
+        tree.activate(platform);
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state->enter == 1);
+        NUI_CHECK(state->move == 0);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerMove, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(state->enter == 1);
+        NUI_CHECK(state->move == 1);
+    }
+
+    // T125 B2: once PointerDown target routing returns, capture and interaction
+    // are semantically committed even if outermost finish reconciliation then
+    // throws. Recovery of unrelated dynamic work must preserve that valid
+    // capture until a later move/cancel terminates it normally.
+    {
+        ui::State<bool> reveal{false};
+        auto state = std::make_shared<PostRouteCaptureState>();
+        auto attempts = std::make_shared<int>(0);
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Column{
+                PostRouteCaptureProbe{state, reveal},
+                ui::If{reveal, ThrowOnceDynamicLeaf{attempts}}}
+                .gap(4.0f)
+                .padding(0.0f)))};
+        tree.mount();
+        tree.layout({120.0f, 100.0f});
+        tree.activate_focus(platform);
+
+        const int begin_before = platform.pointer_capture_begin_count;
+        const int end_before = platform.pointer_capture_end_count;
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(*attempts == 1);
+        NUI_CHECK(state->down == 1);
+        NUI_CHECK(platform.pointer_capture_begin_count == begin_before + 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before);
+        NUI_CHECK(ui::TreeTestAccess::pointer_interaction_active(tree));
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerMove, 500.0f, 500.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(*attempts == 2);
+        NUI_CHECK(state->move == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerCancel, 500.0f, 500.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(state->cancel == 1);
+        NUI_CHECK(platform.pointer_capture_end_count == end_before + 1);
+        NUI_CHECK(!ui::TreeTestAccess::pointer_interaction_active(tree));
     }
 }
 

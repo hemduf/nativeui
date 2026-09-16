@@ -42,67 +42,211 @@
         if (active_platform_) active_platform_->end_pointer_capture();
     }
 
-    void notify_pointer_hover_transition(
-        Node* previous, Node* next, PlatformServices& platform) {
-        const auto dispatcher = detail::dispatcher_for_platform(platform);
-        for (auto* current = previous; current; current = current->parent) {
-            if (next && is_descendant_or_self(next, current)) continue;
-            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
-                    current->component.get())) {
-                observer->retained_pointer_hover_changed(
-                    false, pointer_interaction_active_, dispatcher);
+    enum class PointerHoverTransitionPhase {
+        ObserverLeave,
+        ObserverEnter,
+        PointerLeave,
+        Complete,
+    };
+
+    struct PointerHoverTransitionState {
+        NodeId previous{kInvalidNodeId};
+        NodeId next{kInvalidNodeId};
+        NodeId cursor{kInvalidNodeId};
+        InputEvent leave{};
+        PointerHoverTransitionPhase phase{PointerHoverTransitionPhase::ObserverLeave};
+    };
+
+    std::vector<PointerHoverTransitionState> pointer_hover_transition_stack_;
+    std::size_t pointer_hover_transition_running_{};
+
+    [[nodiscard]] Node* pointer_hover_transition_node(NodeId id) noexcept {
+        return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
+    }
+
+    void execute_pointer_hover_transition(std::size_t index, PlatformServices& platform) {
+        ++pointer_hover_transition_running_;
+        try {
+            while (index < pointer_hover_transition_stack_.size() &&
+                   pointer_hover_transition_stack_[index].phase !=
+                       PointerHoverTransitionPhase::Complete) {
+                switch (pointer_hover_transition_stack_[index].phase) {
+                case PointerHoverTransitionPhase::ObserverLeave: {
+                    const auto next_id = pointer_hover_transition_stack_[index].next;
+                    auto* const next = pointer_hover_transition_node(next_id);
+                    auto cursor = pointer_hover_transition_stack_[index].cursor;
+                    while (cursor != kInvalidNodeId) {
+                        auto* current = pointer_hover_transition_node(cursor);
+                        if (!current) {
+                            pointer_hover_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = current->parent
+                            ? current->parent->id
+                            : kInvalidNodeId;
+                        if (next && is_descendant_or_self(next, current)) {
+                            pointer_hover_transition_stack_[index].cursor = following;
+                            cursor = following;
+                            continue;
+                        }
+                        if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                                current->component.get())) {
+                            const auto dispatcher = detail::dispatcher_for_platform(platform);
+                            pointer_hover_transition_stack_[index].cursor = following;
+                            observer->retained_pointer_hover_changed(
+                                false, pointer_interaction_active_, dispatcher);
+                        } else {
+                            pointer_hover_transition_stack_[index].cursor = following;
+                        }
+                        cursor = following;
+                    }
+                    if (pointer_hover_transition_stack_[index].cursor == kInvalidNodeId) {
+                        pointer_hover_transition_stack_[index].phase =
+                            PointerHoverTransitionPhase::ObserverEnter;
+                        pointer_hover_transition_stack_[index].cursor =
+                            pointer_hover_transition_stack_[index].next;
+                    }
+                    break;
+                }
+                case PointerHoverTransitionPhase::ObserverEnter: {
+                    const auto previous_id = pointer_hover_transition_stack_[index].previous;
+                    auto* const previous = pointer_hover_transition_node(previous_id);
+                    auto cursor = pointer_hover_transition_stack_[index].cursor;
+                    while (cursor != kInvalidNodeId) {
+                        auto* current = pointer_hover_transition_node(cursor);
+                        if (!current) {
+                            pointer_hover_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = current->parent
+                            ? current->parent->id
+                            : kInvalidNodeId;
+                        if (previous && is_descendant_or_self(previous, current)) {
+                            pointer_hover_transition_stack_[index].cursor = following;
+                            cursor = following;
+                            continue;
+                        }
+                        if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
+                                current->component.get())) {
+                            const auto dispatcher = detail::dispatcher_for_platform(platform);
+                            pointer_hover_transition_stack_[index].cursor = following;
+                            observer->retained_pointer_hover_changed(
+                                true, pointer_interaction_active_, dispatcher);
+                        } else {
+                            pointer_hover_transition_stack_[index].cursor = following;
+                        }
+                        cursor = following;
+                    }
+                    if (pointer_hover_transition_stack_[index].cursor == kInvalidNodeId) {
+                        pointer_hover_transition_stack_[index].phase =
+                            PointerHoverTransitionPhase::PointerLeave;
+                        pointer_hover_transition_stack_[index].cursor =
+                            pointer_hover_transition_stack_[index].previous;
+                    }
+                    break;
+                }
+                case PointerHoverTransitionPhase::PointerLeave: {
+                    auto cursor = pointer_hover_transition_stack_[index].cursor;
+                    while (cursor != kInvalidNodeId) {
+                        auto* current = pointer_hover_transition_node(cursor);
+                        if (!current) {
+                            pointer_hover_transition_stack_[index].cursor = kInvalidNodeId;
+                            break;
+                        }
+                        const auto following = current->parent
+                            ? current->parent->id
+                            : kInvalidNodeId;
+                        // InputEvent owns text/drop payloads; copy it before
+                        // advancing the recovery cursor. If preparation throws,
+                        // no application callback has started and retry is valid.
+                        const auto leave = pointer_hover_transition_stack_[index].leave;
+                        pointer_hover_transition_stack_[index].cursor = following;
+                        (void)send_to(*current, leave, platform);
+                        cursor = following;
+                    }
+                    if (pointer_hover_transition_stack_[index].cursor == kInvalidNodeId) {
+                        pointer_hover_transition_stack_[index].phase =
+                            PointerHoverTransitionPhase::Complete;
+                    }
+                    break;
+                }
+                case PointerHoverTransitionPhase::Complete:
+                    break;
+                }
             }
+            --pointer_hover_transition_running_;
+        } catch (...) {
+            --pointer_hover_transition_running_;
+            // Every durable cursor advances only after callback preparation and
+            // immediately before application code. The unfinished suffix is
+            // resumed at a later safe checkpoint without replaying started work.
+            throw;
         }
-        for (auto* current = next; current; current = current->parent) {
-            if (previous && is_descendant_or_self(previous, current)) continue;
-            if (auto* observer = dynamic_cast<detail::RetainedInteractionObserver*>(
-                    current->component.get())) {
-                observer->retained_pointer_hover_changed(
-                    true, pointer_interaction_active_, dispatcher);
+    }
+
+    void resume_pointer_hover_transitions(PlatformServices& platform) {
+        if (pointer_hover_transition_running_ != 0) return;
+        while (!pointer_hover_transition_stack_.empty()) {
+            const auto index = pointer_hover_transition_stack_.size() - 1;
+            execute_pointer_hover_transition(index, platform);
+            if (index < pointer_hover_transition_stack_.size() &&
+                pointer_hover_transition_stack_[index].phase ==
+                    PointerHoverTransitionPhase::Complete) {
+                pointer_hover_transition_stack_.pop_back();
+                continue;
             }
+            break;
+        }
+    }
+
+    void begin_pointer_hover_transition(
+        Node* previous,
+        Node* next,
+        const InputEvent& source_event,
+        PlatformServices& platform) {
+        PointerHoverTransitionState transition{};
+        transition.previous = previous ? previous->id : kInvalidNodeId;
+        transition.next = next ? next->id : kInvalidNodeId;
+        transition.leave = source_event;
+        transition.leave.type = InputType::PointerLeave;
+        transition.leave.delta = {};
+        transition.phase = previous
+            ? PointerHoverTransitionPhase::ObserverLeave
+            : PointerHoverTransitionPhase::ObserverEnter;
+        transition.cursor = previous ? transition.previous : transition.next;
+
+        // Prepare the whole durable record before publishing the new route.
+        // Allocation/copy failure therefore leaves the previous target intact.
+        pointer_hover_transition_stack_.push_back(std::move(transition));
+        const auto index = pointer_hover_transition_stack_.size() - 1;
+        pointer_hover_target_ = next;
+        execute_pointer_hover_transition(index, platform);
+        if (index < pointer_hover_transition_stack_.size() &&
+            pointer_hover_transition_stack_[index].phase ==
+                PointerHoverTransitionPhase::Complete) {
+            pointer_hover_transition_stack_.pop_back();
         }
     }
 
     [[nodiscard]] bool update_pointer_hover_target(
         Node* target, const InputEvent& source_event, PlatformServices& platform) {
+        if (pointer_hover_transition_running_ == 0) {
+            resume_pointer_hover_transitions(platform);
+        }
         auto* const previous = pointer_hover_target_;
         if (previous == target) return false;
-
-        // Publish the new authoritative target before callbacks run so any
-        // re-entrant input sees a coherent per-Tree hover route. T058 owns
-        // future structural removal and must clear this pointer before node
-        // destruction just as it does for capture/focus ownership.
-        pointer_hover_target_ = target;
-        notify_pointer_hover_transition(previous, target, platform);
-        if (!previous) return target != nullptr;
-
-        InputEvent leave = source_event;
-        leave.type = InputType::PointerLeave;
-        leave.delta = {};
-
-        // PointerLeave is route state, not a consumable gesture. Every node on
-        // the previous authoritative route must observe it even if a descendant
-        // chooses to return Handled, otherwise an ancestor could retain stale
-        // hover presentation when the pointer moves to another subtree.
-        for (Node* node = previous; node; node = node->parent) {
-            (void)send_to(*node, leave, platform);
-        }
+        begin_pointer_hover_transition(previous, target, source_event, platform);
         return true;
     }
 
     [[nodiscard]] bool clear_pointer_hover(
         const InputEvent& source_event, PlatformServices& platform) {
+        if (pointer_hover_transition_running_ == 0) {
+            resume_pointer_hover_transitions(platform);
+        }
         auto* const previous = pointer_hover_target_;
         if (!previous) return false;
-        pointer_hover_target_ = nullptr;
-        notify_pointer_hover_transition(previous, nullptr, platform);
-
-        InputEvent leave = source_event;
-        leave.type = InputType::PointerLeave;
-        leave.delta = {};
-        for (Node* node = previous; node; node = node->parent) {
-            (void)send_to(*node, leave, platform);
-        }
+        begin_pointer_hover_transition(previous, nullptr, source_event, platform);
         return true;
     }
 

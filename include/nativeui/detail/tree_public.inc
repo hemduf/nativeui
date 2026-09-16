@@ -1,4 +1,10 @@
-    explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {}
+    explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {
+        // Transition recovery stacks are reused for ordinary focus/hover work so
+        // steady-state input does not allocate. Deeper re-entrant nesting may
+        // grow them before entering the corresponding nested callback.
+        focus_transition_stack_.reserve(4);
+        pointer_hover_transition_stack_.reserve(4);
+    }
     ~Tree() { unmount(); }
 
     Tree(const Tree&) = delete;
@@ -8,6 +14,8 @@
         if (mounted_) return;
         mounted_ = true;
         focusables_.clear();
+        focus_transition_stack_.clear();
+        pointer_hover_transition_stack_.clear();
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
@@ -119,6 +127,8 @@
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
         pointer_interaction_active_ = false;
+        focus_transition_stack_.clear();
+        pointer_hover_transition_stack_.clear();
         active_platform_ = nullptr;
         if (active_) {
             deactivate_node(*root_);
@@ -220,6 +230,12 @@
         // or restoring keyboard focus/text input as a side effect.
         const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
         if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
+
+        // Finish any retained hover route suffix from an earlier throwing
+        // callback before structural reconciliation can remove nodes that still
+        // belong to that semantic transition. The recovery cursor has already
+        // advanced past every callback that started, so no notification is retried.
+        resume_pointer_hover_transitions(platform);
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
@@ -230,6 +246,7 @@
         // without invoking arbitrary user callbacks during unwind.
         const auto previous_dispatch_depth = dispatch_depth_;
         dispatch_depth_ = previous_dispatch_depth + 1;
+        bool pointer_route_committed = false;
         auto finish = [this, &platform, previous_dispatch_depth](EventResult result) {
             dispatch_depth_ = previous_dispatch_depth;
             if (previous_dispatch_depth == 0) {
@@ -330,6 +347,7 @@
             if (event.type == InputType::PointerCancel) {
                 const auto result = cancel_pointer_capture(platform, event);
                 pointer_interaction_active_ = false;
+                pointer_route_committed = true;
                 return finish(result);
             }
 
@@ -344,8 +362,11 @@
                 (void)update_pointer_hover_target(target, event, platform);
                 if (target) {
                     focus_nearest_ancestor(target);
-                    return finish(route_from(*target, event, platform));
+                    const auto result = route_from(*target, event, platform);
+                    pointer_route_committed = true;
+                    return finish(result);
                 }
+                pointer_route_committed = true;
                 return finish(EventResult::Ignored);
             }
 
@@ -370,12 +391,16 @@
                     const auto result = route_from(*owner, event, platform);
                     clear_pointer_capture();
                     pointer_interaction_active_ = false;
+                    pointer_route_committed = true;
                     return finish(result);
                 }
                 pointer_interaction_active_ = false;
                 if (target) {
-                    return finish(route_from(*target, event, platform));
+                    const auto result = route_from(*target, event, platform);
+                    pointer_route_committed = true;
+                    return finish(result);
                 }
+                pointer_route_committed = true;
                 return finish(EventResult::Ignored);
             }
 
@@ -396,14 +421,16 @@
 
             return finish(EventResult::Ignored);
         } catch (...) {
-            // Pointer button routes can execute arbitrary cancellation, hover or
-            // focus callbacks after publishing interaction state but before the
-            // target input handler runs. If any such callback throws, terminate
-            // only framework-owned capture/interaction bookkeeping here; do not
-            // synthesize another user callback while unwinding.
-            if (event.type == InputType::PointerDown ||
-                event.type == InputType::PointerUp ||
-                event.type == InputType::PointerCancel) {
+            // Before a pointer route commits, cancellation/hover/focus callbacks
+            // may have published temporary framework state. Terminate only that
+            // incomplete interaction without invoking user code. Once the target
+            // route has returned, however, capture/interaction is a valid semantic
+            // commit: a later finish/reconciliation failure must not silently
+            // discard it.
+            if (!pointer_route_committed &&
+                (event.type == InputType::PointerDown ||
+                 event.type == InputType::PointerUp ||
+                 event.type == InputType::PointerCancel)) {
                 clear_pointer_capture();
                 pointer_interaction_active_ = false;
             }
