@@ -30,21 +30,43 @@ public:
             if (existing.contains(rect)) return std::nullopt;
         }
 
+        // Discover the complete transitive merge without mutating published
+        // dirty work. The region is bounded to kMaxRects, so at most N scans are
+        // sufficient for every newly touching rectangle to enlarge `merged`.
         Rect merged = rect;
+        for (std::size_t pass = 0; pass < rects_.size(); ++pass) {
+            for (const auto existing : rects_) {
+                if (overlaps_or_touches(existing, merged)) {
+                    merged = unite(merged, existing);
+                }
+            }
+        }
+
+        std::size_t merged_count = 0;
+        for (const auto existing : rects_) {
+            if (overlaps_or_touches(existing, merged)) ++merged_count;
+        }
+        const auto final_size = rects_.size() - merged_count + 1;
+
+        // Capacity growth is the only fallible publication step. Perform it
+        // before erasing any already-published rectangle so std::bad_alloc has
+        // the strong guarantee: the old dirty set remains byte-for-byte valid.
+        if (final_size > rects_.capacity()) rects_.reserve(final_size);
+
         for (std::size_t i = 0; i < rects_.size();) {
             if (overlaps_or_touches(rects_[i], merged)) {
-                merged = unite(merged, rects_[i]);
                 rects_.erase(rects_.begin() + static_cast<std::ptrdiff_t>(i));
-                i = 0; // the enlarged rectangle may now touch earlier entries
             } else {
                 ++i;
             }
         }
-
         rects_.push_back(merged);
+
         if (rects_.size() > kMaxRects) {
             Rect bounds{};
             for (const auto item : rects_) bounds = unite(bounds, item);
+            // reserve() above guarantees enough storage for the pre-collapse
+            // final_size, so shrinking to one element is allocation-free.
             rects_.assign(1, bounds);
             merged = bounds;
         }
