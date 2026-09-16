@@ -130,6 +130,13 @@
 
     void ensure_layout() {
         if (!layout_dirty_) return;
+        // ensure_layout() is a top-level lazy entry used by paint/input paths.
+        // Recursive retained traversal stays inside layout_node_transactional();
+        // a callback that re-enters paint while layout is active must not join
+        // the outer journal and recursively invoke the same application layout.
+        if (layout_transaction_active_) {
+            throw std::logic_error("reentrant retained layout transaction");
+        }
         layout_node(*root_, viewport_rect());
     }
 
