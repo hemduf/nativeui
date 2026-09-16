@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <cstdlib>
+#include <stdexcept>
 
 namespace {
 
@@ -10,6 +11,59 @@ ui::InputEvent key_up(ui::Key key) {
     event.key = key;
     return event;
 }
+
+struct DynamicLifecycleRecoveryState {
+    int mounts{};
+    int activations{};
+    int deactivations{};
+    int unmounts{};
+    bool throw_first_deactivate{true};
+};
+
+class DynamicLifecycleRecoveryComponent final : public ui::Component {
+public:
+    explicit DynamicLifecycleRecoveryComponent(
+        std::shared_ptr<DynamicLifecycleRecoveryState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+
+    void mount(ui::MountContext&) override { ++state_->mounts; }
+    void activate(ui::LifecycleContext&) override { ++state_->activations; }
+    void deactivate(ui::LifecycleContext&) override {
+        ++state_->deactivations;
+        if (state_->throw_first_deactivate) {
+            state_->throw_first_deactivate = false;
+            throw std::runtime_error("dynamic lifecycle teardown failure");
+        }
+    }
+    void unmount(ui::LifecycleContext&) override { ++state_->unmounts; }
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<DynamicLifecycleRecoveryState> state_;
+};
+
+class DynamicLifecycleRecoveryProbe {
+public:
+    explicit DynamicLifecycleRecoveryProbe(
+        std::shared_ptr<DynamicLifecycleRecoveryState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<DynamicLifecycleRecoveryComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<DynamicLifecycleRecoveryState> state_;
+};
 
 bool pixel_near(ui::Rgba8 pixel, ui::Color color, int tolerance = 4) {
     const auto channel = [](float value) {
@@ -187,6 +241,91 @@ void availability_and_reentrancy() {
     }
 }
 
+void exception_recovery_contracts() {
+    // T125 required regression: Button activation enters user code only after
+    // the shared interaction machine has committed its release state. If the
+    // activation callback throws, the caller observes the exception, retained
+    // capture/interaction bookkeeping is idle, and the next gesture can activate
+    // the same Button normally.
+    {
+        test::MockPlatform platform;
+        int activations = 0;
+        bool throw_once = true;
+        ui::UI tree{ui::Button{"Recover", [&] {
+            ++activations;
+            if (throw_once) {
+                throw_once = false;
+                throw std::runtime_error("button activation failure");
+            }
+        }}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(activations == 1);
+        NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Ignored);
+
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.dispatch(
+                      test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(activations == 2);
+    }
+
+    // T125 required regression: T130 owns lifecycle commit semantics, while
+    // T125 owns restoration of the dynamic reconciliation engine. A throw-once
+    // deactivate hook must not leave reconciling_dynamic_ wedged: the next safe
+    // checkpoint retries the pending structural work and later mutations remain
+    // executable.
+    {
+        test::MockPlatform platform;
+        ui::State<bool> visible{true};
+        auto state = std::make_shared<DynamicLifecycleRecoveryState>();
+        ui::UI tree{ui::If{visible, DynamicLifecycleRecoveryProbe{state}}};
+        tree.resize({180.0f, 64.0f});
+        tree.activate(platform);
+        NUI_CHECK(state->mounts == 1);
+        NUI_CHECK(state->activations == 1);
+
+        visible.set(false);
+        bool threw = false;
+        try {
+            tree.resize({180.0f, 64.0f});
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(state->deactivations == 1);
+        NUI_CHECK(state->unmounts == 0);
+
+        tree.resize({180.0f, 64.0f});
+        NUI_CHECK(state->deactivations == 2);
+        NUI_CHECK(state->unmounts == 1);
+
+        visible.set(true);
+        tree.resize({180.0f, 64.0f});
+        NUI_CHECK(state->mounts == 2);
+        NUI_CHECK(state->activations == 2);
+
+        visible.set(false);
+        tree.resize({180.0f, 64.0f});
+        NUI_CHECK(state->deactivations == 3);
+        NUI_CHECK(state->unmounts == 2);
+    }
+}
+
 void visual_state_goldens() {
     constexpr ui::Size size{180.0f, 64.0f};
     ui::HeadlessRenderer renderer{size, 1.0f};
@@ -310,6 +449,7 @@ void equal_resolved_hover_style_does_not_invalidate() {
 void suite() {
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
+    exception_recovery_contracts();
     visual_state_goldens();
     custom_theme_controls_presentation_and_measurement();
     explicit_style_controls_button_presentation_and_measurement();

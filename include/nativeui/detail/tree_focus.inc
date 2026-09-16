@@ -311,7 +311,10 @@
     }
 
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
-        if (!node || !node->component->effective_availability().interactive()) return false;
+        if (!node || dynamic_teardown_quarantines(node) ||
+            !node->component->effective_availability().interactive()) {
+            return false;
+        }
         for (auto* current = node; current; current = current->parent) {
             if (!current->component->effective_availability().interactive()) return false;
             if (current->component->is_focus_scope() &&
