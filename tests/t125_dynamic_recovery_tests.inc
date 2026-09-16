@@ -254,6 +254,7 @@ void factory_failure_preserves_captured_and_reentrant_work() {
 void quarantine_reuses_t130_desired_key_snapshot() {
     struct KeyedItem {
         int id{};
+        bool operator==(const KeyedItem&) const = default;
     };
 
     ui::State<std::vector<KeyedItem>> items{{KeyedItem{1}}};
