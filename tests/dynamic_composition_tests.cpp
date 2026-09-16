@@ -15,6 +15,18 @@ struct TreeTestAccess {
         tree.fail_next_dynamic_enqueue_for_testing_ = true;
     }
 
+    static void fail_next_focus_invalidation_publication(Tree& tree) noexcept {
+        tree.fail_next_focus_invalidation_publication_for_testing_ = true;
+    }
+
+    static void fail_next_input_context_preparation(Tree& tree) noexcept {
+        tree.fail_next_input_context_preparation_for_testing_ = true;
+    }
+
+    static void clear_paint_dirty(Tree& tree) noexcept {
+        tree.paint_dirty_.clear();
+    }
+
     static void seed_pending_focus(Tree& tree) noexcept {
         tree.pending_focus_target_ = kInvalidNodeId;
         tree.pending_focus_request_ = true;
@@ -321,6 +333,59 @@ public:
 
 private:
     std::shared_ptr<ReentrantBlurState> state_;
+};
+
+struct HoverLeaveState {
+    int moves{};
+    int leaves{};
+    bool throw_on_leave{};
+};
+
+class HoverLeaveProbeComponent final : public ui::Component {
+public:
+    explicit HoverLeaveProbeComponent(std::shared_ptr<HoverLeaveState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {80.0f, 30.0f};
+    }
+    void paint(ui::PaintContext&) const override {}
+
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
+        if (event.type == ui::InputType::PointerMove) {
+            ++state_->moves;
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerLeave) {
+            ++state_->leaves;
+            if (state_->throw_on_leave) {
+                throw std::runtime_error("persistent pointer leave failure");
+            }
+        }
+        return ui::EventResult::Ignored;
+    }
+
+private:
+    std::shared_ptr<HoverLeaveState> state_;
+};
+
+class HoverLeaveProbe {
+public:
+    explicit HoverLeaveProbe(std::shared_ptr<HoverLeaveState> state)
+        : state_(std::move(state)) {}
+
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<HoverLeaveProbeComponent>(state);
+            },
+            {}};
+    }
+
+private:
+    std::shared_ptr<HoverLeaveState> state_;
 };
 
 struct DynamicItem {
@@ -797,8 +862,7 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
         ui::Row{
             ui::If{visible, ReentrantBlurProbe{blur}},
             ui::Toggle{"Fallback", fallback}}
-            .gap(4.0f)
-            .padding(0.0f)};
+            .gap(4.0f)};
     tree.resize({220.0f, 80.0f});
     tree.activate(platform);
     NUI_CHECK(blur->focus_in == 1);
@@ -836,6 +900,142 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
     (void)tree.dispatch(test::key(ui::Key::Space), platform);
     NUI_CHECK(!fallback.get());
     NUI_CHECK(blur->focus_out == 1);
+}
+
+void focus_invalidation_prepare_publish_commit_contract() {
+    // Pre-publication allocation failure: the old invalidation remains retryable,
+    // while the already-started blur is not replayed. The resumed transition then
+    // publishes both old/new paint work and routes the normal next key to fallback.
+    {
+        auto blur = std::make_shared<ReentrantBlurState>();
+        blur->throw_on_focus_out = false;
+        ui::State<bool> fallback{false};
+        test::MockPlatform platform;
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{ReentrantBlurProbe{blur}, ui::Toggle{"Fallback", fallback}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+        ui::TreeTestAccess::clear_paint_dirty(tree);
+
+        int invalidations = 0;
+        tree.set_invalidation_callback([&](ui::Rect) { ++invalidations; });
+        ui::TreeTestAccess::fail_next_focus_invalidation_publication(tree);
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(blur->focus_out == 1);
+        NUI_CHECK(invalidations == 0);
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(blur->focus_out == 1);
+        NUI_CHECK(fallback.get());
+        NUI_CHECK(invalidations == 2);
+    }
+
+    // Post-publication callback failure: once DirtyRegion owns the exposure, the
+    // callback is begun work and is never replayed. Recovery advances to the new
+    // focus owner; exactly one later invalidation belongs to that new owner.
+    {
+        auto blur = std::make_shared<ReentrantBlurState>();
+        blur->throw_on_focus_out = false;
+        ui::State<bool> fallback{false};
+        test::MockPlatform platform;
+        ui::Tree tree{ui::compile(ui::make_spec(
+            ui::Row{ReentrantBlurProbe{blur}, ui::Toggle{"Fallback", fallback}}.gap(4.0f)))};
+        tree.mount();
+        tree.layout({220.0f, 80.0f});
+        tree.activate_focus(platform);
+        ui::TreeTestAccess::clear_paint_dirty(tree);
+
+        int invalidations = 0;
+        bool throw_once = true;
+        tree.set_invalidation_callback([&](ui::Rect) {
+            ++invalidations;
+            if (throw_once) {
+                throw_once = false;
+                throw std::runtime_error("invalidation callback failure");
+            }
+        });
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(test::key(ui::Key::Tab), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        NUI_CHECK(blur->focus_out == 1);
+        NUI_CHECK(invalidations == 1);
+
+        NUI_CHECK(tree.dispatch(test::key(ui::Key::Space), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(blur->focus_out == 1);
+        NUI_CHECK(fallback.get());
+        NUI_CHECK(invalidations == 2);
+    }
+}
+
+void hover_input_preparation_boundary_contract() {
+    auto first = std::make_shared<HoverLeaveState>();
+    auto second = std::make_shared<HoverLeaveState>();
+    test::MockPlatform platform;
+    ui::Tree tree{ui::compile(ui::make_spec(
+        ui::Row{HoverLeaveProbe{first}, HoverLeaveProbe{second}}.gap(4.0f)))};
+    tree.mount();
+    tree.layout({220.0f, 80.0f});
+    tree.activate_focus(platform);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(first->moves == 1);
+
+    // Event payload copy succeeds, but complete InputContext preparation fails.
+    // The cursor must still name the first node so the next safe checkpoint
+    // delivers its PointerLeave exactly once before routing to the new target.
+    ui::TreeTestAccess::fail_next_input_context_preparation(tree);
+    bool prepare_threw = false;
+    try {
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform);
+    } catch (const std::bad_alloc&) {
+        prepare_threw = true;
+    }
+    NUI_CHECK(prepare_threw);
+    NUI_CHECK(first->leaves == 0);
+    NUI_CHECK(second->moves == 0);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 120.0f, 15.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(first->leaves == 1);
+    NUI_CHECK(second->moves == 1);
+
+    // Once the callback body begins, cursor progress is committed first. A
+    // persistently throwing leave is therefore not retried on the next checkpoint.
+    second->throw_on_leave = true;
+    bool callback_threw = false;
+    try {
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform);
+    } catch (const std::runtime_error&) {
+        callback_threw = true;
+    }
+    NUI_CHECK(callback_threw);
+    NUI_CHECK(second->leaves == 1);
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 20.0f, 15.0f), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(second->leaves == 1);
+    NUI_CHECK(first->moves == 2);
 }
 
 void lifecycle_terminalizes_pending_semantic_work_contract() {
@@ -999,6 +1199,8 @@ void suite() {
     coalesced_writes_contract();
     focus_capture_and_lifetime_contract();
     dynamic_focus_clear_preserves_newer_reentrant_request_contract();
+    focus_invalidation_prepare_publish_commit_contract();
+    hover_input_preparation_boundary_contract();
     lifecycle_terminalizes_pending_semantic_work_contract();
     focus_scope_rehome_contract();
     nested_focus_scope_rehome_contract();
