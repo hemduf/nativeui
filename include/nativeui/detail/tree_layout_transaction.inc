@@ -5,7 +5,7 @@
 
     using LayoutTransactionJournal = InlineTransactionJournal<LayoutTransactionCheckpoint>;
 
-    void begin_layout_geometry_transaction(LayoutTransactionJournal& journal, const Node& root) {
+    void begin_layout_geometry_transaction(LayoutTransactionJournal& journal) {
         // Retained layout callbacks are arbitrary application code. A nested
         // layout attempt would otherwise overwrite the rollback journal of the
         // outer attempt, so fail before mutating geometry and let the outer
@@ -14,9 +14,11 @@
             throw std::logic_error("reentrant retained layout transaction");
         }
         journal.clear();
-        // Keep small/static trees entirely stack-backed. Larger trees spill once
-        // before geometry mutation instead of growing a heap journal mid-pass.
-        journal.reserve(retained_subtree_node_count(root));
+        // Do not pre-count the subtree: that would add a full O(N) pass to every
+        // successful dirty layout. The common <=64-node journal is stack-backed;
+        // larger trees spill only when the first overflow checkpoint is pushed,
+        // before that node is mutated, so earlier checkpoints remain rollback-safe
+        // if the overflow allocation itself throws.
         layout_transaction_journal_ = &journal;
         layout_transaction_active_ = true;
         layout_dirty_ = true;
@@ -27,7 +29,8 @@
             throw std::logic_error("layout checkpoint outside transaction");
         }
         // Checkpoint immediately before mutation. The common <=64-node path is
-        // stack-backed; overflow, when required, was reserved before mutation.
+        // stack-backed; on larger trees overflow allocation can fail here before
+        // this node is changed, leaving the already-recorded rollback prefix intact.
         layout_transaction_journal_->push_back(LayoutTransactionCheckpoint{&node, node.bounds});
     }
 
@@ -63,7 +66,7 @@
         LayoutPublicationCheckpoint(Tree& owner, Size next_viewport)
             : viewport(owner.viewport_), paint_dirty(std::move(owner.paint_dirty_)) {
             try {
-                owner.begin_layout_geometry_transaction(journal, *owner.root_);
+                owner.begin_layout_geometry_transaction(journal);
             } catch (...) {
                 owner.paint_dirty_ = std::move(paint_dirty);
                 throw;
@@ -115,7 +118,7 @@
         }
 
         LayoutTransactionJournal journal;
-        begin_layout_geometry_transaction(journal, node);
+        begin_layout_geometry_transaction(journal);
         try {
             layout_node_transactional(node, bounds);
         } catch (...) {
