@@ -127,6 +127,16 @@ bool pump(ui::Application& application, int iterations = 8) {
     return true;
 }
 
+template <class Predicate>
+bool pump_until(ui::Application& application, Predicate&& predicate, int attempts = 40) {
+    if (predicate()) return true;
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        if (!pump(application, 2)) return false;
+        if (predicate()) return true;
+    }
+    return predicate();
+}
+
 class NativePointerDriver final {
 public:
 #if defined(__linux__)
@@ -487,23 +497,35 @@ bool run_outside_sequence(ui::Application& application,
 
     if (!step(driver.focus(window), stage, "focus") || !pump(application)) return false;
     if (!await_native_pointer_route(application, driver, window, state, stage)) return false;
-    if (!step(driver.pointer_down(window), stage, "pointer-down") || !pump(application)) return false;
-    if (!expect(state->down == down_before + 1, stage, "pointer down was not delivered")) return false;
+    if (!step(driver.pointer_down(window), stage, "pointer-down")) return false;
+    if (!pump_until(application, [&] { return state->down >= down_before + 1; })) {
+        return expect(false, stage, "pointer down was not delivered");
+    }
+    if (!expect(state->down == down_before + 1, stage, "pointer down was delivered more than once")) {
+        return false;
+    }
     if (!expect(driver.capture_owned_by(window), stage, "native capture is not owned by the pressed view")) {
         return false;
     }
 
     if (!step(driver.drag_outside(window, 0), stage, "first outside motion") || !pump(application)) return false;
-    if (!step(driver.drag_outside(window, 20), stage, "second outside motion") || !pump(application)) return false;
-    if (!expect(state->drag_move >= drag_before + 2, stage, "outside drag motion was lost")) return false;
+    if (!step(driver.drag_outside(window, 20), stage, "second outside motion")) return false;
+    if (!pump_until(application, [&] { return state->drag_move >= drag_before + 2; })) {
+        return expect(false, stage, "outside drag motion was lost");
+    }
     if (!expect(state->outside_drag_move >= outside_before + 2,
                 stage,
                 "drag events were not delivered with out-of-view coordinates")) {
         return false;
     }
 
-    if (!step(driver.pointer_up_outside(window), stage, "outside pointer-up") || !pump(application)) return false;
-    if (!expect(state->up == up_before + 1, stage, "outside pointer up was lost")) return false;
+    if (!step(driver.pointer_up_outside(window), stage, "outside pointer-up")) return false;
+    if (!pump_until(application, [&] { return state->up >= up_before + 1; })) {
+        return expect(false, stage, "outside pointer up was lost");
+    }
+    if (!expect(state->up == up_before + 1, stage, "outside pointer up was delivered more than once")) {
+        return false;
+    }
     if (!expect(state->cancel == cancel_before, stage, "normal outside release synthesized cancel")) return false;
     if (!expect(driver.capture_clear(), stage, "native capture remained after pointer up")) return false;
     return true;
@@ -539,13 +561,22 @@ int main() {
                 "isolation-a", "view B observed view A's captured drag")) return 1;
     if (!run_outside_sequence(application, driver, *b, b_state, "outside-b")) return 1;
 
+    const int a_down_before = a_state->down;
     const int a_cancel_before = a_state->cancel;
     const int a_up_before = a_state->up;
     if (!step(driver.focus(*a), "focus-loss", "focus A") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *a, a_state, "focus-loss")) return 1;
-    if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A") || !pump(application)) return 1;
+    if (!step(driver.pointer_down(*a), "focus-loss", "pointer-down A")) return 1;
+    if (!pump_until(application, [&] { return a_state->down >= a_down_before + 1; })) {
+        return fail("focus-loss", "pointer down A was not delivered");
+    }
+    if (!expect(a_state->down == a_down_before + 1,
+                "focus-loss", "pointer down A was delivered more than once")) return 1;
     if (!expect(driver.capture_owned_by(*a), "focus-loss", "A did not own native capture")) return 1;
-    if (!step(driver.focus(*b), "focus-loss", "focus B") || !pump(application)) return 1;
+    if (!step(driver.focus(*b), "focus-loss", "focus B")) return 1;
+    if (!pump_until(application, [&] { return a_state->cancel >= a_cancel_before + 1; })) {
+        return fail("focus-loss", "focus loss did not cancel toolkit capture");
+    }
     if (!expect(a_state->cancel == a_cancel_before + 1,
                 "focus-loss", "focus loss did not cancel toolkit capture exactly once")) return 1;
     if (!expect(driver.capture_clear(), "focus-loss", "native capture remained after focus loss")) return 1;
@@ -570,8 +601,12 @@ int main() {
     if (!c->valid()) return fail("create-c", c->last_error());
     if (!step(driver.focus(*c), "destroy-capture", "focus C") || !pump(application)) return 1;
     if (!await_native_pointer_route(application, driver, *c, c_state, "destroy-capture")) return 1;
-    if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C") || !pump(application)) return 1;
-    if (!expect(c_state->down == 1, "destroy-capture", "C did not receive pointer down")) return 1;
+    if (!step(driver.pointer_down(*c), "destroy-capture", "pointer-down C")) return 1;
+    if (!pump_until(application, [&] { return c_state->down >= 1; })) {
+        return fail("destroy-capture", "C did not receive pointer down");
+    }
+    if (!expect(c_state->down == 1,
+                "destroy-capture", "C received pointer down more than once")) return 1;
     c.reset();
     c_ui.reset();
     if (!pump(application)) return 1;
