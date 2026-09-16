@@ -3,6 +3,7 @@
 #include "include/core/SkCanvas.h"
 
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -32,6 +33,10 @@ enum class LayoutFault {
 struct LayoutFaultState {
     LayoutFault fault{LayoutFault::None};
     int first_pointer_downs{};
+    bool reenter_layout_from_root{};
+    bool reentrant_layout_started{};
+    int reentrant_layout_calls{};
+    std::function<void()> reentrant_layout;
 };
 
 class LayoutFaultLeaf final : public ui::Component {
@@ -95,6 +100,12 @@ public:
         ui::Rect bounds,
         const std::vector<ui::ChildMetrics>&,
         std::vector<ui::ChildPlacement>& placements) const override {
+        if (state_->reenter_layout_from_root && !state_->reentrant_layout_started &&
+            state_->reentrant_layout) {
+            state_->reentrant_layout_started = true;
+            ++state_->reentrant_layout_calls;
+            state_->reentrant_layout();
+        }
         if (state_->fault == LayoutFault::RootLayoutChildren) {
             throw std::runtime_error("root layout fault");
         }
@@ -208,6 +219,34 @@ void layout_exception_transaction_contract() {
         NUI_CHECK(!tree.layout_dirty());
         NUI_CHECK(!tree.paint_dirty());
     }
+
+    // Layout callbacks are application code and may synchronously re-enter the
+    // same UI. A lazy paint entry must reject that nested top-level layout rather
+    // than joining the active rollback journal. The one-shot callback avoids an
+    // unbounded recursive test failure if the guard regresses: without the guard
+    // the inner paint returns and this assertion observes the missing rejection.
+    state->reenter_layout_from_root = true;
+    state->reentrant_layout_started = false;
+    state->reentrant_layout_calls = 0;
+    state->reentrant_layout = [&] { tree.paint(canvas, platform); };
+    tree.invalidate_layout();
+    threw = false;
+    try {
+        tree.paint(canvas, platform);
+    } catch (const std::logic_error& error) {
+        threw = true;
+        NUI_CHECK(std::string{error.what()} == "reentrant retained layout transaction");
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(state->reentrant_layout_calls == 1);
+    NUI_CHECK(tree.layout_dirty());
+    NUI_CHECK(tree.paint_dirty());
+
+    state->reenter_layout_from_root = false;
+    state->reentrant_layout = {};
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.layout_dirty());
+    NUI_CHECK(!tree.paint_dirty());
 }
 
 void suite() {
