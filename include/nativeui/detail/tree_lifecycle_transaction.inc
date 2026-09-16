@@ -88,7 +88,10 @@
         for (auto& child : node.children) retire_subtree_identities(*child);
     }
 
-    void mount_node_recorded(Node& node, MountTransitionJournal& journal) {
+    void mount_node_recorded(
+        Node& node,
+        MountTransitionJournal& journal,
+        bool publish_focusables) {
         // Journal before the first fallible operation. The inline journal cannot
         // allocate for the common <=64-node path; overflow capacity, when needed,
         // was reserved before any lifecycle publication.
@@ -127,9 +130,11 @@
             overlay_service_};
         progress.component_started = true;
         node.component->mount(context);
-        if (node.component->focusable()) focusables_.push_back(&node);
+        if (publish_focusables && node.component->focusable()) focusables_.push_back(&node);
 
-        for (auto& child : node.children) mount_node_recorded(*child, journal);
+        for (auto& child : node.children) {
+            mount_node_recorded(*child, journal, publish_focusables);
+        }
     }
 
     void rollback_failed_mount(MountTransitionJournal& journal, Node& failed_root) noexcept {
@@ -187,12 +192,19 @@
     void mount_node(Node& node) {
         MountTransitionJournal journal;
         failed_mount_root_ = nullptr;
+
+        // Whole-Tree mount publishes the initial focus registry as before. A
+        // non-root mount is a provisional retained insertion: its structure is
+        // already staged by the dynamic transaction, but its focusability must
+        // remain invisible until that transaction completes mount+activation and
+        // performs the existing staged focus-registry commit.
+        const bool publish_focusables = node.parent == nullptr;
         try {
             // Reserve only spill capacity. The static multi_instance fixture has
             // 47 nodes and remains entirely stack-backed; larger trees still get
             // one bounded pre-publication allocation instead of geometric growth.
             journal.reserve(retained_subtree_node_count(node));
-            mount_node_recorded(node, journal);
+            mount_node_recorded(node, journal, publish_focusables);
         } catch (...) {
             rollback_failed_mount(journal, node);
             // Tree::mount()/dynamic reconciliation still invoke unmount_node()
