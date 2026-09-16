@@ -2,6 +2,12 @@
 
 namespace {
 
+template <class T>
+concept CompleteType = requires { sizeof(T); };
+
+static_assert(!CompleteType<SkCanvas>,
+              "including NativeUI public headers must not pull in the Skia canvas definition");
+
 void two_stop_linear_gradient() {
     const ui::LinearGradient gradient{
         {0.0f, 0.0f},
