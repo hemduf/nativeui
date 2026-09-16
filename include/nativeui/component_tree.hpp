@@ -12,9 +12,12 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <exception>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -22,6 +25,7 @@ namespace ui {
 
 namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
+struct DynamicReconcileFaultAccess;
 } // namespace detail
 
 class Dialog;
@@ -41,6 +45,7 @@ private:
     // this friendship is only an internal coordination seam.
     friend class Dialog;
     friend class UI;
+    friend struct detail::DynamicReconcileFaultAccess;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
@@ -48,11 +53,19 @@ private:
 #define paint_invalidator unsafe_paint_invalidator
 #define layout_invalidator unsafe_layout_invalidator
 #define focus_invalidator unsafe_focus_invalidator
-#define mount_node unsafe_mount_node
-#define unmount_node unsafe_unmount_node
+#define ensure_layout ensure_layout_legacy
+#define layout_node layout_node_legacy
+#define mount_node mount_node_untracked
+#define activate_node activate_node_untracked
+#define deactivate_node deactivate_node_untracked
+#define unmount_node unmount_node_untracked
 #include <nativeui/detail/tree_layout.inc>
 #undef unmount_node
+#undef deactivate_node
+#undef activate_node
 #undef mount_node
+#undef layout_node
+#undef ensure_layout
 #undef focus_invalidator
 #undef layout_invalidator
 #undef paint_invalidator
@@ -63,7 +76,13 @@ private:
 #define register_dynamic_node unsafe_register_dynamic_node
 #include <nativeui/detail/tree_dynamic.inc>
 #undef register_dynamic_node
+#define mount_node retained_mount_node_legacy
+#define unmount_node retained_unmount_node_legacy
 #include <nativeui/detail/tree_retained_invalidation.inc>
+#undef unmount_node
+#undef mount_node
+#include <nativeui/detail/tree_lifecycle_transaction.inc>
+#include <nativeui/detail/tree_layout_transaction.inc>
 };
 
 #include <nativeui/detail/tree_compile.inc>
