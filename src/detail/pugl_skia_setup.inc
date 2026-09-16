@@ -190,15 +190,7 @@ Key translate_key(uint32_t key, PuglMods mods) {
     default: break;
     }
 
-    if (key == ' ') return Key::Space;
-    if (key == 'a' || key == 'A') return Key::A;
-    if (key == 'c' || key == 'C') return Key::C;
-    if (key == 'v' || key == 'V') return Key::V;
-    if (key == 'x' || key == 'X') return Key::X;
-    if (key == 'y' || key == 'Y') return Key::Y;
-    if (key == 'z' || key == 'Z') return Key::Z;
-    if (primary && (key == 'q' || key == 'Q')) return Key::Quit;
-    return Key::None;
+    return detail::translate_ascii_key(key, primary);
 }
 
 void apply_modifiers(InputEvent& out, PuglMods state) {
