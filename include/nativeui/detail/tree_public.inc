@@ -312,6 +312,7 @@
             // opt into pointer targetability. Inactive focus scopes remain unavailable.
             auto hit_test_pointer = [&](auto&& self, Node& node, Point point, Rect inherited_clip) -> Node* {
                 if (inherited_clip.empty() || !inherited_clip.contains(point) ||
+                    dynamic_teardown_quarantines(&node) ||
                     !node.component->effective_availability().interactive()) {
                     return nullptr;
                 }
