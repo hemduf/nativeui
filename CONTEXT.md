@@ -35,76 +35,62 @@ Non-negotiable rules:
 
 ## Current baseline and critical path
 
-### T130 is Done
+### Safety frontier complete
 
-**T130 / #291 / PR #408 merged as `e65e317d6584ae440f1f041b8187a63d18b2aa6a`.** Frozen executable head `4c40b881fa13ea0f9839ae415059744f6107c62d` closes the retained Component lifecycle/layout/paint/native construction and teardown exception-safety blocker.
+The full T123–T132 pre-freeze safety series is Done. The two most recent blockers are merged:
 
-Delivered invariants:
+- **T130 / #291 / PR #408** — lifecycle/layout/paint/native construction/teardown exception safety, merged as `e65e317d6584ae440f1f041b8187a63d18b2aa6a` from frozen head `4c40b881fa13ea0f9839ae415059744f6107c62d`.
+- **T125 / #286 / PR #382** — retained dispatch/reconciliation/cancellation exception safety, pending-work preservation, dynamic enqueue failure recovery and transient native-borrow hardening, merged as `401d73983c2103fae1e48c1984a982277088e060` from frozen head `da4386626837b8cedf9d7f17bc6e8b150aa99921`.
 
-- retained/native destruction is no-throw and best-effort complete;
-- lifecycle transitions use exact-progress per-Tree transaction ownership and rollback;
-- provisional lifecycle state cannot be observed/published through Tree/UI measure/layout/paint/dispatch/inspector paths;
-- dynamic insertion/removal has coherent ownership publication, staged focus-registry repair and durable per-Tree retry state under callback/allocation failure;
-- teardown does not consume pending desired dynamic structure solely to create-and-destroy it;
-- failed layout rolls back geometry/publication state and preserves required layout/paint dirtiness;
-- framework Painter/SkCanvas scopes remain balanced on exception unwind and failed paint remains dirty until success;
-- ViewCore constructor stages have deterministic partial-construction cleanup and preserve shared Application-owned resources;
-- native/window/view teardown continues after retained callback failure and releases owned resources exactly once;
-- T044 semantic PointerDown/PointerUp remains exactly once while native readiness/button-release observation is deterministic;
-- failure/recovery state is instance-owned with no mutable process-global/singleton/`thread_local` recovery state.
+Both completed normal/path CI, T042 Lifecycle Stress and T052/T051 final qualification with zero remaining Blocking/Important review findings.
 
-Exact-head normal/path workflows are all green: CI `35134851097`, Package Contracts `35134851013`, T044 `35134851103`, T050 `35134851018`, T060 `35134851051`, T064 `35134851039`, T065 `35134851008`, T066 `35134851040`, T072 `35134850948`. The only initial Windows red was an external Mesa download reset after a successful build; a same-head targeted rerun passed.
+### T174 is Done
 
-Final-candidate T042 Lifecycle Stress `35140156948` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35140156810` is green for release contracts, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Review records `5226938758` and `5227314927` contain zero Blocking/Important findings. #291 is closed with `status:done`.
+**T174 / #409 / PR #410 merged as `1ef326494ce00d215c1211ad0cde2437e3ffadbb`.** Frozen exact head `e6d747961a2fd39760f5703748c10440f8fb0efa` resolves the last planned public input addition before the v1 freeze.
 
-### T125 is Done
+Delivered contract:
 
-**T125 / #286 / PR #382 merged as `401d73983c2103fae1e48c1984a982277088e060`.** Frozen executable head `da4386626837b8cedf9d7f17bc6e8b150aa99921` closes retained dispatch/reconciliation/cancellation unwind safety while composing on T130's lifecycle/layout/paint transaction model.
+- `UI::set_key_down_handler(std::function<EventResult(const InputEvent&)>)` is per UI/Tree only;
+- framework KeyDown policy, Command normalization and ordinary focused/ancestor routing retain precedence;
+- only otherwise-unhandled raw KeyDown can reach the fallback;
+- Command-mapped shortcuts never double-deliver to the raw fallback;
+- KeyUp/TextInput/Composition/Tick/pointer/wheel/drop remain excluded;
+- active callable lifetime survives re-entrant clear/replacement through stable shared ownership;
+- installation allocates before publication; dispatch itself adds no heap allocation or extra tree walk;
+- callback exceptions use T125's canonical unwind path and later successful dispatch reaches normal outermost reconciliation;
+- no new scheduler, queue, native resource or mutable global/TLS state.
 
-Delivered invariants:
+Exact-head normal/path qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 `35156481983` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. Final T052 `35156481846` is green for release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Reviews `5228886765` and `5228890731` are 0 Blocking / 0 Important; the historical Blocking thread is resolved/outdated and privacy review is clean.
 
-- dispatch, availability, dynamic reconciliation and pointer-cancellation guards restore exact previous state after exceptions;
-- a user/component callback that already started is not automatically retried solely because it threw;
-- focus/hover transition suffixes and coalesced pending intents use stable retained identity and valid safe checkpoints rather than raw retry pointers;
-- mount/deactivate/unmount terminalize pending T125 semantic recovery state so old focus/hover requests cannot replay after Tree reuse;
-- captured, unprocessed and re-entrant dynamic owners survive a failing reconciliation pass;
-- dirty-owner enqueue allocation failure preserves a bounded per-Tree recovery marker without synchronous user-code fallback;
-- dynamic teardown quarantine blocks hover/focus/capture publication into nodes committed for removal, reuses T130's already-computed desired-key snapshot and introduces no duplicate user key callback;
-- quarantine authority is tied to the publishing structural epoch so a re-entrant structural reversal immediately retires provisional authority and T130 safely abandons the stale removal pass;
-- throwing pointer Down/Up/Cancel and nested cancellation cannot leave retained/native capture or interaction state wedged;
-- Pugl transient drop-offer/decision borrows restore exact nested prior state before existing foreign-ABI catch boundaries;
-- all recovery state remains per Tree or stack-local with no mutable process-global/singleton/`thread_local` state.
+### Remaining v1 work
 
-Exact-head normal/path workflows are all green: CI `35150662534`, Package Contracts `35150662688`, T044 `35150662518`, T050 `35150662564`, T060 `35150662729`, T064 `35150662700`, T065 `35150662562`, T066 `35150662456`, T072 `35150662919`.
-
-Final-candidate T042 Lifecycle Stress `35153051058` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35153050940` is green for the release contract, clean Linux/macOS/Windows bootstraps and the exact-head T051 performance/allocation benchmark. Self-review `5228579161` and independent review `5228585872` contain zero Blocking/Important findings; no unresolved review thread remained and privacy review is clean.
-
-### Remaining v1 pre-freeze work
-
-- **T174 / #409 / PR #410 — Ready / P1.** T125 is satisfied. Resume the existing PR on current `main`, reconcile only as composition requires, re-run the fallback callback-throw/command/text/IME/isolation matrix and merge when exact-head review/qualification is green. If planning deliberately moves T174 post-v1, record that decision before T069 starts.
-- **T069 / #81 — Blocked by the T174 pre-freeze decision.** All T123–T132 safety prerequisites are now Done; T069 may resume as soon as T174 is Done or explicitly moved post-v1.
-- **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** It does not block 1.0.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze.
+- **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
 
 ```text
-T125(done) -> T174(ready; finish or retarget) -> T069 -> T070 -> T122/docs -> T071 -> v1.0.0
-T068 -----------------------------------------------------------------> 1.2
+T123–T132(done) + T173(done) + T174(done)
+                         |
+                         v
+T069(ready) -> T070 -> T122/docs -> T071 -> v1.0.0
+T068 ---------------------------------------> 1.2
 ```
 
-## Completed safety foundations relevant to v1
+## Completed foundations relevant to v1
 
-- **T123 / #281:** deterministic lifetime-safe `State<T>` notifications, observer mutation/reentrancy and throwing-observer recovery.
-- **T124 / #282 + T138/T139/T140/T141:** stable `Binding<T>` value/lifetime contract and completed migration of standard/retained state consumers.
-- **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety, pending-work preservation, dynamic enqueue-failure recovery and transient native-borrow hardening.
-- **T126 / #287:** DesktopServices completion/native exception boundaries and deterministic capacity cleanup.
-- **T127 / #288:** `ScrollState` lifetime, observer reentrancy/exception semantics and retained-consumer lifetime gating.
-- **T128 / #289:** Dispatcher accepted-work durability and Animation callback-exception progress/recovery.
-- **T129 / #290:** retained invalidator lifetime safety using per-Tree lifetime generation + stable NodeId lookup.
-- **T130 / #291:** lifecycle/layout/paint/native construction/teardown exception safety, merged in PR #408.
+- **T123 / #281:** deterministic lifetime-safe `State<T>` notifications and observer exception/reentrancy semantics.
+- **T124 / #282 + T138–T141:** stable `Binding<T>` contract and state-consumer migration.
+- **T125 / #286:** retained dispatch/reconciliation/cancellation exception safety.
+- **T126 / #287:** DesktopServices completion/native exception boundaries.
+- **T127 / #288:** `ScrollState` lifetime and observer recovery semantics.
+- **T128 / #289:** Dispatcher accepted-work durability and Animation exceptional recovery.
+- **T129 / #290:** lifetime-safe retained invalidation callbacks.
+- **T130 / #291:** lifecycle/layout/paint/native construction/teardown exception safety.
 - **T131 / #293:** Overlay/Dialog/popup/Tooltip transaction-safe failure recovery.
 - **T132 / #294:** standalone close lifecycle-control deferral under queue rejection/throw.
-- **T173 / #401:** complete public ASCII A-Z key exposure while preserving pre-existing key numeric values and command/text/IME separation.
+- **T173 / #401:** complete public ASCII A-Z key exposure.
+- **T174 / #409:** per-UI unhandled raw KeyDown fallback on final T125 semantics.
 
 Other delivered v1 foundations include T030–T036 standard widgets, T037–T040 Theme/style/animation, T043 resize/scale, T044 pointer capture, T045 semantic accessibility architecture, T047/T048 packaging, T049 gallery, T050 inspector, T051/T052 qualification, T053 consumer-scoped macOS Objective-C runtime identity, T054/T056/T057 helpers/resources, T058 dynamic composition, T060 Application ownership, T061/T062/T063 overlay/Tooltip/Dialog, T064 DesktopServices, T065 Dispatcher, T066 window controls, T067 virtualized ListView and T072 Linux D-Bus.
 
@@ -126,7 +112,7 @@ During active development:
 4. run normal CI plus path-relevant dedicated checks;
 5. complete the full `CODE_REVIEW.md` record on the frozen head;
 6. transition Draft -> Ready only for final T042/T052 qualification;
-7. any executable/build/workflow change invalidates that candidate and requires Draft + requalification;
+7. executable/build/workflow changes invalidate that candidate and require Draft + requalification;
 8. pure project-state completion documentation does not invalidate an otherwise green executable candidate.
 
 Fault injection is mandatory where normal execution cannot deterministically reproduce allocation, callback, queue, partial-construction, layout, paint, teardown or native-boundary failure classes.
@@ -142,7 +128,7 @@ reporting/watchdog: read-only
 fallback work: disabled
 ```
 
-Recovery sequence for any new session:
+Recovery sequence:
 
 1. read `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, `CONTEXT.md`, `ROADMAP.md` and `AUTOMATION.md`;
 2. re-fetch live issues, canonical PRs, exact heads, checks, reviews and unresolved threads;
@@ -151,7 +137,8 @@ Recovery sequence for any new session:
 
 ## Next actions
 
-1. Resume **T174 / #409 / PR #410** on final T125/current-main semantics and finish it through exact-head review/qualification/merge, or explicitly move it post-v1 before the freeze.
-2. Resume **T069 / #81 / PR #269** once T174 is Done or explicitly retargeted outside v1.
-3. Then execute T070 reference application/Getting Started, explicitly scheduled v1 documentation closeout including T122 where applicable, and T071 on one exact RC SHA.
-4. Keep T068/PR #241 parked for NativeUI 1.2.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze.
+2. Execute T070 reference application/Getting Started against that frozen surface.
+3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
+4. Run T071 on one exact release-candidate SHA.
+5. Keep T068/PR #241 parked for NativeUI 1.2.
