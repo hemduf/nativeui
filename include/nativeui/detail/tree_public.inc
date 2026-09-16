@@ -193,6 +193,11 @@
         global_command_handler_ = std::move(handler);
     }
 
+    void set_global_key_down_handler(
+        std::function<EventResult(const InputEvent&)> handler) {
+        global_key_down_handler_ = std::move(handler);
+    }
+
     /// Mark that a pointer button interaction is in progress anywhere in this
     /// tree. Retained presentation policies such as Tooltip consult the flag
     /// through their interaction observers so a drag that starts outside the
@@ -205,6 +210,7 @@
     ///
     /// - Tab/Shift+Tab is owned by the tree and never double-delivered;
     /// - key/text/composition/tick events target the focused node while focus is active;
+    /// - raw KeyDown ignored by the focused route falls back to the per-Tree handler;
     /// - PointerDown cancels an older capture, hit-tests the deepest interactive visual node,
     ///   focuses its nearest focusable ancestor when one exists, then routes from the visual target;
     /// - PointerMove/PointerWheel update the retained hover route, then route to the capture owner
@@ -385,7 +391,16 @@
              event.type == InputType::TextInput || event.type == InputType::Composition ||
              event.type == InputType::Tick) &&
             focus_active_ && !focusables_.empty()) {
-            return finish(route_from(*focusables_[focused_index_], event, platform));
+            auto result = route_from(*focusables_[focused_index_], event, platform);
+            if (event.type == InputType::KeyDown && !handled(result) &&
+                global_key_down_handler_) {
+                result = global_key_down_handler_(event);
+            }
+            return finish(result);
+        }
+
+        if (event.type == InputType::KeyDown && global_key_down_handler_) {
+            return finish(global_key_down_handler_(event));
         }
 
         return finish(EventResult::Ignored);
