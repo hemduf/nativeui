@@ -1,5 +1,8 @@
     [[nodiscard]] bool dynamic_teardown_quarantines(const Node* candidate) const noexcept {
-        if (!candidate) return false;
+        if (!candidate || dynamic_teardown_quarantine_ids_.empty() ||
+            dynamic_teardown_quarantine_epoch_ != structural_epoch_) {
+            return false;
+        }
         for (auto* current = candidate; current; current = current->parent) {
             for (const auto root_id : dynamic_teardown_quarantine_ids_) {
                 if (root_id != kInvalidNodeId && current->id == root_id) return true;
