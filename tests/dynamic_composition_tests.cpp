@@ -895,6 +895,13 @@ void dynamic_focus_clear_preserves_newer_reentrant_request_contract() {
     NUI_CHECK(blur->focus_out == 1);
     NUI_CHECK(fallback.get());
 
+    // Complete the first Space activation before probing a second ordinary
+    // operation. test::key() creates KeyDown events; repeating it without a
+    // KeyUp would exercise Toggle's pressed-key latch rather than recovery.
+    auto space_up = test::key(ui::Key::Space);
+    space_up.type = ui::InputType::KeyUp;
+    (void)tree.dispatch(space_up, platform);
+
     // The removed owner has completed reconciliation and future ordinary work
     // remains usable even though the obsolete A blur would still throw if replayed.
     (void)tree.dispatch(test::key(ui::Key::Space), platform);
