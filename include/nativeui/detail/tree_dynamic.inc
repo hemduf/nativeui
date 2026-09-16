@@ -444,6 +444,27 @@
             return;
         }
 
+        // A structural checkpoint reached from inside a focus/hover semantic
+        // callback must not destroy the retained node named by that callback's
+        // already-advanced durable cursor. Defer the structural batch until the
+        // callback either completes or unwinds; the dirty owner remains queued.
+        if (pointer_hover_transition_running_ != 0 ||
+            focus_transition_running_ != 0 ||
+            focus_semantic_running_ != 0) {
+            return;
+        }
+
+        // Dynamic reconciliation may destroy an intermediate ancestor currently
+        // named by a durable transition cursor. Complete every already-accepted
+        // semantic suffix while the retained ancestry still exists, before any
+        // dirty owner is consumed. If a callback throws, progress made before
+        // invocation is retained by the transition state and structural work is
+        // untouched, so the next safe checkpoint retries only unstarted work.
+        if (active_platform_) {
+            resume_pointer_hover_transitions(*active_platform_);
+            resume_focus_transitions(*active_platform_);
+        }
+
         const bool previous_reconciling = reconciling_dynamic_;
         reconciling_dynamic_ = true;
         constexpr std::size_t kMaxStructuralPasses = 32;
