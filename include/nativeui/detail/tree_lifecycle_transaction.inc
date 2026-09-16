@@ -9,6 +9,50 @@
         return unsafe_layout_invalidator(node);
     }
 
+    // T130 transactions are short-lived and usually small. Keep the common
+    // retained-tree journal on the caller stack so a fresh UI does not pay heap
+    // allocation merely to make rollback possible. Larger/dynamic trees spill
+    // into one pre-reserved vector before lifecycle publication.
+    template <class T, std::size_t InlineCapacity = 64>
+    class InlineTransactionJournal {
+    public:
+        void reserve(std::size_t total_size) {
+            if (total_size > InlineCapacity) overflow_.reserve(total_size - InlineCapacity);
+        }
+
+        void clear() noexcept {
+            size_ = 0;
+            overflow_.clear();
+        }
+
+        void push_back(T value) {
+            if (size_ < InlineCapacity) {
+                inline_[size_] = std::move(value);
+            } else {
+                overflow_.push_back(std::move(value));
+            }
+            ++size_;
+        }
+
+        [[nodiscard]] T& back() noexcept { return (*this)[size_ - 1]; }
+        [[nodiscard]] const T& back() const noexcept { return (*this)[size_ - 1]; }
+
+        [[nodiscard]] T& operator[](std::size_t index) noexcept {
+            return index < InlineCapacity ? inline_[index] : overflow_[index - InlineCapacity];
+        }
+
+        [[nodiscard]] const T& operator[](std::size_t index) const noexcept {
+            return index < InlineCapacity ? inline_[index] : overflow_[index - InlineCapacity];
+        }
+
+        [[nodiscard]] std::size_t size() const noexcept { return size_; }
+
+    private:
+        T inline_[InlineCapacity]{};
+        std::vector<T> overflow_;
+        std::size_t size_{};
+    };
+
     struct MountTransitionProgress {
         Node* node{};
         bool live_identity_started{};
@@ -16,6 +60,9 @@
         bool dynamic_setup_started{};
         bool component_started{};
     };
+
+    using MountTransitionJournal = InlineTransactionJournal<MountTransitionProgress>;
+    using ActivationTransitionJournal = InlineTransactionJournal<Node*>;
 
     [[nodiscard]] bool retain_mount_identity(Node& node) {
         if (!node.parent && retained_invalidation_live_nodes_.empty()) {
@@ -41,12 +88,12 @@
         for (auto& child : node.children) retire_subtree_identities(*child);
     }
 
-    void mount_node_recorded(Node& node) {
-        // Journal before the first fallible operation. Allocation failure therefore
-        // occurs before this node acquires retained state; every later failure has
-        // an exact rollback record.
-        mount_transition_progress_.push_back(MountTransitionProgress{&node});
-        auto& progress = mount_transition_progress_.back();
+    void mount_node_recorded(Node& node, MountTransitionJournal& journal) {
+        // Journal before the first fallible operation. The inline journal cannot
+        // allocate for the common <=64-node path; overflow capacity, when needed,
+        // was reserved before any lifecycle publication.
+        journal.push_back(MountTransitionProgress{&node});
+        auto& progress = journal.back();
 
         progress.live_identity_started = retain_mount_identity(node);
 
@@ -82,26 +129,25 @@
         node.component->mount(context);
         if (node.component->focusable()) focusables_.push_back(&node);
 
-        for (auto& child : node.children) mount_node_recorded(*child);
+        for (auto& child : node.children) mount_node_recorded(*child, journal);
     }
 
-    void rollback_failed_mount() noexcept {
+    void rollback_failed_mount(MountTransitionJournal& journal, Node& failed_root) noexcept {
         // Whole-Tree mount failure is a retained callback generation boundary.
-        // Dynamic subtree failures retire only the attempted subtree identities.
-        if (failed_mount_root_ && !failed_mount_root_->parent) {
+        // Retire it before arbitrary rollback callbacks can re-enter. Dynamic
+        // subtree failures retire only the attempted subtree identities below.
+        if (journal.size() != 0 && !failed_root.parent) {
             retire_retained_invalidation_generation();
         }
 
-        for (auto it = mount_transition_progress_.rbegin();
-             it != mount_transition_progress_.rend(); ++it) {
-            if (!it->node) continue;
-            auto& node = *it->node;
+        for (std::size_t index = journal.size(); index-- > 0;) {
+            auto& progress = journal[index];
+            if (!progress.node) continue;
+            auto& node = *progress.node;
 
-            // Retire long-lived identity before arbitrary unmount callbacks can
-            // re-enter through callbacks issued by the failed mount attempt.
-            if (it->live_identity_started) retire_mount_identity(node.id);
+            if (progress.live_identity_started) retire_mount_identity(node.id);
 
-            if (it->component_started) {
+            if (progress.component_started) {
                 try {
                     LifecycleContext context{
                         node.id,
@@ -114,7 +160,7 @@
                     // remains best-effort through every transition that began.
                 }
             }
-            if (it->theme_setup_started) {
+            if (progress.theme_setup_started) {
                 if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
                     try {
                         binding->set_theme_change_invalidator({});
@@ -122,100 +168,89 @@
                     }
                 }
             }
-            if (it->dynamic_setup_started) {
+            if (progress.dynamic_setup_started) {
                 if (auto* source = dynamic_source(node)) {
                     try {
                         source->set_structure_invalidator({});
                     } catch (...) {
                     }
-                    unregister_dynamic_node(node.id);
+                    try {
+                        unregister_dynamic_node(node.id);
+                    } catch (...) {
+                    }
                 }
             }
         }
-        mount_transition_progress_.clear();
-        failed_mount_root_ = nullptr;
+        journal.clear();
     }
 
     void mount_node(Node& node) {
-        // T052's multi-instance workload constructs a fresh retained tree inside
-        // each measured operation. Letting the three transaction journals grow
-        // geometrically made one 47-node mount/layout/activate cycle pay repeated
-        // allocator growth even though their maximum static-tree size is known.
-        // Reserve that exact root subtree size before arbitrary mount callbacks;
-        // later layout/activation passes reuse the same capacities. A reserve
-        // failure occurs before lifecycle publication, preserving the T130
-        // prepare/commit/recovery contract. Dynamic insertion may still grow a
-        // journal later when the retained tree genuinely exceeds this baseline.
-        if (!node.parent) {
-            const auto node_count = retained_subtree_node_count(node);
-            mount_transition_progress_.reserve(node_count);
-            activation_transition_progress_.reserve(node_count);
-            layout_transaction_checkpoints_.reserve(node_count);
-        }
-
-        mount_transition_progress_.clear();
+        MountTransitionJournal journal;
         failed_mount_root_ = nullptr;
         try {
-            mount_node_recorded(node);
+            // Reserve only spill capacity. The static multi_instance fixture has
+            // 47 nodes and remains entirely stack-backed; larger trees still get
+            // one bounded pre-publication allocation instead of geometric growth.
+            journal.reserve(retained_subtree_node_count(node));
+            mount_node_recorded(node, journal);
         } catch (...) {
-            // Keep the exact pre-order journal until the existing caller enters
-            // unmount_node(node). The rollback wrapper below then inverts only
-            // transitions whose forward hook/setup actually began.
+            rollback_failed_mount(journal, node);
+            // Tree::mount()/dynamic reconciliation still invoke unmount_node()
+            // from their outer recovery path. The journal has already performed
+            // the exact rollback while it was alive, so consume that call once.
             failed_mount_root_ = &node;
             throw;
         }
-        mount_transition_progress_.clear();
     }
 
-    void activate_node_recorded(Node& node) {
+    void activate_node_recorded(Node& node, ActivationTransitionJournal& journal) {
         // Record before invoking user code: if activate() itself throws, this
         // node still requires the matching best-effort deactivate().
-        activation_transition_progress_.push_back(&node);
+        journal.push_back(&node);
         LifecycleContext context{
             node.id,
             node.bounds,
             unsafe_paint_invalidator(node),
             unsafe_layout_invalidator(node)};
         node.component->activate(context);
-        for (auto& child : node.children) activate_node_recorded(*child);
+        for (auto& child : node.children) activate_node_recorded(*child, journal);
     }
 
-    void rollback_failed_activation() noexcept {
-        for (auto it = activation_transition_progress_.rbegin();
-             it != activation_transition_progress_.rend(); ++it) {
-            if (!*it) continue;
-            auto& node = **it;
+    void rollback_failed_activation(ActivationTransitionJournal& journal) noexcept {
+        for (std::size_t index = journal.size(); index-- > 0;) {
+            auto* node = journal[index];
+            if (!node) continue;
             try {
                 LifecycleContext context{
-                    node.id,
-                    node.bounds,
-                    unsafe_paint_invalidator(node),
-                    unsafe_layout_invalidator(node)};
-                node.component->deactivate(context);
+                    node->id,
+                    node->bounds,
+                    unsafe_paint_invalidator(*node),
+                    unsafe_layout_invalidator(*node)};
+                node->component->deactivate(context);
             } catch (...) {
                 // Preserve the original activate exception while completing the
                 // exact reverse transition for every node that started.
             }
         }
-        activation_transition_progress_.clear();
-        failed_activation_root_ = nullptr;
+        journal.clear();
     }
 
     void activate_node(Node& node) {
-        activation_transition_progress_.clear();
+        ActivationTransitionJournal journal;
         failed_activation_root_ = nullptr;
         try {
-            activate_node_recorded(node);
+            journal.reserve(retained_subtree_node_count(node));
+            activate_node_recorded(node, journal);
         } catch (...) {
+            rollback_failed_activation(journal);
             failed_activation_root_ = &node;
             throw;
         }
-        activation_transition_progress_.clear();
     }
 
     void deactivate_node(Node& node) {
         if (failed_activation_root_ == &node) {
-            rollback_failed_activation();
+            failed_activation_root_ = nullptr;
             return;
         }
         deactivate_node_untracked(node);
@@ -223,7 +258,7 @@
 
     void unmount_node(Node& node) {
         if (failed_mount_root_ == &node) {
-            rollback_failed_mount();
+            failed_mount_root_ = nullptr;
             return;
         }
 
@@ -236,7 +271,5 @@
         unmount_node_untracked(node);
     }
 
-    std::vector<MountTransitionProgress> mount_transition_progress_;
-    std::vector<Node*> activation_transition_progress_;
     Node* failed_mount_root_{};
     Node* failed_activation_root_{};
