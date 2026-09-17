@@ -143,6 +143,19 @@ def main() -> None:
     ):
         require(ci, needle, "ci.yml")
 
+    # Linux ARM64 is a native hosted-runner lane and must consume the forked
+    # skia-builder ARM64 release with an exact digest, not an x64 cache/archive.
+    for needle in (
+        "- name: Linux ARM64",
+        "os: ubuntu-24.04-arm",
+        "skia-build-linux-arm64-gpu-release.zip",
+        "https://github.com/hemduf/skia-builder/releases/download/chrome/m149/",
+        "0c5b366864d2ecec9b3de87b100ccea038f6289e6fccf279031bf7501b332ef1",
+        "Machine:.*AArch64",
+        "nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-",
+    ):
+        require(ci, needle, "ci.yml")
+
     consumer_platform = (ROOT / "cmake" / "NativeUIConsumerPlatform.cmake").read_text(
         encoding="utf-8"
     )
