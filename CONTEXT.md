@@ -119,9 +119,29 @@ Exact-head normal/path qualification is green for CI #1836, T044 #275, T050 #156
 
 T075 is not on the v1 critical path. Because its Painter API is now present on `main`, T069's public-surface audit must explicitly account for the current scoped-clipping surface together with T073/T074.
 
+### T076 is Done
+
+**T076 / #159 / PR #425 merged as `aea479af629b30ba21bb1ea7a7553b77b9717dd5`.** Frozen executable head `f7ad7c2dea7d2077fc9060c069218f8480cb95ea` adds hard-bounded group compositing through the existing `Painter::StateGuard` and `PaintOptions` surface for the post-1.0/NativeUI 1.1 rendering line.
+
+Delivered contract:
+
+- `Painter::scoped_layer(Rect, PaintOptions)` returns the existing non-copyable/non-movable `StateGuard`; no `LayerScope`, duplicate `LayerOptions` or public backend type is introduced;
+- finite layer bounds are enforced by a real clip captured under the creation transform before a private `saveLayer`, so backend bounds hints are never the correctness boundary;
+- one logical `StateGuard` can own multiple private backend frames through entry-depth bookkeeping while preserving the shared Painter save-depth/restore-floor invariant;
+- layer opacity and blend apply once to the completed group rather than once per child;
+- empty, inverted and non-finite bounds are balanced empty clip-only scopes and do not open a backend layer;
+- deterministic failure after the hard-clip frame or after `saveLayer` restores the exact prior Painter/SkCanvas stack and a later valid draw remains usable;
+- nested layer/clip/state/manual saves, transform capture, early-return/exception unwind and two-Painter lifetime isolation are covered;
+- no mutable global/singleton/`thread_local` layer state or persistent offscreen cache is introduced;
+- `examples/features/t076_layers.cpp` provides the interactive example and deterministic `--self-test`, while the Core paint suite executes the bounded-layer rendering path under sanitizers.
+
+Exact-head normal CI #1862 is green on Linux X11, Linux ARM64, Linux ASan+UBSan, Windows and macOS. Final T042 Lifecycle Stress #839 and T052 v0.1 Release Gate #563 are green on the frozen head, including clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5237620829` records zero Blocking/Important findings and no unresolved review threads remain.
+
+T076 is not on the v1 critical path. T077 / #160 is now Ready and extends this bounded layer foundation with Gaussian blur.
+
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075 public Painter surface.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075/T076 public Painter surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -137,6 +157,7 @@ post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
+T076(done) -> T077(ready) ------------------> NativeUI 1.1 effects
 ```
 
 ## Completed foundations relevant to v1
@@ -161,6 +182,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T073 / #156:** generic Brush fill painting foundation for Color/LinearGradient/RadialGradient with deterministic value/failure semantics and shared Painter materialization.
 - **T074 / #157:** Brush stroke painting for rounded rectangles, Paths, lines and arcs with PaintOptions, preserved Color/style semantics and shared Painter-local sampling.
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
+- **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with exact multi-frame `StateGuard` restore/rollback and deterministic group opacity/blend semantics.
 
 ## Validation policy
 
@@ -205,7 +227,7 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T074/T075 Painter surface.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T074/T075/T076 Painter surface.
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
