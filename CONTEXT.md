@@ -82,9 +82,28 @@ Normal/path exact-head qualification is green for CI #1828, T044 #267 and T066 #
 
 T073 is not on the v1 critical path. Because it is now present on `main`, T069's v1 public-surface audit must explicitly account for the current Brush-facing surface when deciding the frozen v1 API.
 
+### T075 is Done
+
+**T075 / #158 / PR #421 merged as `7cd37ef7a2e23b2e3c69880174f60f9578edbbc1`.** Frozen exact head `adf486a8aad6f7a94c1a512ed230ab40e7eec63f` delivers strict lexical scoped clipping through the existing `Painter::StateGuard` abstraction for the post-1.0/NativeUI 1.1 rendering line.
+
+Delivered contract:
+
+- Rect, rounded-Rect and arbitrary `Path` scoped clipping all return `Painter::StateGuard`;
+- `StateGuard` is non-copyable and non-movable, with no-throw destruction and guaranteed-copy-elision factories;
+- one private Painter scope-frame mechanism shares the existing save-depth/restore-floor state with `scoped_state()`;
+- Path/rounded geometry preparation is completed before publication and clip-application failure rolls back the entered frame;
+- invalid, empty, inverted and non-finite clip geometry becomes a balanced empty effective clip, never an unclipped fallback;
+- rounded radius canonicalization is deterministic and bounded to half the smallest rectangle dimension;
+- nested scoped/manual clipping, transform capture, early-return/exception restoration and two-Painter isolation are covered;
+- `examples/features/t075_scoped_clipping.cpp` provides the required interactive example and deterministic `--self-test`.
+
+Exact-head normal/path qualification is green for CI #1836, T044 #275, T050 #156, T066 #332, T072 #351 and Package Contracts #265. Final T042 Lifecycle Stress #835 and T052 v0.1 Release Gate #559 are green on the frozen head, including Linux ASan+UBSan, Linux X11, Windows/macOS qualification, clean package bootstraps and exact-head T051 benchmark. Final review `5233924873` records zero Blocking/Important findings and no unresolved review threads remain.
+
+T075 is not on the v1 critical path. Because its Painter API is now present on `main`, T069's public-surface audit must explicitly account for the current scoped-clipping surface together with T073.
+
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073 public surface.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T075 public Painter surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -98,6 +117,7 @@ T068 ---------------------------------------> 1.2
 
 post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
+T075(done) ---------------------------------> NativeUI 1.1 foundation
 ```
 
 ## Completed foundations relevant to v1
@@ -120,6 +140,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 ## Post-1.0 foundations already merged
 
 - **T073 / #156:** generic Brush fill painting foundation for Color/LinearGradient/RadialGradient with deterministic value/failure semantics and shared Painter materialization.
+- **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 
 ## Validation policy
 
@@ -164,7 +185,7 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073 surface.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T075 Painter surface.
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
