@@ -62,38 +62,36 @@ struct ResolvedTextLayout {
 
 
 class Painter {
+    struct ScopeFrame {
+        int previous_floor{};
+        int guard_depth{};
+    };
+
 public:
     class StateGuard {
     public:
-        explicit StateGuard(Painter& painter) noexcept
-            : painter_(&painter), previous_floor_(painter.restore_floor_) {
-            painter_->canvas_.save();
-            ++painter_->save_depth_;
-            guard_depth_ = painter_->save_depth_;
-            painter_->restore_floor_ = guard_depth_;
-        }
-
         StateGuard(const StateGuard&) = delete;
         StateGuard& operator=(const StateGuard&) = delete;
-        StateGuard(StateGuard&& other) noexcept
-            : painter_(std::exchange(other.painter_, nullptr)),
-              previous_floor_(other.previous_floor_),
-              guard_depth_(other.guard_depth_) {}
+        StateGuard(StateGuard&&) = delete;
         StateGuard& operator=(StateGuard&&) = delete;
 
         ~StateGuard() noexcept {
-            if (!painter_) return;
-            [[maybe_unused]] const bool balanced = painter_->save_depth_ == guard_depth_;
-            while (painter_->save_depth_ > guard_depth_) painter_->restore_unchecked();
-            if (painter_->save_depth_ == guard_depth_) painter_->restore_unchecked();
-            painter_->restore_floor_ = previous_floor_;
-            assert(balanced && "Unbalanced Painter save()/restore() inside paint scope");
+            painter_->end_scope(frame_);
         }
 
     private:
+        friend class Painter;
+
+        struct AdoptFrameTag {};
+
+        explicit StateGuard(Painter& painter) noexcept
+            : painter_(&painter), frame_(painter.begin_scope()) {}
+
+        StateGuard(Painter& painter, ScopeFrame frame, AdoptFrameTag) noexcept
+            : painter_(&painter), frame_(frame) {}
+
         Painter* painter_{};
-        int previous_floor_{};
-        int guard_depth_{};
+        ScopeFrame frame_{};
     };
 
     explicit Painter(SkCanvas& canvas) : canvas_(canvas) {}
@@ -117,24 +115,37 @@ public:
 
     [[nodiscard]] StateGuard scoped_clip(Rect rect) {
         const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
-        StateGuard guard{*this};
-        canvas_.clipRect(clip, SkClipOp::kIntersect, true);
-        return guard;
+        const ScopeFrame frame = begin_scope();
+        try {
+            canvas_.clipRect(clip, SkClipOp::kIntersect, true);
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
     [[nodiscard]] StateGuard scoped_clip(Rect rect, float radius) {
         const bool valid_rect = valid_clip_rect(rect);
-        const float clip_radius = std::isfinite(radius) ? std::max(0.0f, radius) : 0.0f;
         const SkRect sk_rect = valid_rect ? to_sk_rect(rect) : SkRect::MakeEmpty();
+        const float clip_radius = canonical_clip_radius(rect, radius);
+        const bool rounded = valid_rect && clip_radius > 0.0f;
+        const SkRRect sk_rounded = rounded
+            ? SkRRect::MakeRectXY(sk_rect, clip_radius, clip_radius)
+            : SkRRect{};
 
-        StateGuard guard{*this};
-        if (!valid_rect || !(clip_radius > 0.0f)) {
-            canvas_.clipRect(sk_rect, SkClipOp::kIntersect, true);
-        } else {
-            const auto rounded = SkRRect::MakeRectXY(sk_rect, clip_radius, clip_radius);
-            canvas_.clipRRect(rounded, SkClipOp::kIntersect, true);
+        const ScopeFrame frame = begin_scope();
+        try {
+            if (rounded) {
+                canvas_.clipRRect(sk_rounded, SkClipOp::kIntersect, true);
+            } else {
+                canvas_.clipRect(sk_rect, SkClipOp::kIntersect, true);
+            }
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
         }
-        return guard;
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
     [[nodiscard]] StateGuard scoped_clip(const Path& path) {
@@ -142,9 +153,14 @@ public:
         // it before entering the Painter save frame so construction failure
         // cannot publish a partially active scope.
         const SkPath clip = valid_clip_path(path) ? to_sk_path(path) : SkPath{};
-        StateGuard guard{*this};
-        canvas_.clipPath(clip, SkClipOp::kIntersect, true);
-        return guard;
+        const ScopeFrame frame = begin_scope();
+        try {
+            canvas_.clipPath(clip, SkClipOp::kIntersect, true);
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
     void save() {
@@ -322,6 +338,29 @@ public:
     }
 
 private:
+    [[nodiscard]] ScopeFrame begin_scope() noexcept {
+        ScopeFrame frame{restore_floor_, 0};
+        canvas_.save();
+        ++save_depth_;
+        frame.guard_depth = save_depth_;
+        restore_floor_ = frame.guard_depth;
+        return frame;
+    }
+
+    void end_scope(ScopeFrame frame) noexcept {
+        [[maybe_unused]] const bool balanced = save_depth_ == frame.guard_depth;
+        while (save_depth_ > frame.guard_depth) restore_unchecked();
+        if (save_depth_ == frame.guard_depth) restore_unchecked();
+        restore_floor_ = frame.previous_floor;
+        assert(balanced && "Unbalanced Painter save()/restore() inside paint scope");
+    }
+
+    void rollback_scope(ScopeFrame frame) noexcept {
+        while (save_depth_ > frame.guard_depth) restore_unchecked();
+        if (save_depth_ == frame.guard_depth) restore_unchecked();
+        restore_floor_ = frame.previous_floor;
+    }
+
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
@@ -333,6 +372,14 @@ private:
             return false;
         }
         return std::isfinite(rect.x + rect.w) && std::isfinite(rect.y + rect.h);
+    }
+
+    [[nodiscard]] static float canonical_clip_radius(Rect rect, float radius) noexcept {
+        if (!valid_clip_rect(rect) || !std::isfinite(radius) || !(radius > 0.0f)) {
+            return 0.0f;
+        }
+        const float max_radius = 0.5f * (std::min)(rect.w, rect.h);
+        return (std::min)(radius, max_radius);
     }
 
     [[nodiscard]] static bool valid_clip_path(const Path& path) noexcept {
