@@ -28,10 +28,10 @@ Non-negotiable rules:
 ## Pinned dependencies
 
 - Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`.
-- Skia: `olilarkin/skia-builder` `chrome/m149`.
+- Skia: `hemduf/skia-builder` `chrome/m149`, forked from `olilarkin/skia-builder`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
-- Linux: x64 GPU Release, X11/OpenGL/Fontconfig.
+- Linux: x64 GPU Release for the normal dependency path; CI additionally validates NativeUI natively on ARM64 against the forked `skia-build-linux-arm64-gpu-release.zip` asset.
 
 ## Current baseline and critical path
 
@@ -82,6 +82,24 @@ Normal/path exact-head qualification is green for CI #1828, T044 #267 and T066 #
 
 T073 is not on the v1 critical path. Because it is now present on `main`, T069's v1 public-surface audit must explicitly account for the current Brush-facing surface when deciding the frozen v1 API.
 
+### T074 is Done
+
+**T074 / #157 / PR #422 merged as `36425b5e0c96de943a1158ed006e027f9a28ff09`.** Frozen executable head `0566b25d96cc98a61ef4ba7dca4a8d97549e8a77` extends the T073 backend-neutral Brush paint-source seam to stroked vector primitives for the post-1.0/NativeUI 1.1 rendering line.
+
+Delivered contract:
+
+- Painter and Canvas accept `Brush + PaintOptions` for rounded-rect/rect strokes, Path strokes, lines and arcs;
+- existing Color stroke overloads remain source-compatible and delegate to the same Brush path;
+- legacy round caps for line/arc and existing Path `StrokeStyle` cap/join/miter behavior are preserved;
+- a multi-segment Path shares Painter-local Brush coordinates; gradients are not remapped independently per segment;
+- opacity and blend are applied exactly once through the existing T073 paint materialization seam;
+- Brush values are consumed per draw without retained caller storage, persistent backend resources, registries, caches or mutable global/TLS state;
+- dedicated compile/API, Color parity, cap/join/miter, radial line/arc, transform/opacity/blend, independent stroke golden and `t074_brush_strokes --self-test` coverage is present.
+
+Normal/path exact-head qualification is green for CI #1842, including Linux ASan+UBSan, Linux X11, macOS and Windows, plus T044 #285 and T066 #336. Final T042 Lifecycle Stress #836 and T052 v0.1 Release Gate #560 are green on the frozen executable candidate. Final independent review `5236179950` reports zero remaining Blocking/Important findings and no unresolved review threads remain.
+
+T074 is not on the v1 critical path. Because its stroke API is now present on `main`, T069's public-surface audit must explicitly account for the current Brush fill/stroke surface when deciding the frozen v1 API.
+
 ### T075 is Done
 
 **T075 / #158 / PR #421 merged as `7cd37ef7a2e23b2e3c69880174f60f9578edbbc1`.** Frozen exact head `adf486a8aad6f7a94c1a512ed230ab40e7eec63f` delivers strict lexical scoped clipping through the existing `Painter::StateGuard` abstraction for the post-1.0/NativeUI 1.1 rendering line.
@@ -99,11 +117,11 @@ Delivered contract:
 
 Exact-head normal/path qualification is green for CI #1836, T044 #275, T050 #156, T066 #332, T072 #351 and Package Contracts #265. Final T042 Lifecycle Stress #835 and T052 v0.1 Release Gate #559 are green on the frozen head, including Linux ASan+UBSan, Linux X11, Windows/macOS qualification, clean package bootstraps and exact-head T051 benchmark. Final review `5233924873` records zero Blocking/Important findings and no unresolved review threads remain.
 
-T075 is not on the v1 critical path. Because its Painter API is now present on `main`, T069's public-surface audit must explicitly account for the current scoped-clipping surface together with T073.
+T075 is not on the v1 critical path. Because its Painter API is now present on `main`, T069's public-surface audit must explicitly account for the current scoped-clipping surface together with T073/T074.
 
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T075 public Painter surface.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075 public Painter surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -117,6 +135,7 @@ T068 ---------------------------------------> 1.2
 
 post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
+T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
 ```
 
@@ -140,6 +159,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 ## Post-1.0 foundations already merged
 
 - **T073 / #156:** generic Brush fill painting foundation for Color/LinearGradient/RadialGradient with deterministic value/failure semantics and shared Painter materialization.
+- **T074 / #157:** Brush stroke painting for rounded rectangles, Paths, lines and arcs with PaintOptions, preserved Color/style semantics and shared Painter-local sampling.
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 
 ## Validation policy
@@ -185,7 +205,7 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T075 Painter surface.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T074/T075 Painter surface.
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
