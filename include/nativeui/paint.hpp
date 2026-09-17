@@ -15,6 +15,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRect.h"
+#include "include/core/SkRRect.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTypeface.h"
 #include "include/effects/SkGradient.h"
@@ -78,8 +79,9 @@ public:
             : painter_(std::exchange(other.painter_, nullptr)),
               previous_floor_(other.previous_floor_),
               guard_depth_(other.guard_depth_) {}
+        StateGuard& operator=(StateGuard&&) = delete;
 
-        ~StateGuard() {
+        ~StateGuard() noexcept {
             if (!painter_) return;
             [[maybe_unused]] const bool balanced = painter_->save_depth_ == guard_depth_;
             while (painter_->save_depth_ > guard_depth_) painter_->restore_unchecked();
@@ -112,6 +114,38 @@ public:
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
     [[nodiscard]] StateGuard scoped_state() noexcept { return StateGuard{*this}; }
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+
+    [[nodiscard]] StateGuard scoped_clip(Rect rect) {
+        const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
+        StateGuard guard{*this};
+        canvas_.clipRect(clip, SkClipOp::kIntersect, true);
+        return guard;
+    }
+
+    [[nodiscard]] StateGuard scoped_clip(Rect rect, float radius) {
+        const bool valid_rect = valid_clip_rect(rect);
+        const float clip_radius = std::isfinite(radius) ? std::max(0.0f, radius) : 0.0f;
+        const SkRect sk_rect = valid_rect ? to_sk_rect(rect) : SkRect::MakeEmpty();
+
+        StateGuard guard{*this};
+        if (!valid_rect || !(clip_radius > 0.0f)) {
+            canvas_.clipRect(sk_rect, SkClipOp::kIntersect, true);
+        } else {
+            const auto rounded = SkRRect::MakeRectXY(sk_rect, clip_radius, clip_radius);
+            canvas_.clipRRect(rounded, SkClipOp::kIntersect, true);
+        }
+        return guard;
+    }
+
+    [[nodiscard]] StateGuard scoped_clip(const Path& path) {
+        // Path conversion may allocate inside the backend value builder. Finish
+        // it before entering the Painter save frame so construction failure
+        // cannot publish a partially active scope.
+        const SkPath clip = valid_clip_path(path) ? to_sk_path(path) : SkPath{};
+        StateGuard guard{*this};
+        canvas_.clipPath(clip, SkClipOp::kIntersect, true);
+        return guard;
+    }
 
     void save() {
         canvas_.save();
@@ -288,6 +322,40 @@ public:
     }
 
 private:
+    [[nodiscard]] static bool finite_point(Point point) noexcept {
+        return std::isfinite(point.x) && std::isfinite(point.y);
+    }
+
+    [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
+        if (!std::isfinite(rect.x) || !std::isfinite(rect.y) ||
+            !std::isfinite(rect.w) || !std::isfinite(rect.h) ||
+            !(rect.w > 0.0f) || !(rect.h > 0.0f)) {
+            return false;
+        }
+        return std::isfinite(rect.x + rect.w) && std::isfinite(rect.y + rect.h);
+    }
+
+    [[nodiscard]] static bool valid_clip_path(const Path& path) noexcept {
+        for (const auto& command : path.commands_) {
+            switch (command.verb) {
+                case Path::Verb::Move:
+                case Path::Verb::Line:
+                    if (!finite_point(command.a)) return false;
+                    break;
+                case Path::Verb::Quad:
+                    if (!finite_point(command.a) || !finite_point(command.b)) return false;
+                    break;
+                case Path::Verb::Cubic:
+                    if (!finite_point(command.a) || !finite_point(command.b) ||
+                        !finite_point(command.c)) return false;
+                    break;
+                case Path::Verb::Close:
+                    break;
+            }
+        }
+        return true;
+    }
+
     [[nodiscard]] static SkRect to_sk_rect(Rect r) {
         return SkRect::MakeXYWH(r.x, r.y, r.w, r.h);
     }
