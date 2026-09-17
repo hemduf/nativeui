@@ -19,13 +19,12 @@ bool update_requested(int argc, char** argv) {
     return false;
 }
 
-bool verify_gradient(bool update) {
+ui::LinearGradient plateau_gradient() {
     constexpr ui::Color left{
         64.0f / 255.0f, 80.0f / 255.0f, 96.0f / 255.0f, 1.0f};
     constexpr ui::Color right{
         96.0f / 255.0f, 80.0f / 255.0f, 64.0f / 255.0f, 1.0f};
-
-    const ui::LinearGradient gradient{
+    return ui::LinearGradient{
         {0.0f, 0.0f},
         {8.0f, 0.0f},
         {
@@ -35,7 +34,20 @@ bool verify_gradient(bool update) {
             ui::GradientStop{1.0f, right},
         },
     };
+}
 
+test::golden::CompareOptions plateau_options() {
+    test::golden::CompareOptions options;
+    options.channel_tolerance = 1;
+    options.compare_regions = {
+        test::golden::Region{0, 0, 3, 2},
+        test::golden::Region{5, 0, 3, 2},
+    };
+    return options;
+}
+
+bool verify_gradient(bool update) {
+    const auto gradient = plateau_gradient();
     ui::UI tree{
         ui::Canvas{8.0f, 2.0f, [gradient](ui::CanvasContext2D& g) {
             g.fill_rect({0.0f, 0.0f, 8.0f, 2.0f}, gradient);
@@ -44,18 +56,72 @@ bool verify_gradient(bool update) {
     ui::HeadlessRenderer renderer{{8.0f, 2.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
+    return test::golden::verify(
+        "gradient_scene",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        plateau_options(),
+        update);
+}
+
+bool verify_brush_linear_path(bool update) {
+    const ui::Brush brush{plateau_gradient()};
+    ui::Path path;
+    path.move_to({0.0f, 0.0f})
+        .line_to({8.0f, 0.0f})
+        .line_to({8.0f, 2.0f})
+        .line_to({0.0f, 2.0f})
+        .close();
+
+    ui::UI tree{
+        ui::Canvas{8.0f, 2.0f, [brush, path](ui::CanvasContext2D& g) {
+            g.fill_path(path, brush);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{8.0f, 2.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    return test::golden::verify(
+        "brush_linear_path",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        plateau_options(),
+        update);
+}
+
+bool verify_brush_radial_circle(bool update) {
+    constexpr ui::Color color{
+        64.0f / 255.0f, 80.0f / 255.0f, 96.0f / 255.0f, 1.0f};
+    const ui::Brush brush{ui::RadialGradient{
+        {4.0f, 4.0f},
+        3.0f,
+        {
+            ui::GradientStop{0.0f, color},
+            ui::GradientStop{1.0f, color},
+        }}};
+
+    ui::UI tree{
+        ui::Canvas{8.0f, 8.0f, [brush](ui::CanvasContext2D& g) {
+            g.circle({4.0f, 4.0f}, 3.0f, brush);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{8.0f, 8.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
     test::golden::CompareOptions options;
     options.channel_tolerance = 1;
-    // Compare the two constant plateaus away from the interpolation band. This
-    // keeps the snapshot deterministic while still proving that a gradient
-    // shader, not a single solid fallback, reaches the headless renderer.
     options.compare_regions = {
-        test::golden::Region{0, 0, 3, 2},
-        test::golden::Region{5, 0, 3, 2},
+        test::golden::Region{3, 3, 2, 2},
+        test::golden::Region{0, 0, 1, 1},
+        test::golden::Region{7, 0, 1, 1},
+        test::golden::Region{0, 7, 1, 1},
+        test::golden::Region{7, 7, 1, 1},
     };
 
     return test::golden::verify(
-        "gradient_scene",
+        "brush_radial_circle",
         test::golden::from_renderer(renderer),
         NATIVEUI_GOLDEN_BASELINE_DIR,
         NATIVEUI_GOLDEN_ARTIFACT_DIR,
@@ -67,7 +133,10 @@ bool verify_gradient(bool update) {
 
 int main(int argc, char** argv) {
     try {
-        NUI_CHECK(verify_gradient(update_requested(argc, argv)));
+        const bool update = update_requested(argc, argv);
+        NUI_CHECK(verify_gradient(update));
+        NUI_CHECK(verify_brush_linear_path(update));
+        NUI_CHECK(verify_brush_radial_circle(update));
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL gradient golden: " << error.what() << '\n';

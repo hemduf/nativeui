@@ -130,6 +130,10 @@ public:
         painter_.fill_rounded_rect(rect, 0.0f, gradient, options);
     }
 
+    void fill_rect(Rect rect, const Brush& brush, PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, 0.0f, brush, options);
+    }
+
     void stroke_rect(Rect rect, float width, Color color) {
         painter_.stroke_rounded_rect(rect, 0.0f, width, color);
     }
@@ -148,12 +152,21 @@ public:
         painter_.fill_rounded_rect(rect, radius, gradient, options);
     }
 
+    void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
+                           PaintOptions options = {}) {
+        painter_.fill_rounded_rect(rect, radius, brush, options);
+    }
+
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         painter_.stroke_rounded_rect(rect, radius, width, color);
     }
 
     void circle(Point center, float radius, Color color) {
         painter_.circle(center, radius, color);
+    }
+
+    void circle(Point center, float radius, const Brush& brush, PaintOptions options = {}) {
+        painter_.circle(center, radius, brush, options);
     }
 
     void arc(Point center, float radius, float start, float end, float width, Color color) {
@@ -166,6 +179,10 @@ public:
 
     void fill_path(const Path& path, Color color) {
         painter_.fill_path(path, color);
+    }
+
+    void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
+        painter_.fill_path(path, brush, options);
     }
 
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
