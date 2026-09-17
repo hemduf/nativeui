@@ -110,9 +110,30 @@ Exact-head normal/path qualification passed CI #1836 plus T044 #275, T050 #156, 
 
 T075 is a NativeUI 1.1/post-1.0 rendering foundation and is not on the v1 critical path. T069 must nevertheless account for the current scoped-clipping public Painter surface when freezing the v1 API exposed by current `main`.
 
+### T076 — Done (post-1.0 rendering foundation)
+
+**T076 / issue #159 / PR #425 merged as `aea479af629b30ba21bb1ea7a7553b77b9717dd5`.**
+
+Frozen executable head `f7ad7c2dea7d2077fc9060c069218f8480cb95ea` adds hard-bounded group compositing through the existing `Painter::StateGuard` and `PaintOptions` surface.
+
+Delivered contract includes:
+
+- `Painter::scoped_layer(Rect, PaintOptions)` returns the existing non-copyable/non-movable `StateGuard`; no `LayerScope`, duplicate `LayerOptions` or public backend type is added;
+- finite layer bounds are enforced by a real hard clip captured under the creation transform before the private `saveLayer`, so Skia's layer bounds remain only a sizing hint;
+- one logical guard may own multiple private backend frames through entry-depth bookkeeping while preserving the shared Painter restore-floor invariant;
+- opacity and blend apply exactly once to the composed group rather than per child;
+- empty, inverted and non-finite bounds produce balanced empty clip-only scopes and never open a backend layer;
+- deterministic partial-entry failure after the hard clip or after `saveLayer` rolls back to the exact prior Painter/SkCanvas stack, and later drawing remains usable;
+- no mutable global/singleton/`thread_local` layer state or persistent offscreen cache is introduced;
+- nested layer/clip/state/manual-save, transform capture, exception/early-return unwind and two-Painter isolation are covered by the feature self-test and Core sanitizer runtime coverage.
+
+Exact-head normal qualification passed CI #1862 on Linux X11, Linux ARM64, Linux ASan+UBSan, Windows and macOS. Final T042 Lifecycle Stress #839 and T052 v0.1 Release Gate #563 passed on the frozen head, including clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5237620829` reports zero remaining Blocking/Important findings.
+
+T076 is a NativeUI 1.1/post-1.0 rendering foundation and is not on the v1 critical path. T077 / #160 is now unblocked and extends the same bounded layer mechanism with Gaussian blur.
+
 ### Active pre-freeze work
 
-- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze. The audit must account for the current `main` public surface after the merged T073, T074 and T075 rendering foundations.
+- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze. The audit must account for the current `main` public surface after the merged T073, T074, T075 and T076 rendering foundations.
 - **T068 / #80 / PR #241 — deferred to 1.2:** native accessibility bridges remain outside the v1 critical path.
 
 ## Current dependency frontier
@@ -141,6 +162,7 @@ post-1.0 / later-release work already landed:
   T073(done) -----------------------------------------> NativeUI 1.1 foundation
   T074(done) -----------------------------------------> NativeUI 1.1 foundation
   T075(done) -----------------------------------------> NativeUI 1.1 foundation
+  T076(done) -> T077(ready) --------------------------> NativeUI 1.1 effects
   T068 ----------------------------------------------> 1.2
 ```
 
@@ -160,7 +182,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 3 — Rendering and graphics
 
-**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension and T075's strict lexical scoped-clipping API are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
+**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension, T075's strict lexical scoped-clipping API and T076's hard-bounded scoped layer compositing are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
 
 ### Milestone 4 — Text system
 
@@ -184,7 +206,7 @@ post-1.0 / later-release work already landed:
 
 The remaining v1 sequence is:
 
-1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze against current `main`, including the merged T073/T074/T075 Painter surface;
+1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze against current `main`, including the merged T073/T074/T075/T076 Painter surface;
 2. validate T070 reference application/Getting Started against the frozen surface;
 3. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
 4. run T071 validation/release-only on one exact RC SHA.
@@ -209,7 +231,8 @@ The remaining v1 sequence is:
 - **T073 / #156:** backend-neutral generic Brush fill painting with deterministic move/copy/failure semantics and shared Painter materialization.
 - **T074 / #157:** Brush + PaintOptions stroke support for rounded rectangles, Paths, lines and arcs with preserved Color/style semantics and shared Painter-local sampling.
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
+- **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with one logical `StateGuard`, exact multi-frame restore/rollback, group opacity/blend and empty invalid-bound scopes.
 
 ## Release policy
 
-T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T073, T074 and T075 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T073, T074, T075 and T076 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T077 remains post-1.0 work and builds on the T076 layer contract. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
