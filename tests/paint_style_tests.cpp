@@ -1,6 +1,8 @@
 #include "test_support.hpp"
 
 #include <cstdlib>
+#include <functional>
+#include <memory>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -53,6 +55,41 @@ bool black(ui::Rgba8 pixel) {
     return pixel.r < 8 && pixel.g < 8 && pixel.b < 8;
 }
 
+class PainterProbeComponent final : public ui::Component {
+public:
+    explicit PainterProbeComponent(std::function<void(ui::Painter&)> draw)
+        : draw_(std::move(draw)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {64.0f, 64.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        draw_(context.painter());
+    }
+
+private:
+    std::function<void(ui::Painter&)> draw_;
+};
+
+class PainterProbe {
+public:
+    explicit PainterProbe(std::function<void(ui::Painter&)> draw)
+        : draw_(std::move(draw)) {}
+
+    ui::Spec spec() && {
+        auto draw = std::move(draw_);
+        return ui::Spec{
+            [draw = std::move(draw)]() mutable {
+                return std::make_unique<PainterProbeComponent>(std::move(draw));
+            },
+            {}};
+    }
+
+private:
+    std::function<void(ui::Painter&)> draw_;
+};
+
 ui::LinearGradient red_blue_gradient(float width) {
     return ui::LinearGradient{
         {0.0f, 0.0f},
@@ -62,6 +99,61 @@ ui::LinearGradient red_blue_gradient(float width) {
             ui::GradientStop{1.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
         },
     };
+}
+
+void bounded_layer_core_contract() {
+    ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {0.25f, 0.25f, 0.25f, 1.0f});
+
+        ui::PaintOptions options;
+        options.opacity = 0.5f;
+        {
+            auto layer = painter.scoped_layer({16.0f, 8.0f, 32.0f, 24.0f}, options);
+            painter.fill_rounded_rect(
+                {-100.0f, 8.0f, 180.0f, 24.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+            painter.fill_rounded_rect(
+                {28.0f, 8.0f, 52.0f, 24.0f}, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f});
+        }
+
+        {
+            auto empty = painter.scoped_layer({0.0f, 40.0f, 0.0f, 16.0f});
+            painter.fill_rounded_rect(
+                {0.0f, 40.0f, 64.0f, 16.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }
+        painter.fill_rounded_rect(
+            {2.0f, 42.0f, 4.0f, 4.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+    }}};
+
+    ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    const auto outside = renderer.pixel(8, 16);
+    NUI_CHECK(outside.r > 55 && outside.r < 75);
+    NUI_CHECK(outside.g > 55 && outside.g < 75);
+    NUI_CHECK(outside.b > 55 && outside.b < 75);
+
+    const auto red_only = renderer.pixel(20, 16);
+    NUI_CHECK(red_only.r > 145 && red_only.r < 180);
+    NUI_CHECK(red_only.g > 20 && red_only.g < 50);
+    NUI_CHECK(red_only.b > 20 && red_only.b < 50);
+
+    const auto overlap = renderer.pixel(32, 16);
+    NUI_CHECK(overlap.r < 50);
+    NUI_CHECK(overlap.g > 20 && overlap.g < 50);
+    NUI_CHECK(overlap.b > 145 && overlap.b < 180);
+
+    const auto hard_bound_outside = renderer.pixel(52, 16);
+    NUI_CHECK(hard_bound_outside.r > 55 && hard_bound_outside.r < 75);
+    NUI_CHECK(hard_bound_outside.g > 55 && hard_bound_outside.g < 75);
+    NUI_CHECK(hard_bound_outside.b > 55 && hard_bound_outside.b < 75);
+
+    const auto recovered = renderer.pixel(4, 44);
+    NUI_CHECK(recovered.g > 220 && recovered.r < 40 && recovered.b < 40);
+    const auto invalid_output = renderer.pixel(24, 48);
+    NUI_CHECK(invalid_output.r > 55 && invalid_output.r < 75);
+    NUI_CHECK(invalid_output.g > 55 && invalid_output.g < 75);
+    NUI_CHECK(invalid_output.b > 55 && invalid_output.b < 75);
 }
 
 void two_stop_linear_gradient() {
@@ -527,6 +619,7 @@ void brush_stroke_transform_opacity_and_blend() {
 }
 
 void suite() {
+    bounded_layer_core_contract();
     two_stop_linear_gradient();
     multi_stop_linear_gradient();
     radial_gradient();
