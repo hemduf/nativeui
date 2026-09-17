@@ -210,12 +210,13 @@ public:
     }
 
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kStroke_Style);
-        paint.setStrokeWidth(width);
-        paint.setColor4f(to_sk_color(color));
-        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+        stroke_rounded_rect(rect, radius, width, Brush{color});
+    }
+
+    void stroke_rounded_rect(Rect rect, float radius, float width, const Brush& brush,
+                             PaintOptions options = {}) {
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
+                              make_stroke_paint(brush, StrokeStyle{width}, options));
     }
 
     void circle(Point center, float radius, Color color) {
@@ -228,12 +229,13 @@ public:
     }
 
     void arc(Point center, float radius, float start, float end, float width, Color color) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kStroke_Style);
-        paint.setStrokeWidth(width);
-        paint.setStrokeCap(SkPaint::kRound_Cap);
-        paint.setColor4f(to_sk_color(color));
+        arc(center, radius, start, end, width, Brush{color});
+    }
+
+    void arc(Point center, float radius, float start, float end, float width,
+             const Brush& brush, PaintOptions options = {}) {
+        const auto paint = make_stroke_paint(
+            brush, StrokeStyle{width, StrokeCap::Round}, options);
         const auto oval = SkRect::MakeXYWH(center.x - radius, center.y - radius,
                                            radius * 2.0f, radius * 2.0f);
         constexpr float rad_to_deg = 180.0f / kPi;
@@ -241,12 +243,13 @@ public:
     }
 
     void line(Point a, Point b, float width, Color color) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kStroke_Style);
-        paint.setStrokeWidth(width);
-        paint.setStrokeCap(SkPaint::kRound_Cap);
-        paint.setColor4f(to_sk_color(color));
+        line(a, b, width, Brush{color});
+    }
+
+    void line(Point a, Point b, float width, const Brush& brush,
+              PaintOptions options = {}) {
+        const auto paint = make_stroke_paint(
+            brush, StrokeStyle{width, StrokeCap::Round}, options);
         canvas_.drawLine(a.x, a.y, b.x, b.y, paint);
     }
 
@@ -261,16 +264,13 @@ public:
     }
 
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
+        stroke_path(path, Brush{color}, style);
+    }
+
+    void stroke_path(const Path& path, const Brush& brush, StrokeStyle style = {},
+                     PaintOptions options = {}) {
         if (path.empty() || style.width <= 0.0f) return;
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kStroke_Style);
-        paint.setStrokeWidth(style.width);
-        paint.setStrokeCap(to_sk_cap(style.cap));
-        paint.setStrokeJoin(to_sk_join(style.join));
-        paint.setStrokeMiter(std::max(0.0f, style.miter_limit));
-        paint.setColor4f(to_sk_color(color));
-        canvas_.drawPath(to_sk_path(path), paint);
+        canvas_.drawPath(to_sk_path(path), make_stroke_paint(brush, style, options));
     }
 
     void text(Point position, std::string_view text, const TextStyle& style) {
@@ -455,6 +455,18 @@ private:
         return brush.visit([options](const auto& source) {
             return make_fill_paint(source, options);
         });
+    }
+
+    [[nodiscard]] static SkPaint make_stroke_paint(const Brush& brush,
+                                                   StrokeStyle style,
+                                                   PaintOptions options) {
+        auto paint = make_fill_paint(brush, options);
+        paint.setStyle(SkPaint::kStroke_Style);
+        paint.setStrokeWidth(style.width);
+        paint.setStrokeCap(to_sk_cap(style.cap));
+        paint.setStrokeJoin(to_sk_join(style.join));
+        paint.setStrokeMiter(std::max(0.0f, style.miter_limit));
+        return paint;
     }
 
     [[nodiscard]] static bool valid_gradient_stops(const std::vector<GradientStop>& stops) {
