@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-16
+**Updated:** 2026-09-17
 
 NativeUI is a reusable C++20 retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -49,9 +49,29 @@ Frozen exact head `e6d747961a2fd39760f5703748c10440f8fb0efa` delivered the final
 
 Exact-head qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 Lifecycle Stress `35156481983` passed Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35156481846` passed the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 performance/allocation benchmark. Self review `5228886765` and independent frozen-head review `5228890731` report zero Blocking/Important findings; the historical Blocking thread is resolved/outdated and privacy review is clean.
 
+### T073 — Done (post-1.0 rendering foundation)
+
+**T073 / issue #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.**
+
+Frozen exact head `63bc82c6e2fd3db0aa6aae06456e51c36da33bfc` introduces backend-neutral `ui::Brush` values for solid colors, linear gradients and radial gradients, with one shared Painter fill-materialization seam and Canvas/Painter Brush fill overloads.
+
+Delivered contract includes:
+
+- exact transparent-solid moved-from semantics, including self-move assignment;
+- non-allocating/non-throwing Color construction, moves and destruction by representation contract;
+- strong copy-assignment guarantee under deterministic allocation failure;
+- owned gradient logical state with independent multi-UI lifetime behavior;
+- preserved transform, clip, invalid-gradient, opacity and blend semantics;
+- no mutable production global/singleton/`thread_local` state and no backend resource creation during Brush construction;
+- isolated public-header coverage plus radial-circle and linear-Path golden coverage.
+
+Exact-head normal/path qualification passed CI #1828, T044 #267 and T066 #324. Final T042 Lifecycle Stress #834 passed Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #558 passed the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5233819886` reports zero remaining Blocking/Important findings.
+
+T073 remains a NativeUI 1.1/post-1.0 rendering foundation and is not on the v1 critical path. T069 continues to own the v1 public-surface audit/freeze against the current `main` state.
+
 ### Active pre-freeze work
 
-- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze.
+- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze. The audit must account for the current `main` public surface after the merged T073 foundation.
 - **T068 / #80 / PR #241 — deferred to 1.2:** native accessibility bridges remain outside the v1 critical path.
 
 ## Current dependency frontier
@@ -76,7 +96,8 @@ v1 critical path:
   T049(done) -----------------------------------------> T071
   T044(done) -----------------------------------------> T071
 
-post-1.0:
+post-1.0 / later-release work already landed:
+  T073(done) -----------------------------------------> NativeUI 1.1 foundation
   T068 ----------------------------------------------> 1.2
 ```
 
@@ -96,7 +117,7 @@ post-1.0:
 
 ### Milestone 3 — Rendering and graphics
 
-**Complete.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery.
+**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush foundation is also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
 
 ### Milestone 4 — Text system
 
@@ -120,7 +141,7 @@ post-1.0:
 
 The remaining v1 sequence is:
 
-1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze;
+1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze against current `main`;
 2. validate T070 reference application/Getting Started against the frozen surface;
 3. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
 4. run T071 validation/release-only on one exact RC SHA.
@@ -140,6 +161,10 @@ The remaining v1 sequence is:
 - **T173 / #401:** complete public ASCII A-Z key exposure and routing coverage.
 - **T174 / #409:** per-UI fallback for unhandled raw KeyDown shortcuts on final T125 semantics.
 
+## Completed post-1.0 foundations
+
+- **T073 / #156:** backend-neutral generic Brush fill painting with deterministic move/copy/failure semantics and shared Painter materialization.
+
 ## Release policy
 
-T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T073 is merged as a later-release rendering foundation and remains outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
