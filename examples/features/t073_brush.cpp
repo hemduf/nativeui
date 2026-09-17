@@ -1,5 +1,7 @@
 #include "example_support.hpp"
 
+#include <utility>
+
 namespace {
 
 ui::Brush panel_brush() {
@@ -78,6 +80,9 @@ int main(int argc, char** argv) {
         const ui::Brush linear{ui::LinearGradient{
             {48.0f, 0.0f}, {72.0f, 0.0f},
             {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}};
+        ui::Brush self_moved{ui::Color{0.0f, 1.0f, 0.0f, 1.0f}};
+        self_moved = std::move(self_moved);
+
         ui::Path path;
         path.move_to({48.0f, 2.0f})
             .line_to({72.0f, 2.0f})
@@ -86,16 +91,18 @@ int main(int argc, char** argv) {
             .close();
 
         ui::UI tree{
-            ui::Canvas{72.0f, 24.0f, [solid, radial, linear, path](ui::CanvasContext2D& g) {
-                g.fill_rounded_rect({1.0f, 2.0f, 14.0f, 20.0f}, 3.0f, solid);
-                g.circle({32.0f, 12.0f}, 8.0f, radial);
-                g.fill_path(path, linear);
-            }}
+            ui::Canvas{72.0f, 24.0f,
+                [solid, radial, linear, self_moved, path](ui::CanvasContext2D& g) {
+                    g.fill_rounded_rect({1.0f, 2.0f, 14.0f, 20.0f}, 3.0f, solid);
+                    g.fill_rect({1.0f, 2.0f, 14.0f, 20.0f}, self_moved);
+                    g.circle({32.0f, 12.0f}, 8.0f, radial);
+                    g.fill_path(path, linear);
+                }}
         };
         ui::HeadlessRenderer renderer{{72.0f, 24.0f}, 1.0f};
         if (!renderer.render(tree)) return example::fail("headless Brush render failed");
         if (!red_dominant(renderer.pixel(8, 12))) {
-            return example::fail("solid Brush did not render");
+            return example::fail("solid or self-moved transparent Brush contract failed");
         }
         const auto center = renderer.pixel(32, 12);
         const auto edge = renderer.pixel(39, 12);

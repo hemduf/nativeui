@@ -94,7 +94,10 @@ public:
     }
 
     Brush& operator=(Brush&& other) noexcept {
-        if (this == &other) return *this;
+        if (this == &other) {
+            reset_to_transparent();
+            return *this;
+        }
         value_ = std::move(other.value_);
         other.reset_to_transparent();
         return *this;
