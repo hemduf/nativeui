@@ -32,6 +32,13 @@ def main() -> None:
     if not workflow_files:
         raise AssertionError("no workflow files found")
 
+    # T044/T066 are focused harnesses inside normal CI, not independent PR
+    # matrices. Reintroducing either workflow would recreate duplicate platform
+    # runners/checks for coverage that CI already owns.
+    for name in ("t044-pointer-capture.yml", "t066-window-controls.yml"):
+        if (WORKFLOWS / name).exists():
+            raise AssertionError(f"{name}: contract must live in ci.yml")
+
     # Every workflow that can react to PR churn must cancel superseded work.
     for path in workflow_files:
         text = path.read_text(encoding="utf-8")
@@ -122,6 +129,19 @@ def main() -> None:
         "-DNATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE=ON",
         "ci.yml",
     )
+
+    # Platform-specialized T044/T066 coverage is intentionally folded into the
+    # existing CI runners. Keep their focused harnesses and sanitizer coverage
+    # visible here so a future cleanup cannot silently drop them.
+    for needle in (
+        "cmake -S tests/t044 -B build-t044",
+        "cmake -S tests/t066 -B build-t066",
+        "nativeui_t066_window_controls_platform_tests",
+        "nativeui_t066_destroy_survivor_tests",
+        "cmake -S tests/t044 -B build-t044-sanitize",
+        "libxtst-dev",
+    ):
+        require(ci, needle, "ci.yml")
 
     # Linux ARM64 is a native hosted-runner lane and must consume the forked
     # skia-builder ARM64 release with an exact digest, not an x64 cache/archive.
