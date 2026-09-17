@@ -91,6 +91,31 @@ bool verify_brush_linear_path(bool update) {
         update);
 }
 
+bool verify_brush_linear_path_stroke(bool update) {
+    const ui::Brush brush{plateau_gradient()};
+    ui::Path path;
+    path.move_to({-4.0f, 1.0f}).line_to({12.0f, 1.0f});
+    const ui::StrokeStyle style{4.0f, ui::StrokeCap::Butt, ui::StrokeJoin::Miter, 4.0f};
+
+    ui::UI tree{
+        ui::Canvas{8.0f, 2.0f, [brush, path, style](ui::CanvasContext2D& g) {
+            g.stroke_path(path, brush, style);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{8.0f, 2.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    // The oversized horizontal stroke fully covers the 8x2 target, so the
+    // existing fill baseline becomes an exact golden for shared Brush sampling.
+    return test::golden::verify(
+        "brush_linear_path",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        plateau_options(),
+        update);
+}
+
 bool verify_brush_radial_circle(bool update) {
     constexpr ui::Color color{
         64.0f / 255.0f, 80.0f / 255.0f, 96.0f / 255.0f, 1.0f};
@@ -136,6 +161,7 @@ int main(int argc, char** argv) {
         const bool update = update_requested(argc, argv);
         NUI_CHECK(verify_gradient(update));
         NUI_CHECK(verify_brush_linear_path(update));
+        NUI_CHECK(verify_brush_linear_path_stroke(update));
         NUI_CHECK(verify_brush_radial_circle(update));
         return 0;
     } catch (const std::exception& error) {

@@ -397,6 +397,135 @@ void brush_copies_are_multi_ui_lifetime_safe() {
     NUI_CHECK(center_after.r > 220 && center_after.g > 220 && center_after.b > 220);
 }
 
+void brush_strokes_match_color_and_preserve_style() {
+    constexpr ui::Color color{0.72f, 0.28f, 0.62f, 0.70f};
+
+    ui::Path miter_path;
+    miter_path.move_to({4.0f, 30.0f}).line_to({10.0f, 20.0f}).line_to({16.0f, 30.0f});
+    ui::Path round_path;
+    round_path.move_to({28.0f, 30.0f}).line_to({34.0f, 20.0f}).line_to({40.0f, 30.0f});
+    ui::Path bevel_path;
+    bevel_path.move_to({52.0f, 30.0f}).line_to({58.0f, 20.0f}).line_to({64.0f, 30.0f});
+
+    const ui::StrokeStyle miter{3.0f, ui::StrokeCap::Butt, ui::StrokeJoin::Miter, 1.25f};
+    const ui::StrokeStyle round{3.0f, ui::StrokeCap::Round, ui::StrokeJoin::Round, 4.0f};
+    const ui::StrokeStyle bevel{3.0f, ui::StrokeCap::Square, ui::StrokeJoin::Bevel, 8.0f};
+
+    ui::UI legacy{
+        ui::Canvas{72.0f, 36.0f,
+            [color, miter_path, round_path, bevel_path, miter, round, bevel](ui::CanvasContext2D& g) {
+                g.stroke_rounded_rect({2.0f, 2.0f, 14.0f, 10.0f}, 3.0f, 2.0f, color);
+                g.line({20.0f, 7.0f}, {34.0f, 7.0f}, 3.0f, color);
+                g.arc({46.0f, 7.0f}, 5.0f, 0.0f, 4.71238898f, 2.0f, color);
+                g.stroke_path(miter_path, color, miter);
+                g.stroke_path(round_path, color, round);
+                g.stroke_path(bevel_path, color, bevel);
+            }}
+    };
+
+    ui::UI generic{
+        ui::Canvas{72.0f, 36.0f,
+            [color, miter_path, round_path, bevel_path, miter, round, bevel](ui::CanvasContext2D& g) {
+                const ui::Brush brush{color};
+                g.stroke_rounded_rect({2.0f, 2.0f, 14.0f, 10.0f}, 3.0f, 2.0f, brush);
+                g.line({20.0f, 7.0f}, {34.0f, 7.0f}, 3.0f, brush);
+                g.arc({46.0f, 7.0f}, 5.0f, 0.0f, 4.71238898f, 2.0f, brush);
+                g.stroke_path(miter_path, brush, miter);
+                g.stroke_path(round_path, brush, round);
+                g.stroke_path(bevel_path, brush, bevel);
+            }}
+    };
+
+    ui::HeadlessRenderer legacy_renderer{{72.0f, 36.0f}, 1.0f};
+    ui::HeadlessRenderer generic_renderer{{72.0f, 36.0f}, 1.0f};
+    NUI_CHECK(legacy_renderer.render(legacy));
+    NUI_CHECK(generic_renderer.render(generic));
+    NUI_CHECK(legacy_renderer.rgba_pixels() == generic_renderer.rgba_pixels());
+}
+
+void brush_stroke_path_uses_shared_painter_coordinates() {
+    const ui::Brush brush{red_blue_gradient(48.0f)};
+    ui::Path path;
+    path.move_to({4.0f, 4.0f})
+        .line_to({44.0f, 4.0f})
+        .line_to({44.0f, 20.0f})
+        .line_to({4.0f, 20.0f});
+    const ui::StrokeStyle style{4.0f, ui::StrokeCap::Butt, ui::StrokeJoin::Miter, 4.0f};
+
+    ui::UI tree{
+        ui::Canvas{48.0f, 24.0f, [brush, path, style](ui::CanvasContext2D& g) {
+            g.stroke_path(path, brush, style);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{48.0f, 24.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    NUI_CHECK(red_dominant(renderer.pixel(6, 4)));
+    NUI_CHECK(blue_dominant(renderer.pixel(42, 4)));
+    NUI_CHECK(blue_dominant(renderer.pixel(44, 12)));
+    NUI_CHECK(red_dominant(renderer.pixel(6, 20)));
+    NUI_CHECK(blue_dominant(renderer.pixel(42, 20)));
+}
+
+void brush_radial_line_and_arc_rendering() {
+    const ui::Brush line_brush{ui::RadialGradient{
+        {8.0f, 8.0f}, 6.0f,
+        {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f}}};
+    const ui::Brush arc_brush{ui::RadialGradient{
+        {24.0f, 8.0f}, 6.0f,
+        {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}};
+
+    ui::UI tree{
+        ui::Canvas{32.0f, 16.0f, [line_brush, arc_brush](ui::CanvasContext2D& g) {
+            g.line({2.0f, 8.0f}, {14.0f, 8.0f}, 3.0f, line_brush);
+            g.arc({24.0f, 8.0f}, 5.0f, 0.0f, 6.28318531f, 3.0f, arc_brush);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{32.0f, 16.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    const auto center = renderer.pixel(8, 8);
+    const auto line_edge = renderer.pixel(13, 8);
+    const auto arc_edge = renderer.pixel(29, 8);
+    NUI_CHECK(center.r > 220 && center.g > 220 && center.b > 220);
+    NUI_CHECK(line_edge.r < 100 && line_edge.g < 100 && line_edge.b < 100);
+    NUI_CHECK(arc_edge.b > arc_edge.r + 40);
+}
+
+void brush_stroke_transform_opacity_and_blend() {
+    const ui::Brush transformed{red_blue_gradient(16.0f)};
+    const ui::Brush multiply{ui::LinearGradient{
+        {28.0f, 0.0f}, {40.0f, 0.0f},
+        {0.5f, 0.5f, 1.0f, 1.0f}, {0.5f, 0.5f, 1.0f, 1.0f}}};
+
+    ui::UI tree{
+        ui::Canvas{40.0f, 16.0f, [transformed, multiply](ui::CanvasContext2D& g) {
+            g.save();
+            g.translate(8.0f, 4.0f);
+            g.line({0.0f, 4.0f}, {16.0f, 4.0f}, 4.0f, transformed,
+                   ui::PaintOptions{0.5f, ui::BlendMode::SourceOver});
+            g.restore();
+
+            g.fill_rect({28.0f, 0.0f, 12.0f, 16.0f}, {0.8f, 0.5f, 0.25f, 1.0f});
+            g.line({29.0f, 8.0f}, {39.0f, 8.0f}, 4.0f, multiply,
+                   ui::PaintOptions{1.0f, ui::BlendMode::Multiply});
+        }}
+    };
+    ui::HeadlessRenderer renderer{{40.0f, 16.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+
+    const auto left = renderer.pixel(10, 8);
+    const auto right = renderer.pixel(22, 8);
+    NUI_CHECK(left.r > 90 && left.r < 140 && left.b < 45);
+    NUI_CHECK(right.b > 90 && right.b < 140 && right.r < 45);
+    NUI_CHECK(black(renderer.pixel(4, 8)));
+
+    const auto multiplied = renderer.pixel(34, 8);
+    NUI_CHECK(multiplied.r > 80 && multiplied.r < 125);
+    NUI_CHECK(multiplied.g > 45 && multiplied.g < 90);
+    NUI_CHECK(multiplied.b > 45 && multiplied.b < 90);
+}
+
 void suite() {
     two_stop_linear_gradient();
     multi_stop_linear_gradient();
@@ -410,6 +539,10 @@ void suite() {
     brush_transform_clip_opacity_and_blend();
     brush_invalid_gradient_preserves_fallback();
     brush_copies_are_multi_ui_lifetime_safe();
+    brush_strokes_match_color_and_preserve_style();
+    brush_stroke_path_uses_shared_painter_coordinates();
+    brush_radial_line_and_arc_rendering();
+    brush_stroke_transform_opacity_and_blend();
 }
 
 } // namespace
