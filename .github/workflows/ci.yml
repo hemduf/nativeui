@@ -58,7 +58,7 @@ jobs:
             os: ubuntu-latest
             cmake_args: ''
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +88,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -119,9 +119,59 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      # T044 and T066 keep their focused CMake harnesses, but they qualify on the
+      # existing platform runners instead of starting duplicate workflow matrices.
+      # sccache makes the repeated NativeUI compilation mostly cache hits.
+      - name: Configure T044 pointer-capture contract — Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S tests/t044 -B build-t044 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure T044 pointer-capture contract — Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S tests/t044 -B build-t044 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build T044 pointer-capture contract
+        run: cmake --build build-t044 --config Release --parallel 2
+
+      - name: Configure T066 window-controls contract — Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S tests/t066 -B build-t066 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Configure T066 window-controls contract — Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S tests/t066 -B build-t066 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build T066 window-controls contract
+        run: >-
+          cmake --build build-t066 --config Release
+          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests nativeui_t066_window_controls_example
+          --parallel 2
+
       # Hosted Windows runners do not provide a deterministic modern OpenGL
-      # implementation for Skia GPU tests. Keep the native window suite on the
-      # same pinned llvmpipe contract used by the dedicated platform workflows.
+      # implementation for Skia GPU tests. Keep every native harness on the same
+      # pinned llvmpipe contract.
       - name: Install Windows software OpenGL
         if: runner.os == 'Windows'
         shell: pwsh
@@ -147,8 +197,10 @@ jobs:
           if (-not $opengl -or -not $gallium) {
             throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
           }
-          Copy-Item $opengl.FullName build\opengl32.dll -Force
-          Copy-Item $gallium.FullName build\libgallium_wgl.dll -Force
+          foreach ($dir in @('build', 'build-t044', 'build-t066')) {
+            Copy-Item $opengl.FullName (Join-Path $dir 'opengl32.dll') -Force
+            Copy-Item $gallium.FullName (Join-Path $dir 'libgallium_wgl.dll') -Force
+          }
 
       - name: Linux X11 renderer and lifecycle smoke
         if: runner.os == 'Linux'
@@ -178,13 +230,49 @@ jobs:
 
       # macOS CI shares one Objective-C bridge across ordinary feature examples
       # to keep builds bounded. T066 intentionally mutates the standalone window
-      # delegate close lifecycle, so its exact example is qualified in the
-      # dedicated T066 workflow with a normal consumer-scoped bridge instead.
+      # delegate close lifecycle, so its exact example is qualified below using
+      # the focused T066 harness with a normal consumer-scoped bridge.
       - name: Test macOS
         if: runner.os == 'macOS'
         run: >-
           ctest --test-dir build --output-on-failure -C Release
           -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}|^nativeui_example_t066_window_controls_self_test$'
+
+      - name: T044 and T066 contracts — Linux X11
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
+          sh -c 'ctest --test-dir build-t044 --output-on-failure -C Release && ./build-t066/nativeui_t066_window_control_state_tests && ./build-t066/nativeui_t066_window_controls_platform_tests && ./build-t066/nativeui_t066_destroy_survivor_tests && ./build-t066/nativeui_t066_window_controls_example --self-test'
+
+      - name: T044 and T066 contracts — macOS
+        if: runner.os == 'macOS'
+        run: |
+          ctest --test-dir build-t044 --output-on-failure -C Release
+          ./build-t066/nativeui_t066_window_control_state_tests
+          ./build-t066/nativeui_t066_window_controls_platform_tests
+          ./build-t066/nativeui_t066_destroy_survivor_tests
+          ./build-t066/nativeui_t066_window_controls_example --self-test
+
+      - name: T044 and T066 contracts — Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          ctest --test-dir build-t044 --output-on-failure -C Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-t066/nativeui_t066_window_control_state_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-t066/nativeui_t066_window_controls_platform_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-t066/nativeui_t066_destroy_survivor_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build-t066/nativeui_t066_window_controls_example.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # T053/CODE_REVIEW.md requires proof that two final consumers configured
       # together derive different Objective-C runtime namespaces.
@@ -207,7 +295,7 @@ jobs:
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -225,7 +313,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libfontconfig1-dev
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
 
       - name: Configure
         run: >-
@@ -246,3 +334,29 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
         run: ctest --test-dir build-sanitize --output-on-failure -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
+
+      # Preserve T044's platform sanitizer qualification without a separate
+      # workflow/check. The focused harness reuses this job's dependency cache
+      # and sanitizer environment.
+      - name: Configure sanitized T044 pointer-capture contract
+        run: >-
+          cmake -S tests/t044 -B build-t044-sanitize -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_ENABLE_SANITIZERS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Build sanitized T044 pointer-capture contract
+        run: cmake --build build-t044-sanitize --parallel 2
+
+      - name: Test sanitized T044 pointer-capture contract
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
+          ctest --test-dir build-t044-sanitize --output-on-failure
