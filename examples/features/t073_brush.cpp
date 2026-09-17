@@ -66,6 +66,10 @@ bool blue_dominant(ui::Rgba8 pixel) {
     return pixel.b > 150 && pixel.b > pixel.r * 2;
 }
 
+void move_assign_alias(ui::Brush& destination, ui::Brush& source) noexcept {
+    destination = std::move(source);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -80,8 +84,11 @@ int main(int argc, char** argv) {
         const ui::Brush linear{ui::LinearGradient{
             {48.0f, 0.0f}, {72.0f, 0.0f},
             {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}};
+        const ui::Brush multiply{ui::LinearGradient{
+            {16.0f, 0.0f}, {24.0f, 0.0f},
+            {0.5f, 0.5f, 1.0f, 1.0f}, {0.5f, 0.5f, 1.0f, 1.0f}}};
         ui::Brush self_moved{ui::Color{0.0f, 1.0f, 0.0f, 1.0f}};
-        self_moved = std::move(self_moved);
+        move_assign_alias(self_moved, self_moved);
 
         ui::Path path;
         path.move_to({48.0f, 2.0f})
@@ -92,9 +99,12 @@ int main(int argc, char** argv) {
 
         ui::UI tree{
             ui::Canvas{72.0f, 24.0f,
-                [solid, radial, linear, self_moved, path](ui::CanvasContext2D& g) {
+                [solid, radial, linear, multiply, self_moved, path](ui::CanvasContext2D& g) {
                     g.fill_rounded_rect({1.0f, 2.0f, 14.0f, 20.0f}, 3.0f, solid);
                     g.fill_rect({1.0f, 2.0f, 14.0f, 20.0f}, self_moved);
+                    g.fill_rect({16.0f, 2.0f, 8.0f, 20.0f}, {0.8f, 0.5f, 0.25f, 1.0f});
+                    g.fill_rect({16.0f, 2.0f, 8.0f, 20.0f}, multiply,
+                                ui::PaintOptions{1.0f, ui::BlendMode::Multiply});
                     g.circle({32.0f, 12.0f}, 8.0f, radial);
                     g.fill_path(path, linear);
                 }}
@@ -103,6 +113,12 @@ int main(int argc, char** argv) {
         if (!renderer.render(tree)) return example::fail("headless Brush render failed");
         if (!red_dominant(renderer.pixel(8, 12))) {
             return example::fail("solid or self-moved transparent Brush contract failed");
+        }
+        const auto multiplied = renderer.pixel(20, 12);
+        if (!(multiplied.r > 80 && multiplied.r < 125 &&
+              multiplied.g > 45 && multiplied.g < 90 &&
+              multiplied.b > 45 && multiplied.b < 90)) {
+            return example::fail("Brush multiply blend did not match T021 semantics");
         }
         const auto center = renderer.pixel(32, 12);
         const auto edge = renderer.pixel(39, 12);
