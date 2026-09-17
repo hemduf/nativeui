@@ -62,7 +62,7 @@ jobs:
             skia_arm64: false
           - name: Linux ARM64
             os: ubuntu-24.04-arm
-            cmake_args: -DNATIVEUI_SKIA_ROOT=${{ github.workspace }}/.skia-arm64
+            cmake_args: -DNATIVEUI_SKIA_ROOT=$GITHUB_WORKSPACE/.skia-arm64
             skia_arm64: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
