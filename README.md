@@ -8,7 +8,7 @@ A C++20 UI-only framework proof of concept for standalone applications and embed
 - **Skia Ganesh/OpenGL**: window rendering.
 - **Skia raster** can be used for future headless/golden tests.
 - **CMake + CPM.cmake**: all dependency acquisition.
-- **`olilarkin/skia-builder`**: prebuilt static Skia binaries. NativeUI never builds Skia.
+- **`hemduf/skia-builder`**: prebuilt static Skia binaries, forked from `olilarkin/skia-builder`. NativeUI never builds Skia.
 - No CLAP/VST3/AU types, parameter IDs, automation or audio code.
 
 ## Declarative API
@@ -125,7 +125,7 @@ Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)`
 The project bootstraps CPM.cmake, then:
 
 1. fetches Pugl source at the pinned commit `b7637149ebe53124e5be90559e02a0185bbcbd73`; Windows/Linux compile the normal generic platform sources, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
-2. downloads the pinned `skia-builder` `chrome/m149` release ZIP for the current platform and imports its static `skia` library.
+2. downloads the pinned `hemduf/skia-builder` `chrome/m149` release ZIP for the current production-supported platform path and imports its static `skia` library.
 
 The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/Ninja Skia build is part of NativeUI.
 
@@ -143,6 +143,7 @@ The installed/public low-level `nativeui_attach_platform(TARGET ... CONSUMER_ID 
 
 - macOS: `skia-build-mac-universal-gpu-release.zip`
 - Linux x64: `skia-build-linux-x64-gpu-release.zip`
+- Linux ARM64 CI: `skia-build-linux-arm64-gpu-release.zip` on the native `ubuntu-24.04-arm` runner.
 - Windows x64: `/MD` Release by default; `/MT` selectable.
 
 ### Focus scopes
@@ -182,7 +183,6 @@ ui::EventResult input(const ui::InputEvent& event, ui::InputContext&) override {
 
 ```cpp
 ui::ScrollState scroll{ui::ScrollAxis::Vertical};
-
 ui::UI ui {
     ui::Scroll{scroll, longContent}
 };
@@ -246,7 +246,7 @@ Targets can also be run directly:
 ./build/nativeui_smoke_embedded
 ```
 
-The embedded smoke creates a `PUGL_PROGRAM` parent and a real `PUGL_MODULE` child attached through the parent's native handle. `EmbeddedView::poll()` remains non-blocking. `last_error()` on both window wrappers exposes runtime Pugl/renderer errors after successful construction.
+The embedded smoke creates a `PUGL_PROGRAM` parent then a real `PUGL_MODULE` child attached through the parent's native handle. `EmbeddedView::poll()` remains non-blocking. `last_error()` on both window wrappers exposes runtime Pugl/renderer errors after successful construction.
 
 ## Build
 
@@ -258,147 +258,3 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
-
-Core-only builds use `-DNATIVEUI_BUILD_PLATFORM=OFF` and compile no consumer platform bridge.
-
-### skia-builder archive layout
-
-`CPMAddPackage(URL ...)` uses CMake/FetchContent extraction semantics. Since the
-`skia-builder` ZIPs contain a single top-level `build/` directory, CMake normally
-strips that directory while extracting into `_deps/skia_prebuilt-src`.
-NativeUI therefore auto-detects both supported layouts:
-
-```text
-# CPM / FetchContent extraction
-_deps/skia_prebuilt-src/
-├── include/include/core/SkCanvas.h
-└── mac-gpu/...
-
-# Manual unzip retaining the original archive root
-<root>/build/
-├── include/include/core/SkCanvas.h
-└── mac-gpu/...
-```
-
-Do not hard-code `build/` below `skia_prebuilt_SOURCE_DIR`.
-
-### Offline/local dependency overrides
-
-The normal build always uses CPM. For local/offline validation you can point to already extracted dependency trees:
-
-```bash
-cmake -S . -B build \
-  -DNATIVEUI_PUGL_SOURCE=/path/to/pugl \
-  -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive
-```
-
-These dependency overrides do not change the T053 consumer identity/prefix contract.
-
-## Platform build requirements
-
-CPM manages the source/binary dependencies, but the native SDK development packages still come from the platform:
-
-- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks). Consumer-scoped Objective-C runtime naming is handled by NativeUI's T053 target machinery rather than a global cache variable.
-- **Windows**: Windows SDK + OpenGL + DirectWrite; select the Skia `/MD` or `/MT` package with `NATIVEUI_SKIA_WINDOWS_CRT`.
-- **Linux/X11**: X11, OpenGL/GLX and Fontconfig development packages. On Debian/Ubuntu this is typically `libx11-dev libgl1-mesa-dev libfontconfig1-dev`.
-
-NativeUI deliberately disables optional Pugl Xcursor/XRandR/XSync integration in this POC to keep the baseline dependency set small.
-
-## High-DPI model
-
-Pugl reports native geometry in physical pixels. NativeUI converts input and view geometry to logical coordinates by dividing by `puglGetScaleFactor()`. Skia wraps the physical framebuffer directly and scales the canvas exactly once. Public `WindowDesc::size` and component geometry are therefore logical coordinates.
-
-## Input implemented
-
-- Tab / Shift+Tab focus
-- mouse click/drag
-- knob arrow-key editing (Shift = fine)
-- toggle via Space/Enter/click
-- text input with UTF-8 committed text
-- caret and selection
-- Home/End and word navigation
-- copy/cut/paste
-- undo/redo
-- double/triple click selection
-- horizontal text scrolling
-- placeholder, max length, submit, Escape/revert
-- Pugl clipboard bridge
-
-Advanced IME pre-edit/candidate positioning remains a later platform extension because Pugl currently exposes committed text but not a complete composition/pre-edit API.
-
-## Current platform scope
-
-- macOS / Cocoa through Pugl
-- Windows / Win32 through Pugl
-- Linux / X11 through Pugl
-- Wayland is not part of this POC
-
-
-## Git repository
-
-Version the sources, tests (including `tests/golden/baselines/*.ppm`), examples,
-CMake files, `.github/` workflows and project documentation. `.gitignore` excludes
-builds, downloaded dependency caches, generated test images, local IDE/environment
-settings, `tickets/`, `TICKETS.md` and `nativeui_T*.zip` recovery snapshots. Development
-tickets are maintained in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue).
-`.gitattributes` normalizes text
-line endings and preserves binary golden images byte-for-byte.
-
-Use out-of-source builds as shown above. Keep machine-specific dependency paths in
-the ignored `CMakeUserPresets.json` or pass the documented CMake overrides locally;
-shared `CMakePresets.json` files can be versioned.
-
-Clone the source repository, then use the build commands above:
-
-```bash
-git clone https://github.com/hemduf/nativeui.git
-cd nativeui
-```
-
-Recovery ZIPs remain separate artifacts; Git stores the files required to rebuild
-the project.
-
-## Project continuation / agent recovery
-
-The backlog is available as [52 GitHub issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue),
-organized by priority, status and [roadmap milestone](https://github.com/hemduf/nativeui/milestones?state=all).
-GitHub is the source of truth for ticket descriptions, status, dependencies and
-discussion. Local `TICKETS.md` and `tickets/` copies may exist for offline recovery,
-but are ignored by Git and are not required after cloning.
-
-The repository contains the continuation documentation:
-
-- `AGENTS.md` — mandatory development/TDD/review/recovery workflow;
-- `CODE_REVIEW.md` — mandatory plug-in-host-safe C++/platform/Objective-C review gate;
-- `CONTEXT.md` — compact current-state context for resuming without chat history;
-- `ROADMAP.md` — milestone roadmap from POC to reusable toolkit;
-- `PLAN.md` — implementation sequencing and rationale;
-- [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue) — actionable tickets with status, dependencies, acceptance criteria and tests.
-
-Any agent resuming the project should start with `AGENTS.md`, then `CODE_REVIEW.md`, then `CONTEXT.md`, and follow the dependency-driven ticket selection rules in `AGENTS.md`. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
-
-
-## Feature examples
-
-Every feature ticket ships a dedicated executable, not only unit tests. Current examples:
-
-```text
-nativeui_example_t007_constraints
-nativeui_example_t008_alignment
-nativeui_example_t009_flex
-nativeui_example_t010_grid
-nativeui_example_t011_clipping
-nativeui_example_t012_scroll
-nativeui_example_t013_bubbling
-nativeui_example_t014_focus_scopes
-nativeui_example_t015_pointer_capture
-```
-
-Run interactively on a desktop, or run the executable self-check without opening a window:
-
-```bash
-./build/nativeui_example_t015_pointer_capture --self-test
-ctest --test-dir build -R nativeui_example_ --output-on-failure
-```
-
-Feature-example sources are also compiled against `NativeUI::Core` in display-less builds to catch public API regressions.
