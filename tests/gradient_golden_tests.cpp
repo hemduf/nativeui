@@ -105,10 +105,11 @@ bool verify_brush_linear_path_stroke(bool update) {
     ui::HeadlessRenderer renderer{{8.0f, 2.0f}, 1.0f};
     if (!renderer.render(tree)) return false;
 
-    // The oversized horizontal stroke fully covers the 8x2 target, so the
-    // existing fill baseline becomes an exact golden for shared Brush sampling.
+    // The oversized horizontal stroke fully covers the 8x2 target, so its
+    // initial baseline is byte-identical to the fill baseline. Keep a distinct
+    // golden ID so --update-goldens cannot let one scene overwrite the other.
     return test::golden::verify(
-        "brush_linear_path",
+        "brush_linear_path_stroke",
         test::golden::from_renderer(renderer),
         NATIVEUI_GOLDEN_BASELINE_DIR,
         NATIVEUI_GOLDEN_ARTIFACT_DIR,
