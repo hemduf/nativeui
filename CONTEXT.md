@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-16
+**Updated:** 2026-09-17
 
 ## Mission and invariants
 
@@ -62,9 +62,29 @@ Delivered contract:
 
 Exact-head normal/path qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 `35156481983` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. Final T052 `35156481846` is green for release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Reviews `5228886765` and `5228890731` are 0 Blocking / 0 Important; the historical Blocking thread is resolved/outdated and privacy review is clean.
 
+### T073 is Done
+
+**T073 / #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.** Frozen exact head `63bc82c6e2fd3db0aa6aae06456e51c36da33bfc` delivers the generic backend-neutral Brush fill foundation targeted at the post-1.0/NativeUI 1.1 rendering line.
+
+Delivered contract:
+
+- `ui::Brush` represents Color, LinearGradient and RadialGradient without public backend types;
+- Painter and Canvas fill rounded rectangles, circles and Paths through one Brush-compatible fill materialization seam;
+- existing Color/gradient overloads remain source-compatible and share the same rendering path;
+- Color construction, moves and destruction preserve the declared non-allocating/non-throwing representation contract;
+- copy assignment uses prepare-then-no-throw-commit semantics and preserves the prior destination on allocation failure;
+- moved-from and self-moved Brushes become deterministic transparent solid values;
+- gradient logical storage is owned and remains safe across independent UI lifetimes;
+- Brush construction creates no backend shader/resource and introduces no mutable global/singleton/`thread_local` state;
+- transform, clip, invalid-gradient, opacity and blend behavior remains compatible with T019/T021.
+
+Normal/path exact-head qualification is green for CI #1828, T044 #267 and T066 #324. Final T042 Lifecycle Stress #834 passed Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #558 passed the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5233819886` reports zero remaining Blocking/Important findings.
+
+T073 is not on the v1 critical path. Because it is now present on `main`, T069's v1 public-surface audit must explicitly account for the current Brush-facing surface when deciding the frozen v1 API.
+
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073 public surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -75,6 +95,9 @@ T123–T132(done) + T173(done) + T174(done)
                          v
 T069(ready) -> T070 -> T122/docs -> T071 -> v1.0.0
 T068 ---------------------------------------> 1.2
+
+post-1.0 / later-release line already landed on main:
+T073(done) ---------------------------------> NativeUI 1.1 foundation
 ```
 
 ## Completed foundations relevant to v1
@@ -93,6 +116,10 @@ T068 ---------------------------------------> 1.2
 - **T174 / #409:** per-UI unhandled raw KeyDown fallback on final T125 semantics.
 
 Other delivered v1 foundations include T030–T036 standard widgets, T037–T040 Theme/style/animation, T043 resize/scale, T044 pointer capture, T045 semantic accessibility architecture, T047/T048 packaging, T049 gallery, T050 inspector, T051/T052 qualification, T053 consumer-scoped macOS Objective-C runtime identity, T054/T056/T057 helpers/resources, T058 dynamic composition, T060 Application ownership, T061/T062/T063 overlay/Tooltip/Dialog, T064 DesktopServices, T065 Dispatcher, T066 window controls, T067 virtualized ListView and T072 Linux D-Bus.
+
+## Post-1.0 foundations already merged
+
+- **T073 / #156:** generic Brush fill painting foundation for Color/LinearGradient/RadialGradient with deterministic value/failure semantics and shared Painter materialization.
 
 ## Validation policy
 
@@ -137,7 +164,7 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073 surface.
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
