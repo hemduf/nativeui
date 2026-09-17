@@ -120,7 +120,7 @@ jobs:
 
           lib="$root/build/linux-gpu/lib/Release/arm64/libskia.a"
           test -f "$lib"
-          member="$(ar t "$lib" | head -n 1)"
+          member="$(ar t "$lib" | awk 'NR == 1 { print }')"
           test -n "$member"
           ar p "$lib" "$member" > "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o"
           readelf -h "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o" | tee "${RUNNER_TEMP}/nativeui-skia-arm64-readelf.txt"
