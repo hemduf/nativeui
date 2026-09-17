@@ -112,7 +112,7 @@ if(NATIVEUI_BUILD_PLATFORM)
 endif()
 
 # -----------------------------------------------------------------------------
-# Skia: prebuilt static release artifacts from olilarkin/skia-builder.
+# Skia: prebuilt static release artifacts from hemduf/skia-builder.
 # The binary archive itself is managed/downloaded by CPM.
 # -----------------------------------------------------------------------------
 set(NATIVEUI_SKIA_TAG "chrome/m149" CACHE STRING "skia-builder release tag")
@@ -173,7 +173,7 @@ if(NOT NATIVEUI_SKIA_ROOT)
   endif()
 
   set(_skia_url
-    "https://github.com/olilarkin/skia-builder/releases/download/${NATIVEUI_SKIA_TAG}/${_skia_asset}")
+    "https://github.com/hemduf/skia-builder/releases/download/${NATIVEUI_SKIA_TAG}/${_skia_asset}")
 
   CPMAddPackage(
     NAME skia_prebuilt
