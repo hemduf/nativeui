@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstddef>
 #include <exception>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,6 +34,8 @@
 namespace ui {
 
 namespace detail {
+
+struct PainterLayerFaultAccess;
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -64,8 +67,17 @@ struct ResolvedTextLayout {
 class Painter {
     struct ScopeFrame {
         int previous_floor{};
+        int entry_depth{};
         int guard_depth{};
     };
+
+    enum class LayerFaultPoint : unsigned char {
+        None,
+        AfterHardClip,
+        AfterSaveLayer,
+    };
+
+    friend struct detail::PainterLayerFaultAccess;
 
 public:
     class StateGuard {
@@ -160,6 +172,59 @@ public:
             rollback_scope(frame);
             throw;
         }
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+    }
+
+    [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
+                                          PaintOptions options = {}) {
+        const bool valid_bounds = valid_clip_rect(logical_bounds);
+        const SkRect layer_bounds = valid_bounds
+            ? to_sk_rect(logical_bounds)
+            : SkRect::MakeEmpty();
+
+        // Invalid geometry is deliberately an empty clip-only scope. In
+        // particular, never call saveLayer() with invalid/empty bounds because
+        // Skia treats layer bounds as a sizing hint rather than a hard limit.
+        if (!valid_bounds) {
+            const ScopeFrame frame = begin_scope();
+            try {
+                canvas_.clipRect(layer_bounds, SkClipOp::kIntersect, false);
+            } catch (...) {
+                rollback_scope(frame);
+                throw;
+            }
+            return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+        }
+
+        // Prepare all NativeUI-owned composition state before entering either
+        // private backend frame. PaintOptions canonicalization is shared with
+        // ordinary Painter draws so opacity/blend semantics stay identical.
+        SkPaint layer_paint;
+        apply_paint_options(layer_paint, options);
+
+        // One public StateGuard owns two private backend frames:
+        //   1) a real hard clip captured under the current transform;
+        //   2) the saveLayer frame that applies opacity/blend once on restore.
+        // The saveLayer bounds remain only a backend sizing hint.
+        ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
+        try {
+            canvas_.save();
+            ++save_depth_;
+            canvas_.clipRect(layer_bounds, SkClipOp::kIntersect, false);
+            maybe_fail_layer(LayerFaultPoint::AfterHardClip);
+
+            [[maybe_unused]] const int previous_save_count =
+                canvas_.saveLayer(layer_bounds, &layer_paint);
+            ++save_depth_;
+            maybe_fail_layer(LayerFaultPoint::AfterSaveLayer);
+
+            frame.guard_depth = save_depth_;
+            restore_floor_ = frame.guard_depth;
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
@@ -323,7 +388,7 @@ public:
 
 private:
     [[nodiscard]] ScopeFrame begin_scope() noexcept {
-        ScopeFrame frame{restore_floor_, 0};
+        ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         canvas_.save();
         ++save_depth_;
         frame.guard_depth = save_depth_;
@@ -333,16 +398,20 @@ private:
 
     void end_scope(ScopeFrame frame) noexcept {
         [[maybe_unused]] const bool balanced = save_depth_ == frame.guard_depth;
-        while (save_depth_ > frame.guard_depth) restore_unchecked();
-        if (save_depth_ == frame.guard_depth) restore_unchecked();
+        while (save_depth_ > frame.entry_depth) restore_unchecked();
         restore_floor_ = frame.previous_floor;
         assert(balanced && "Unbalanced Painter save()/restore() inside paint scope");
     }
 
     void rollback_scope(ScopeFrame frame) noexcept {
-        while (save_depth_ > frame.guard_depth) restore_unchecked();
-        if (save_depth_ == frame.guard_depth) restore_unchecked();
+        while (save_depth_ > frame.entry_depth) restore_unchecked();
         restore_floor_ = frame.previous_floor;
+    }
+
+    void maybe_fail_layer(LayerFaultPoint point) {
+        if (layer_fault_point_ != point) return;
+        layer_fault_point_ = LayerFaultPoint::None;
+        throw std::bad_alloc{};
     }
 
     [[nodiscard]] static bool finite_point(Point point) noexcept {
@@ -590,6 +659,7 @@ private:
     SkCanvas& canvas_;
     int save_depth_{};
     int restore_floor_{};
+    LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};
 };
 
 class PlatformServices {
