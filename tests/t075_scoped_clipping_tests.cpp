@@ -236,9 +236,14 @@ void invalid_geometry_is_empty() {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
 
-    // Invalid/inverted/non-finite rectangles create a balanced empty clip.
+    // Empty, inverted and non-finite rectangles create a balanced empty clip.
     {
         ui::UI tree{PainterProbe{[nan, inf](ui::Painter& painter) {
+            {
+                auto clip = painter.scoped_clip({8.0f, 8.0f, 0.0f, 20.0f});
+                painter.fill_rounded_rect(
+                    {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+            }
             {
                 auto clip = painter.scoped_clip({nan, 0.0f, 20.0f, 20.0f});
                 painter.fill_rounded_rect(
@@ -266,16 +271,23 @@ void invalid_geometry_is_empty() {
     // Empty and non-finite Paths both create empty effective clips.
     {
         ui::Path empty;
-        ui::Path invalid;
-        invalid.move_to({nan, 0.0f}).line_to({20.0f, 20.0f});
-        ui::UI tree{PainterProbe{[empty, invalid](ui::Painter& painter) {
+        ui::Path invalid_nan;
+        invalid_nan.move_to({nan, 0.0f}).line_to({20.0f, 20.0f});
+        ui::Path invalid_inf;
+        invalid_inf.move_to({0.0f, 0.0f}).line_to({inf, 20.0f});
+        ui::UI tree{PainterProbe{[empty, invalid_nan, invalid_inf](ui::Painter& painter) {
             {
                 auto clip = painter.scoped_clip(empty);
                 painter.fill_rounded_rect(
                     {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
             }
             {
-                auto clip = painter.scoped_clip(invalid);
+                auto clip = painter.scoped_clip(invalid_nan);
+                painter.fill_rounded_rect(
+                    {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+            }
+            {
+                auto clip = painter.scoped_clip(invalid_inf);
                 painter.fill_rounded_rect(
                     {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
             }
@@ -286,6 +298,45 @@ void invalid_geometry_is_empty() {
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(green(renderer.pixel(2, 2)));
         NUI_CHECK(black(renderer.pixel(32, 32)));
+    }
+}
+
+void unwind_restores_render_state() {
+    // Exception unwinding must restore both the clip and any transform applied
+    // after the clip frame was entered, not merely the Painter's depth counter.
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            try {
+                auto clip = painter.scoped_clip({8.0f, 8.0f, 8.0f, 8.0f});
+                painter.translate(20.0f, 0.0f);
+                throw std::runtime_error("t075 render unwind");
+            } catch (const std::runtime_error&) {
+            }
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(green(renderer.pixel(2, 2)));
+        NUI_CHECK(green(renderer.pixel(40, 40)));
+    }
+
+    // Early return must use the same lexical restoration path.
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            const auto early_return = [&painter] {
+                auto clip = painter.scoped_clip({8.0f, 8.0f, 8.0f, 8.0f});
+                painter.translate(20.0f, 0.0f);
+                return;
+            };
+            early_return();
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(green(renderer.pixel(2, 2)));
+        NUI_CHECK(green(renderer.pixel(40, 40)));
     }
 }
 
@@ -322,6 +373,19 @@ void stack_lifetime_contract() {
         return;
     };
     early_return();
+    NUI_CHECK(painter.save_depth() == 0);
+
+    // A scoped state can be nested inside a scoped clip without changing which
+    // frame the outer clip owns or crossing its protected restore floor.
+    {
+        auto clip = painter.scoped_clip({0.0f, 0.0f, 16.0f, 16.0f});
+        NUI_CHECK(painter.save_depth() == 1);
+        {
+            auto state = painter.scoped_state();
+            NUI_CHECK(painter.save_depth() == 2);
+        }
+        NUI_CHECK(painter.save_depth() == 1);
+    }
     NUI_CHECK(painter.save_depth() == 0);
 
     // Manual state outside a scoped clip, with a nested balanced manual save.
@@ -424,6 +488,7 @@ void suite() {
     transformed_clip_semantics();
     rounded_radius_canonicalization();
     invalid_geometry_is_empty();
+    unwind_restores_render_state();
     stack_lifetime_contract();
     independent_painters_are_isolated();
 }
