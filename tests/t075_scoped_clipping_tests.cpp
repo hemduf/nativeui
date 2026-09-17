@@ -19,10 +19,9 @@ using PathClipResult = decltype(std::declval<ui::Painter&>().scoped_clip(std::de
 static_assert(std::is_same_v<RectClipResult, ui::Painter::StateGuard>);
 static_assert(std::is_same_v<RoundedClipResult, ui::Painter::StateGuard>);
 static_assert(std::is_same_v<PathClipResult, ui::Painter::StateGuard>);
-static_assert(std::is_move_constructible_v<ui::Painter::StateGuard>);
-static_assert(std::is_nothrow_move_constructible_v<ui::Painter::StateGuard>);
 static_assert(!std::is_copy_constructible_v<ui::Painter::StateGuard>);
 static_assert(!std::is_copy_assignable_v<ui::Painter::StateGuard>);
+static_assert(!std::is_move_constructible_v<ui::Painter::StateGuard>);
 static_assert(!std::is_move_assignable_v<ui::Painter::StateGuard>);
 static_assert(std::is_nothrow_destructible_v<ui::Painter::StateGuard>);
 
@@ -74,9 +73,8 @@ bool black(ui::Rgba8 pixel) {
 }
 
 void scoped_clip_pixels() {
-    // Deterministic nested Rect + rounded-Rect probes. The outer scope remains
-    // active after the rounded scope exits, then the final corner draw proves
-    // the outer scope itself restored the previous unclipped state.
+    // Nested Rect + rounded-Rect probes. The rounded corner sample proves this
+    // is not accidentally implemented as a rectangular inner clip.
     {
         ui::UI tree{PainterProbe{[](ui::Painter& painter) {
             {
@@ -96,13 +94,14 @@ void scoped_clip_pixels() {
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(green(renderer.pixel(2, 2)));
         NUI_CHECK(red(renderer.pixel(10, 10)));
+        NUI_CHECK(red(renderer.pixel(17, 17)));
         NUI_CHECK(green(renderer.pixel(24, 24)));
         NUI_CHECK(red(renderer.pixel(52, 52)));
         NUI_CHECK(black(renderer.pixel(60, 60)));
     }
 
-    // Arbitrary Path clipping uses the same scope token and intersects the
-    // current Painter clip rather than escaping to an unclipped fallback.
+    // Path clipping nests through the same Painter stack and intersects the
+    // inherited rectangular clip rather than escaping it.
     {
         ui::Path triangle;
         triangle.move_to({32.0f, 8.0f})
@@ -110,19 +109,20 @@ void scoped_clip_pixels() {
                 .line_to({8.0f, 56.0f})
                 .close();
         ui::UI tree{PainterProbe{[triangle](ui::Painter& painter) {
-            auto clip = painter.scoped_clip(triangle);
+            auto outer = painter.scoped_clip({12.0f, 12.0f, 40.0f, 40.0f});
+            auto inner = painter.scoped_clip(triangle);
             painter.fill_rounded_rect(
                 {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
         }}};
         ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(red(renderer.pixel(32, 32)));
+        NUI_CHECK(black(renderer.pixel(10, 50)));
+        NUI_CHECK(black(renderer.pixel(54, 50)));
         NUI_CHECK(black(renderer.pixel(4, 4)));
-        NUI_CHECK(black(renderer.pixel(60, 60)));
     }
 
-    // Clip geometry is captured under the current transform. Restoring the
-    // outer scoped_state() must restore the transform as well as the clip.
+    // Translation is captured at scope creation and restored by scoped_state().
     {
         ui::UI tree{PainterProbe{[](ui::Painter& painter) {
             {
@@ -141,6 +141,94 @@ void scoped_clip_pixels() {
         NUI_CHECK(red(renderer.pixel(16, 8)));
         NUI_CHECK(black(renderer.pixel(6, 8)));
         NUI_CHECK(black(renderer.pixel(28, 8)));
+    }
+}
+
+void transformed_clip_semantics() {
+    // Scale applies to clip geometry at scope creation.
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            auto state = painter.scoped_state();
+            painter.scale(2.0f);
+            auto clip = painter.scoped_clip({4.0f, 4.0f, 8.0f, 8.0f});
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 32.0f, 32.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(12, 12)));
+        NUI_CHECK(black(renderer.pixel(4, 12)));
+        NUI_CHECK(black(renderer.pixel(28, 12)));
+    }
+
+    // Rotation produces a rotated thin clip, not an axis-aligned fallback.
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            auto state = painter.scoped_state();
+            painter.translate(32.0f, 32.0f);
+            painter.rotate(ui::kPi * 0.25f);
+            auto clip = painter.scoped_clip({-12.0f, -4.0f, 24.0f, 8.0f});
+            painter.fill_rounded_rect(
+                {-32.0f, -32.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(32, 32)));
+        NUI_CHECK(red(renderer.pixel(39, 39)));
+        NUI_CHECK(black(renderer.pixel(42, 32)));
+    }
+
+    // concat() uses the same current-transform semantics as translate().
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            auto state = painter.scoped_state();
+            painter.concat(ui::Transform2D::translation(20.0f, 8.0f));
+            auto clip = painter.scoped_clip({0.0f, 0.0f, 12.0f, 12.0f});
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 32.0f, 32.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(24, 12)));
+        NUI_CHECK(black(renderer.pixel(8, 12)));
+        NUI_CHECK(black(renderer.pixel(36, 12)));
+    }
+}
+
+void rounded_radius_canonicalization() {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    const auto check_rectangular_fallback = [](float radius) {
+        ui::UI tree{PainterProbe{[radius](ui::Painter& painter) {
+            auto clip = painter.scoped_clip({8.0f, 8.0f, 16.0f, 16.0f}, radius);
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(9, 9)));
+        NUI_CHECK(red(renderer.pixel(20, 20)));
+        NUI_CHECK(black(renderer.pixel(4, 4)));
+    };
+
+    check_rectangular_fallback(-4.0f);
+    check_rectangular_fallback(nan);
+    check_rectangular_fallback(inf);
+
+    // For a 16x8 rect the maximum canonical radius is exactly 4. An oversized
+    // radius must therefore retain the center and round away the extreme corner.
+    {
+        ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+            auto clip = painter.scoped_clip({8.0f, 8.0f, 16.0f, 8.0f}, 1000.0f);
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+        }}};
+        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(red(renderer.pixel(16, 12)));
+        NUI_CHECK(!red(renderer.pixel(8, 8)));
+        NUI_CHECK(black(renderer.pixel(4, 4)));
     }
 }
 
@@ -173,19 +261,6 @@ void invalid_geometry_is_empty() {
         NUI_CHECK(renderer.render(tree));
         NUI_CHECK(green(renderer.pixel(2, 2)));
         NUI_CHECK(black(renderer.pixel(32, 32)));
-    }
-
-    // A non-finite radius canonicalizes to the rectangular clip behavior.
-    {
-        ui::UI tree{PainterProbe{[nan](ui::Painter& painter) {
-            auto clip = painter.scoped_clip({8.0f, 8.0f, 16.0f, 16.0f}, nan);
-            painter.fill_rounded_rect(
-                {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
-        }}};
-        ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
-        NUI_CHECK(renderer.render(tree));
-        NUI_CHECK(red(renderer.pixel(12, 12)));
-        NUI_CHECK(black(renderer.pixel(4, 4)));
     }
 
     // Empty and non-finite Paths both create empty effective clips.
@@ -240,6 +315,15 @@ void stack_lifetime_contract() {
     NUI_CHECK(depth_during_throw == 1);
     NUI_CHECK(painter.save_depth() == 0);
 
+    // Early return follows the same lexical teardown path.
+    const auto early_return = [&painter] {
+        auto clip = painter.scoped_clip({4.0f, 4.0f, 20.0f, 20.0f});
+        NUI_CHECK(painter.save_depth() == 1);
+        return;
+    };
+    early_return();
+    NUI_CHECK(painter.save_depth() == 0);
+
     // Manual state outside a scoped clip, with a nested balanced manual save.
     painter.save();
     NUI_CHECK(painter.save_depth() == 1);
@@ -266,6 +350,28 @@ void stack_lifetime_contract() {
     }
     NUI_CHECK(painter.save_depth() == 0);
 
+    // Legacy manual clip outside a new scoped clip.
+    painter.push_clip({0.0f, 0.0f, 16.0f, 16.0f});
+    NUI_CHECK(painter.save_depth() == 1);
+    {
+        auto clip = painter.scoped_clip({2.0f, 2.0f, 8.0f, 8.0f});
+        NUI_CHECK(painter.save_depth() == 2);
+    }
+    NUI_CHECK(painter.save_depth() == 1);
+    painter.pop_clip();
+    NUI_CHECK(painter.save_depth() == 0);
+
+    // New scoped clip outside the legacy manual clip API.
+    {
+        auto clip = painter.scoped_clip({0.0f, 0.0f, 16.0f, 16.0f});
+        NUI_CHECK(painter.save_depth() == 1);
+        painter.push_clip({2.0f, 2.0f, 8.0f, 8.0f});
+        NUI_CHECK(painter.save_depth() == 2);
+        painter.pop_clip();
+        NUI_CHECK(painter.save_depth() == 1);
+    }
+    NUI_CHECK(painter.save_depth() == 0);
+
     // Legacy manual clip outside a scoped state token.
     painter.push_clip({0.0f, 0.0f, 8.0f, 8.0f});
     NUI_CHECK(painter.save_depth() == 1);
@@ -275,17 +381,6 @@ void stack_lifetime_contract() {
     }
     NUI_CHECK(painter.save_depth() == 1);
     painter.pop_clip();
-    NUI_CHECK(painter.save_depth() == 0);
-
-    // Move construction transfers the one live frame; moved-from destruction
-    // must not restore it a second time.
-    {
-        auto source = painter.scoped_clip({0.0f, 0.0f, 8.0f, 8.0f});
-        NUI_CHECK(painter.save_depth() == 1);
-        auto destination = std::move(source);
-        (void)destination;
-        NUI_CHECK(painter.save_depth() == 1);
-    }
     NUI_CHECK(painter.save_depth() == 0);
 }
 
@@ -326,6 +421,8 @@ void independent_painters_are_isolated() {
 
 void suite() {
     scoped_clip_pixels();
+    transformed_clip_semantics();
+    rounded_radius_canonicalization();
     invalid_geometry_is_empty();
     stack_lifetime_contract();
     independent_painters_are_isolated();

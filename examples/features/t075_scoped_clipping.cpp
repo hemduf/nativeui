@@ -91,7 +91,9 @@ int main(int argc, char** argv) {
         if (!accent_like(renderer.pixel(350, 78))) {
             return example::fail("path scoped clip did not render its center");
         }
-        if (!panel_like(renderer.pixel(8, 8))) {
+        // This sample lies inside the unclipped first circle but outside its
+        // rectangular clip, so it catches an accidental unbounded fallback.
+        if (!panel_like(renderer.pixel(130, 74))) {
             return example::fail("scoped clip leaked outside its bounds");
         }
         return 0;
