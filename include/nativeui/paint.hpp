@@ -137,45 +137,26 @@ public:
     }
 
     void fill_rounded_rect(Rect rect, float radius, Color color) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kFill_Style);
-        paint.setColor4f(to_sk_color(color));
-        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
+                              make_fill_paint(color, {}));
     }
 
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
                            PaintOptions options = {}) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kFill_Style);
-
-        const auto start = gradient.start();
-        const auto end = gradient.end();
-        const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
-        apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
-            return SkShaders::LinearGradient(points, sk_gradient);
-        });
-        apply_paint_options(paint, options);
-        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
+                              make_fill_paint(gradient, options));
     }
 
     void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
                            PaintOptions options = {}) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kFill_Style);
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
+                              make_fill_paint(gradient, options));
+    }
 
-        const auto center = gradient.center();
-        const SkPoint sk_center{center.x, center.y};
-        apply_gradient(paint, gradient.stops(), [sk_center, &gradient](const SkGradient& sk_gradient) {
-            if (!(gradient.radius() > 0.0f) || !std::isfinite(gradient.radius())) {
-                return sk_sp<SkShader>{};
-            }
-            return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
-        });
-        apply_paint_options(paint, options);
-        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius, paint);
+    void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
+                           PaintOptions options = {}) {
+        canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
+                              make_fill_paint(brush, options));
     }
 
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
@@ -188,10 +169,12 @@ public:
     }
 
     void circle(Point center, float radius, Color color) {
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setColor4f(to_sk_color(color));
-        canvas_.drawCircle(center.x, center.y, radius, paint);
+        canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(color, {}));
+    }
+
+    void circle(Point center, float radius, const Brush& brush,
+                PaintOptions options = {}) {
+        canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(brush, options));
     }
 
     void arc(Point center, float radius, float start, float end, float width, Color color) {
@@ -219,11 +202,12 @@ public:
 
     void fill_path(const Path& path, Color color) {
         if (path.empty()) return;
-        SkPaint paint;
-        paint.setAntiAlias(true);
-        paint.setStyle(SkPaint::kFill_Style);
-        paint.setColor4f(to_sk_color(color));
-        canvas_.drawPath(to_sk_path(path), paint);
+        canvas_.drawPath(to_sk_path(path), make_fill_paint(color, {}));
+    }
+
+    void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
+        if (path.empty()) return;
+        canvas_.drawPath(to_sk_path(path), make_fill_paint(brush, options));
     }
 
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
@@ -296,6 +280,68 @@ private:
         return SkColor4f{c.r, c.g, c.b, c.a};
     }
 
+    static void apply_fill_source(SkPaint& paint, Color color) {
+        paint.setColor4f(to_sk_color(color));
+    }
+
+    static void apply_fill_source(SkPaint& paint, const LinearGradient& gradient) {
+        const auto start = gradient.start();
+        const auto end = gradient.end();
+        const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
+        apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
+            return SkShaders::LinearGradient(points, sk_gradient);
+        });
+    }
+
+    static void apply_fill_source(SkPaint& paint, const RadialGradient& gradient) {
+        const auto center = gradient.center();
+        const SkPoint sk_center{center.x, center.y};
+        apply_gradient(paint, gradient.stops(), [sk_center, &gradient](const SkGradient& sk_gradient) {
+            if (!(gradient.radius() > 0.0f) || !std::isfinite(gradient.radius())) {
+                return sk_sp<SkShader>{};
+            }
+            return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
+        });
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(Color color, PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, color);
+        apply_paint_options(paint, options, color.a);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(const LinearGradient& gradient,
+                                                 PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, gradient);
+        // Preserve T021 gradient opacity semantics exactly: PaintOptions opacity
+        // is the paint alpha even when an invalid gradient falls back to a
+        // source color with its own alpha.
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(const RadialGradient& gradient,
+                                                 PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, gradient);
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
+        return brush.visit([options](const auto& source) {
+            return make_fill_paint(source, options);
+        });
+    }
+
     [[nodiscard]] static bool valid_gradient_stops(const std::vector<GradientStop>& stops) {
         if (stops.size() < 2) return false;
         float previous = -1.0f;
@@ -354,11 +400,12 @@ private:
         return SkBlendMode::kSrcOver;
     }
 
-    static void apply_paint_options(SkPaint& paint, PaintOptions options) {
+    static void apply_paint_options(SkPaint& paint, PaintOptions options,
+                                    float source_alpha = 1.0f) {
         const float opacity = std::isfinite(options.opacity)
             ? std::clamp(options.opacity, 0.0f, 1.0f)
             : 1.0f;
-        paint.setAlphaf(opacity);
+        paint.setAlphaf(source_alpha * opacity);
         paint.setBlendMode(to_sk_blend_mode(options.blend));
     }
 

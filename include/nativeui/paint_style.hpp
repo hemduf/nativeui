@@ -3,6 +3,9 @@
 #include <nativeui/geometry.hpp>
 
 #include <initializer_list>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace ui {
@@ -68,5 +71,73 @@ private:
     float radius_{};
     std::vector<GradientStop> stops_;
 };
+
+class Painter;
+
+class Brush {
+public:
+    Brush(Color color) noexcept : value_(color) {}
+    Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
+    Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
+
+    Brush(const Brush&) = default;
+
+    Brush& operator=(const Brush& other) {
+        if (this == &other) return *this;
+        Brush replacement{other};
+        *this = std::move(replacement);
+        return *this;
+    }
+
+    Brush(Brush&& other) noexcept : value_(std::move(other.value_)) {
+        other.reset_to_transparent();
+    }
+
+    Brush& operator=(Brush&& other) noexcept {
+        if (this == &other) {
+            reset_to_transparent();
+            return *this;
+        }
+        value_ = std::move(other.value_);
+        other.reset_to_transparent();
+        return *this;
+    }
+
+    ~Brush() noexcept = default;
+
+private:
+    using Storage = std::variant<Color, LinearGradient, RadialGradient>;
+
+    static_assert(std::is_nothrow_constructible_v<Storage, Color>);
+    static_assert(std::is_nothrow_move_constructible_v<Storage>);
+    static_assert(std::is_nothrow_move_assignable_v<Storage>);
+    static_assert(std::is_nothrow_destructible_v<Storage>);
+
+    [[nodiscard]] static constexpr Color transparent() noexcept {
+        return Color{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    void reset_to_transparent() noexcept {
+        Storage replacement{transparent()};
+        value_ = std::move(replacement);
+    }
+
+    template <class Visitor>
+    decltype(auto) visit(Visitor&& visitor) const {
+        return std::visit(std::forward<Visitor>(visitor), value_);
+    }
+
+    friend class Painter;
+    Storage value_;
+};
+
+static_assert(std::is_nothrow_move_constructible_v<LinearGradient>);
+static_assert(std::is_nothrow_move_assignable_v<LinearGradient>);
+static_assert(std::is_nothrow_move_constructible_v<RadialGradient>);
+static_assert(std::is_nothrow_move_assignable_v<RadialGradient>);
+static_assert(std::is_nothrow_constructible_v<Brush, Color>);
+static_assert(std::is_nothrow_move_constructible_v<Brush>);
+static_assert(std::is_nothrow_move_assignable_v<Brush>);
+static_assert(std::is_nothrow_destructible_v<Brush>);
 
 } // namespace ui
