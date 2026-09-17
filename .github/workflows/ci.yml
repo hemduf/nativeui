@@ -51,12 +51,19 @@ jobs:
           - name: macOS
             os: macos-15-intel
             cmake_args: -DNATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE=ON
+            skia_arm64: false
           - name: Windows
             os: windows-latest
             cmake_args: ''
+            skia_arm64: false
           - name: Linux X11
             os: ubuntu-latest
             cmake_args: ''
+            skia_arm64: false
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            cmake_args: -DNATIVEUI_SKIA_ROOT=${{ github.workspace }}/.skia-arm64
+            skia_arm64: true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
 
@@ -67,9 +74,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CPM_SOURCE_CACHE }}
-          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
           restore-keys: |
-            nativeui-cpm-${{ runner.os }}-
+            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Set up MSVC environment
         if: runner.os == 'Windows'
@@ -88,7 +95,39 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth unzip
+
+      # NativeUI's production dependency resolver still names the Linux library
+      # directory `x64`. For the ARM64 CI lane, acquire the real ARM64 package
+      # from our skia-builder fork, verify it, then provide a local compatibility
+      # alias so this lane validates NativeUI itself without pretending the
+      # archive is x86_64.
+      - name: Prepare forked Skia Linux ARM64
+        if: matrix.skia_arm64 == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/skia-build-linux-arm64-gpu-release.zip"
+          root="${{ github.workspace }}/.skia-arm64"
+          url="https://github.com/hemduf/skia-builder/releases/download/chrome/m149/skia-build-linux-arm64-gpu-release.zip"
+          expected="0c5b366864d2ecec9b3de87b100ccea038f6289e6fccf279031bf7501b332ef1"
+
+          curl --fail --location --retry 3 --output "$archive" "$url"
+          echo "$expected  $archive" | sha256sum --check --strict
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+
+          lib="$root/build/linux-gpu/lib/Release/arm64/libskia.a"
+          test -f "$lib"
+          member="$(ar t "$lib" | head -n 1)"
+          test -n "$member"
+          ar p "$lib" "$member" > "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o"
+          readelf -h "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o" | tee "${RUNNER_TEMP}/nativeui-skia-arm64-readelf.txt"
+          grep -q 'Machine:.*AArch64' "${RUNNER_TEMP}/nativeui-skia-arm64-readelf.txt"
+
+          mkdir -p "$root/build/linux-gpu/lib/Release"
+          ln -sfn arm64 "$root/build/linux-gpu/lib/Release/x64"
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -215,9 +254,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CPM_SOURCE_CACHE }}
-          key: nativeui-cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
           restore-keys: |
-            nativeui-cpm-${{ runner.os }}-
+            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.11
