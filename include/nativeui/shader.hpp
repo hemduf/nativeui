@@ -33,7 +33,11 @@ struct ShaderCompileResult {
 
 namespace detail {
 struct ShaderProgramData;
-struct ShaderProgramCompiler;
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+[[nodiscard]] ShaderCompileResult compile_shader_program_for_test(
+    std::string_view sksl,
+    int injected_failure);
+#endif
 } // namespace detail
 
 /// Immutable compiled runtime-shader program.
@@ -56,10 +60,16 @@ public:
 
 private:
     explicit ShaderProgram(std::shared_ptr<const detail::ShaderProgramData> data) noexcept;
+    [[nodiscard]] static ShaderCompileResult compile_impl(std::string_view sksl,
+                                                          int injected_failure);
 
     std::shared_ptr<const detail::ShaderProgramData> data_;
 
-    friend struct detail::ShaderProgramCompiler;
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    friend ShaderCompileResult detail::compile_shader_program_for_test(
+        std::string_view sksl,
+        int injected_failure);
+#endif
 };
 
 } // namespace ui

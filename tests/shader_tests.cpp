@@ -8,11 +8,6 @@
 #include <string_view>
 #include <type_traits>
 
-namespace ui::detail {
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure);
-} // namespace ui::detail
-
 namespace {
 
 constexpr int kFailBeforeDiagnosticOwnership = 1;
