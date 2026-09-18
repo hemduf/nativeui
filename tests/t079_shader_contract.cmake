@@ -27,9 +27,14 @@ if(_umbrella_pos EQUAL -1)
   message(FATAL_ERROR "T079: nativeui.hpp does not expose shader.hpp")
 endif()
 
-file(GLOB _production_sources "${SOURCE_DIR}/src/*.cpp")
-file(GLOB _production_headers "${SOURCE_DIR}/include/nativeui/*.hpp")
-foreach(_path IN LISTS _production_sources _production_headers)
+file(GLOB_RECURSE _production_files
+  "${SOURCE_DIR}/src/*.cpp"
+  "${SOURCE_DIR}/src/*.hpp"
+  "${SOURCE_DIR}/src/*.inc"
+  "${SOURCE_DIR}/include/nativeui/*.hpp"
+  "${SOURCE_DIR}/include/nativeui/*.inc"
+)
+foreach(_path IN LISTS _production_files)
   get_filename_component(_name "${_path}" NAME)
   if(_name STREQUAL "skia_shader.cpp")
     continue()

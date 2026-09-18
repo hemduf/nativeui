@@ -76,13 +76,14 @@ struct ShaderProgramCompiler {
             std::make_shared<ShaderProgramData>(std::move(backend.effect));
         std::shared_ptr<const ShaderProgramData> data = std::move(mutable_data);
 
+        auto candidate =
+            std::unique_ptr<ShaderProgram>{new ShaderProgram{std::move(data)}};
+
         if (failure == CompileFailurePoint::BeforeProgramPublication) {
             throw std::bad_alloc{};
         }
 
-        auto program = std::shared_ptr<const ShaderProgram>{
-            new ShaderProgram{std::move(data)}
-        };
+        std::shared_ptr<const ShaderProgram> program{std::move(candidate)};
         return ShaderCompileResult{std::move(program), {}};
     }
 };
