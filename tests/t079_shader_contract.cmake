@@ -24,6 +24,27 @@ foreach(_forbidden IN ITEMS
   endif()
 endforeach()
 
+file(READ "${SOURCE_DIR}/src/skia_shader.cpp" _shader_backend)
+string(FIND
+  "${_shader_backend}"
+  "std::numeric_limits<uint32_t>::max()"
+  _backend_size_limit)
+string(FIND
+  "${_shader_backend}"
+  "sksl.size() > detail::kMaxSkSLSourceBytes"
+  _backend_size_guard)
+string(FIND
+  "${_shader_backend}"
+  "SkRuntimeEffect::MakeForShader"
+  _backend_compile_call)
+if(_backend_size_limit EQUAL -1 OR
+   _backend_size_guard EQUAL -1 OR
+   _backend_compile_call EQUAL -1 OR
+   _backend_size_guard GREATER _backend_compile_call)
+  message(FATAL_ERROR
+    "T079: pinned SkString 32-bit source-size guard must run before MakeForShader")
+endif()
+
 file(READ "${SOURCE_DIR}/include/nativeui/nativeui.hpp" _umbrella)
 string(FIND "${_umbrella}" "#include <nativeui/shader.hpp>" _umbrella_pos)
 if(_umbrella_pos EQUAL -1)
