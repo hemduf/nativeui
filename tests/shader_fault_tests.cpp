@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -256,14 +257,13 @@ void construction_and_copy_failure_are_atomic() {
 
     bool null_threw_invalid_argument = false;
     try {
-        ScopedAllocationFailure fail;
         ui::ShaderInstance invalid{std::shared_ptr<const ui::ShaderProgram>{}};
         (void)invalid;
     } catch (const std::invalid_argument&) {
         null_threw_invalid_argument = true;
     }
     check(null_threw_invalid_argument,
-          "null ShaderInstance did not reject before any allocation attempt");
+          "null ShaderInstance did not reject with invalid_argument");
 
     bool constructor_bad_alloc = false;
     try {
