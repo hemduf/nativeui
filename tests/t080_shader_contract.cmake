@@ -51,12 +51,51 @@ foreach(_backend_required IN ITEMS
     "ShaderCompileError::UnsupportedInterface"
     "std::byte{0}"
     "std::memcpy"
+    "packed_array_byte_size"
+    "packed_array_byte_size(value)"
+    "packed_array_byte_size(backend_values)"
+    "packed_array_byte_size(components)"
+    "reflected.offset != previous_end"
+    "previous_end != uniform_size"
     "std::string_view{data.uniforms[index].name}")
   string(FIND "${_backend}" "${_backend_required}" _backend_required_pos)
   if(_backend_required_pos EQUAL -1)
     message(FATAL_ERROR "T080: missing implementation contract '${_backend_required}'")
   endif()
 endforeach()
+
+# Vector setters must derive the copied byte extent from element count/type,
+# never from the std::array wrapper object's representation.
+string(REGEX MATCHALL "packed_array_byte_size\\(value\\)" _float_vector_byte_sizes "${_backend}")
+list(LENGTH _float_vector_byte_sizes _float_vector_byte_size_count)
+if(NOT _float_vector_byte_size_count EQUAL 3)
+  message(FATAL_ERROR
+    "T080: expected packed element extents for exactly float2/float3/float4 setters")
+endif()
+
+string(REGEX MATCHALL "packed_array_byte_size\\(backend_values\\)" _int_vector_byte_sizes "${_backend}")
+list(LENGTH _int_vector_byte_sizes _int_vector_byte_size_count)
+if(NOT _int_vector_byte_size_count EQUAL 3)
+  message(FATAL_ERROR
+    "T080: expected packed element extents for exactly int2/int3/int4 setters")
+endif()
+
+string(REGEX MATCHALL "packed_array_byte_size\\(components\\)" _color_byte_sizes "${_backend}")
+list(LENGTH _color_byte_sizes _color_byte_size_count)
+if(NOT _color_byte_size_count EQUAL 1)
+  message(FATAL_ERROR
+    "T080: expected one packed element extent for the Color setter")
+endif()
+
+string(FIND "${_backend}" "sizeof(backend_values)" _backend_array_object_size)
+if(NOT _backend_array_object_size EQUAL -1)
+  message(FATAL_ERROR "T080: int vector packing must not use std::array object size")
+endif()
+
+string(FIND "${_backend}" "sizeof(components)" _color_array_object_size)
+if(NOT _color_array_object_size EQUAL -1)
+  message(FATAL_ERROR "T080: Color packing must not use std::array object size")
+endif()
 
 string(FIND "${_access}" "binding_bytes" _binding_access)
 if(_binding_access EQUAL -1)

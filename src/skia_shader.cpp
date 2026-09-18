@@ -163,6 +163,12 @@ template <std::size_t N>
     return true;
 }
 
+template <class T, std::size_t N>
+[[nodiscard]] constexpr std::size_t packed_array_byte_size(
+    const std::array<T, N>&) noexcept {
+    return sizeof(T) * N;
+}
+
 [[nodiscard]] bool color_finite(Color color) noexcept {
     return std::isfinite(color.r) &&
            std::isfinite(color.g) &&
@@ -392,11 +398,11 @@ ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
             throw std::runtime_error(
                 "Pinned Skia uniform byte size does not match NativeUI T080 packing");
         }
-        if (reflected.offset < previous_end ||
+        if (reflected.offset != previous_end ||
             reflected.offset > uniform_size ||
             reflected_size > uniform_size - reflected.offset) {
             throw std::runtime_error(
-                "Pinned Skia uniform reflection produced invalid or overlapping bounds");
+                "Pinned Skia uniform reflection is not exactly contiguous");
         }
 
         uniforms.push_back(ShaderUniformInfo{
@@ -416,6 +422,11 @@ ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
             throw std::bad_alloc{};
         }
 #endif
+    }
+
+    if (previous_end != uniform_size) {
+        throw std::runtime_error(
+            "Pinned Skia uniform reflection does not cover the complete uniform block");
     }
 
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
@@ -561,7 +572,7 @@ ShaderSetResult ShaderInstance::set_float2(
         name,
         ShaderUniformType::Float2,
         value.data(),
-        sizeof(value),
+        detail::packed_array_byte_size(value),
         detail::all_finite(value));
 }
 
@@ -572,7 +583,7 @@ ShaderSetResult ShaderInstance::set_float3(
         name,
         ShaderUniformType::Float3,
         value.data(),
-        sizeof(value),
+        detail::packed_array_byte_size(value),
         detail::all_finite(value));
 }
 
@@ -583,7 +594,7 @@ ShaderSetResult ShaderInstance::set_float4(
         name,
         ShaderUniformType::Float4,
         value.data(),
-        sizeof(value),
+        detail::packed_array_byte_size(value),
         detail::all_finite(value));
 }
 
@@ -607,7 +618,7 @@ ShaderSetResult ShaderInstance::set_int2(
         name,
         ShaderUniformType::Int2,
         backend_values.data(),
-        sizeof(backend_values),
+        detail::packed_array_byte_size(backend_values),
         true);
 }
 
@@ -619,7 +630,7 @@ ShaderSetResult ShaderInstance::set_int3(
         name,
         ShaderUniformType::Int3,
         backend_values.data(),
-        sizeof(backend_values),
+        detail::packed_array_byte_size(backend_values),
         true);
 }
 
@@ -631,7 +642,7 @@ ShaderSetResult ShaderInstance::set_int4(
         name,
         ShaderUniformType::Int4,
         backend_values.data(),
-        sizeof(backend_values),
+        detail::packed_array_byte_size(backend_values),
         true);
 }
 
@@ -641,7 +652,7 @@ ShaderSetResult ShaderInstance::set_color(std::string_view name, Color value) no
         name,
         ShaderUniformType::Color,
         components.data(),
-        sizeof(components),
+        detail::packed_array_byte_size(components),
         detail::color_finite(value));
 }
 
