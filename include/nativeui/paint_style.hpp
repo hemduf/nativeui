@@ -2,6 +2,7 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <cmath>
 #include <initializer_list>
 #include <type_traits>
 #include <utility>
@@ -9,6 +10,51 @@
 #include <vector>
 
 namespace ui {
+
+namespace detail {
+struct EffectTestAccess;
+}
+
+class Effect {
+public:
+    [[nodiscard]] static Effect gaussian_blur(float sigma_x, float sigma_y) noexcept {
+        return Effect{Kind::GaussianBlur,
+                      canonical_sigma(sigma_x),
+                      canonical_sigma(sigma_y)};
+    }
+
+    Effect(const Effect&) noexcept = default;
+    Effect& operator=(const Effect&) noexcept = default;
+    Effect(Effect&&) noexcept = default;
+    Effect& operator=(Effect&&) noexcept = default;
+    ~Effect() noexcept = default;
+
+private:
+    enum class Kind : unsigned char {
+        GaussianBlur,
+    };
+
+    Effect(Kind kind, float sigma_x, float sigma_y) noexcept
+        : kind_(kind), sigma_x_(sigma_x), sigma_y_(sigma_y) {}
+
+    [[nodiscard]] static float canonical_sigma(float sigma) noexcept {
+        if (!std::isfinite(sigma) || sigma <= 0.0f) return 0.0f;
+        return sigma > 64.0f ? 64.0f : sigma;
+    }
+
+    friend class Painter;
+    friend struct detail::EffectTestAccess;
+
+    Kind kind_{Kind::GaussianBlur};
+    float sigma_x_{};
+    float sigma_y_{};
+};
+
+static_assert(std::is_nothrow_copy_constructible_v<Effect>);
+static_assert(std::is_nothrow_copy_assignable_v<Effect>);
+static_assert(std::is_nothrow_move_constructible_v<Effect>);
+static_assert(std::is_nothrow_move_assignable_v<Effect>);
+static_assert(std::is_nothrow_destructible_v<Effect>);
 
 struct GradientStop {
     float offset{};

@@ -65,8 +65,6 @@ Delivered contract:
 
 Exact-head normal/path qualification is green for CI `35343703682`, T050 `35343703661`, T060 `35343703732`, T064 `35343703852`, T065 `35343703617`, T072 `35343703816` and Package Contracts `35343703787`. Final T042 Lifecycle Stress `35345455301` and T052 v0.1 Release Gate `35345455659` are green. Final review reports zero remaining Blocking/Important findings.
 
-T069 must include the new `InputType::ContextMenu` public surface in the v1 API audit/freeze.
-
 ### T073 — Done (post-1.0 rendering foundation)
 
 **T073 / issue #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.**
@@ -147,11 +145,32 @@ Delivered contract includes:
 
 Exact-head normal qualification passed CI #1862 on Linux X11, Linux ARM64, Linux ASan+UBSan, Windows and macOS. Final T042 Lifecycle Stress #839 and T052 v0.1 Release Gate #563 passed on the frozen head, including clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5237620829` reports zero remaining Blocking/Important findings.
 
-T076 is a NativeUI 1.1/post-1.0 rendering foundation and is not on the v1 critical path. T077 / #160 is now unblocked and extends the same bounded layer mechanism with Gaussian blur.
+T076 is a NativeUI 1.1/post-1.0 rendering foundation and is not on the v1 critical path.
+
+### T077 — Done (post-1.0 effects foundation)
+
+**T077 / issue #160 / PR #426 merged as `58fbe58d3d0535a321d2b81ada685cdc40d5d218`.**
+
+Frozen exact head `b310fa5f3fe6f51494e2a0b8f4e37e1269577b0f` adds the first small backend-neutral `ui::Effect` value and bounded Gaussian blur through the existing `Painter::StateGuard` / `PaintOptions` layer surface.
+
+Delivered contract includes:
+
+- allocation-free/noexcept Gaussian Effect construction, copy/move/assignment/destruction with exact independent sigma canonicalization to `[0,64]`;
+- `Painter::scoped_layer(Rect, const Effect&, PaintOptions)` with no second public scope/options abstraction;
+- separate hard source and output clips so the complete composed layer is blurred once without clipping the halo at restore;
+- transparent-edge Gaussian sampling, asymmetric/one-axis blur and zero/zero parity with the T076 unfiltered layer path;
+- conservative device support through outward source mapping plus pinned Skia forward image-filter bounds, with fail-closed large/non-finite geometry;
+- filtered `saveLayer(nullptr, ...)` correctness independent from optional backend bounds hints;
+- deterministic rollback after materialization/output-clip/saveLayer/source-clip seams, strict LIFO nesting and destroy-A/continue-B isolation;
+- direct Skia raster oracles, golden coverage, feature self-test and standalone/embedded native GPU smoke.
+
+Exact-head normal/path qualification passed CI #1893, Package Contracts #310, T050 #187 and T072 #381. Final T042 Lifecycle Stress #840 passed Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #564 passed release contract, clean Linux/macOS/Windows bootstraps and the exact-head T051 benchmark. Final review comment `5726825909` records zero remaining Blocking/Important findings.
+
+T077 remains outside the v1 critical path. **T078 / #161 is now Ready** and extends the effect value with drop shadows plus retained visual-outset invalidation/culling correctness.
 
 ### Active pre-freeze work
 
-- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze. The audit must account for the current `main` public surface after the merged T073, T074, T075 and T076 rendering foundations.
+- **T069 / #81 — Deprecated:** retired as a standalone v1 freeze gate; current `main` public/package contracts and exact-head qualification are authoritative. It is not a dependency or merge gate for T079 or subsequent 1.1 shader work.
 - **T068 / #80 / PR #241 — deferred to 1.2:** native accessibility bridges remain outside the v1 critical path.
 
 ## Current dependency frontier
@@ -170,10 +189,10 @@ state/safety:
 
 pre-freeze public additions:
   T173(done) -> T174(done)
-  T175(done) -----------------------------------------> T069 audit surface
+  T175(done) -----------------------------------------> current public/package surface
 
 v1 critical path:
-  T069(ready) -> T070 -> T122/docs closeout -> T071 -> v1.0.0
+  T070 -> T122/docs closeout -> T071 -> v1.0.0
   T049(done) -----------------------------------------> T071
   T044(done) -----------------------------------------> T071
 
@@ -181,7 +200,7 @@ post-1.0 / later-release work already landed:
   T073(done) -----------------------------------------> NativeUI 1.1 foundation
   T074(done) -----------------------------------------> NativeUI 1.1 foundation
   T075(done) -----------------------------------------> NativeUI 1.1 foundation
-  T076(done) -> T077(ready) --------------------------> NativeUI 1.1 effects
+  T076(done) -> T077(done) -> T078(ready) -----------> NativeUI 1.1 effects
   T068 ----------------------------------------------> 1.2
 ```
 
@@ -201,7 +220,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 3 — Rendering and graphics
 
-**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension, T075's strict lexical scoped-clipping API and T076's hard-bounded scoped layer compositing are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
+**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension, T075's strict lexical scoped-clipping API, T076's hard-bounded scoped layer compositing and T077's bounded Gaussian Effect layer are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
 
 ### Milestone 4 — Text system
 
@@ -225,10 +244,9 @@ post-1.0 / later-release work already landed:
 
 The remaining v1 sequence is:
 
-1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze against current `main`, including the merged T073/T074/T075/T076 Painter surface;
-2. validate T070 reference application/Getting Started against the frozen surface;
-3. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
-4. run T071 validation/release-only on one exact RC SHA.
+1. validate T070 reference application/Getting Started against the current public/package surface;
+2. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
+3. run T071 validation/release-only on one exact RC SHA.
 
 ## Completed safety and pre-freeze closeouts
 
@@ -252,7 +270,9 @@ The remaining v1 sequence is:
 - **T074 / #157:** Brush + PaintOptions stroke support for rounded rectangles, Paths, lines and arcs with preserved Color/style semantics and shared Painter-local sampling.
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with one logical `StateGuard`, exact multi-frame restore/rollback, group opacity/blend and empty invalid-bound scopes.
+- **T077 / #160:** allocation-free backend-neutral Gaussian `Effect` values and hard-bounded filtered layers with conservative Skia-derived output support, exact rollback and native GPU qualification.
+- **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation with immutable sharing, deterministic diagnostics, strong failure publication guarantees, pinned-Skia source-size safety, isolated fault seams and installed-package shader linkage validation. Merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`.
 
 ## Release policy
 
-T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied, including T175's ContextMenu input surface. T073, T074, T075 and T076 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T077 remains post-1.0 work and builds on the T076 layer contract. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077 and T079 are merged as later-release rendering foundations outside the v1 critical path. T078 is the next Ready post-1.0 effects ticket and builds on T077 plus retained visual-outset correctness. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

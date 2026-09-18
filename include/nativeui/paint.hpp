@@ -17,14 +17,17 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkRRect.h"
 #include "include/core/SkTypes.h"
+#include "include/core/SkTileMode.h"
 #include "include/core/SkTypeface.h"
 #include "include/effects/SkGradient.h"
+#include "include/effects/SkImageFilters.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <exception>
+#include <limits>
 #include <new>
 #include <string>
 #include <string_view>
@@ -36,6 +39,7 @@ namespace ui {
 namespace detail {
 
 struct PainterLayerFaultAccess;
+struct PainterEffectFaultAccess;
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -75,9 +79,14 @@ class Painter {
         None,
         AfterHardClip,
         AfterSaveLayer,
+        BeforeEffectMaterialization,
+        AfterEffectOutputClip,
+        AfterEffectSaveLayer,
+        AfterEffectSourceClip,
     };
 
     friend struct detail::PainterLayerFaultAccess;
+    friend struct detail::PainterEffectFaultAccess;
 
 public:
     class StateGuard {
@@ -217,6 +226,86 @@ public:
                 canvas_.saveLayer(layer_bounds, &layer_paint);
             ++save_depth_;
             maybe_fail_layer(LayerFaultPoint::AfterSaveLayer);
+
+            frame.guard_depth = save_depth_;
+            restore_floor_ = frame.guard_depth;
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+    }
+
+    [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
+                                          const Effect& effect,
+                                          PaintOptions options = {}) {
+        // Preserve T076's exact invalid/no-op behavior and avoid even creating
+        // a backend image filter when there is nothing to evaluate.
+        if (!valid_clip_rect(logical_bounds)) {
+            return scoped_layer(logical_bounds, options);
+        }
+        if (effect.kind_ != Effect::Kind::GaussianBlur ||
+            (effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f)) {
+            return scoped_layer(logical_bounds, options);
+        }
+
+        const SkRect source_bounds = to_sk_rect(logical_bounds);
+        SkIRect device_source_bounds;
+        if (!effect_source_device_bounds(source_bounds, device_source_bounds)) {
+            // A transform that cannot produce a finite conservative source
+            // rectangle must fail closed before backend filter materialization.
+            return scoped_empty_device_output();
+        }
+
+        // All fallible backend preparation happens before any private Painter
+        // frame is entered or restore floor is published.
+        maybe_fail_layer(LayerFaultPoint::BeforeEffectMaterialization);
+        auto image_filter = SkImageFilters::Blur(
+            effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+        if (!image_filter) {
+            throw std::bad_alloc{};
+        }
+
+        SkIRect device_output_bounds;
+        if (!effect_filter_output_bounds(
+                *image_filter, device_source_bounds, device_output_bounds)) {
+            return scoped_empty_device_output();
+        }
+
+        SkPaint layer_paint;
+        apply_paint_options(layer_paint, options);
+        layer_paint.setImageFilter(std::move(image_filter));
+
+        // Filtered topology differs deliberately from T076:
+        //   outer output-support clip -> saveLayer(filter) -> source clip.
+        // The source clip is inside saveLayer so restoring the filtered layer
+        // removes it before compositing the halo back under the output clip.
+        const auto entry_matrix = canvas_.getLocalToDevice();
+        ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
+        try {
+            canvas_.save();
+            ++save_depth_;
+
+            // The support clip is an axis-aligned conservative device-space
+            // envelope. Existing parent clips already live in device space and
+            // remain intersected while only this new clip is installed under
+            // identity coordinates.
+            canvas_.resetMatrix();
+            canvas_.clipIRect(device_output_bounds, SkClipOp::kIntersect);
+            canvas_.setMatrix(entry_matrix);
+            maybe_fail_layer(LayerFaultPoint::AfterEffectOutputClip);
+
+            // saveLayer bounds are only a sizing hint in pinned Skia.
+            // The real finite device clip above already bounds output/allocation,
+            // so omit the optional hint and keep correctness independent of it.
+            [[maybe_unused]] const int previous_save_count =
+                canvas_.saveLayer(nullptr, &layer_paint);
+            ++save_depth_;
+            maybe_fail_layer(LayerFaultPoint::AfterEffectSaveLayer);
+
+            canvas_.clipRect(source_bounds, SkClipOp::kIntersect, false);
+            maybe_fail_layer(LayerFaultPoint::AfterEffectSourceClip);
 
             frame.guard_depth = save_depth_;
             restore_floor_ = frame.guard_depth;
@@ -387,6 +476,20 @@ public:
     }
 
 private:
+    [[nodiscard]] StateGuard scoped_empty_device_output() {
+        const auto entry_matrix = canvas_.getLocalToDevice();
+        const ScopeFrame frame = begin_scope();
+        try {
+            canvas_.resetMatrix();
+            canvas_.clipIRect(SkIRect::MakeEmpty(), SkClipOp::kIntersect);
+            canvas_.setMatrix(entry_matrix);
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+    }
+
     [[nodiscard]] ScopeFrame begin_scope() noexcept {
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         canvas_.save();
@@ -416,6 +519,99 @@ private:
 
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
+    }
+
+    [[nodiscard]] bool effect_source_device_bounds(
+        const SkRect& source_bounds,
+        SkIRect& device_source) const noexcept {
+        const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
+        if (!matrix.isFinite() || matrix.hasPerspective() ||
+            !source_bounds.isFinite() || source_bounds.isEmpty()) {
+            return false;
+        }
+
+        const double m00 = static_cast<double>(matrix.getScaleX());
+        const double m01 = static_cast<double>(matrix.getSkewX());
+        const double m02 = static_cast<double>(matrix.getTranslateX());
+        const double m10 = static_cast<double>(matrix.getSkewY());
+        const double m11 = static_cast<double>(matrix.getScaleY());
+        const double m12 = static_cast<double>(matrix.getTranslateY());
+
+        double min_x = std::numeric_limits<double>::infinity();
+        double min_y = std::numeric_limits<double>::infinity();
+        double max_x = -std::numeric_limits<double>::infinity();
+        double max_y = -std::numeric_limits<double>::infinity();
+        const double xs[2] = {
+            static_cast<double>(source_bounds.left()),
+            static_cast<double>(source_bounds.right()),
+        };
+        const double ys[2] = {
+            static_cast<double>(source_bounds.top()),
+            static_cast<double>(source_bounds.bottom()),
+        };
+
+        for (double x : xs) {
+            for (double y : ys) {
+                const double mapped_x = m00 * x + m01 * y + m02;
+                const double mapped_y = m10 * x + m11 * y + m12;
+                if (!std::isfinite(mapped_x) || !std::isfinite(mapped_y)) return false;
+                min_x = (std::min)(min_x, mapped_x);
+                min_y = (std::min)(min_y, mapped_y);
+                max_x = (std::max)(max_x, mapped_x);
+                max_y = (std::max)(max_y, mapped_y);
+            }
+        }
+
+        const double left = std::floor(min_x);
+        const double top = std::floor(min_y);
+        const double right = std::ceil(max_x);
+        const double bottom = std::ceil(max_y);
+
+        // clipIRect converts integer coordinates to SkScalar internally.
+        // Staying inside binary32's exact-integer range prevents an outward
+        // edge from being rounded inward later.
+        constexpr double max_exact_float_integer = 16777216.0; // 2^24
+        if (!std::isfinite(left) || !std::isfinite(top) ||
+            !std::isfinite(right) || !std::isfinite(bottom) ||
+            left < -max_exact_float_integer || top < -max_exact_float_integer ||
+            right > max_exact_float_integer || bottom > max_exact_float_integer ||
+            !(left < right) || !(top < bottom)) {
+            return false;
+        }
+
+        device_source = SkIRect::MakeLTRB(static_cast<int>(left),
+                                          static_cast<int>(top),
+                                          static_cast<int>(right),
+                                          static_cast<int>(bottom));
+        return !device_source.isEmpty();
+    }
+
+    [[nodiscard]] bool effect_filter_output_bounds(
+        const SkImageFilter& filter,
+        const SkIRect& device_source,
+        SkIRect& device_output) const {
+        const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
+        if (!matrix.isFinite() || matrix.hasPerspective()) return false;
+
+        // This public Skia API is specifically documented for clipping and
+        // temporary-buffer allocation: the result may be conservative but must
+        // never be smaller than the real filtered output.
+        const SkIRect output = filter.filterBounds(
+            device_source,
+            matrix,
+            SkImageFilter::kForward_MapDirection);
+        if (output.isEmpty()) return false;
+
+        constexpr int max_exact_float_integer = 1 << 24;
+        if (output.left() < -max_exact_float_integer ||
+            output.top() < -max_exact_float_integer ||
+            output.right() > max_exact_float_integer ||
+            output.bottom() > max_exact_float_integer) {
+            return false;
+        }
+
+        device_output = output;
+        return true;
     }
 
     [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
