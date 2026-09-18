@@ -14,7 +14,10 @@
 namespace ui::detail {
 
 struct ShaderProgramData final {
-    explicit ShaderProgramData(sk_sp<SkRuntimeEffect> effect_in) noexcept
+    // The pinned m149 sk_sp move constructor is not declared noexcept.
+    // Keep this constructor potentially-throwing so a future/backend exception
+    // propagates through the direct C++ API instead of terminating the host.
+    explicit ShaderProgramData(sk_sp<SkRuntimeEffect> effect_in)
         : effect(std::move(effect_in)) {}
 
     sk_sp<SkRuntimeEffect> effect;
