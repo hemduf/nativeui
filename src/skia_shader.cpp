@@ -8,6 +8,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -23,6 +24,13 @@ struct ShaderProgramData final {
 
     sk_sp<const SkRuntimeEffect> effect;
 };
+
+static_assert(std::is_nothrow_destructible_v<SkRuntimeEffect>,
+              "ShaderProgram noexcept teardown requires nothrow SkRuntimeEffect destruction");
+static_assert(std::is_nothrow_destructible_v<sk_sp<const SkRuntimeEffect>>,
+              "ShaderProgram noexcept teardown requires nothrow sk_sp destruction");
+static_assert(std::is_nothrow_destructible_v<ShaderProgramData>,
+              "ShaderProgramData must remain nothrow destructible");
 
 namespace {
 
