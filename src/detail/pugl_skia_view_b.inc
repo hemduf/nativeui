@@ -114,15 +114,16 @@
 
         case PUGL_BUTTON_PRESS:
         case PUGL_BUTTON_RELEASE: {
-            if (event->button.button != 0) return PUGL_SUCCESS;
             InputEvent input{};
-            input.type = event->type == PUGL_BUTTON_PRESS ? InputType::PointerDown : InputType::PointerUp;
+            input.type = detail::translate_pugl_button(
+                event->button.button, event->type == PUGL_BUTTON_PRESS);
+            if (input.type == InputType::None) return PUGL_SUCCESS;
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->button.x), static_cast<float>(event->button.y)},
                 geometry_.last_valid_scale());
             apply_modifiers(input, event->button.state);
 
-            if (event->type == PUGL_BUTTON_PRESS) {
+            if (input.type == InputType::PointerDown) {
                 const double now = puglGetTime(world_);
                 const float dx = input.position.x - last_click_position_.x;
                 const float dy = input.position.y - last_click_position_.y;
@@ -132,7 +133,7 @@
                 last_click_time_ = now;
                 last_click_position_ = input.position;
             }
-            input.clicks = click_count_;
+            input.clicks = input.type == InputType::ContextMenu ? 1 : click_count_;
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }

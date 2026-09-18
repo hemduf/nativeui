@@ -565,7 +565,7 @@ The internal bridge follows this conceptual mapping:
 ```text
 PUGL_KEY_PRESS/RELEASE -> KeyDown / KeyUp
 PUGL_TEXT              -> committed TextInput
-PUGL_BUTTON_*          -> PointerDown / PointerUp
+PUGL_BUTTON_*          -> PointerDown / PointerUp (left), ContextMenu (right press)
 PUGL_MOTION            -> PointerMove
 PUGL_SCROLL            -> PointerWheel
 PUGL_FOCUS_*           -> focus activation/deactivation
@@ -574,6 +574,12 @@ PUGL_EXPOSE            -> native frame render
 PUGL_TIMER             -> timer/animation work
 PUGL_DATA_*            -> clipboard / drop flow
 ```
+
+`InputType::ContextMenu` carries the same logical position and modifiers as a pointer
+press and is delivered to the pointer hit target without moving keyboard focus. If a
+pointer capture is active, its owner first receives `PointerCancel` and the capture is
+released; context-menu routing cannot establish a replacement capture. Ignored requests
+bubble through ancestors like other targeted input.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 

@@ -62,6 +62,23 @@ Delivered contract:
 
 Exact-head normal/path qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 `35156481983` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. Final T052 `35156481846` is green for release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Reviews `5228886765` and `5228890731` are 0 Blocking / 0 Important; the historical Blocking thread is resolved/outdated and privacy review is clean.
 
+### T175 is Done
+
+**T175 / #428 / PR #429 completed from frozen executable head `d5c23ae534c26b2b7400784fc4e5d37f853397c1`.** It adds first-class right-button context-menu input without disturbing existing primary-pointer semantics.
+
+Delivered contract:
+
+- `InputType::ContextMenu` is appended to preserve existing enum values;
+- pinned Pugl backends use the normalized `0 = primary, 1 = secondary, 2 = middle` convention;
+- only secondary press becomes ContextMenu; secondary release, middle and extra buttons remain ignored;
+- retained routing hit-tests and bubbles without moving focus;
+- active capture is cancelled first with `PointerCancel`, and ContextMenu routing blocks replacement capture;
+- unwind/re-entrancy restores capture guards and pointer-interaction state exactly;
+- explicit Pugl translation vectors, routing/fault tests and the dedicated feature self-test cover the contract;
+- no mutable global/TLS state, scheduler or persistent platform resource was introduced.
+
+Exact-head CI `35343703682`, T050 `35343703661`, T060 `35343703732`, T064 `35343703852`, T065 `35343703617`, T072 `35343703816` and Package Contracts `35343703787` are green. Final T042 `35345455301` and T052 `35345455659` are green. Final review has zero Blocking/Important findings.
+
 ### T073 is Done
 
 **T073 / #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.** Frozen exact head `63bc82c6e2fd3db0aa6aae06456e51c36da33bfc` delivers the generic backend-neutral Brush fill foundation targeted at the post-1.0/NativeUI 1.1 rendering line.
@@ -167,7 +184,7 @@ Exact-head CI #1893, Package Contracts #310, T050 #187 and T072 #381 are green. 
 Current path:
 
 ```text
-T123–T132(done) + T173(done) + T174(done)
+T123–T132(done) + T173(done) + T174(done) + T175(done)
                          |
                          v
 T070 -> T122/docs -> T071 -> v1.0.0
@@ -195,6 +212,7 @@ T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
 - **T132 / #294:** standalone close lifecycle-control deferral under queue rejection/throw.
 - **T173 / #401:** complete public ASCII A-Z key exposure.
 - **T174 / #409:** per-UI unhandled raw KeyDown fallback on final T125 semantics.
+- **T175 / #428:** first-class right-button ContextMenu routing with normalized Pugl translation and capture-safe recovery.
 
 Other delivered v1 foundations include T030–T036 standard widgets, T037–T040 Theme/style/animation, T043 resize/scale, T044 pointer capture, T045 semantic accessibility architecture, T047/T048 packaging, T049 gallery, T050 inspector, T051/T052 qualification, T053 consumer-scoped macOS Objective-C runtime identity, T054/T056/T057 helpers/resources, T058 dynamic composition, T060 Application ownership, T061/T062/T063 overlay/Tooltip/Dialog, T064 DesktopServices, T065 Dispatcher, T066 window controls, T067 virtualized ListView and T072 Linux D-Bus.
 
