@@ -73,27 +73,20 @@ void exact_result_contract() {
 }
 
 void caller_source_lifetime_is_independent() {
-    std::shared_ptr<const ui::ShaderProgram> program;
-    {
+    const auto success = [] {
         std::string source{kValidShader};
-        const auto result = ui::ShaderProgram::compile(source);
-        NUI_CHECK(result.ok());
-        program = result.program;
-        source.assign("destroyed");
-        source.shrink_to_fit();
-    }
-    NUI_CHECK(program);
+        return ui::ShaderProgram::compile(source);
+    }();
+    NUI_CHECK(success.ok());
+    NUI_CHECK(success.program);
+    NUI_CHECK(success.diagnostics.empty());
 
-    std::string diagnostic_message;
-    {
+    const auto failure = [] {
         std::string source{"half4 main(float2 p) { return nope; }"};
-        const auto result = ui::ShaderProgram::compile(source);
-        check_compile_failure(result);
-        diagnostic_message = result.diagnostics.front().message;
-        source.clear();
-        source.shrink_to_fit();
-    }
-    NUI_CHECK(!diagnostic_message.empty());
+        return ui::ShaderProgram::compile(source);
+    }();
+    check_compile_failure(failure);
+    NUI_CHECK(!failure.diagnostics.front().message.empty());
 }
 
 void immutable_program_can_be_retained_by_two_uis() {
