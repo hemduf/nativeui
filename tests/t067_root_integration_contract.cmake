@@ -37,7 +37,7 @@ require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_retained_tes
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)" "public API test registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)" "semantic API test registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)" "visual test registration")
-string(REGEX MATCH "foreach\\(_header IN ITEMS[^\\n]*\\)" _public_header_loop "${_root_cmake}")
+string(REGEX MATCH "foreach\\(_header IN ITEMS[^)]*\\)" _public_header_loop "${_root_cmake}")
 if(_public_header_loop STREQUAL "")
   message(FATAL_ERROR
     "T067 root integration contract: missing public-header compile loop")
