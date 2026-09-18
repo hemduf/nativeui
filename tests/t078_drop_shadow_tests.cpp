@@ -211,8 +211,9 @@ void effect_value_contract() {
 }
 
 void dirty_region_publication_is_allocation_free() {
-    ui::DirtyRegion dirty;
     const ui::Rect clip{0.0f, 0.0f, 1000.0f, 100.0f};
+
+    ui::DirtyRegion dirty;
     const auto before = allocation_probe::allocation_count;
     for (int i = 0; i < 9; ++i) {
         (void)dirty.add(
@@ -220,6 +221,27 @@ void dirty_region_publication_is_allocation_free() {
     }
     NUI_CHECK(allocation_probe::allocation_count == before);
     NUI_CHECK(dirty.rects().size() == 1);
+
+    // Copy/move operations may allocate up front, but add() must remain
+    // allocation-free on every successfully constructed object, including the
+    // moved-from source.
+    ui::DirtyRegion copied = dirty;
+    const auto copied_before = allocation_probe::allocation_count;
+    (void)copied.add({240, 0, 8, 8}, clip);
+    NUI_CHECK(allocation_probe::allocation_count == copied_before);
+
+    ui::DirtyRegion moved = std::move(copied);
+    const auto moved_before = allocation_probe::allocation_count;
+    (void)moved.add({260, 0, 8, 8}, clip);
+    (void)copied.add({280, 0, 8, 8}, clip);
+    NUI_CHECK(allocation_probe::allocation_count == moved_before);
+
+    ui::DirtyRegion assigned;
+    assigned = std::move(moved);
+    const auto assigned_before = allocation_probe::allocation_count;
+    (void)assigned.add({300, 0, 8, 8}, clip);
+    (void)moved.add({320, 0, 8, 8}, clip);
+    NUI_CHECK(allocation_probe::allocation_count == assigned_before);
 }
 
 void shadow_and_shadow_only_share_shadow_contribution() {
