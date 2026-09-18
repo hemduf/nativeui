@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -497,6 +498,63 @@ bool verify_overlay_portal(bool update) {
         NATIVEUI_GOLDEN_BASELINE_DIR, NATIVEUI_GOLDEN_ARTIFACT_DIR, options, update);
 }
 
+
+class T077GoldenComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {64.0f, 64.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        auto& painter = context.painter();
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 64.0f, 64.0f}, 0.0f, {0.0f, 0.0f, 0.0f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {24.0f, 24.0f, 16.0f, 16.0f}, ui::Effect::gaussian_blur(3.0f, 3.0f));
+        painter.fill_rounded_rect(
+            {24.0f, 24.0f, 16.0f, 16.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    }
+};
+
+class T077Golden {
+public:
+    ui::Spec spec() && {
+        return ui::Spec{
+            [] { return std::make_unique<T077GoldenComponent>(); },
+            {}};
+    }
+};
+
+bool verify_t077_blur(bool update) {
+    ui::UI tree{T077Golden{}};
+    ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    // A compact raw-pixel profile keeps the baseline reviewable while still
+    // sampling far background, two halo radii, the source edge and the core.
+    test::golden::Image profile{5, 1, {}};
+    profile.rgb.reserve(15);
+    for (const int x : {15, 20, 22, 24, 32}) {
+        const auto sample = renderer.pixel(x, 32);
+        profile.rgb.push_back(sample.r);
+        profile.rgb.push_back(sample.g);
+        profile.rgb.push_back(sample.b);
+    }
+
+    CompareOptions options;
+    // Blur kernels may vary slightly across pinned backend implementations; the
+    // profile remains deliberately coarse while the T077 contract tests enforce
+    // exact clipping, no-op, support and composition invariants independently.
+    options.channel_tolerance = 30;
+    return test::golden::verify(
+        "t077_blur_profile",
+        profile,
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        options,
+        update);
+}
+
 int run_suite(bool update) {
     comparator_self_check();
     failure_artifact_self_check();
@@ -509,6 +567,7 @@ int run_suite(bool update) {
     NUI_CHECK(verify_t035_combo_popup(update));
     NUI_CHECK(verify_t038_widget_state_matrix(update));
     NUI_CHECK(verify_overlay_portal(update));
+    NUI_CHECK(verify_t077_blur(update));
     return 0;
 }
 
