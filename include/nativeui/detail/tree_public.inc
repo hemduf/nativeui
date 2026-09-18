@@ -424,6 +424,20 @@
                 return finish(EventResult::Ignored);
             }
 
+            if (event.type == InputType::ContextMenu) {
+                // Same targeting as a press but without keyboard focus: an
+                // active capture is cancelled so a menu request can never
+                // coexist with a stale drag, then the hit component is
+                // targeted. Ignored events bubble through ancestors like any
+                // targeted input.
+                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
+                pointer_interaction_active_ = false;
+                auto* target = hit_test_pointer(
+                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
+                if (target) return finish(route_from(*target, event, platform));
+                return finish(EventResult::Ignored);
+            }
+
             if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
