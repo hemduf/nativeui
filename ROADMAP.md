@@ -184,6 +184,7 @@ post-1.0 / later-release work already landed:
   T074(done) -----------------------------------------> NativeUI 1.1 foundation
   T075(done) -----------------------------------------> NativeUI 1.1 foundation
   T076(done) -> T077(done) -> T078(ready) -----------> NativeUI 1.1 effects
+  T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
   T068 ----------------------------------------------> 1.2
 ```
 
@@ -254,7 +255,8 @@ The remaining v1 sequence is:
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with one logical `StateGuard`, exact multi-frame restore/rollback, group opacity/blend and empty invalid-bound scopes.
 - **T077 / #160:** allocation-free backend-neutral Gaussian `Effect` values and hard-bounded filtered layers with conservative Skia-derived output support, exact rollback and native GPU qualification.
 - **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation with immutable sharing, deterministic diagnostics, strong failure publication guarantees, pinned-Skia source-size safety, isolated fault seams and installed-package shader linkage validation. Merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`.
+- **T080 / #164 / PR #430:** typed SkSL uniform reflection/binding with NativeUI-owned stable descriptors, bounded profile rejection, deterministic zero-initialized per-instance storage, exact backend `int` packing, allocation-free/noexcept setters, independent copy/move/inert semantics, partial-reflection fault recovery and zero-recompile instrumentation. Exact-head candidate `28025c36` passed CI #1914, Package Contracts #330, T050 #207 and T072 #399. T081 becomes Ready after this merge.
 
 ## Release policy
 
-T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077 and T079 are merged as later-release rendering foundations outside the v1 critical path. T078 is the next Ready post-1.0 effects ticket and builds on T077 plus retained visual-outset correctness. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077, T079 and T080 are merged as later-release rendering foundations outside the v1 critical path. T078 remains Ready on the effects line. T081 is Ready on the shader line after T080 and T073, while T082 remains Blocked on T081. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
