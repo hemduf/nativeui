@@ -1,6 +1,7 @@
 #include <nativeui/shader.hpp>
 
 #include "src/detail/shader_instance_access.hpp"
+#include "src/detail/shader_test_seams.hpp"
 
 #include <algorithm>
 #include <array>
@@ -163,10 +164,10 @@ float read_float(std::span<const std::byte> bytes, std::size_t offset = 0) {
     return value;
 }
 
-std::int32_t read_int(std::span<const std::byte> bytes, std::size_t offset = 0) {
-    check(offset <= bytes.size() && sizeof(std::int32_t) <= bytes.size() - offset,
-          "int read outside binding block");
-    std::int32_t value{};
+int read_backend_int(std::span<const std::byte> bytes, std::size_t offset = 0) {
+    check(offset <= bytes.size() && sizeof(int) <= bytes.size() - offset,
+          "backend int read outside binding block");
+    int value{};
     std::memcpy(&value, bytes.data() + offset, sizeof(value));
     return value;
 }
@@ -237,8 +238,9 @@ void zero_initialization_and_exact_values() {
     ui::ShaderInstance int_instance{integer.program};
     check(int_instance.set_int("value", -1234567) == ui::ShaderSetResult::Ok,
           "int setter failed");
-    check(read_int(ui::detail::ShaderInstanceAccess::binding_bytes(int_instance)) == -1234567,
-          "int bytes do not preserve int32 value");
+    check(read_backend_int(ui::detail::ShaderInstanceAccess::binding_bytes(int_instance)) ==
+              -1234567,
+          "int bytes do not preserve the exact backend int value");
 
     const auto color = ui::ShaderProgram::compile(R"(
         layout(color) uniform float4 tint;
@@ -287,7 +289,7 @@ void complete_binding_block_matches_reflected_packing() {
     const auto bytes = ui::detail::ShaderInstanceAccess::binding_bytes(instance);
     constexpr std::size_t kExpectedBytes =
         (1U + 2U + 3U + 4U) * sizeof(float) +
-        (1U + 2U + 3U + 4U) * sizeof(std::int32_t) +
+        (1U + 2U + 3U + 4U) * sizeof(int) +
         4U * sizeof(float);
     check(bytes.size() == kExpectedBytes, "complete binding block byte size mismatch");
 
@@ -297,8 +299,9 @@ void complete_binding_block_matches_reflected_packing() {
         offset += sizeof(float);
     };
     const auto expect_int = [&](std::int32_t expected) {
-        check(read_int(bytes, offset) == expected, "int packing mismatch");
-        offset += sizeof(std::int32_t);
+        check(read_backend_int(bytes, offset) == static_cast<int>(expected),
+              "int packing mismatch");
+        offset += sizeof(int);
     };
 
     for (float value : {10.0f, 20.0f, 21.0f, 30.0f, 31.0f, 32.0f,
@@ -312,6 +315,33 @@ void complete_binding_block_matches_reflected_packing() {
         expect_float(value);
     }
     check(offset == bytes.size(), "packing verification did not consume the full block");
+}
+
+
+void setters_do_not_recompile_source() {
+    const auto compiled = ui::ShaderProgram::compile(kAllSetterShader);
+    check(compiled.ok(), "compile-count program did not compile");
+    ui::ShaderInstance instance{compiled.program};
+
+    const std::size_t before = ui::detail::shader_compile_call_count_for_test();
+    check(instance.set_float("scalar", 0.25f) == ui::ShaderSetResult::Ok,
+          "compile-count float setter failed");
+    check(instance.set_float2("pair", {1.0f, 2.0f}) == ui::ShaderSetResult::Ok,
+          "compile-count float2 setter failed");
+    check(instance.set_int("integer", std::numeric_limits<std::int32_t>::min()) ==
+              ui::ShaderSetResult::Ok,
+          "compile-count int setter failed");
+    check(instance.set_int4(
+              "ivector",
+              {1, 2, 3, std::numeric_limits<std::int32_t>::max()}) ==
+              ui::ShaderSetResult::Ok,
+          "compile-count int4 setter failed");
+    check(instance.set_color("tint", {-2.0f, 0.5f, 3.0f, 1.5f}) ==
+              ui::ShaderSetResult::Ok,
+          "compile-count color setter failed");
+    const std::size_t after = ui::detail::shader_compile_call_count_for_test();
+
+    check(after == before, "uniform mutation unexpectedly recompiled SkSL source");
 }
 
 void construction_and_copy_failure_are_atomic() {
@@ -542,6 +572,7 @@ void suite() {
     compile_publication_faults();
     zero_initialization_and_exact_values();
     complete_binding_block_matches_reflected_packing();
+    setters_do_not_recompile_source();
     construction_and_copy_failure_are_atomic();
     setters_and_moves_allocate_nothing();
     setter_failure_is_non_destructive_and_instances_are_isolated();

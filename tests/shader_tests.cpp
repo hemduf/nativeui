@@ -181,6 +181,11 @@ void unsupported_profile_is_atomic() {
         half4 main(float2 p) { return half4(0.0); }
     )"));
     check_unsupported(ui::ShaderProgram::compile(R"(
+        uniform float accepted_first;
+        uniform float2x2 rejected_second;
+        half4 main(float2 p) { return half4(accepted_first); }
+    )"));
+    check_unsupported(ui::ShaderProgram::compile(R"(
         uniform float values[2];
         half4 main(float2 p) { return half4(0.0); }
     )"));

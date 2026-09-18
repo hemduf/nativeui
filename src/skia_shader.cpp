@@ -51,6 +51,9 @@ static_assert(std::is_nothrow_destructible_v<ShaderProgramData>,
               "ShaderProgramData must remain nothrow destructible");
 static_assert(sizeof(std::int32_t) == sizeof(int),
               "NativeUI ShaderInstance requires pinned SkSL int to match int32_t");
+static_assert(std::numeric_limits<int>::min() == std::numeric_limits<std::int32_t>::min() &&
+              std::numeric_limits<int>::max() == std::numeric_limits<std::int32_t>::max(),
+              "NativeUI ShaderInstance requires backend int to have the full int32_t range");
 
 namespace {
 
@@ -100,10 +103,10 @@ constexpr size_t kMaxSkSLSourceBytes =
         case ShaderUniformType::Float2: return sizeof(float) * 2U;
         case ShaderUniformType::Float3: return sizeof(float) * 3U;
         case ShaderUniformType::Float4: return sizeof(float) * 4U;
-        case ShaderUniformType::Int: return sizeof(std::int32_t);
-        case ShaderUniformType::Int2: return sizeof(std::int32_t) * 2U;
-        case ShaderUniformType::Int3: return sizeof(std::int32_t) * 3U;
-        case ShaderUniformType::Int4: return sizeof(std::int32_t) * 4U;
+        case ShaderUniformType::Int: return sizeof(int);
+        case ShaderUniformType::Int2: return sizeof(int) * 2U;
+        case ShaderUniformType::Int3: return sizeof(int) * 3U;
+        case ShaderUniformType::Int4: return sizeof(int) * 4U;
         case ShaderUniformType::Color: return sizeof(float) * 4U;
     }
     return 0;
@@ -167,7 +170,20 @@ template <std::size_t N>
            std::isfinite(color.a);
 }
 
+
+template <std::size_t N>
+[[nodiscard]] std::array<int, N> backend_ints(
+    const std::array<std::int32_t, N>& values) noexcept {
+    std::array<int, N> converted{};
+    for (std::size_t index = 0; index < N; ++index) {
+        converted[index] = static_cast<int>(values[index]);
+    }
+    return converted;
+}
+
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+
+std::size_t shader_compile_call_count_for_test_value = 0;
 
 enum class CompileFailurePoint {
     None,
@@ -272,6 +288,10 @@ private:
 
 } // namespace
 
+std::size_t shader_compile_call_count_for_test() noexcept {
+    return shader_compile_call_count_for_test_value;
+}
+
 } // namespace ui::detail
 
 namespace ui {
@@ -287,6 +307,9 @@ std::span<const ShaderUniformInfo> ShaderProgram::uniforms() const noexcept {
 }
 
 ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    ++detail::shader_compile_call_count_for_test_value;
+#endif
     if (sksl.size() > detail::kMaxSkSLSourceBytes) {
         return detail::oversized_source_result();
     }
@@ -441,11 +464,19 @@ ShaderInstance::ShaderInstance(std::shared_ptr<const ShaderProgram> program)
       bindings_(prepared_binding_size(program_), std::byte{0}) {}
 
 ShaderInstance::ShaderInstance(const ShaderInstance& other)
-    : program_(other.program_),
-      bindings_(other.bindings_) {}
+    : program_(other.program_) {
+    if (program_) {
+        bindings_ = other.bindings_;
+    }
+}
 
 ShaderInstance& ShaderInstance::operator=(const ShaderInstance& other) {
     if (this == &other) return *this;
+    if (!other.program_) {
+        program_.reset();
+        bindings_.clear();
+        return *this;
+    }
     ShaderInstance replacement{other};
     swap(replacement);
     return *this;
@@ -557,44 +588,48 @@ ShaderSetResult ShaderInstance::set_float4(
 ShaderSetResult ShaderInstance::set_int(
     std::string_view name,
     std::int32_t value) noexcept {
+    const int backend_value = static_cast<int>(value);
     return set_value(
         name,
         ShaderUniformType::Int,
-        &value,
-        sizeof(value),
+        &backend_value,
+        sizeof(backend_value),
         true);
 }
 
 ShaderSetResult ShaderInstance::set_int2(
     std::string_view name,
     std::array<std::int32_t, 2> value) noexcept {
+    const auto backend_values = detail::backend_ints(value);
     return set_value(
         name,
         ShaderUniformType::Int2,
-        value.data(),
-        sizeof(value),
+        backend_values.data(),
+        sizeof(backend_values),
         true);
 }
 
 ShaderSetResult ShaderInstance::set_int3(
     std::string_view name,
     std::array<std::int32_t, 3> value) noexcept {
+    const auto backend_values = detail::backend_ints(value);
     return set_value(
         name,
         ShaderUniformType::Int3,
-        value.data(),
-        sizeof(value),
+        backend_values.data(),
+        sizeof(backend_values),
         true);
 }
 
 ShaderSetResult ShaderInstance::set_int4(
     std::string_view name,
     std::array<std::int32_t, 4> value) noexcept {
+    const auto backend_values = detail::backend_ints(value);
     return set_value(
         name,
         ShaderUniformType::Int4,
-        value.data(),
-        sizeof(value),
+        backend_values.data(),
+        sizeof(backend_values),
         true);
 }
 
