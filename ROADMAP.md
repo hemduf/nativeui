@@ -1,6 +1,6 @@
 # NativeUI roadmap
 
-**Updated:** 2026-09-17
+**Updated:** 2026-09-18
 
 NativeUI is a reusable C++20 retained-mode UI toolkit: Pugl owns native views/events, Skia owns rendering, and NativeUI owns retained composition, layout, input/focus, widgets, styling, resources and packaging. GitHub Issues are the source of truth for exact ticket scope, status and dependencies.
 
@@ -48,6 +48,24 @@ Frozen exact head `e6d747961a2fd39760f5703748c10440f8fb0efa` delivered the final
 - feature example/self-test covers normal routing and throw -> catch -> later dynamic reconciliation.
 
 Exact-head qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 Lifecycle Stress `35156481983` passed Linux ASan+UBSan, Linux X11, macOS and Windows. T052 v0.1 Release Gate `35156481846` passed the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 performance/allocation benchmark. Self review `5228886765` and independent frozen-head review `5228890731` report zero Blocking/Important findings; the historical Blocking thread is resolved/outdated and privacy review is clean.
+
+### T175 — Done
+
+**T175 / issue #428 / PR #429 completed from frozen executable head `d5c23ae534c26b2b7400784fc4e5d37f853397c1`.**
+
+Delivered contract:
+
+- `InputType::ContextMenu` is appended without renumbering existing public input values;
+- Pugl's normalized secondary-button press (`button == 1`) maps to ContextMenu on every pinned backend, while secondary release, middle and extra buttons remain ignored;
+- context-menu delivery uses pointer hit testing and normal ancestor bubbling without moving keyboard focus;
+- any active pointer capture is cancelled first with `PointerCancel`, and context-menu handlers cannot establish replacement capture;
+- capture/interaction guards recover exactly across re-entrant routing and exceptions;
+- primary press/release, multi-click and drag behavior remains unchanged;
+- dedicated routing/fault tests, explicit Pugl button-translation vectors and the `t175_context_menu --self-test` feature example cover the shipped behavior.
+
+Exact-head normal/path qualification is green for CI `35343703682`, T050 `35343703661`, T060 `35343703732`, T064 `35343703852`, T065 `35343703617`, T072 `35343703816` and Package Contracts `35343703787`. Final T042 Lifecycle Stress `35345455301` and T052 v0.1 Release Gate `35345455659` are green. Final review reports zero remaining Blocking/Important findings.
+
+T069 must include the new `InputType::ContextMenu` public surface in the v1 API audit/freeze.
 
 ### T073 — Done (post-1.0 rendering foundation)
 
@@ -152,6 +170,7 @@ state/safety:
 
 pre-freeze public additions:
   T173(done) -> T174(done)
+  T175(done) -----------------------------------------> T069 audit surface
 
 v1 critical path:
   T069(ready) -> T070 -> T122/docs closeout -> T071 -> v1.0.0
@@ -178,7 +197,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 2 — Input, focus and gestures
 
-**Complete for the v1 input surface.** Event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop are delivered. T173 completed public ASCII A-Z key exposure; T125 finalized exception-safe dispatch/reconciliation semantics; T174 now provides the per-UI fallback for otherwise-unhandled raw KeyDown shortcuts without changing Command/text/IME routing.
+**Complete for the v1 input surface.** Event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop are delivered. T173 completed public ASCII A-Z key exposure; T125 finalized exception-safe dispatch/reconciliation semantics; T174 provides the per-UI fallback for otherwise-unhandled raw KeyDown shortcuts; T175 adds first-class right-button ContextMenu delivery with capture-safe routing.
 
 ### Milestone 3 — Rendering and graphics
 
@@ -198,7 +217,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 7 — Platform and embedded robustness
 
-**Complete for the current v1 platform surface.** T043 resize/scale, T044 pointer capture, T053 macOS Objective-C runtime identity, T060 Application ownership, T064 DesktopServices, T065 Dispatcher, T066 window controls and T072 Linux D-Bus are delivered. T125/T126/T128/T130/T132 close the relevant failure boundaries.
+**Complete for the current v1 platform surface.** T043 resize/scale, T044 pointer capture, T053 macOS Objective-C runtime identity, T060 Application ownership, T064 DesktopServices, T065 Dispatcher, T066 window controls, T072 Linux D-Bus and T175 normalized secondary-button ContextMenu delivery are delivered. T125/T126/T128/T130/T132 close the relevant failure boundaries.
 
 ### Milestone 8 — Packaging, virtualization, overlays and release convergence
 
@@ -225,6 +244,7 @@ The remaining v1 sequence is:
 - **T132 / #294:** failure-safe standalone close lifecycle-control deferral.
 - **T173 / #401:** complete public ASCII A-Z key exposure and routing coverage.
 - **T174 / #409:** per-UI fallback for unhandled raw KeyDown shortcuts on final T125 semantics.
+- **T175 / #428:** first-class ContextMenu input delivery from Pugl's normalized secondary button, with focus invariance and capture-safe exception recovery.
 
 ## Completed post-1.0 foundations
 
@@ -235,4 +255,4 @@ The remaining v1 sequence is:
 
 ## Release policy
 
-T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T073, T074, T075 and T076 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T077 remains post-1.0 work and builds on the T076 layer contract. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied, including T175's ContextMenu input surface. T073, T074, T075 and T076 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T077 remains post-1.0 work and builds on the T076 layer contract. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

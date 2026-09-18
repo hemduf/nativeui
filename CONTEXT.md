@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-17
+**Updated:** 2026-09-18
 
 ## Mission and invariants
 
@@ -61,6 +61,25 @@ Delivered contract:
 - no new scheduler, queue, native resource or mutable global/TLS state.
 
 Exact-head normal/path qualification is green for CI `35154523714`, T050 `35154524036` and T066 `35154523694`. Final T042 `35156481983` is green on Linux ASan+UBSan, Linux X11, macOS and Windows. Final T052 `35156481846` is green for release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Reviews `5228886765` and `5228890731` are 0 Blocking / 0 Important; the historical Blocking thread is resolved/outdated and privacy review is clean.
+
+### T175 is Done
+
+**T175 / #428 / PR #429 completed from frozen executable head `d5c23ae534c26b2b7400784fc4e5d37f853397c1`.** It adds first-class right-button context-menu input without disturbing existing primary-pointer semantics.
+
+Delivered contract:
+
+- `InputType::ContextMenu` is appended to preserve existing enum values;
+- pinned Pugl backends are treated through their normalized `0 = primary, 1 = secondary, 2 = middle` convention;
+- only secondary press becomes ContextMenu; secondary release, middle and extra buttons remain ignored;
+- retained routing hit-tests and bubbles without moving focus;
+- active capture is cancelled first with `PointerCancel`, and ContextMenu routing blocks replacement capture;
+- unwind/re-entrancy restores capture guards and pointer-interaction state exactly;
+- explicit Pugl translation vectors, routing/fault tests and the dedicated feature self-test cover the contract;
+- no mutable global/TLS state, scheduler or persistent platform resource was introduced.
+
+Exact-head CI `35343703682`, T050 `35343703661`, T060 `35343703732`, T064 `35343703852`, T065 `35343703617`, T072 `35343703816` and Package Contracts `35343703787` are green. Final T042 `35345455301` and T052 `35345455659` are green. Final review has zero Blocking/Important findings.
+
+T069 must now audit/freeze this new ContextMenu public input surface together with the current Painter additions already on `main`.
 
 ### T073 is Done
 
@@ -141,13 +160,13 @@ T076 is not on the v1 critical path. T077 / #160 is now Ready and extends this b
 
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075/T076 public Painter surface.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174/T175 are resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the new ContextMenu input surface and the current post-T073/T074/T075/T076 public Painter surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
 
 ```text
-T123–T132(done) + T173(done) + T174(done)
+T123–T132(done) + T173(done) + T174(done) + T175(done)
                          |
                          v
 T069(ready) -> T070 -> T122/docs -> T071 -> v1.0.0
@@ -174,6 +193,7 @@ T076(done) -> T077(ready) ------------------> NativeUI 1.1 effects
 - **T132 / #294:** standalone close lifecycle-control deferral under queue rejection/throw.
 - **T173 / #401:** complete public ASCII A-Z key exposure.
 - **T174 / #409:** per-UI unhandled raw KeyDown fallback on final T125 semantics.
+- **T175 / #428:** first-class right-button ContextMenu routing with normalized Pugl translation and capture-safe recovery.
 
 Other delivered v1 foundations include T030–T036 standard widgets, T037–T040 Theme/style/animation, T043 resize/scale, T044 pointer capture, T045 semantic accessibility architecture, T047/T048 packaging, T049 gallery, T050 inspector, T051/T052 qualification, T053 consumer-scoped macOS Objective-C runtime identity, T054/T056/T057 helpers/resources, T058 dynamic composition, T060 Application ownership, T061/T062/T063 overlay/Tooltip/Dialog, T064 DesktopServices, T065 Dispatcher, T066 window controls, T067 virtualized ListView and T072 Linux D-Bus.
 
@@ -227,7 +247,7 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T074/T075/T076 Painter surface.
+1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for T175's ContextMenu input surface and the current post-T073/T074/T075/T076 Painter surface.
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
