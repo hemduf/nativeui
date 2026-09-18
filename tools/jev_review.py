@@ -169,6 +169,42 @@ def request(
         raise ReviewError(f"invalid JSON from {url}") from exc
 
 
+def call_typesafe(payload: dict[str, Any], timeout: float) -> tuple[dict[str, Any], str]:
+    """Use the official Python SDK when available, otherwise fall back to stdlib HTTP."""
+    try:
+        from typesafe_sdk import TypeSafeClient  # type: ignore[import-not-found]
+    except ImportError:
+        key = (os.getenv("TYPESAFE_API_KEY") or "").strip()
+        if not key:
+            raise ReviewError(
+                "TYPESAFE_API_KEY is required (or install typesafe-sdk and configure it as in your working scripts)"
+            )
+        api = os.getenv("TYPESAFE_BASE_URL", API_ROOT).strip().rstrip("/") + "/v1/systemone"
+        response = request(
+            api,
+            method="POST",
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            body=payload,
+            timeout=timeout,
+        )
+        return response, "stdlib-http"
+
+    try:
+        with TypeSafeClient() as client:
+            response = client.system_one(
+                state=payload["state"],
+                questions=payload["questions"],
+                model=payload["model"],
+                timeout=timeout,
+            )
+    except Exception as exc:
+        raise ReviewError(f"TypeSafe SDK request failed: {exc}") from exc
+
+    if hasattr(response, "model_dump"):
+        return response.model_dump(mode="json"), "typesafe-sdk"
+    raise ReviewError("TypeSafe SDK returned an unsupported response object")
+
+
 def gh_headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
     h = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28"}
     token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
@@ -374,17 +410,7 @@ def main() -> int:
             })
             return 0
 
-        key = os.getenv("TYPESAFE_API_KEY")
-        if not key:
-            raise ReviewError("TYPESAFE_API_KEY is required unless --dry-run is used")
-        api = os.getenv("TYPESAFE_BASE_URL", API_ROOT).rstrip("/") + "/v1/systemone"
-        response = request(
-            api,
-            method="POST",
-            headers={"Authorization": f"Bearer {key}"},
-            body=payload,
-            timeout=a.timeout,
-        )
+        response, typesafe_backend = call_typesafe(payload, a.timeout)
         result = analyze(response, a.review_at, a.high_at)
         out = {
             "schema_version": 1,
@@ -393,6 +419,7 @@ def main() -> int:
             "issue": a.issue,
             "pull_request": a.pr,
             "review_target": change.get("source"),
+            "typesafe_backend": typesafe_backend,
             "head_sha": change.get("head_sha"),
             "state_sha256": fingerprint,
             "thresholds": {"review_at": a.review_at, "high_at": a.high_at},
