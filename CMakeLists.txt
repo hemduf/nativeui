@@ -400,6 +400,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t079_shader_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t080_shader_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t080_shader_contract.cmake"
+  )
   set_tests_properties(
     nativeui_feature_example_discovery_contract
     PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
@@ -438,6 +444,10 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t079_shader_contract
     PROPERTIES LABELS "build;cmake;t079;shader" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t080_shader_contract
+    PROPERTIES LABELS "build;cmake;t080;shader" TIMEOUT 20
   )
 
   function(nativeui_add_core_test name source)
@@ -490,14 +500,16 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
 
-  # T079 allocation/fallback fault seams are compiled only into this isolated
-  # test executable. NativeUI::Core never contains the test-only entry point,
+  # T079/T080 shader allocation/fallback fault seams are compiled only into
+  # this isolated test executable. NativeUI::Core never contains the test-only
+  # entry point,
   # even when the normal test suite is enabled.
   add_executable(nativeui_shader_fault_tests
     tests/shader_fault_tests.cpp
     src/skia_shader.cpp
   )
   target_include_directories(nativeui_shader_fault_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
   target_compile_features(nativeui_shader_fault_tests PRIVATE cxx_std_20)

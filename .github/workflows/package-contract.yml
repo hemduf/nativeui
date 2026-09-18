@@ -22,6 +22,8 @@ on:
       - 'tests/shader_tests.cpp'
       - 'tests/shader_fault_tests.cpp'
       - 'tests/t079_shader_contract.cmake'
+      - 'tests/t080_shader_contract.cmake'
+      - 'examples/features/t080_shader_uniforms.cpp'
       - 'src/detail/**'
       - 'tests/t047_*'
       - 'tests/t047_*/**'
@@ -61,6 +63,8 @@ on:
       - 'tests/shader_tests.cpp'
       - 'tests/shader_fault_tests.cpp'
       - 'tests/t079_shader_contract.cmake'
+      - 'tests/t080_shader_contract.cmake'
+      - 'examples/features/t080_shader_uniforms.cpp'
       - 'src/detail/**'
       - 'tests/t047_*'
       - 'tests/t047_*/**'
@@ -125,6 +129,9 @@ jobs:
 
       - name: T056 binary-data contract
         run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t056_binary_data_contract_tests.cmake
+
+      - name: T080 shader public contract
+        run: cmake -DSOURCE_DIR=${{ github.workspace }} -P tests/t080_shader_contract.cmake
 
   package:
     name: Package — ${{ matrix.name }}
