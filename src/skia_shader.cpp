@@ -101,51 +101,6 @@ private:
 
 } // namespace
 
-struct ShaderProgramCompiler {
-    [[nodiscard]] static ShaderCompileResult compile(std::string_view sksl,
-                                                     int injected_failure = 0) {
-        const auto failure = decode_failure_point(injected_failure);
-        auto backend = SkRuntimeEffect::MakeForShader(SkString{sksl});
-
-        if (!backend.effect) {
-            if (failure == CompileFailurePoint::BeforeDiagnosticOwnership) {
-                throw std::bad_alloc{};
-            }
-            if (failure == CompileFailurePoint::EmptyBackendDiagnostic) {
-                backend.errorText.reset();
-            }
-
-            std::vector<ShaderDiagnostic> diagnostics;
-            diagnostics.reserve(1);
-            diagnostics.push_back(compiler_diagnostic(backend.errorText));
-            return ShaderCompileResult{nullptr, std::move(diagnostics)};
-        }
-
-        auto mutable_data = std::allocate_shared<ShaderProgramData>(
-            PublicationAllocator<ShaderProgramData>{
-                failure == CompileFailurePoint::ProgramDataAllocation},
-            std::move(backend.effect));
-        std::shared_ptr<const ShaderProgramData> data = std::move(mutable_data);
-
-        auto candidate =
-            std::unique_ptr<ShaderProgram>{new ShaderProgram{std::move(data)}};
-        auto program = publish_program(
-            std::move(candidate),
-            failure == CompileFailurePoint::ProgramPublicationAllocation);
-        return ShaderCompileResult{std::move(program), {}};
-    }
-};
-
-#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
-// Test-only private seam. It carries failure selection as an argument so the
-// implementation needs no mutable global/thread-local injection state and is
-// absent from normal release builds.
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure) {
-    return ShaderProgramCompiler::compile(sksl, injected_failure);
-}
-#endif
-
 } // namespace ui::detail
 
 namespace ui {
@@ -157,7 +112,54 @@ ShaderProgram::ShaderProgram(
 ShaderProgram::~ShaderProgram() noexcept = default;
 
 ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
-    return detail::ShaderProgramCompiler::compile(sksl);
+    return compile_impl(sksl, 0);
+}
+
+ShaderCompileResult ShaderProgram::compile_impl(std::string_view sksl,
+                                                int injected_failure) {
+    const auto failure = detail::decode_failure_point(injected_failure);
+    auto backend = SkRuntimeEffect::MakeForShader(SkString{sksl});
+
+    if (!backend.effect) {
+        if (failure == detail::CompileFailurePoint::BeforeDiagnosticOwnership) {
+            throw std::bad_alloc{};
+        }
+        if (failure == detail::CompileFailurePoint::EmptyBackendDiagnostic) {
+            backend.errorText.reset();
+        }
+
+        std::vector<ShaderDiagnostic> diagnostics;
+        diagnostics.reserve(1);
+        diagnostics.push_back(detail::compiler_diagnostic(backend.errorText));
+        return ShaderCompileResult{nullptr, std::move(diagnostics)};
+    }
+
+    auto mutable_data = std::allocate_shared<detail::ShaderProgramData>(
+        detail::PublicationAllocator<detail::ShaderProgramData>{
+            failure == detail::CompileFailurePoint::ProgramDataAllocation},
+        std::move(backend.effect));
+    std::shared_ptr<const detail::ShaderProgramData> data = std::move(mutable_data);
+
+    auto candidate =
+        std::unique_ptr<ShaderProgram>{new ShaderProgram{std::move(data)}};
+    auto program = detail::publish_program(
+        std::move(candidate),
+        failure == detail::CompileFailurePoint::ProgramPublicationAllocation);
+    return ShaderCompileResult{std::move(program), {}};
 }
 
 } // namespace ui
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+namespace ui::detail {
+
+// Test-only private seam. It carries failure selection as an argument so the
+// implementation needs no mutable global/thread-local injection state and is
+// absent from normal release builds.
+ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
+                                                    int injected_failure) {
+    return ShaderProgram::compile_impl(sksl, injected_failure);
+}
+
+} // namespace ui::detail
+#endif
