@@ -154,7 +154,7 @@ T077 remains outside the v1 critical path. **T078 / #161 is now Ready** and exte
 
 ### Active pre-freeze work
 
-- **T069 / #81 / PR #269 — Ready, P0:** final NativeUI v1 public API audit/freeze. All T123–T132 hard safety prerequisites are Done and T174's public input addition is resolved before the freeze. The audit must account for the current `main` public surface after the merged T073, T074, T075 and T076 rendering foundations.
+- **T069 / #81 — Deprecated:** retired as a standalone v1 freeze gate; current `main` public/package contracts and exact-head qualification are authoritative. It is not a dependency or merge gate for T079 or subsequent 1.1 shader work.
 - **T068 / #80 / PR #241 — deferred to 1.2:** native accessibility bridges remain outside the v1 critical path.
 
 ## Current dependency frontier
@@ -175,7 +175,7 @@ pre-freeze public additions:
   T173(done) -> T174(done)
 
 v1 critical path:
-  T069(ready) -> T070 -> T122/docs closeout -> T071 -> v1.0.0
+  T070 -> T122/docs closeout -> T071 -> v1.0.0
   T049(done) -----------------------------------------> T071
   T044(done) -----------------------------------------> T071
 
@@ -227,10 +227,9 @@ post-1.0 / later-release work already landed:
 
 The remaining v1 sequence is:
 
-1. resume T069 / #81 / PR #269 and complete the full public-surface audit/freeze against current `main`, including the merged T073/T074/T075/T076/T077 Painter surface;
-2. validate T070 reference application/Getting Started against the frozen surface;
-3. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
-4. run T071 validation/release-only on one exact RC SHA.
+1. validate T070 reference application/Getting Started against the current public/package surface;
+2. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
+3. run T071 validation/release-only on one exact RC SHA.
 
 ## Completed safety and pre-freeze closeouts
 
@@ -254,7 +253,8 @@ The remaining v1 sequence is:
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with one logical `StateGuard`, exact multi-frame restore/rollback, group opacity/blend and empty invalid-bound scopes.
 - **T077 / #160:** allocation-free backend-neutral Gaussian `Effect` values and hard-bounded filtered layers with conservative Skia-derived output support, exact rollback and native GPU qualification.
+- **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation with immutable sharing, deterministic diagnostics, strong failure publication guarantees, pinned-Skia source-size safety, isolated fault seams and installed-package shader linkage validation. Merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`.
 
 ## Release policy
 
-T069 freezes only the backend-neutral v1 public API after every hard dependency and planned pre-freeze public addition is Done. That condition is now satisfied. T073, T074, T075, T076 and T077 are merged as later-release rendering foundations and remain outside the v1 critical path; T069 must explicitly account for the current `main` surface when deciding the frozen v1 API. T078 is the next Ready post-1.0 effects ticket and builds on T077 plus retained visual-outset correctness. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077 and T079 are merged as later-release rendering foundations outside the v1 critical path. T078 is the next Ready post-1.0 effects ticket and builds on T077 plus retained visual-outset correctness. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

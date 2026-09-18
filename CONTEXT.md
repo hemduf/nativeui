@@ -161,7 +161,7 @@ Exact-head CI #1893, Package Contracts #310, T050 #187 and T072 #381 are green. 
 
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075/T076/T077 public Painter surface.
+- **T069 / #81 — Deprecated.** It is no longer a scheduler/merge gate. Current `main` public/package contracts and exact-head qualification are authoritative.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -170,7 +170,7 @@ Current path:
 T123–T132(done) + T173(done) + T174(done)
                          |
                          v
-T069(ready) -> T070 -> T122/docs -> T071 -> v1.0.0
+T070 -> T122/docs -> T071 -> v1.0.0
 T068 ---------------------------------------> 1.2
 
 post-1.0 / later-release line already landed on main:
@@ -204,6 +204,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with exact multi-frame `StateGuard` restore/rollback and deterministic group opacity/blend semantics.
 - **T077 / #160:** bounded Gaussian Effect layers through the same StateGuard/PaintOptions model with conservative backend-derived output support and exact failure recovery.
+- **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`; immutable/const backend ownership, deterministic diagnostics, failure-atomic publication, pinned-m149 source-size guard, no implicit paint-time compilation and installed-package shader smoke on Linux/Windows/macOS.
 
 ## Validation policy
 
@@ -248,9 +249,9 @@ Recovery sequence:
 
 ## Next actions
 
-1. Resume **T069 / #81 / PR #269** on current `main` and complete the v1 public API inventory, breaking cleanup and freeze, explicitly accounting for the current post-T073/T074/T075/T076 Painter surface.
-2. Execute T070 reference application/Getting Started against that frozen surface.
-3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
-4. Run T071 on one exact release-candidate SHA.
-5. T078 / #161 is Ready for the NativeUI 1.1 effects line after higher-priority v1 work.
+1. Execute T070 reference application/Getting Started against the current validated public/package surface.
+2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
+3. Run T071 on one exact release-candidate SHA.
+4. T078 / #161 remains Ready for the NativeUI 1.1 effects line.
+5. T080 / #164 is now Ready after T079 completion and adds typed SkSL uniform reflection/binding.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
