@@ -1,6 +1,9 @@
 #include "example_support.hpp"
 
+#include <exception>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -72,6 +75,56 @@ const char* self_test() {
     return nullptr;
 }
 
+int platform_smoke() {
+    const char* stage = "application";
+    try {
+        ui::Application application;
+        if (!application.valid()) {
+            return example::fail(application.last_error().empty()
+                                     ? "T077 platform application is invalid"
+                                     : application.last_error());
+        }
+
+        stage = "standalone";
+        auto standalone_ui = std::make_unique<ui::UI>(BlurDemo{});
+        ui::StandaloneWindow standalone{
+            application,
+            *standalone_ui,
+            ui::WindowDesc{
+                .title = "NativeUI T077 platform smoke",
+                .size = {460.0f, 240.0f},
+                .resizable = true}};
+        if (!standalone.valid() || !standalone.native_handle()) {
+            return example::fail(standalone.last_error().empty()
+                                     ? "T077 standalone window is invalid"
+                                     : standalone.last_error());
+        }
+
+        stage = "embedded";
+        auto embedded_ui = std::make_unique<ui::UI>(BlurDemo{});
+        ui::EmbeddedView embedded{
+            *embedded_ui, standalone.native_handle(), {420.0f, 180.0f}};
+        if (!embedded.native_handle()) {
+            return example::fail(embedded.last_error().empty()
+                                     ? "T077 embedded view is invalid"
+                                     : embedded.last_error());
+        }
+
+        // Pump both real native renderers long enough to force the T077 effect
+        // through Skia Ganesh/OpenGL in standalone and embedded contexts.
+        stage = "native-paint";
+        for (int i = 0; i < 12; ++i) {
+            (void)application.poll(0.0);
+            (void)embedded.poll();
+        }
+        if (!standalone.last_error().empty()) return example::fail(standalone.last_error());
+        if (!embedded.last_error().empty()) return example::fail(embedded.last_error());
+        return 0;
+    } catch (const std::exception& error) {
+        return example::fail(std::string{"T077 platform smoke "} + stage + ": " + error.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -82,6 +135,9 @@ int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) {
         if (const char* error = self_test()) return example::fail(error);
         return 0;
+    }
+    if (argc == 2 && std::string_view{argv[1]} == "--platform-smoke") {
+        return platform_smoke();
     }
 
     auto tree = make_ui();
