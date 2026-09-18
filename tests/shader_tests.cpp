@@ -15,6 +15,11 @@ ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
 
 namespace {
 
+constexpr int kFailBeforeDiagnosticOwnership = 1;
+constexpr int kFailBeforeProgramData = 2;
+constexpr int kFailProgramPublicationAllocation = 3;
+constexpr int kForceEmptyBackendDiagnostic = 4;
+
 constexpr std::string_view kValidShader = R"(
     half4 main(float2 p) {
         return half4(0.25, 0.5, 0.75, 1.0);
@@ -138,9 +143,20 @@ void expect_injected_bad_alloc(std::string_view source, int failure_point) {
 
 void deterministic_failure_injection_has_strong_recovery() {
     expect_injected_bad_alloc(
-        "half4 main(float2 p) { return missing_symbol; }", 1);
-    expect_injected_bad_alloc(kValidShader, 2);
-    expect_injected_bad_alloc(kValidShader, 3);
+        "half4 main(float2 p) { return missing_symbol; }",
+        kFailBeforeDiagnosticOwnership);
+    expect_injected_bad_alloc(kValidShader, kFailBeforeProgramData);
+    expect_injected_bad_alloc(kValidShader, kFailProgramPublicationAllocation);
+}
+
+void empty_backend_diagnostic_uses_nativeui_fallback() {
+    const auto result = ui::detail::compile_shader_program_for_test(
+        "half4 main(float2 p) { return missing_symbol; }",
+        kForceEmptyBackendDiagnostic);
+    check_compile_failure(result);
+    NUI_CHECK(result.diagnostics.size() == 1U);
+    NUI_CHECK(result.diagnostics.front().message ==
+              "SkSL runtime-shader compilation failed");
 }
 
 void repeated_failed_compile_remains_usable() {
@@ -159,6 +175,7 @@ void suite() {
     caller_source_lifetime_is_independent();
     immutable_program_can_be_retained_by_two_uis();
     deterministic_failure_injection_has_strong_recovery();
+    empty_backend_diagnostic_uses_nativeui_fallback();
     repeated_failed_compile_remains_usable();
 }
 

@@ -24,14 +24,16 @@ enum class CompileFailurePoint : int {
     None = 0,
     BeforeDiagnosticOwnership = 1,
     BeforeProgramData = 2,
-    BeforeProgramPublication = 3,
+    ProgramPublicationAllocation = 3,
+    EmptyBackendDiagnostic = 4,
 };
 
 [[nodiscard]] CompileFailurePoint decode_failure_point(int value) noexcept {
     switch (value) {
         case 1: return CompileFailurePoint::BeforeDiagnosticOwnership;
         case 2: return CompileFailurePoint::BeforeProgramData;
-        case 3: return CompileFailurePoint::BeforeProgramPublication;
+        case 3: return CompileFailurePoint::ProgramPublicationAllocation;
+        case 4: return CompileFailurePoint::EmptyBackendDiagnostic;
         default: return CompileFailurePoint::None;
     }
 }
@@ -49,6 +51,54 @@ enum class CompileFailurePoint : int {
     };
 }
 
+template <class T>
+class PublicationAllocator {
+public:
+    using value_type = T;
+
+    explicit PublicationAllocator(bool fail_allocation = false) noexcept
+        : fail_allocation_(fail_allocation) {}
+
+    template <class U>
+    PublicationAllocator(const PublicationAllocator<U>& other) noexcept
+        : fail_allocation_(other.fail_allocation_) {}
+
+    [[nodiscard]] T* allocate(std::size_t count) {
+        if (fail_allocation_) throw std::bad_alloc{};
+        return std::allocator<T>{}.allocate(count);
+    }
+
+    void deallocate(T* pointer, std::size_t count) noexcept {
+        std::allocator<T>{}.deallocate(pointer, count);
+    }
+
+    template <class U>
+    [[nodiscard]] bool operator==(const PublicationAllocator<U>& other) const noexcept {
+        return fail_allocation_ == other.fail_allocation_;
+    }
+
+private:
+    template <class>
+    friend class PublicationAllocator;
+
+    bool fail_allocation_{};
+};
+
+[[nodiscard]] std::shared_ptr<const ShaderProgram> publish_program(
+    std::unique_ptr<ShaderProgram> candidate,
+    bool fail_control_block_allocation) {
+    auto* raw = candidate.release();
+
+    // shared_ptr(Y*, D, A) is required to invoke D(raw) if control-block
+    // allocation throws, so this exercises the real publication allocation
+    // while preserving the strong no-partial-publication guarantee.
+    return std::shared_ptr<const ShaderProgram>{
+        raw,
+        std::default_delete<ShaderProgram>{},
+        PublicationAllocator<ShaderProgram>{fail_control_block_allocation},
+    };
+}
+
 } // namespace
 
 struct ShaderProgramCompiler {
@@ -60,6 +110,9 @@ struct ShaderProgramCompiler {
         if (!backend.effect) {
             if (failure == CompileFailurePoint::BeforeDiagnosticOwnership) {
                 throw std::bad_alloc{};
+            }
+            if (failure == CompileFailurePoint::EmptyBackendDiagnostic) {
+                backend.errorText.reset();
             }
 
             std::vector<ShaderDiagnostic> diagnostics;
@@ -78,22 +131,22 @@ struct ShaderProgramCompiler {
 
         auto candidate =
             std::unique_ptr<ShaderProgram>{new ShaderProgram{std::move(data)}};
-
-        if (failure == CompileFailurePoint::BeforeProgramPublication) {
-            throw std::bad_alloc{};
-        }
-
-        std::shared_ptr<const ShaderProgram> program{std::move(candidate)};
+        auto program = publish_program(
+            std::move(candidate),
+            failure == CompileFailurePoint::ProgramPublicationAllocation);
         return ShaderCompileResult{std::move(program), {}};
     }
 };
 
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
 // Test-only private seam. It carries failure selection as an argument so the
-// implementation needs no mutable global/thread-local injection state.
+// implementation needs no mutable global/thread-local injection state and is
+// absent from normal release builds.
 ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
                                                     int injected_failure) {
     return ShaderProgramCompiler::compile(sksl, injected_failure);
 }
+#endif
 
 } // namespace ui::detail
 
