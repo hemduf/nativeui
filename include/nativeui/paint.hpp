@@ -17,14 +17,17 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkRRect.h"
 #include "include/core/SkTypes.h"
+#include "include/core/SkTileMode.h"
 #include "include/core/SkTypeface.h"
 #include "include/effects/SkGradient.h"
+#include "include/effects/SkImageFilters.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <exception>
+#include <limits>
 #include <new>
 #include <string>
 #include <string_view>
@@ -36,6 +39,7 @@ namespace ui {
 namespace detail {
 
 struct PainterLayerFaultAccess;
+struct PainterEffectFaultAccess;
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -75,9 +79,14 @@ class Painter {
         None,
         AfterHardClip,
         AfterSaveLayer,
+        BeforeEffectMaterialization,
+        AfterEffectOutputClip,
+        AfterEffectSaveLayer,
+        AfterEffectSourceClip,
     };
 
     friend struct detail::PainterLayerFaultAccess;
+    friend struct detail::PainterEffectFaultAccess;
 
 public:
     class StateGuard {
@@ -217,6 +226,70 @@ public:
                 canvas_.saveLayer(layer_bounds, &layer_paint);
             ++save_depth_;
             maybe_fail_layer(LayerFaultPoint::AfterSaveLayer);
+
+            frame.guard_depth = save_depth_;
+            restore_floor_ = frame.guard_depth;
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+    }
+
+    [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
+                                          const Effect& effect,
+                                          PaintOptions options = {}) {
+        // Preserve T076's exact invalid/no-op behavior and avoid even creating
+        // a backend image filter when there is nothing to evaluate.
+        if (!valid_clip_rect(logical_bounds)) {
+            return scoped_layer(logical_bounds, options);
+        }
+        if (effect.kind_ != Effect::Kind::GaussianBlur ||
+            (effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f)) {
+            return scoped_layer(logical_bounds, options);
+        }
+
+        const SkRect source_bounds = to_sk_rect(logical_bounds);
+        SkRect output_bounds;
+        if (!effect_output_bounds(logical_bounds, effect, output_bounds) ||
+            !mapped_effect_bounds_are_bounded(output_bounds)) {
+            // A transform or expansion that cannot be represented safely must
+            // fail closed. Reuse T076's balanced empty clip-only scope.
+            return scoped_layer(Rect{}, options);
+        }
+
+        // All fallible backend preparation happens before any private Painter
+        // frame is entered or restore floor is published.
+        maybe_fail_layer(LayerFaultPoint::BeforeEffectMaterialization);
+        auto image_filter = SkImageFilters::Blur(
+            effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+        if (!image_filter) {
+            throw std::bad_alloc{};
+        }
+
+        SkPaint layer_paint;
+        apply_paint_options(layer_paint, options);
+        layer_paint.setImageFilter(std::move(image_filter));
+
+        // Filtered topology differs deliberately from T076:
+        //   outer output-support clip -> saveLayer(filter) -> source clip.
+        // The source clip is inside saveLayer so restoring the filtered layer
+        // removes it before compositing the halo back under the output clip.
+        ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
+        try {
+            canvas_.save();
+            ++save_depth_;
+            canvas_.clipRect(output_bounds, SkClipOp::kIntersect, false);
+            maybe_fail_layer(LayerFaultPoint::AfterEffectOutputClip);
+
+            [[maybe_unused]] const int previous_save_count =
+                canvas_.saveLayer(output_bounds, &layer_paint);
+            ++save_depth_;
+            maybe_fail_layer(LayerFaultPoint::AfterEffectSaveLayer);
+
+            canvas_.clipRect(source_bounds, SkClipOp::kIntersect, false);
+            maybe_fail_layer(LayerFaultPoint::AfterEffectSourceClip);
 
             frame.guard_depth = save_depth_;
             restore_floor_ = frame.guard_depth;
@@ -416,6 +489,57 @@ private:
 
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
+    }
+
+    [[nodiscard]] static bool effect_output_bounds(Rect source,
+                                                   const Effect& effect,
+                                                   SkRect& output) noexcept {
+        const double support_x = 3.0 * static_cast<double>(effect.sigma_x_);
+        const double support_y = 3.0 * static_cast<double>(effect.sigma_y_);
+        const double left = static_cast<double>(source.x) - support_x;
+        const double top = static_cast<double>(source.y) - support_y;
+        const double right =
+            static_cast<double>(source.x) + static_cast<double>(source.w) + support_x;
+        const double bottom =
+            static_cast<double>(source.y) + static_cast<double>(source.h) + support_y;
+
+        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
+        if (!std::isfinite(left) || !std::isfinite(top) ||
+            !std::isfinite(right) || !std::isfinite(bottom) ||
+            left < -max_float || top < -max_float ||
+            right > max_float || bottom > max_float ||
+            !(left < right) || !(top < bottom)) {
+            return false;
+        }
+
+        output = SkRect::MakeLTRB(static_cast<float>(left),
+                                  static_cast<float>(top),
+                                  static_cast<float>(right),
+                                  static_cast<float>(bottom));
+        return output.isFinite() && !output.isEmpty();
+    }
+
+    [[nodiscard]] bool mapped_effect_bounds_are_bounded(const SkRect& local_bounds) const noexcept {
+        const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
+        if (!matrix.isFinite() || matrix.hasPerspective()) return false;
+
+        const SkRect device_bounds = matrix.mapRect(local_bounds);
+        if (!device_bounds.isFinite() || device_bounds.isEmpty()) return false;
+
+        // saveLayer ultimately allocates in integer device coordinates. Reject
+        // geometry that cannot be conservatively rounded outward into that
+        // domain instead of allowing overflow to become a small/unbounded layer.
+        const double left = std::floor(static_cast<double>(device_bounds.left()));
+        const double top = std::floor(static_cast<double>(device_bounds.top()));
+        const double right = std::ceil(static_cast<double>(device_bounds.right()));
+        const double bottom = std::ceil(static_cast<double>(device_bounds.bottom()));
+        const double int_min = static_cast<double>(std::numeric_limits<int>::min());
+        const double int_max = static_cast<double>(std::numeric_limits<int>::max());
+        return std::isfinite(left) && std::isfinite(top) &&
+               std::isfinite(right) && std::isfinite(bottom) &&
+               left >= int_min && top >= int_min &&
+               right <= int_max && bottom <= int_max &&
+               left < right && top < bottom;
     }
 
     [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
