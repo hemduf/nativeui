@@ -63,12 +63,6 @@ struct PainterEffectFaultAccess {
         painter.layer_fault_point_ = Painter::LayerFaultPoint::None;
     }
 
-    static bool local_output_bounds(Rect source,
-                                    const Effect& effect,
-                                    SkRect& output) noexcept {
-        return Painter::effect_output_bounds(source, effect, output);
-    }
-
     static bool device_output_bounds(Painter& painter,
                                      Rect source,
                                      const Effect& effect,
@@ -183,6 +177,7 @@ void no_op_and_invalid_do_not_materialize() {
     auto* canvas = surface->getCanvas();
     ui::Painter painter{*canvas};
     const int baseline = canvas->getSaveCount();
+    const auto blur = ui::Effect::gaussian_blur(2.0f, 2.0f);
 
     ui::detail::PainterEffectFaultAccess::fail_before_materialization(painter);
     {
@@ -196,8 +191,7 @@ void no_op_and_invalid_do_not_materialize() {
     // The seam is still armed, proving the no-op path did not reach materialization.
     bool threw = false;
     try {
-        auto layer = painter.scoped_layer(
-            {8.0f, 8.0f, 24.0f, 24.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        auto layer = painter.scoped_layer({8.0f, 8.0f, 24.0f, 24.0f}, blur);
         (void)layer;
     } catch (const std::bad_alloc&) {
         threw = true;
@@ -206,14 +200,43 @@ void no_op_and_invalid_do_not_materialize() {
     NUI_CHECK(painter.save_depth() == 0);
     NUI_CHECK(canvas->getSaveCount() == baseline);
 
-    ui::detail::PainterEffectFaultAccess::fail_before_materialization(painter);
-    {
-        auto empty = painter.scoped_layer(
-            {8.0f, 8.0f, 0.0f, 24.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
-        NUI_CHECK(painter.save_depth() == 1);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const ui::Rect invalid_bounds[] = {
+        {8.0f, 8.0f, 0.0f, 24.0f},
+        {8.0f, 8.0f, -1.0f, 24.0f},
+        {nan, 8.0f, 24.0f, 24.0f},
+        {8.0f, 8.0f, inf, 24.0f},
+    };
+
+    for (const auto bounds : invalid_bounds) {
+        ui::detail::PainterEffectFaultAccess::fail_before_materialization(painter);
+        {
+            auto empty = painter.scoped_layer(bounds, blur);
+            NUI_CHECK(painter.save_depth() == 1);
+        }
+        NUI_CHECK(painter.save_depth() == 0);
+        NUI_CHECK(canvas->getSaveCount() == baseline);
+
+        bool seam_still_armed = false;
+        try {
+            auto layer = painter.scoped_layer({8.0f, 8.0f, 24.0f, 24.0f}, blur);
+            (void)layer;
+        } catch (const std::bad_alloc&) {
+            seam_still_armed = true;
+        }
+        NUI_CHECK(seam_still_armed);
+        NUI_CHECK(painter.save_depth() == 0);
+        NUI_CHECK(canvas->getSaveCount() == baseline);
+
+        {
+            auto recovered = painter.scoped_layer({8.0f, 8.0f, 24.0f, 24.0f}, blur);
+            painter.fill_rounded_rect(
+                {12.0f, 12.0f, 4.0f, 4.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+        }
+        NUI_CHECK(painter.save_depth() == 0);
+        NUI_CHECK(canvas->getSaveCount() == baseline);
     }
-    NUI_CHECK(painter.save_depth() == 0);
-    ui::detail::PainterEffectFaultAccess::clear(painter);
 }
 
 void zero_blur_is_pixel_equivalent() {
@@ -282,6 +305,17 @@ void asymmetric_blur_contract() {
     const auto horizontal_outside = pixel(pixels, 27, 32);
     NUI_CHECK(vertical_halo.r > 4);
     NUI_CHECK(horizontal_outside.r < 4);
+
+    const auto x_only = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {28.0f, 28.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(3.0f, 0.0f));
+        painter.fill_rounded_rect({28.0f, 28.0f, 8.0f, 8.0f}, 0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    });
+    NUI_CHECK(pixel(x_only, 26, 32).r > 4);
+    NUI_CHECK(pixel(x_only, 32, 27).r < 4);
 }
 
 void parent_clip_remains_authoritative() {
@@ -383,14 +417,17 @@ void inner_transform_does_not_redefine_effect_space() {
 
 void device_support_rounding_contract() {
     {
-        SkRect local_output;
-        const bool valid = ui::detail::PainterEffectFaultAccess::local_output_bounds(
+        auto precision_surface = make_surface();
+        NUI_CHECK(precision_surface && precision_surface->getCanvas());
+        ui::Painter precision{*precision_surface->getCanvas()};
+        SkIRect precision_output;
+        NUI_CHECK(ui::detail::PainterEffectFaultAccess::device_output_bounds(
+            precision,
             {8388608.0f, 0.0f, 1.0f, 1.0f},
             ui::Effect::gaussian_blur(0.5f, 0.5f),
-            local_output);
-        NUI_CHECK(valid);
-        NUI_CHECK(static_cast<double>(local_output.left()) <= 8388606.5);
-        NUI_CHECK(static_cast<double>(local_output.right()) >= 8388610.5);
+            precision_output));
+        NUI_CHECK(precision_output.left() == 8388606);
+        NUI_CHECK(precision_output.right() == 8388611);
     }
 
     auto surface = make_surface();
@@ -409,6 +446,20 @@ void device_support_rounding_contract() {
     NUI_CHECK(device_output.top() == 37);
     NUI_CHECK(device_output.right() == 25);
     NUI_CHECK(device_output.bottom() == 52);
+
+    auto max_surface = make_surface();
+    NUI_CHECK(max_surface && max_surface->getCanvas());
+    ui::Painter max_sigma{*max_surface->getCanvas()};
+    SkIRect max_output;
+    NUI_CHECK(ui::detail::PainterEffectFaultAccess::device_output_bounds(
+        max_sigma,
+        {10.0f, 20.0f, 4.0f, 4.0f},
+        ui::Effect::gaussian_blur(64.0f, 64.0f),
+        max_output));
+    NUI_CHECK(max_output.left() == -182);
+    NUI_CHECK(max_output.top() == -172);
+    NUI_CHECK(max_output.right() == 206);
+    NUI_CHECK(max_output.bottom() == 216);
 
     auto rotated_surface = make_surface();
     NUI_CHECK(rotated_surface && rotated_surface->getCanvas());
@@ -444,13 +495,15 @@ std::vector<std::uint8_t> raw_skia_affine_blur_reference() {
                      SkClipOp::kIntersect,
                      false);
 
-    SkPaint source_paint;
-    source_paint.setAntiAlias(true);
-    source_paint.setColor(SK_ColorWHITE);
-    canvas->drawRoundRect(SkRect::MakeXYWH(0.0f, 0.0f, 8.0f, 8.0f),
-                          0.0f,
-                          0.0f,
-                          source_paint);
+    SkPaint red_paint;
+    red_paint.setAntiAlias(true);
+    red_paint.setColor(SK_ColorRED);
+    canvas->drawRect(SkRect::MakeXYWH(0.0f, 0.0f, 6.0f, 8.0f), red_paint);
+
+    SkPaint blue_paint;
+    blue_paint.setAntiAlias(true);
+    blue_paint.setColor(SK_ColorBLUE);
+    canvas->drawRect(SkRect::MakeXYWH(2.0f, 0.0f, 6.0f, 8.0f), blue_paint);
     canvas->restore();
     canvas->restore();
 
@@ -467,6 +520,72 @@ std::vector<std::uint8_t> raw_skia_affine_blur_reference() {
     return pixels;
 }
 
+std::vector<std::uint8_t> raw_skia_fractional_scale_reference() {
+    auto surface = make_surface();
+    NUI_CHECK(surface && surface->getCanvas());
+    auto* canvas = surface->getCanvas();
+    canvas->clear(SK_ColorBLACK);
+    canvas->save();
+    canvas->scale(1.5f, 1.5f);
+
+    SkPaint layer_paint;
+    layer_paint.setImageFilter(
+        SkImageFilters::Blur(0.5f, 0.5f, SkTileMode::kDecal, nullptr));
+    canvas->saveLayer(nullptr, &layer_paint);
+    canvas->clipRect(SkRect::MakeXYWH(10.25f, 10.25f, 4.0f, 4.0f),
+                     SkClipOp::kIntersect,
+                     false);
+
+    SkPaint source_paint;
+    source_paint.setAntiAlias(true);
+    source_paint.setColor(SK_ColorWHITE);
+    canvas->drawRect(SkRect::MakeXYWH(10.25f, 10.25f, 4.0f, 4.0f),
+                     source_paint);
+    canvas->restore();
+    canvas->restore();
+
+    SkPixmap pixmap;
+    NUI_CHECK(surface->peekPixels(&pixmap) && pixmap.addr());
+    std::vector<std::uint8_t> pixels(64U * 64U * 4U);
+    constexpr std::size_t row_bytes = 64U * 4U;
+    const auto* source = static_cast<const std::uint8_t*>(pixmap.addr());
+    for (int y = 0; y < 64; ++y) {
+        std::memcpy(pixels.data() + static_cast<std::size_t>(y) * row_bytes,
+                    source + static_cast<std::size_t>(y) * pixmap.rowBytes(),
+                    row_bytes);
+    }
+    return pixels;
+}
+
+void fractional_scale_blur_matches_unhinted_skia_oracle() {
+    const auto nativeui_pixels = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f},
+                                  0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto state = painter.scoped_state();
+        painter.scale(1.5f, 1.5f);
+        auto layer = painter.scoped_layer(
+            {10.25f, 10.25f, 4.0f, 4.0f},
+            ui::Effect::gaussian_blur(0.5f, 0.5f));
+        painter.fill_rounded_rect({10.25f, 10.25f, 4.0f, 4.0f},
+                                  0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    });
+    const auto reference = raw_skia_fractional_scale_reference();
+
+    for (int y = 10; y < 30; ++y) {
+        for (int x = 10; x < 30; ++x) {
+            const auto offset = static_cast<std::size_t>((y * 64 + x) * 4);
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                const int delta = std::abs(
+                    static_cast<int>(nativeui_pixels[offset + channel]) -
+                    static_cast<int>(reference[offset + channel]));
+                NUI_CHECK(delta <= 1);
+            }
+        }
+    }
+}
+
 void affine_blur_matches_unclipped_skia_oracle() {
     const auto nativeui_pixels = render([](ui::Painter& painter) {
         painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f},
@@ -478,9 +597,12 @@ void affine_blur_matches_unclipped_skia_oracle() {
         auto layer = painter.scoped_layer(
             {0.0f, 0.0f, 8.0f, 8.0f},
             ui::Effect::gaussian_blur(0.5f, 0.5f));
-        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f},
+        painter.fill_rounded_rect({0.0f, 0.0f, 6.0f, 8.0f},
                                   0.0f,
-                                  {1.0f, 1.0f, 1.0f, 1.0f});
+                                  {1.0f, 0.0f, 0.0f, 1.0f});
+        painter.fill_rounded_rect({2.0f, 0.0f, 6.0f, 8.0f},
+                                  0.0f,
+                                  {0.0f, 0.0f, 1.0f, 1.0f});
     });
     const auto reference = raw_skia_affine_blur_reference();
 
@@ -584,12 +706,30 @@ void fault_and_stack_recovery_contract() {
         NUI_CHECK(threw);
         NUI_CHECK(painter.save_depth() == 0);
         NUI_CHECK(canvas->getSaveCount() == baseline);
+
+        {
+            auto recovered = painter.scoped_layer(
+                {12.0f, 12.0f, 24.0f, 24.0f}, blur);
+            painter.fill_rounded_rect(
+                {16.0f, 16.0f, 4.0f, 4.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+        }
+        NUI_CHECK(painter.save_depth() == 0);
+        NUI_CHECK(canvas->getSaveCount() == baseline);
     };
 
     expect_failure(ui::detail::PainterEffectFaultAccess::fail_before_materialization);
     expect_failure(ui::detail::PainterEffectFaultAccess::fail_after_output_clip);
     expect_failure(ui::detail::PainterEffectFaultAccess::fail_after_save_layer);
     expect_failure(ui::detail::PainterEffectFaultAccess::fail_after_source_clip);
+
+    const auto early_return = [&]() -> bool {
+        auto layer = painter.scoped_layer({12.0f, 12.0f, 24.0f, 24.0f}, blur);
+        return painter.save_depth() == 2 &&
+               canvas->getSaveCount() == baseline + 2;
+    };
+    NUI_CHECK(early_return());
+    NUI_CHECK(painter.save_depth() == 0);
+    NUI_CHECK(canvas->getSaveCount() == baseline);
 
     {
         auto layer = painter.scoped_layer({12.0f, 12.0f, 24.0f, 24.0f}, blur);
@@ -670,44 +810,87 @@ void affine_transform_and_overflow_contract() {
     auto* nonfinite_canvas = nonfinite_surface->getCanvas();
     const int nonfinite_baseline = nonfinite_canvas->getSaveCount();
     ui::Painter nonfinite{*nonfinite_canvas};
-    nonfinite.scale(std::numeric_limits<float>::infinity(), 1.0f);
-    ui::detail::PainterEffectFaultAccess::fail_before_materialization(nonfinite);
     {
-        auto empty = nonfinite.scoped_layer(
-            {0.0f, 0.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        auto state = nonfinite.scoped_state();
+        nonfinite.scale(std::numeric_limits<float>::infinity(), 1.0f);
+        ui::detail::PainterEffectFaultAccess::fail_before_materialization(nonfinite);
+        {
+            auto empty = nonfinite.scoped_layer(
+                {0.0f, 0.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+            NUI_CHECK(nonfinite.save_depth() == 2);
+        }
         NUI_CHECK(nonfinite.save_depth() == 1);
+        ui::detail::PainterEffectFaultAccess::clear(nonfinite);
     }
     NUI_CHECK(nonfinite.save_depth() == 0);
     NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
-    ui::detail::PainterEffectFaultAccess::clear(nonfinite);
+    {
+        auto recovered = nonfinite.scoped_layer(
+            {4.0f, 4.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        nonfinite.fill_rounded_rect(
+            {6.0f, 6.0f, 2.0f, 2.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
+    }
+    NUI_CHECK(nonfinite.save_depth() == 0);
+    NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
 }
 
 void independent_painters_do_not_share_effect_state() {
-    auto surface_a = make_surface();
     auto surface_b = make_surface();
-    NUI_CHECK(surface_a && surface_a->getCanvas());
     NUI_CHECK(surface_b && surface_b->getCanvas());
-    ui::Painter a{*surface_a->getCanvas()};
-    ui::Painter b{*surface_b->getCanvas()};
+    auto* canvas_b = surface_b->getCanvas();
+    const int baseline_b = canvas_b->getSaveCount();
+    ui::Painter painter_b{*canvas_b};
+    const auto blur_b = ui::Effect::gaussian_blur(1.0f, 3.0f);
 
-    ui::detail::PainterEffectFaultAccess::fail_before_materialization(a);
     {
-        auto layer_b = b.scoped_layer(
-            {8.0f, 8.0f, 24.0f, 24.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
-        NUI_CHECK(b.save_depth() == 2);
-    }
-    NUI_CHECK(b.save_depth() == 0);
+        auto layer_b = painter_b.scoped_layer(
+            {8.0f, 8.0f, 32.0f, 32.0f}, blur_b);
+        NUI_CHECK(painter_b.save_depth() == 2);
 
-    bool a_threw = false;
-    try {
-        auto layer_a = a.scoped_layer(
-            {8.0f, 8.0f, 24.0f, 24.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
-        (void)layer_a;
-    } catch (const std::bad_alloc&) {
-        a_threw = true;
+        {
+            auto surface_a = make_surface();
+            NUI_CHECK(surface_a && surface_a->getCanvas());
+            ui::Painter painter_a{*surface_a->getCanvas()};
+            const auto blur_a = ui::Effect::gaussian_blur(4.0f, 1.0f);
+
+            {
+                auto layer_a = painter_a.scoped_layer(
+                    {4.0f, 4.0f, 24.0f, 24.0f}, blur_a);
+                painter_a.fill_rounded_rect(
+                    {8.0f, 8.0f, 8.0f, 8.0f}, 0.0f, {1.0f, 0.0f, 0.0f, 1.0f});
+            }
+            NUI_CHECK(painter_a.save_depth() == 0);
+
+            ui::detail::PainterEffectFaultAccess::fail_before_materialization(painter_a);
+            bool a_threw = false;
+            try {
+                auto failed = painter_a.scoped_layer(
+                    {4.0f, 4.0f, 24.0f, 24.0f}, blur_a);
+                (void)failed;
+            } catch (const std::bad_alloc&) {
+                a_threw = true;
+            }
+            NUI_CHECK(a_threw);
+            NUI_CHECK(painter_a.save_depth() == 0);
+        } // Painter A and its surface are destroyed while B's blur layer is active.
+
+        NUI_CHECK(painter_b.save_depth() == 2);
+        NUI_CHECK(canvas_b->getSaveCount() == baseline_b + 2);
+        painter_b.fill_rounded_rect(
+            {12.0f, 12.0f, 8.0f, 8.0f}, 0.0f, {0.0f, 1.0f, 0.0f, 1.0f});
     }
-    NUI_CHECK(a_threw);
-    NUI_CHECK(a.save_depth() == 0);
+
+    NUI_CHECK(painter_b.save_depth() == 0);
+    NUI_CHECK(canvas_b->getSaveCount() == baseline_b);
+
+    {
+        auto later_b = painter_b.scoped_layer(
+            {8.0f, 8.0f, 24.0f, 24.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        painter_b.fill_rounded_rect(
+            {12.0f, 12.0f, 4.0f, 4.0f}, 0.0f, {0.0f, 0.0f, 1.0f, 1.0f});
+    }
+    NUI_CHECK(painter_b.save_depth() == 0);
+    NUI_CHECK(canvas_b->getSaveCount() == baseline_b);
 }
 
 void suite() {
@@ -721,6 +904,7 @@ void suite() {
     blend_applies_to_filtered_group();
     inner_transform_does_not_redefine_effect_space();
     device_support_rounding_contract();
+    fractional_scale_blur_matches_unhinted_skia_oracle();
     affine_blur_matches_unclipped_skia_oracle();
     hidpi_blur_scales_in_logical_space();
     nested_filtered_scopes_preserve_lifo();
