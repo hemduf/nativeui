@@ -122,7 +122,7 @@ private:
 namespace ui {
 
 ShaderProgram::ShaderProgram(
-    std::shared_ptr<const detail::ShaderProgramData> data) noexcept
+    std::unique_ptr<const detail::ShaderProgramData> data) noexcept
     : data_(std::move(data)) {}
 
 ShaderProgram::~ShaderProgram() noexcept = default;
@@ -159,15 +159,12 @@ ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
     }
 
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
-    auto mutable_data = std::allocate_shared<detail::ShaderProgramData>(
-        detail::FaultAllocator<detail::ShaderProgramData>{
-            failure == detail::CompileFailurePoint::ProgramDataAllocation},
-        std::move(backend.effect));
-#else
-    auto mutable_data =
-        std::make_shared<detail::ShaderProgramData>(std::move(backend.effect));
+    if (failure == detail::CompileFailurePoint::ProgramDataAllocation) {
+        throw std::bad_alloc{};
+    }
 #endif
-    std::shared_ptr<const detail::ShaderProgramData> data = std::move(mutable_data);
+    std::unique_ptr<const detail::ShaderProgramData> data =
+        std::make_unique<detail::ShaderProgramData>(std::move(backend.effect));
 
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
     if (failure == detail::CompileFailurePoint::BeforeProgramWrapperAllocation) {
