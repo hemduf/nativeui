@@ -15,6 +15,13 @@ class DirtyRegion {
 public:
     static constexpr std::size_t kMaxRects = 8;
 
+    DirtyRegion() {
+        // add() may temporarily append a ninth fragment before collapsing to
+        // the bounded union. Reserve once so retained publication never needs
+        // to allocate after component state has already changed.
+        rects_.reserve(kMaxRects + 1);
+    }
+
     [[nodiscard]] bool empty() const noexcept { return rects_.empty(); }
     [[nodiscard]] const std::vector<Rect>& rects() const noexcept { return rects_; }
 
@@ -22,7 +29,7 @@ public:
 
     /// Add a rectangle clipped to `clip`. Returns the (possibly merged) region
     /// that newly needs exposure, or nullopt when it was already fully covered.
-    [[nodiscard]] std::optional<Rect> add(Rect rect, Rect clip) {
+    [[nodiscard]] std::optional<Rect> add(Rect rect, Rect clip) noexcept {
         rect = intersect(rect, clip);
         if (rect.empty()) return std::nullopt;
 

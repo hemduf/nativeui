@@ -107,26 +107,14 @@
 
     struct LayoutPublicationCheckpoint {
         Size viewport{};
-        DirtyRegion paint_dirty{};
         LayoutTransactionJournal journal;
 
         LayoutPublicationCheckpoint(Tree& owner, Size next_viewport)
             : viewport(owner.viewport_),
-              paint_dirty(std::move(owner.paint_dirty_)),
               journal(owner.layout_transaction_overflow_) {
-            try {
-                owner.begin_layout_geometry_transaction(journal);
-            } catch (...) {
-                owner.paint_dirty_ = std::move(paint_dirty);
-                throw;
-            }
+            owner.begin_layout_geometry_transaction(journal);
             owner.active_layout_publication_ = this;
             owner.viewport_ = next_viewport;
-            // paint_dirty_ is moved-from here. Layout callbacks may accumulate a
-            // fresh region; commit restores the old storage before clearing it so
-            // successful publication reuses capacity rather than allocating a
-            // checkpoint copy on every fresh Tree layout.
-            owner.paint_dirty_.clear();
         }
 
         LayoutPublicationCheckpoint(const LayoutPublicationCheckpoint&) = delete;
@@ -136,8 +124,6 @@
     };
 
     [[nodiscard]] LayoutPublicationCheckpoint begin_layout_publication(Size viewport) {
-        // C++17 guaranteed copy elision constructs the checkpoint directly in
-        // the caller, keeping the active journal pointer stable without a heap.
         return LayoutPublicationCheckpoint{*this, viewport};
     }
 
@@ -145,18 +131,13 @@
         rollback_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
         viewport_ = checkpoint.viewport;
-        paint_dirty_ = std::move(checkpoint.paint_dirty);
+        (void)retain_dirty(viewport_rect());
     }
 
     void commit_layout_publication() {
-        // Reclaim the pre-transaction DirtyRegion storage before publishing the
-        // fresh full-viewport invalidation. This preserves successful semantics
-        // while avoiding a fourth fresh-Tree allocation in T052 multi_instance.
-        auto* checkpoint = active_layout_publication_;
         commit_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
-        if (checkpoint) paint_dirty_ = std::move(checkpoint->paint_dirty);
-        paint_dirty_.clear();
+        if (root_) publish_visual_bounds(*root_);
         invalidate_paint(viewport_rect());
     }
 
@@ -175,6 +156,7 @@
             throw;
         }
         commit_layout_geometry_transaction();
+        publish_visual_bounds(node);
     }
 
     void ensure_layout() {
