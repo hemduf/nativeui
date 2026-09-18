@@ -574,83 +574,153 @@ private:
         const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
         if (!matrix.isFinite() || matrix.hasPerspective()) return false;
 
-        const double m00 = static_cast<double>(matrix.getScaleX());
-        const double m01 = static_cast<double>(matrix.getSkewX());
-        const double m02 = static_cast<double>(matrix.getTranslateX());
-        const double m10 = static_cast<double>(matrix.getSkewY());
-        const double m11 = static_cast<double>(matrix.getScaleY());
-        const double m12 = static_cast<double>(matrix.getTranslateY());
+        auto map_rect_out = [](const SkMatrix& transform,
+                               double left,
+                               double top,
+                               double right,
+                               double bottom,
+                               double& out_left,
+                               double& out_top,
+                               double& out_right,
+                               double& out_bottom) noexcept {
+            const double m00 = static_cast<double>(transform.getScaleX());
+            const double m01 = static_cast<double>(transform.getSkewX());
+            const double m02 = static_cast<double>(transform.getTranslateX());
+            const double m10 = static_cast<double>(transform.getSkewY());
+            const double m11 = static_cast<double>(transform.getScaleY());
+            const double m12 = static_cast<double>(transform.getTranslateY());
 
-        double min_x = std::numeric_limits<double>::infinity();
-        double min_y = std::numeric_limits<double>::infinity();
-        double max_x = -std::numeric_limits<double>::infinity();
-        double max_y = -std::numeric_limits<double>::infinity();
-
-        const double xs[2] = {
-            static_cast<double>(source.x),
-            static_cast<double>(source.x) + static_cast<double>(source.w),
+            double min_x = std::numeric_limits<double>::infinity();
+            double min_y = std::numeric_limits<double>::infinity();
+            double max_x = -std::numeric_limits<double>::infinity();
+            double max_y = -std::numeric_limits<double>::infinity();
+            const double xs[2] = {left, right};
+            const double ys[2] = {top, bottom};
+            for (double x : xs) {
+                for (double y : ys) {
+                    const double mapped_x = m00 * x + m01 * y + m02;
+                    const double mapped_y = m10 * x + m11 * y + m12;
+                    if (!std::isfinite(mapped_x) || !std::isfinite(mapped_y)) return false;
+                    min_x = (std::min)(min_x, mapped_x);
+                    min_y = (std::min)(min_y, mapped_y);
+                    max_x = (std::max)(max_x, mapped_x);
+                    max_y = (std::max)(max_y, mapped_y);
+                }
+            }
+            out_left = std::floor(min_x);
+            out_top = std::floor(min_y);
+            out_right = std::ceil(max_x);
+            out_bottom = std::ceil(max_y);
+            return std::isfinite(out_left) && std::isfinite(out_top) &&
+                   std::isfinite(out_right) && std::isfinite(out_bottom) &&
+                   out_left < out_right && out_top < out_bottom;
         };
-        const double ys[2] = {
-            static_cast<double>(source.y),
-            static_cast<double>(source.y) + static_cast<double>(source.h),
-        };
 
-        for (double x : xs) {
-            for (double y : ys) {
-                const double mapped_x = m00 * x + m01 * y + m02;
-                const double mapped_y = m10 * x + m11 * y + m12;
-                if (!std::isfinite(mapped_x) || !std::isfinite(mapped_y)) return false;
-                min_x = (std::min)(min_x, mapped_x);
-                min_y = (std::min)(min_y, mapped_y);
-                max_x = (std::max)(max_x, mapped_x);
-                max_y = (std::max)(max_y, mapped_y);
+        double device_left{};
+        double device_top{};
+        double device_right{};
+        double device_bottom{};
+
+        if (matrix.isScaleTranslate()) {
+            // Skia keeps scale+translate entirely in image-filter layer space.
+            // Round source coverage there first, then apply the integer kernel
+            // radius produced by ceil(3 * mapped sigma).
+            if (!map_rect_out(matrix,
+                              static_cast<double>(source.x),
+                              static_cast<double>(source.y),
+                              static_cast<double>(source.x) + static_cast<double>(source.w),
+                              static_cast<double>(source.y) + static_cast<double>(source.h),
+                              device_left,
+                              device_top,
+                              device_right,
+                              device_bottom)) {
+                return false;
+            }
+
+            const double sigma_x = std::abs(
+                static_cast<double>(matrix.getScaleX()) *
+                static_cast<double>(effect.sigma_x_));
+            const double sigma_y = std::abs(
+                static_cast<double>(matrix.getScaleY()) *
+                static_cast<double>(effect.sigma_y_));
+            if (!std::isfinite(sigma_x) || !std::isfinite(sigma_y)) return false;
+            const double radius_x = std::ceil(3.0 * sigma_x);
+            const double radius_y = std::ceil(3.0 * sigma_y);
+            device_left -= radius_x;
+            device_top -= radius_y;
+            device_right += radius_x;
+            device_bottom += radius_y;
+        } else {
+            // Blur supports scale+translate in its layer space. For affine CTMs
+            // Skia factors out positive axis scales, evaluates/rounds the blur
+            // in that scale-only layer, then maps the expanded integer layer
+            // through the remaining affine transform.
+            SkSize layer_scale;
+            SkMatrix layer_to_device;
+            if (!matrix.decomposeScale(&layer_scale, &layer_to_device) ||
+                !layer_to_device.isFinite()) {
+                return false;
+            }
+
+            const double sx = static_cast<double>(layer_scale.width());
+            const double sy = static_cast<double>(layer_scale.height());
+            if (!std::isfinite(sx) || !std::isfinite(sy) || !(sx > 0.0) || !(sy > 0.0)) {
+                return false;
+            }
+
+            double layer_left = std::floor(static_cast<double>(source.x) * sx);
+            double layer_top = std::floor(static_cast<double>(source.y) * sy);
+            double layer_right = std::ceil(
+                (static_cast<double>(source.x) + static_cast<double>(source.w)) * sx);
+            double layer_bottom = std::ceil(
+                (static_cast<double>(source.y) + static_cast<double>(source.h)) * sy);
+            if (!std::isfinite(layer_left) || !std::isfinite(layer_top) ||
+                !std::isfinite(layer_right) || !std::isfinite(layer_bottom) ||
+                !(layer_left < layer_right) || !(layer_top < layer_bottom)) {
+                return false;
+            }
+
+            const double radius_x =
+                std::ceil(3.0 * sx * static_cast<double>(effect.sigma_x_));
+            const double radius_y =
+                std::ceil(3.0 * sy * static_cast<double>(effect.sigma_y_));
+            if (!std::isfinite(radius_x) || !std::isfinite(radius_y)) return false;
+            layer_left -= radius_x;
+            layer_top -= radius_y;
+            layer_right += radius_x;
+            layer_bottom += radius_y;
+
+            if (!map_rect_out(layer_to_device,
+                              layer_left,
+                              layer_top,
+                              layer_right,
+                              layer_bottom,
+                              device_left,
+                              device_top,
+                              device_right,
+                              device_bottom)) {
+                return false;
             }
         }
-
-        // Mirror the pinned Skia blur bound contract: content is first rounded
-        // out to layer/device pixels, then the kernel outsets each axis by
-        // ceil(3 * mappedSigma). For general affine matrices Skia maps a Size
-        // by the lengths of the transformed local X/Y basis vectors.
-        double mapped_sigma_x{};
-        double mapped_sigma_y{};
-        if (matrix.isScaleTranslate()) {
-            mapped_sigma_x =
-                std::abs(m00 * static_cast<double>(effect.sigma_x_));
-            mapped_sigma_y =
-                std::abs(m11 * static_cast<double>(effect.sigma_y_));
-        } else {
-            mapped_sigma_x = std::hypot(
-                m00 * static_cast<double>(effect.sigma_x_),
-                m10 * static_cast<double>(effect.sigma_x_));
-            mapped_sigma_y = std::hypot(
-                m01 * static_cast<double>(effect.sigma_y_),
-                m11 * static_cast<double>(effect.sigma_y_));
-        }
-        if (!std::isfinite(mapped_sigma_x) || !std::isfinite(mapped_sigma_y)) return false;
-
-        const double radius_x = std::ceil(3.0 * mapped_sigma_x);
-        const double radius_y = std::ceil(3.0 * mapped_sigma_y);
-        const double left = std::floor(min_x) - radius_x;
-        const double top = std::floor(min_y) - radius_y;
-        const double right = std::ceil(max_x) + radius_x;
-        const double bottom = std::ceil(max_y) + radius_y;
 
         // SkCanvas::clipIRect ultimately converts the integer rect to SkScalar
         // (float). Restrict device coordinates to the exact-integer range of
         // binary32 so this conversion cannot round an outward edge inward.
         constexpr double max_exact_float_integer = 16777216.0; // 2^24
-        if (!std::isfinite(left) || !std::isfinite(top) ||
-            !std::isfinite(right) || !std::isfinite(bottom) ||
-            left < -max_exact_float_integer || top < -max_exact_float_integer ||
-            right > max_exact_float_integer || bottom > max_exact_float_integer ||
-            !(left < right) || !(top < bottom)) {
+        if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
+            !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
+            device_left < -max_exact_float_integer ||
+            device_top < -max_exact_float_integer ||
+            device_right > max_exact_float_integer ||
+            device_bottom > max_exact_float_integer ||
+            !(device_left < device_right) || !(device_top < device_bottom)) {
             return false;
         }
 
-        device_output = SkIRect::MakeLTRB(static_cast<int>(left),
-                                          static_cast<int>(top),
-                                          static_cast<int>(right),
-                                          static_cast<int>(bottom));
+        device_output = SkIRect::MakeLTRB(static_cast<int>(device_left),
+                                          static_cast<int>(device_top),
+                                          static_cast<int>(device_right),
+                                          static_cast<int>(device_bottom));
         return !device_output.isEmpty();
     }
 
