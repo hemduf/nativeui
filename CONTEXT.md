@@ -174,7 +174,21 @@ Delivered contract:
 
 Exact-head CI #1893, Package Contracts #310, T050 #187 and T072 #381 are green. Final T042 #840 and T052 #564 are green, including lifecycle stress, clean platform bootstraps and exact-head T051 benchmark. Review record `5726825909` reports zero Blocking/Important findings.
 
-**T078 / #161 is now Ready** for the NativeUI 1.1 effects line; it adds drop shadows plus retained visual-outset invalidation/culling semantics.
+**T078 / #161 / PR #431 merged as `da4ba30bcc9453029aee689b56543d4a74be6db3` from frozen executable head `23f0e0e08b94be5c82bf2896104643768a6d0e96`.**
+
+Delivered contract:
+
+- immutable allocation-free/noexcept `Effect::drop_shadow` and `Effect::drop_shadow_only` values with bounded offset/sigma/color canonicalization;
+- exact continuous `Effect::visual_outset()` for GaussianBlur and both shadow kinds, including zero-alpha and opposite-edge offset semantics;
+- T077's existing filtered `Painter::StateGuard` topology reused for DropShadow/DropShadowOnly with conservative backend filter bounds, one-shot PaintOptions, zero-alpha fast paths and affine scope-entry semantics;
+- per-node successfully published visual bounds in retained state, with paint-only old∪new invalidation and no layout/input/accessibility geometry expansion;
+- layout publication remains transactional: candidate geometry cannot publish visual bounds, rollback restores prior geometry/dirty state, and reentrant/throwing invalidation callbacks observe coherent committed state;
+- bounded `DirtyRegion` publication is allocation-free after construction and preserves its no-throw capacity invariant across copy/move/moved-from states;
+- before-first-layout, zero-sized-layout-with-outset, structural removal, multi-Tree isolation, transform/blend and backend-device-support regressions are covered.
+
+Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 are green. Final T042 Lifecycle Stress #845 is green on Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #569 is green for the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark.
+
+T094 / #178 remains blocked by its explicit T071 dependency; T078 itself is complete.
 
 ### Remaining v1 work
 
@@ -194,7 +208,7 @@ post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
-T076(done) -> T077(done) -> T078(ready) -----> NativeUI 1.1 effects
+T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
 T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
 ```
 
@@ -223,6 +237,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with exact multi-frame `StateGuard` restore/rollback and deterministic group opacity/blend semantics.
 - **T077 / #160:** bounded Gaussian Effect layers through the same StateGuard/PaintOptions model with conservative backend-derived output support and exact failure recovery.
+- **T078 / #161 / PR #431:** DropShadow/DropShadowOnly plus exact continuous `VisualOutset`, retained published visual bounds, old/new invalidation and transaction-safe layout/dirty publication; merged as `da4ba30bcc9453029aee689b56543d4a74be6db3` from `23f0e0e08b94be5c82bf2896104643768a6d0e96` after exact-head normal and final T042/T052 qualification.
 - **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`; immutable/const backend ownership, deterministic diagnostics, failure-atomic publication, pinned-m149 source-size guard, no implicit paint-time compilation and installed-package shader smoke on Linux/Windows/macOS.
 - **T080 / #164 / PR #430:** typed SkSL uniform reflection and binding completed on candidate `28025c36`: NativeUI-owned descriptor lifetime/order, supported float/int/vector/Color profile, atomic UnsupportedInterface rejection for arrays/matrices/children, exact zero-initialized per-instance bytes, backend `int` conversion, allocation-free/noexcept setters, strong copy/move/inert semantics, partial-reflection fault injection and explicit zero-recompile proof. Exact-head CI #1914, Package Contracts #330, T050 #207 and T072 #399 are green.
 
@@ -272,6 +287,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T078 / #161 remains Ready for the NativeUI 1.1 effects line.
+4. T078 / #161 is Done; T094 / #178 remains blocked on T071 before dirty-region retained traversal can start.
 5. T081 / #165 is now Ready for ShaderInstance -> Brush snapshot/materialization after T080 completion; T082 remains Blocked on T081.
 6. Keep T068/PR #241 parked for NativeUI 1.2.

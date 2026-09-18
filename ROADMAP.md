@@ -166,7 +166,7 @@ Delivered contract includes:
 
 Exact-head normal/path qualification passed CI #1893, Package Contracts #310, T050 #187 and T072 #381. Final T042 Lifecycle Stress #840 passed Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #564 passed release contract, clean Linux/macOS/Windows bootstraps and the exact-head T051 benchmark. Final review comment `5726825909` records zero remaining Blocking/Important findings.
 
-T077 remains outside the v1 critical path. **T078 / #161 is now Ready** and extends the effect value with drop shadows plus retained visual-outset invalidation/culling correctness.
+T077 and T078 remain outside the v1 critical path. **T078 / #161 / PR #431 is Done**, merged as `da4ba30bcc9453029aee689b56543d4a74be6db3` from frozen executable head `23f0e0e08b94be5c82bf2896104643768a6d0e96`. It adds immutable DropShadow/DropShadowOnly effects plus the retained published visual-outset invalidation contract consumed by later partial-rendering work. Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 passed; final T042 Lifecycle Stress #845 and T052 v0.1 Release Gate #569 also passed, including the exact-head T051 benchmark.
 
 ### Active pre-freeze work
 
@@ -200,7 +200,7 @@ post-1.0 / later-release work already landed:
   T073(done) -----------------------------------------> NativeUI 1.1 foundation
   T074(done) -----------------------------------------> NativeUI 1.1 foundation
   T075(done) -----------------------------------------> NativeUI 1.1 foundation
-  T076(done) -> T077(done) -> T078(ready) -----------> NativeUI 1.1 effects
+  T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
   T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
   T068 ----------------------------------------------> 1.2
 ```
@@ -221,7 +221,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 3 — Rendering and graphics
 
-**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension, T075's strict lexical scoped-clipping API, T076's hard-bounded scoped layer compositing and T077's bounded Gaussian Effect layer are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
+**Complete for v1.** Transforms, paths, gradients, images, SVG/resources, caches and deterministic rendering/golden tests are delivered. T130 guarantees Painter/SkCanvas unwind balance and failed-frame recovery. T073's generic Brush fill foundation, T074's Brush stroke extension, T075's strict lexical scoped-clipping API, T076's hard-bounded scoped layer compositing, T077's bounded Gaussian Effect layer and T078's drop-shadow/published-visual-outset invalidation contract are also merged on `main` for the post-1.0/1.1 rendering line without changing the v1 critical path.
 
 ### Milestone 4 — Text system
 
@@ -272,6 +272,7 @@ The remaining v1 sequence is:
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with one logical `StateGuard`, exact multi-frame restore/rollback, group opacity/blend and empty invalid-bound scopes.
 - **T077 / #160:** allocation-free backend-neutral Gaussian `Effect` values and hard-bounded filtered layers with conservative Skia-derived output support, exact rollback and native GPU qualification.
+- **T078 / #161 / PR #431:** allocation-free backend-neutral DropShadow/DropShadowOnly effects, exact continuous `VisualOutset` semantics, per-node successfully published visual bounds, old/new paint invalidation, layout rollback/reentrancy safety and bounded no-throw dirty publication; merged as `da4ba30bcc9453029aee689b56543d4a74be6db3` after CI #1916, Package #332, T050 #209, T072 #401, T042 #845 and T052 #569.
 - **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation with immutable sharing, deterministic diagnostics, strong failure publication guarantees, pinned-Skia source-size safety, isolated fault seams and installed-package shader linkage validation. Merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`.
 - **T080 / #164 / PR #430:** typed SkSL uniform reflection/binding with NativeUI-owned stable descriptors, bounded profile rejection, deterministic zero-initialized per-instance storage, exact backend `int` packing, allocation-free/noexcept setters, independent copy/move/inert semantics, partial-reflection fault recovery and zero-recompile instrumentation. Exact-head candidate `28025c36` passed CI #1914, Package Contracts #330, T050 #207 and T072 #399. T081 becomes Ready after this merge.
 
