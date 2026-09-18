@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-17
+**Updated:** 2026-09-18
 
 ## Mission and invariants
 
@@ -137,11 +137,31 @@ Delivered contract:
 
 Exact-head normal CI #1862 is green on Linux X11, Linux ARM64, Linux ASan+UBSan, Windows and macOS. Final T042 Lifecycle Stress #839 and T052 v0.1 Release Gate #563 are green on the frozen head, including clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark. Final review `5237620829` records zero Blocking/Important findings and no unresolved review threads remain.
 
-T076 is not on the v1 critical path. T077 / #160 is now Ready and extends this bounded layer foundation with Gaussian blur.
+T076 is not on the v1 critical path.
+
+### T077 is Done
+
+**T077 / #160 / PR #426 merged as `58fbe58d3d0535a321d2b81ada685cdc40d5d218` from frozen head `b310fa5f3fe6f51494e2a0b8f4e37e1269577b0f`.**
+
+Delivered contract:
+
+- small allocation-free/noexcept backend-neutral Gaussian `ui::Effect` value with exact independent per-axis sigma canonicalization;
+- effect-aware `Painter::scoped_layer(...)` reuses the existing `StateGuard` and `PaintOptions` abstractions;
+- hard source clip remains inside the filtered layer while a separate finite device-space output clip preserves the halo;
+- output support uses conservative outward source mapping plus Skia's forward image-filter bounds contract and fails closed on unrepresentable/non-finite geometry;
+- zero/zero blur is the T076 no-op path; asymmetric one-axis blur and transparent-edge sampling are supported;
+- group blur, opacity and blend each apply once to the complete composed source;
+- deterministic partial-entry failure seams recover the exact Painter/SkCanvas stack and later operations remain usable;
+- no mutable global/TLS cache/registry is introduced and independent Painter instances remain isolated;
+- direct Skia raster oracles, golden/self-test, ASan/UBSan and Linux/Windows/macOS native GPU smoke are green.
+
+Exact-head CI #1893, Package Contracts #310, T050 #187 and T072 #381 are green. Final T042 #840 and T052 #564 are green, including lifecycle stress, clean platform bootstraps and exact-head T051 benchmark. Review record `5726825909` reports zero Blocking/Important findings.
+
+**T078 / #161 is now Ready** for the NativeUI 1.1 effects line; it adds drop shadows plus retained visual-outset invalidation/culling semantics.
 
 ### Remaining v1 work
 
-- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075/T076 public Painter surface.
+- **T069 / #81 / PR #269 — Ready / P0.** All hard safety prerequisites are Done and T174 is resolved. Resume the existing canonical PR on current `main` and execute the complete public API inventory/cleanup/freeze, including the current post-T073/T074/T075/T076/T077 public Painter surface.
 - **T068 / #80 / PR #241 — deferred to NativeUI 1.2.** Native accessibility bridges do not block 1.0.
 
 Current path:
@@ -157,7 +177,7 @@ post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
-T076(done) -> T077(ready) ------------------> NativeUI 1.1 effects
+T076(done) -> T077(done) -> T078(ready) -----> NativeUI 1.1 effects
 ```
 
 ## Completed foundations relevant to v1
@@ -183,6 +203,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T074 / #157:** Brush stroke painting for rounded rectangles, Paths, lines and arcs with PaintOptions, preserved Color/style semantics and shared Painter-local sampling.
 - **T075 / #158:** strict lexical scoped clipping for Rect, rounded Rect and Path through the existing `Painter::StateGuard` stack model.
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with exact multi-frame `StateGuard` restore/rollback and deterministic group opacity/blend semantics.
+- **T077 / #160:** bounded Gaussian Effect layers through the same StateGuard/PaintOptions model with conservative backend-derived output support and exact failure recovery.
 
 ## Validation policy
 
@@ -231,4 +252,5 @@ Recovery sequence:
 2. Execute T070 reference application/Getting Started against that frozen surface.
 3. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 4. Run T071 on one exact release-candidate SHA.
-5. Keep T068/PR #241 parked for NativeUI 1.2.
+5. T078 / #161 is Ready for the NativeUI 1.1 effects line after higher-priority v1 work.
+6. Keep T068/PR #241 parked for NativeUI 1.2.
