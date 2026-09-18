@@ -3,6 +3,8 @@
 #include "include/core/SkString.h"
 #include "include/effects/SkRuntimeEffect.h"
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -19,6 +21,21 @@ struct ShaderProgramData final {
 };
 
 namespace {
+
+constexpr size_t kMaxSkSLSourceBytes =
+    static_cast<size_t>(std::numeric_limits<uint32_t>::max());
+
+[[nodiscard]] ShaderCompileResult oversized_source_result() {
+    std::vector<ShaderDiagnostic> diagnostics;
+    diagnostics.reserve(1);
+    diagnostics.push_back(ShaderDiagnostic{
+        ShaderCompileError::CompileError,
+        0,
+        0,
+        "SkSL source exceeds the backend size limit",
+    });
+    return ShaderCompileResult{nullptr, std::move(diagnostics)};
+}
 
 [[nodiscard]] ShaderDiagnostic compiler_diagnostic(const SkString& error_text) {
     std::string message{error_text.data(), error_text.size()};
@@ -43,6 +60,7 @@ enum class CompileFailurePoint {
     BeforeProgramWrapperAllocation,
     ProgramPublicationAllocation,
     EmptyBackendDiagnostic,
+    OversizedSource,
 };
 
 [[nodiscard]] CompileFailurePoint test_failure_point(std::string_view sksl) noexcept {
@@ -63,6 +81,9 @@ enum class CompileFailurePoint {
     }
     if (sksl.find("/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/") != std::string_view::npos) {
         return CompileFailurePoint::EmptyBackendDiagnostic;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_OVERSIZED_SOURCE__*/") != std::string_view::npos) {
+        return CompileFailurePoint::OversizedSource;
     }
     return CompileFailurePoint::None;
 }
@@ -128,8 +149,15 @@ ShaderProgram::ShaderProgram(
 ShaderProgram::~ShaderProgram() noexcept = default;
 
 ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
+    if (sksl.size() > detail::kMaxSkSLSourceBytes) {
+        return detail::oversized_source_result();
+    }
+
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
     const auto failure = detail::test_failure_point(sksl);
+    if (failure == detail::CompileFailurePoint::OversizedSource) {
+        return detail::oversized_source_result();
+    }
 #endif
 
     auto backend = SkRuntimeEffect::MakeForShader(SkString{sksl});

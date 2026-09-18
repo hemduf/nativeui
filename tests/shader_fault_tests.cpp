@@ -21,6 +21,8 @@ constexpr std::string_view kFailPublicationMarker =
     "/*__NATIVEUI_T079_FAIL_PUBLICATION__*/";
 constexpr std::string_view kEmptyDiagnosticMarker =
     "/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/";
+constexpr std::string_view kOversizedSourceMarker =
+    "/*__NATIVEUI_T079_OVERSIZED_SOURCE__*/";
 
 constexpr std::string_view kValidShader = R"(
     half4 main(float2 p) {
@@ -82,6 +84,14 @@ void suite() {
     check(fallback.diagnostics.front().message ==
               "SkSL runtime-shader compilation failed",
           "fallback diagnostic text mismatch");
+
+    const auto oversized = ui::ShaderProgram::compile(kOversizedSourceMarker);
+    check_compile_failure(oversized);
+    check(oversized.diagnostics.size() == 1U,
+          "oversized source diagnostic count mismatch");
+    check(oversized.diagnostics.front().message ==
+              "SkSL source exceeds the backend size limit",
+          "oversized source diagnostic text mismatch");
 }
 
 } // namespace
