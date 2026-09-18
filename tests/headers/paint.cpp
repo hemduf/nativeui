@@ -5,8 +5,12 @@
 
 using NativeUILayerResult = decltype(
     std::declval<ui::Painter&>().scoped_layer(ui::Rect{}, ui::PaintOptions{}));
+using NativeUIEffectLayerResult = decltype(
+    std::declval<ui::Painter&>().scoped_layer(
+        ui::Rect{}, ui::Effect::gaussian_blur(1.0f, 2.0f), ui::PaintOptions{}));
 
 static_assert(std::is_same_v<NativeUILayerResult, ui::Painter::StateGuard>);
+static_assert(std::is_same_v<NativeUIEffectLayerResult, ui::Painter::StateGuard>);
 static_assert(!std::is_copy_constructible_v<ui::Painter::StateGuard>);
 static_assert(!std::is_copy_assignable_v<ui::Painter::StateGuard>);
 static_assert(!std::is_move_constructible_v<ui::Painter::StateGuard>);
@@ -22,6 +26,7 @@ static_assert(requires(ui::Painter& painter,
                        ui::StrokeStyle style,
                        ui::PaintOptions options) {
     painter.scoped_layer(rect, options);
+    painter.scoped_layer(rect, ui::Effect::gaussian_blur(2.0f, 3.0f), options);
     painter.stroke_rounded_rect(rect, 2.0f, 1.0f, brush, options);
     painter.line(a, b, 1.0f, brush, options);
     painter.arc(a, 8.0f, 0.0f, 1.0f, 1.0f, brush, options);
