@@ -1,5 +1,6 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
+#include "detail/pugl_button_translation.hpp"
 #include "detail/scoped_borrow_state.hpp"
 #include "detail/window_control_state.hpp"
 

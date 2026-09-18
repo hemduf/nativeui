@@ -576,9 +576,10 @@ PUGL_DATA_*            -> clipboard / drop flow
 ```
 
 `InputType::ContextMenu` carries the same logical position and modifiers as a pointer
-press but is delivered to the pointer hit target without changing keyboard focus,
-pointer capture or pointer-interaction state; ignored requests bubble through
-ancestors like other targeted input.
+press and is delivered to the pointer hit target without moving keyboard focus. If a
+pointer capture is active, its owner first receives `PointerCancel` and the capture is
+released; context-menu routing cannot establish a replacement capture. Ignored requests
+bubble through ancestors like other targeted input.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 

@@ -22,7 +22,7 @@
     }
 
     void set_pointer_capture(Node& node) noexcept {
-        if (cancelling_pointer_capture_ || dynamic_teardown_quarantines(&node)) return;
+        if (pointer_capture_blocked_ || dynamic_teardown_quarantines(&node)) return;
         if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) return;
 
         if (pointer_capture_.node) clear_pointer_capture();
@@ -371,6 +371,23 @@
         return true;
     }
 
+    [[nodiscard]] EventResult route_without_pointer_capture(
+        Node& target, const InputEvent& event, PlatformServices& platform) {
+        // Some targeted events are explicitly not allowed to establish pointer
+        // capture. Preserve an outer guard across reentrant dispatch and restore
+        // it exactly even when application input code throws.
+        const bool previous_blocked = pointer_capture_blocked_;
+        pointer_capture_blocked_ = true;
+        try {
+            const auto result = route_from(target, event, platform);
+            pointer_capture_blocked_ = previous_blocked;
+            return result;
+        } catch (...) {
+            pointer_capture_blocked_ = previous_blocked;
+            throw;
+        }
+    }
+
     [[nodiscard]] EventResult cancel_pointer_capture(
         PlatformServices& platform, InputEvent event = InputEvent{}) {
         auto* owner = pointer_capture_owner();
@@ -379,19 +396,14 @@
         event.type = InputType::PointerCancel;
         // Keep the owner recorded while routing so release_pointer() remains
         // idempotent, but prevent a cancellation handler from re-capturing.
-        // Restore the exact prior guard value and terminate the stale capture
-        // even when application code throws. Cleanup performs no component
-        // callback, so the original exception can propagate to the C++ caller
-        // while the later input route remains usable.
-        const bool previous_cancelling = cancelling_pointer_capture_;
-        cancelling_pointer_capture_ = true;
+        // Terminate the stale capture even when application code throws.
+        // Cleanup performs no component callback, so the original exception can
+        // propagate to the C++ caller while later input remains usable.
         try {
-            const auto result = route_from(*owner, event, platform);
-            cancelling_pointer_capture_ = previous_cancelling;
+            const auto result = route_without_pointer_capture(*owner, event, platform);
             clear_pointer_capture();
             return result;
         } catch (...) {
-            cancelling_pointer_capture_ = previous_cancelling;
             clear_pointer_capture();
             throw;
         }
@@ -410,7 +422,7 @@
     Node* pointer_hover_target_{};
     detail::OverlayService* overlay_service_{};
     bool pointer_interaction_active_{};
-    bool cancelling_pointer_capture_{};
+    bool pointer_capture_blocked_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};

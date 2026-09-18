@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -9,8 +10,8 @@ namespace {
 
 // T175: the right-button/context-menu request is a targeted input event. It
 // must reach the pointer hit target with its position and modifiers, bubble
-// through ancestors like other targeted input, and leave focus, pointer
-// capture and pointer-interaction state untouched.
+// through ancestors like other targeted input, leave focus untouched, cancel
+// any stale active capture, and never establish a replacement capture.
 
 struct MenuProbeState {
     int context_events{};
@@ -22,6 +23,9 @@ struct MenuProbeState {
     bool shift{};
     bool primary{};
     bool capture_on_press{};
+    bool capture_on_context{};
+    bool throw_on_context{};
+    bool throw_on_cancel{};
     ui::EventResult result{ui::EventResult::Ignored};
 };
 
@@ -44,12 +48,17 @@ public:
             ++state_->pointer_events;
             if (state_->capture_on_press) context.capture_pointer();
         }
-        if (event.type == ui::InputType::PointerCancel) ++state_->cancel_events;
+        if (event.type == ui::InputType::PointerCancel) {
+            ++state_->cancel_events;
+            if (state_->throw_on_cancel) throw std::runtime_error{"pointer-cancel test fault"};
+        }
         if (event.type != ui::InputType::ContextMenu) return ui::EventResult::Ignored;
         ++state_->context_events;
         state_->last_position = event.position;
         state_->shift = event.shift;
         state_->primary = event.primary;
+        if (state_->capture_on_context) context.capture_pointer();
+        if (state_->throw_on_context) throw std::runtime_error{"context-menu test fault"};
         return state_->result;
     }
 
@@ -150,6 +159,7 @@ void context_menu_delivers_to_the_hit_target() {
     event.shift = true;
     event.primary = true;
     right->result = ui::EventResult::Handled;
+    right->capture_on_context = true;
     const int capture_before = platform.pointer_capture_begin_count;
 
     NUI_CHECK(tree.dispatch(event, platform) == ui::EventResult::Handled);
@@ -160,7 +170,8 @@ void context_menu_delivers_to_the_hit_target() {
     NUI_CHECK(right->shift);
     NUI_CHECK(right->primary);
 
-    // Side-effect free: no focus change, no capture, no press semantics.
+    // No focus change, no new capture (even when the handler asks for one),
+    // and no primary-press semantics.
     NUI_CHECK(left->focus_in == 1);
     NUI_CHECK(left->focus_out == 0);
     NUI_CHECK(right->focus_in == 0);
@@ -256,12 +267,93 @@ void context_menu_releases_an_active_capture() {
     NUI_CHECK(platform.pointer_capture_end_count == 0);
 
     left->result = ui::EventResult::Handled;
+    left->capture_on_context = true;
     NUI_CHECK(tree.dispatch(test::pointer(ui::InputType::ContextMenu, 60.0f, 40.0f), platform) ==
               ui::EventResult::Handled);
     NUI_CHECK(right->cancel_events == 1);
     NUI_CHECK(platform.pointer_capture_end_count == 1);
+    NUI_CHECK(platform.pointer_capture_begin_count == 1);
     NUI_CHECK(left->context_events == 1);
     NUI_CHECK(right->context_events == 0);
+
+    // The temporary no-capture guard is restored after normal delivery.
+    left->capture_on_context = false;
+    left->capture_on_press = true;
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerDown, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_begin_count == 2);
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerCancel, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_end_count == 2);
+}
+
+void context_menu_recovers_when_capture_cancel_throws() {
+    auto left = std::make_shared<MenuProbeState>();
+    auto right = std::make_shared<MenuProbeState>();
+    right->capture_on_press = true;
+    right->throw_on_cancel = true;
+    auto stage = std::make_shared<MenuStageState>();
+    ui::UI tree{MenuStage{stage, MenuProbe{left}, MenuProbe{right}}};
+    test::MockPlatform platform;
+    tree.resize({240.0f, 80.0f});
+    tree.activate(platform);
+
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerDown, 180.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_begin_count == 1);
+    NUI_CHECK(platform.pointer_capture_end_count == 0);
+
+    bool threw = false;
+    try {
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::ContextMenu, 60.0f, 40.0f), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(right->cancel_events == 1);
+    NUI_CHECK(platform.pointer_capture_end_count == 1);
+    NUI_CHECK(left->context_events == 0);
+
+    // The failed cancellation still leaves the tree in a coherent idle state:
+    // capture is gone, the no-capture guard is restored, and a fresh pointer
+    // interaction can capture/release normally.
+    right->throw_on_cancel = false;
+    left->capture_on_press = true;
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerDown, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_begin_count == 2);
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerCancel, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_end_count == 2);
+}
+
+void context_menu_capture_guard_recovers_after_throw() {
+    auto left = std::make_shared<MenuProbeState>();
+    auto right = std::make_shared<MenuProbeState>();
+    auto stage = std::make_shared<MenuStageState>();
+    ui::UI tree{MenuStage{stage, MenuProbe{left}, MenuProbe{right}}};
+    test::MockPlatform platform;
+    tree.resize({240.0f, 80.0f});
+    tree.activate(platform);
+
+    left->capture_on_context = true;
+    left->throw_on_context = true;
+    bool threw = false;
+    try {
+        (void)tree.dispatch(
+            test::pointer(ui::InputType::ContextMenu, 60.0f, 40.0f), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(platform.pointer_capture_begin_count == 0);
+    NUI_CHECK(platform.pointer_capture_end_count == 0);
+
+    // Exception recovery must restore the guard so later ordinary pointer input
+    // can capture and release normally.
+    left->capture_on_context = false;
+    left->throw_on_context = false;
+    left->capture_on_press = true;
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerDown, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_begin_count == 1);
+    (void)tree.dispatch(test::pointer(ui::InputType::PointerCancel, 60.0f, 40.0f), platform);
+    NUI_CHECK(platform.pointer_capture_end_count == 1);
 }
 
 } // namespace
@@ -272,5 +364,7 @@ int main() {
         context_menu_bubbles_and_keeps_press_behavior();
         context_menu_does_not_count_as_a_click();
         context_menu_releases_an_active_capture();
+        context_menu_recovers_when_capture_cancel_throws();
+        context_menu_capture_guard_recovers_after_throw();
     });
 }

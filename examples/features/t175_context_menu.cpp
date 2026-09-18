@@ -58,7 +58,7 @@ public:
             ui::colors::textMuted);
         painter.text(
             {bounds.x + 16.0f, bounds.y + 90.0f},
-            "Left clicks stay PointerDown; focus and capture are untouched.",
+            "Focus stays put; active capture is cancelled before menu routing.",
             11.0f,
             ui::colors::textMuted);
 

@@ -104,7 +104,8 @@ enum class InputType {
     // Appended after Quit so every pre-existing public enumerator keeps its
     // numeric value. A context-menu request (right-button press or the
     // platform's equivalent) carries the logical position and modifiers like a
-    // pointer press; routing must not change focus, capture or interaction state.
+    // pointer press. Routing does not move keyboard focus or start a new capture;
+    // an existing capture is cancelled before the request is delivered.
     ContextMenu
 };
 

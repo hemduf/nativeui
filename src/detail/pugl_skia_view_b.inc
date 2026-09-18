@@ -114,25 +114,16 @@
 
         case PUGL_BUTTON_PRESS:
         case PUGL_BUTTON_RELEASE: {
-            // Pugl normalizes the button index (0 left, 1 middle, 2 right; X11
-            // subtracts one). The middle button stays unsupported, the right
-            // button becomes a context-menu request on press only.
-            const bool right_button = event->button.button == 2;
-            if (!right_button && event->button.button != 0) return PUGL_SUCCESS;
-            if (right_button && event->type == PUGL_BUTTON_RELEASE) return PUGL_SUCCESS;
             InputEvent input{};
-            if (right_button) {
-                input.type = InputType::ContextMenu;
-            } else {
-                input.type = event->type == PUGL_BUTTON_PRESS ? InputType::PointerDown
-                                                              : InputType::PointerUp;
-            }
+            input.type = detail::translate_pugl_button(
+                event->button.button, event->type == PUGL_BUTTON_PRESS);
+            if (input.type == InputType::None) return PUGL_SUCCESS;
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->button.x), static_cast<float>(event->button.y)},
                 geometry_.last_valid_scale());
             apply_modifiers(input, event->button.state);
 
-            if (event->type == PUGL_BUTTON_PRESS && !right_button) {
+            if (input.type == InputType::PointerDown) {
                 const double now = puglGetTime(world_);
                 const float dx = input.position.x - last_click_position_.x;
                 const float dy = input.position.y - last_click_position_.y;
@@ -142,7 +133,7 @@
                 last_click_time_ = now;
                 last_click_position_ = input.position;
             }
-            input.clicks = right_button ? 1 : click_count_;
+            input.clicks = input.type == InputType::ContextMenu ? 1 : click_count_;
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }

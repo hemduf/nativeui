@@ -428,13 +428,15 @@
                 // Same targeting as a press but without keyboard focus: an
                 // active capture is cancelled so a menu request can never
                 // coexist with a stale drag, then the hit component is
-                // targeted. Ignored events bubble through ancestors like any
-                // targeted input.
+                // targeted. Context-menu handlers are not allowed to establish
+                // a replacement capture; ignored events still bubble normally.
                 if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
                 pointer_interaction_active_ = false;
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                if (target) return finish(route_from(*target, event, platform));
+                if (target) {
+                    return finish(route_without_pointer_capture(*target, event, platform));
+                }
                 return finish(EventResult::Ignored);
             }
 
@@ -499,7 +501,8 @@
             if (!pointer_route_committed &&
                 (event.type == InputType::PointerDown ||
                  event.type == InputType::PointerUp ||
-                 event.type == InputType::PointerCancel)) {
+                 event.type == InputType::PointerCancel ||
+                 event.type == InputType::ContextMenu)) {
                 clear_pointer_capture();
                 pointer_interaction_active_ = false;
             }
