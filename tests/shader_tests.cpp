@@ -8,6 +8,11 @@
 #include <string_view>
 #include <type_traits>
 
+namespace ui {
+ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
+                                                    int injected_failure);
+} // namespace ui
+
 namespace {
 
 constexpr int kFailBeforeDiagnosticOwnership = 1;
@@ -117,7 +122,7 @@ void immutable_program_can_be_retained_by_two_uis() {
 void expect_injected_bad_alloc(std::string_view source, int failure_point) {
     bool threw = false;
     try {
-        (void)ui::detail::compile_shader_program_for_test(source, failure_point);
+        (void)ui::compile_shader_program_for_test(source, failure_point);
     } catch (const std::bad_alloc&) {
         threw = true;
     }
@@ -138,7 +143,7 @@ void deterministic_failure_injection_has_strong_recovery() {
 }
 
 void empty_backend_diagnostic_uses_nativeui_fallback() {
-    const auto result = ui::detail::compile_shader_program_for_test(
+    const auto result = ui::compile_shader_program_for_test(
         "half4 main(float2 p) { return missing_symbol; }",
         kForceEmptyBackendDiagnostic);
     check_compile_failure(result);
