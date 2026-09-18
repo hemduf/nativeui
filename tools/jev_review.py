@@ -118,6 +118,17 @@ def redact(text: str) -> str:
     return text
 
 
+def redact_value(value: Any) -> Any:
+    """Redact string leaves without ever rewriting serialized JSON syntax."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, list):
+        return [redact_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_value(item) for key, item in value.items()}
+    return value
+
+
 def trim(text: str, limit: int, name: str) -> str:
     if len(text) <= limit:
         return text
@@ -339,7 +350,7 @@ def main() -> int:
             "policies": policy,
         }
         if not a.no_redact:
-            state = json.loads(redact(json.dumps(state, ensure_ascii=False)))
+            state = redact_value(state)
 
         qs = questions()
         payload = {"model": a.model, "state": state, "questions": qs}
