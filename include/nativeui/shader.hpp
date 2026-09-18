@@ -55,14 +55,8 @@ public:
 
 private:
     explicit ShaderProgram(std::shared_ptr<const detail::ShaderProgramData> data) noexcept;
-    [[nodiscard]] static ShaderCompileResult compile_impl(std::string_view sksl,
-                                                          int injected_failure);
 
     std::shared_ptr<const detail::ShaderProgramData> data_;
-
-    friend ShaderCompileResult compile_shader_program_for_test(
-        std::string_view sksl,
-        int injected_failure);
 };
 
 } // namespace ui
