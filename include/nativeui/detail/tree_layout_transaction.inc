@@ -107,25 +107,28 @@
 
     struct LayoutPublicationCheckpoint {
         Size viewport{};
-        DirtyRegion paint_dirty{};
+        Rect paint_dirty[DirtyRegion::kMaxRects]{};
+        std::size_t paint_dirty_count{};
         LayoutTransactionJournal journal;
 
         LayoutPublicationCheckpoint(Tree& owner, Size next_viewport)
             : viewport(owner.viewport_),
-              paint_dirty(std::move(owner.paint_dirty_)),
               journal(owner.layout_transaction_overflow_) {
-            try {
-                owner.begin_layout_geometry_transaction(journal);
-            } catch (...) {
-                owner.paint_dirty_ = std::move(paint_dirty);
-                throw;
+            const auto& retained_dirty = owner.paint_dirty_.rects();
+            paint_dirty_count = retained_dirty.size();
+            for (std::size_t index = 0; index < paint_dirty_count; ++index) {
+                paint_dirty[index] = retained_dirty[index];
             }
+
+            // Begin before changing viewport/dirty publication. A reentrant
+            // layout rejection therefore leaves every old public state intact.
+            owner.begin_layout_geometry_transaction(journal);
             owner.active_layout_publication_ = this;
             owner.viewport_ = next_viewport;
-            // paint_dirty_ is moved-from here. Layout callbacks may accumulate a
-            // fresh region; commit restores the old storage before clearing it so
-            // successful publication reuses capacity rather than allocating a
-            // checkpoint copy on every fresh Tree layout.
+
+            // Keep the Tree's already-reserved DirtyRegion storage in place.
+            // Layout callbacks may invalidate without allocation, while the old
+            // region lives in this fixed-size transaction checkpoint.
             owner.paint_dirty_.clear();
         }
 
@@ -136,27 +139,37 @@
     };
 
     [[nodiscard]] LayoutPublicationCheckpoint begin_layout_publication(Size viewport) {
-        // C++17 guaranteed copy elision constructs the checkpoint directly in
-        // the caller, keeping the active journal pointer stable without a heap.
         return LayoutPublicationCheckpoint{*this, viewport};
     }
 
     void rollback_layout_publication(LayoutPublicationCheckpoint&& checkpoint) noexcept {
+        // Retain any independent invalidation raised while application layout
+        // callbacks were executing. Candidate geometry itself is rolled back.
+        Rect transaction_dirty{};
+        for (const auto rect : paint_dirty_.rects()) {
+            transaction_dirty = unite(transaction_dirty, rect);
+        }
+
         rollback_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
         viewport_ = checkpoint.viewport;
-        paint_dirty_ = std::move(checkpoint.paint_dirty);
+
+        paint_dirty_.clear();
+        for (std::size_t index = 0; index < checkpoint.paint_dirty_count; ++index) {
+            (void)retain_dirty(checkpoint.paint_dirty[index]);
+        }
+        (void)retain_dirty(transaction_dirty);
     }
 
     void commit_layout_publication() {
-        // Reclaim the pre-transaction DirtyRegion storage before publishing the
-        // fresh full-viewport invalidation. This preserves successful semantics
-        // while avoiding a fourth fresh-Tree allocation in T052 multi_instance.
-        auto* checkpoint = active_layout_publication_;
         commit_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
-        if (checkpoint) paint_dirty_ = std::move(checkpoint->paint_dirty);
+
+        // Successful layout supersedes all prior geometry damage. Reuse the
+        // existing bounded storage, publish visual state, then notify one full
+        // viewport invalidation from the coherent committed state.
         paint_dirty_.clear();
+        if (root_) publish_visual_bounds(*root_);
         invalidate_paint(viewport_rect());
     }
 
@@ -175,6 +188,7 @@
             throw;
         }
         commit_layout_geometry_transaction();
+        publish_visual_bounds(node);
     }
 
     void ensure_layout() {

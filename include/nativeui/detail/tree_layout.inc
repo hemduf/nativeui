@@ -159,7 +159,7 @@
         if (layout_changed) {
             invalidate_layout_from(*root_);
         } else if (paint_changed) {
-            invalidate_paint(viewport_rect());
+            publish_all_visual_bounds_then_invalidate();
         }
     }
 
@@ -255,7 +255,7 @@
             if (layout_changed) {
                 invalidate_layout_from(*root_);
             } else if (paint_changed) {
-                invalidate_paint(viewport_rect());
+                publish_all_visual_bounds_then_invalidate();
             }
 
             if (focus_changed && active_) sync_focus_structure(platform);
@@ -299,14 +299,100 @@
         };
     }
 
+    [[nodiscard]] static float canonical_visual_outset_side(float value) noexcept {
+        if (!std::isfinite(value) || value <= 0.0f) return 0.0f;
+        return value;
+    }
+
+    [[nodiscard]] Rect current_visual_bounds(const Node& node) const noexcept {
+        if (node.component->effective_visibility() != VisibilityMode::Visible) return {};
+
+        const Rect layout = node.bounds;
+        if (!std::isfinite(layout.x) || !std::isfinite(layout.y) ||
+            !std::isfinite(layout.w) || !std::isfinite(layout.h) ||
+            layout.w < 0.0f || layout.h < 0.0f) {
+            return {};
+        }
+
+        const auto raw = node.component->visual_outset();
+        const double left_outset = canonical_visual_outset_side(raw.left);
+        const double top_outset = canonical_visual_outset_side(raw.top);
+        const double right_outset = canonical_visual_outset_side(raw.right);
+        const double bottom_outset = canonical_visual_outset_side(raw.bottom);
+
+        const Rect viewport = viewport_rect();
+        const double viewport_left = static_cast<double>(viewport.x);
+        const double viewport_top = static_cast<double>(viewport.y);
+        const double viewport_right = viewport_left + static_cast<double>(viewport.w);
+        const double viewport_bottom = viewport_top + static_cast<double>(viewport.h);
+
+        const double raw_left = static_cast<double>(layout.x) - left_outset;
+        const double raw_top = static_cast<double>(layout.y) - top_outset;
+        const double raw_right =
+            static_cast<double>(layout.x) + static_cast<double>(layout.w) + right_outset;
+        const double raw_bottom =
+            static_cast<double>(layout.y) + static_cast<double>(layout.h) + bottom_outset;
+
+        const double left = std::max(viewport_left, raw_left);
+        const double top = std::max(viewport_top, raw_top);
+        const double right = std::min(viewport_right, raw_right);
+        const double bottom = std::min(viewport_bottom, raw_bottom);
+        if (!std::isfinite(left) || !std::isfinite(top) ||
+            !std::isfinite(right) || !std::isfinite(bottom) ||
+            !(left < right) || !(top < bottom)) {
+            return {};
+        }
+
+        return {static_cast<float>(left),
+                static_cast<float>(top),
+                static_cast<float>(right - left),
+                static_cast<float>(bottom - top)};
+    }
+
+    void publish_visual_bounds(Node& node) noexcept {
+        node.published_visual_bounds = current_visual_bounds(node);
+        node.visual_bounds_published = true;
+        for (auto& child : node.children) publish_visual_bounds(*child);
+    }
+
+    [[nodiscard]] std::optional<Rect> retain_dirty(Rect rect) noexcept {
+        return paint_dirty_.add(rect, viewport_rect());
+    }
+
+    void notify_invalidation(Rect rect) {
+        if (invalidation_callback_) invalidation_callback_(rect);
+    }
+
     void invalidate_node_paint(Node& node) {
-        invalidate_paint(node.bounds.empty() ? viewport_rect() : node.bounds);
+        if (layout_transaction_active_ || !node.visual_bounds_published) {
+            // Candidate geometry is not publication authority. A state change
+            // during layout keeps a conservative repaint pending; successful
+            // layout commit will publish the new visual bounds, while rollback
+            // leaves the old publication authoritative.
+            invalidate_paint(viewport_rect());
+            return;
+        }
+
+        const Rect old_bounds = node.published_visual_bounds;
+        const Rect new_bounds = current_visual_bounds(node);
+        const Rect dirty = unite(old_bounds, new_bounds);
+        const auto exposed = retain_dirty(dirty);
+
+        node.published_visual_bounds = new_bounds;
+        node.visual_bounds_published = true;
+        if (exposed) notify_invalidation(*exposed);
     }
 
     void invalidate_paint(Rect rect) {
-        if (const auto exposed = paint_dirty_.add(rect, viewport_rect())) {
-            if (invalidation_callback_) invalidation_callback_(*exposed);
+        if (const auto exposed = retain_dirty(rect)) {
+            notify_invalidation(*exposed);
         }
+    }
+
+    void publish_all_visual_bounds_then_invalidate() {
+        const auto exposed = retain_dirty(viewport_rect());
+        if (!layout_transaction_active_ && root_) publish_visual_bounds(*root_);
+        if (exposed) notify_invalidation(*exposed);
     }
 
     void invalidate_layout_from(Node& node) {

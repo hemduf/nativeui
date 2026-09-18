@@ -514,6 +514,11 @@ public:
     /// component itself is still painted under its inherited ancestor clip.
     [[nodiscard]] virtual bool clips_children() const noexcept { return false; }
 
+    /// Conservative continuous logical extension of this component's painted
+    /// pixels beyond its retained layout bounds. It affects paint invalidation
+    /// only; layout, measurement, focus and hit testing remain unchanged.
+    [[nodiscard]] virtual VisualOutset visual_outset() const noexcept { return {}; }
+
     /// Existing intrinsic preferred-size hook. Kept source-compatible for
     /// custom components while constrained measurement is layered around it.
     [[nodiscard]] virtual Size measure(const std::vector<ChildMetrics>& children) const = 0;
@@ -606,6 +611,8 @@ struct Node {
     std::unique_ptr<Component> component;
     std::vector<std::unique_ptr<Node>> children;
     Rect bounds{};
+    Rect published_visual_bounds{};
+    bool visual_bounds_published{};
     bool layout_dirty{true};
     bool focus_scope_active_cached{};
     NodeId focus_restore{kInvalidNodeId};

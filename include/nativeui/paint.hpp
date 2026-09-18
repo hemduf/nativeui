@@ -245,9 +245,16 @@ public:
         if (!valid_clip_rect(logical_bounds)) {
             return scoped_layer(logical_bounds, options);
         }
-        if (effect.kind_ != Effect::Kind::GaussianBlur ||
-            (effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f)) {
+        if (effect.kind_ == Effect::Kind::GaussianBlur &&
+            effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f) {
             return scoped_layer(logical_bounds, options);
+        }
+        if ((effect.kind_ == Effect::Kind::DropShadow ||
+             effect.kind_ == Effect::Kind::DropShadowOnly) &&
+            effect.color_.a <= 0.0f) {
+            return effect.kind_ == Effect::Kind::DropShadow
+                ? scoped_layer(logical_bounds, options)
+                : scoped_empty_device_output();
         }
 
         const SkRect source_bounds = to_sk_rect(logical_bounds);
@@ -261,8 +268,7 @@ public:
         // All fallible backend preparation happens before any private Painter
         // frame is entered or restore floor is published.
         maybe_fail_layer(LayerFaultPoint::BeforeEffectMaterialization);
-        auto image_filter = SkImageFilters::Blur(
-            effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+        auto image_filter = materialize_effect_filter(effect);
         if (!image_filter) {
             throw std::bad_alloc{};
         }
@@ -519,6 +525,34 @@ private:
 
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
+    }
+
+    [[nodiscard]] static sk_sp<SkImageFilter> materialize_effect_filter(
+        const Effect& effect) {
+        switch (effect.kind_) {
+            case Effect::Kind::GaussianBlur:
+                return SkImageFilters::Blur(
+                    effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+            case Effect::Kind::DropShadow:
+                return SkImageFilters::DropShadow(
+                    effect.offset_.x,
+                    effect.offset_.y,
+                    effect.sigma_x_,
+                    effect.sigma_y_,
+                    to_sk_color(effect.color_),
+                    nullptr,
+                    nullptr);
+            case Effect::Kind::DropShadowOnly:
+                return SkImageFilters::DropShadowOnly(
+                    effect.offset_.x,
+                    effect.offset_.y,
+                    effect.sigma_x_,
+                    effect.sigma_y_,
+                    to_sk_color(effect.color_),
+                    nullptr,
+                    nullptr);
+        }
+        return nullptr;
     }
 
     [[nodiscard]] bool effect_source_device_bounds(
