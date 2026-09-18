@@ -1,9 +1,12 @@
 #include "test_support.hpp"
 
 #include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
+#include "include/effects/SkImageFilters.h"
 
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -417,10 +420,81 @@ void device_support_rounding_contract() {
         {0.0f, 0.0f, 8.0f, 8.0f},
         ui::Effect::gaussian_blur(0.5f, 0.5f),
         rotated_output));
-    NUI_CHECK(rotated_output.left() == -8);
-    NUI_CHECK(rotated_output.top() == -2);
-    NUI_CHECK(rotated_output.right() == 8);
-    NUI_CHECK(rotated_output.bottom() == 14);
+    NUI_CHECK(rotated_output.left() == -9);
+    NUI_CHECK(rotated_output.top() == -3);
+    NUI_CHECK(rotated_output.right() == 9);
+    NUI_CHECK(rotated_output.bottom() == 15);
+}
+
+std::vector<std::uint8_t> raw_skia_affine_blur_reference() {
+    auto surface = make_surface();
+    NUI_CHECK(surface && surface->getCanvas());
+    auto* canvas = surface->getCanvas();
+    canvas->clear(SK_ColorBLACK);
+
+    canvas->save();
+    canvas->translate(32.0f, 20.0f);
+    canvas->rotate(45.0f);
+
+    SkPaint layer_paint;
+    layer_paint.setImageFilter(
+        SkImageFilters::Blur(0.5f, 0.5f, SkTileMode::kDecal, nullptr));
+    canvas->saveLayer(nullptr, &layer_paint);
+    canvas->clipRect(SkRect::MakeXYWH(0.0f, 0.0f, 8.0f, 8.0f),
+                     SkClipOp::kIntersect,
+                     false);
+
+    SkPaint source_paint;
+    source_paint.setAntiAlias(true);
+    source_paint.setColor(SK_ColorWHITE);
+    canvas->drawRoundRect(SkRect::MakeXYWH(0.0f, 0.0f, 8.0f, 8.0f),
+                          0.0f,
+                          0.0f,
+                          source_paint);
+    canvas->restore();
+    canvas->restore();
+
+    SkPixmap pixmap;
+    NUI_CHECK(surface->peekPixels(&pixmap) && pixmap.addr());
+    std::vector<std::uint8_t> pixels(64U * 64U * 4U);
+    constexpr std::size_t row_bytes = 64U * 4U;
+    const auto* source = static_cast<const std::uint8_t*>(pixmap.addr());
+    for (int y = 0; y < 64; ++y) {
+        std::memcpy(pixels.data() + static_cast<std::size_t>(y) * row_bytes,
+                    source + static_cast<std::size_t>(y) * pixmap.rowBytes(),
+                    row_bytes);
+    }
+    return pixels;
+}
+
+void affine_blur_matches_unclipped_skia_oracle() {
+    const auto nativeui_pixels = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f},
+                                  0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto state = painter.scoped_state();
+        painter.translate(32.0f, 20.0f);
+        painter.rotate(0.78539816339f);
+        auto layer = painter.scoped_layer(
+            {0.0f, 0.0f, 8.0f, 8.0f},
+            ui::Effect::gaussian_blur(0.5f, 0.5f));
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f},
+                                  0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    });
+    const auto reference = raw_skia_affine_blur_reference();
+
+    for (int y = 12; y < 40; ++y) {
+        for (int x = 16; x < 48; ++x) {
+            const auto offset = static_cast<std::size_t>((y * 64 + x) * 4);
+            for (std::size_t channel = 0; channel < 4; ++channel) {
+                const int delta = std::abs(
+                    static_cast<int>(nativeui_pixels[offset + channel]) -
+                    static_cast<int>(reference[offset + channel]));
+                NUI_CHECK(delta <= 1);
+            }
+        }
+    }
 }
 
 void hidpi_blur_scales_in_logical_space() {
@@ -647,6 +721,7 @@ void suite() {
     blend_applies_to_filtered_group();
     inner_transform_does_not_redefine_effect_space();
     device_support_rounding_contract();
+    affine_blur_matches_unclipped_skia_oracle();
     hidpi_blur_scales_in_logical_space();
     nested_filtered_scopes_preserve_lifo();
     fault_and_stack_recovery_contract();
