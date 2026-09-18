@@ -14,7 +14,9 @@ foreach(_forbidden IN ITEMS
     "SkShader"
     "SkData"
     "SkCanvas"
-    "SkString")
+    "SkString"
+    "NATIVEUI_ENABLE_TEST_SEAMS"
+    "compile_shader_program_for_test")
   string(FIND "${_shader_public}" "${_forbidden}" _forbidden_pos)
   if(NOT _forbidden_pos EQUAL -1)
     message(FATAL_ERROR
@@ -28,11 +30,11 @@ if(_umbrella_pos EQUAL -1)
   message(FATAL_ERROR "T079: nativeui.hpp does not expose shader.hpp")
 endif()
 
-string(FIND
-  "${_root_cmake}"
-  "target_compile_definitions(nativeui_core PRIVATE NATIVEUI_ENABLE_TEST_SEAMS=1)"
-  _core_test_seam)
-if(NOT _core_test_seam EQUAL -1)
+string(REGEX MATCH
+  "target_compile_definitions[ \t\r\n]*\\([ \t\r\n]*nativeui_core[^)]*NATIVEUI_ENABLE_TEST_SEAMS"
+  _core_test_seam
+  "${_root_cmake}")
+if(NOT _core_test_seam STREQUAL "")
   message(FATAL_ERROR
     "T079: NativeUI::Core must not compile the shader fault-test seam")
 endif()
