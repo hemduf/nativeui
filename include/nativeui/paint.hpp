@@ -254,10 +254,11 @@ public:
         SkRect output_bounds;
         SkIRect device_output_bounds;
         if (!effect_output_bounds(logical_bounds, effect, output_bounds) ||
-            !effect_device_output_bounds(output_bounds, device_output_bounds)) {
+            !effect_device_output_bounds(logical_bounds, effect, device_output_bounds)) {
             // A transform or expansion that cannot be represented safely must
-            // fail closed. Reuse T076's balanced empty clip-only scope.
-            return scoped_layer(Rect{}, options);
+            // fail closed under a device-space empty clip, even if the current
+            // local transform itself contains non-finite values.
+            return scoped_empty_device_output();
         }
 
         // All fallible backend preparation happens before any private Painter
@@ -469,6 +470,20 @@ public:
     }
 
 private:
+    [[nodiscard]] StateGuard scoped_empty_device_output() {
+        const auto entry_matrix = canvas_.getLocalToDevice();
+        const ScopeFrame frame = begin_scope();
+        try {
+            canvas_.resetMatrix();
+            canvas_.clipIRect(SkIRect::MakeEmpty(), SkClipOp::kIntersect);
+            canvas_.setMatrix(entry_matrix);
+        } catch (...) {
+            rollback_scope(frame);
+            throw;
+        }
+        return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
+    }
+
     [[nodiscard]] ScopeFrame begin_scope() noexcept {
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         canvas_.save();
@@ -553,7 +568,8 @@ private:
         return output.isFinite() && !output.isEmpty();
     }
 
-    [[nodiscard]] bool effect_device_output_bounds(const SkRect& local_bounds,
+    [[nodiscard]] bool effect_device_output_bounds(Rect source,
+                                                   const Effect& effect,
                                                    SkIRect& device_output) const noexcept {
         const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
         if (!matrix.isFinite() || matrix.hasPerspective()) return false;
@@ -570,10 +586,14 @@ private:
         double max_x = -std::numeric_limits<double>::infinity();
         double max_y = -std::numeric_limits<double>::infinity();
 
-        const double xs[2] = {static_cast<double>(local_bounds.left()),
-                              static_cast<double>(local_bounds.right())};
-        const double ys[2] = {static_cast<double>(local_bounds.top()),
-                              static_cast<double>(local_bounds.bottom())};
+        const double xs[2] = {
+            static_cast<double>(source.x),
+            static_cast<double>(source.x) + static_cast<double>(source.w),
+        };
+        const double ys[2] = {
+            static_cast<double>(source.y),
+            static_cast<double>(source.y) + static_cast<double>(source.h),
+        };
 
         for (double x : xs) {
             for (double y : ys) {
@@ -587,11 +607,38 @@ private:
             }
         }
 
-        const double left = std::floor(min_x);
-        const double top = std::floor(min_y);
-        const double right = std::ceil(max_x);
-        const double bottom = std::ceil(max_y);
-        constexpr double max_exact_float_integer = 16777216.0;
+        // Mirror the pinned Skia blur bound contract: content is first rounded
+        // out to layer/device pixels, then the kernel outsets each axis by
+        // ceil(3 * mappedSigma). For general affine matrices Skia maps a Size
+        // by the lengths of the transformed local X/Y basis vectors.
+        double mapped_sigma_x{};
+        double mapped_sigma_y{};
+        if (matrix.isScaleTranslate()) {
+            mapped_sigma_x =
+                std::abs(m00 * static_cast<double>(effect.sigma_x_));
+            mapped_sigma_y =
+                std::abs(m11 * static_cast<double>(effect.sigma_y_));
+        } else {
+            mapped_sigma_x = std::hypot(
+                m00 * static_cast<double>(effect.sigma_x_),
+                m10 * static_cast<double>(effect.sigma_x_));
+            mapped_sigma_y = std::hypot(
+                m01 * static_cast<double>(effect.sigma_y_),
+                m11 * static_cast<double>(effect.sigma_y_));
+        }
+        if (!std::isfinite(mapped_sigma_x) || !std::isfinite(mapped_sigma_y)) return false;
+
+        const double radius_x = std::ceil(3.0 * mapped_sigma_x);
+        const double radius_y = std::ceil(3.0 * mapped_sigma_y);
+        const double left = std::floor(min_x) - radius_x;
+        const double top = std::floor(min_y) - radius_y;
+        const double right = std::ceil(max_x) + radius_x;
+        const double bottom = std::ceil(max_y) + radius_y;
+
+        // SkCanvas::clipIRect ultimately converts the integer rect to SkScalar
+        // (float). Restrict device coordinates to the exact-integer range of
+        // binary32 so this conversion cannot round an outward edge inward.
+        constexpr double max_exact_float_integer = 16777216.0; // 2^24
         if (!std::isfinite(left) || !std::isfinite(top) ||
             !std::isfinite(right) || !std::isfinite(bottom) ||
             left < -max_exact_float_integer || top < -max_exact_float_integer ||

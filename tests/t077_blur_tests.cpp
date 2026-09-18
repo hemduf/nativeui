@@ -70,9 +70,7 @@ struct PainterEffectFaultAccess {
                                      Rect source,
                                      const Effect& effect,
                                      SkIRect& output) noexcept {
-        SkRect local;
-        return Painter::effect_output_bounds(source, effect, local) &&
-               painter.effect_device_output_bounds(local, output);
+        return painter.effect_device_output_bounds(source, effect, output);
     }
 };
 
@@ -404,10 +402,25 @@ void device_support_rounding_contract() {
         ui::Effect::gaussian_blur(0.5f, 0.5f),
         device_output);
     NUI_CHECK(valid);
-    NUI_CHECK(device_output.left() == 13);
+    NUI_CHECK(device_output.left() == 12);
     NUI_CHECK(device_output.top() == 37);
-    NUI_CHECK(device_output.right() == 24);
+    NUI_CHECK(device_output.right() == 25);
     NUI_CHECK(device_output.bottom() == 52);
+
+    auto rotated_surface = make_surface();
+    NUI_CHECK(rotated_surface && rotated_surface->getCanvas());
+    ui::Painter rotated{*rotated_surface->getCanvas()};
+    rotated.rotate(0.78539816339f);
+    SkIRect rotated_output;
+    NUI_CHECK(ui::detail::PainterEffectFaultAccess::device_output_bounds(
+        rotated,
+        {0.0f, 0.0f, 8.0f, 8.0f},
+        ui::Effect::gaussian_blur(0.5f, 0.5f),
+        rotated_output));
+    NUI_CHECK(rotated_output.left() == -8);
+    NUI_CHECK(rotated_output.top() == -2);
+    NUI_CHECK(rotated_output.right() == 8);
+    NUI_CHECK(rotated_output.bottom() == 14);
 }
 
 void hidpi_blur_scales_in_logical_space() {
@@ -577,6 +590,22 @@ void affine_transform_and_overflow_contract() {
     }
     NUI_CHECK(huge.save_depth() == 0);
     ui::detail::PainterEffectFaultAccess::clear(huge);
+
+    auto nonfinite_surface = make_surface();
+    NUI_CHECK(nonfinite_surface && nonfinite_surface->getCanvas());
+    auto* nonfinite_canvas = nonfinite_surface->getCanvas();
+    const int nonfinite_baseline = nonfinite_canvas->getSaveCount();
+    ui::Painter nonfinite{*nonfinite_canvas};
+    nonfinite.scale(std::numeric_limits<float>::infinity(), 1.0f);
+    ui::detail::PainterEffectFaultAccess::fail_before_materialization(nonfinite);
+    {
+        auto empty = nonfinite.scoped_layer(
+            {0.0f, 0.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        NUI_CHECK(nonfinite.save_depth() == 1);
+    }
+    NUI_CHECK(nonfinite.save_depth() == 0);
+    NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
+    ui::detail::PainterEffectFaultAccess::clear(nonfinite);
 }
 
 void independent_painters_do_not_share_effect_state() {
