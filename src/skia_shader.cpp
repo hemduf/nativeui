@@ -23,7 +23,7 @@ namespace {
 enum class CompileFailurePoint : int {
     None = 0,
     BeforeDiagnosticOwnership = 1,
-    BeforeProgramData = 2,
+    ProgramDataAllocation = 2,
     ProgramPublicationAllocation = 3,
     EmptyBackendDiagnostic = 4,
 };
@@ -31,7 +31,7 @@ enum class CompileFailurePoint : int {
 [[nodiscard]] CompileFailurePoint decode_failure_point(int value) noexcept {
     switch (value) {
         case 1: return CompileFailurePoint::BeforeDiagnosticOwnership;
-        case 2: return CompileFailurePoint::BeforeProgramData;
+        case 2: return CompileFailurePoint::ProgramDataAllocation;
         case 3: return CompileFailurePoint::ProgramPublicationAllocation;
         case 4: return CompileFailurePoint::EmptyBackendDiagnostic;
         default: return CompileFailurePoint::None;
@@ -121,12 +121,10 @@ struct ShaderProgramCompiler {
             return ShaderCompileResult{nullptr, std::move(diagnostics)};
         }
 
-        if (failure == CompileFailurePoint::BeforeProgramData) {
-            throw std::bad_alloc{};
-        }
-
-        auto mutable_data =
-            std::make_shared<ShaderProgramData>(std::move(backend.effect));
+        auto mutable_data = std::allocate_shared<ShaderProgramData>(
+            PublicationAllocator<ShaderProgramData>{
+                failure == CompileFailurePoint::ProgramDataAllocation},
+            std::move(backend.effect));
         std::shared_ptr<const ShaderProgramData> data = std::move(mutable_data);
 
         auto candidate =
