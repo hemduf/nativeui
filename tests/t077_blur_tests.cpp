@@ -59,6 +59,15 @@ struct PainterEffectFaultAccess {
     static void clear(Painter& painter) noexcept {
         painter.layer_fault_point_ = Painter::LayerFaultPoint::None;
     }
+
+    static bool device_output_bounds(Painter& painter,
+                                     Rect source,
+                                     const Effect& effect,
+                                     SkRect& output) noexcept {
+        SkRect local;
+        return Painter::effect_output_bounds(source, effect, local) &&
+               painter.effect_device_output_bounds(local, output);
+    }
 };
 
 } // namespace ui::detail
@@ -155,8 +164,9 @@ void effect_value_contract() {
     auto c = b;
     c = a;
     auto d = std::move(c);
-    d = std::move(d);
-    (void)d;
+    auto e = ui::Effect::gaussian_blur(1.0f, 1.0f);
+    e = std::move(d);
+    (void)e;
     NUI_CHECK(allocation_probe::allocation_count == before);
 }
 
@@ -310,6 +320,146 @@ void opacity_applies_once_to_filtered_group() {
     NUI_CHECK(std::abs(full_halo - 2 * half_halo) <= 4);
 }
 
+
+void blend_applies_to_filtered_group() {
+    const auto source_over = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.5f, 0.5f, 0.5f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {24.0f, 24.0f, 16.0f, 16.0f}, ui::Effect::gaussian_blur(3.0f, 3.0f));
+        painter.fill_rounded_rect({24.0f, 24.0f, 16.0f, 16.0f}, 0.0f,
+                                  {1.0f, 0.0f, 0.0f, 1.0f});
+    });
+
+    const auto multiply = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.5f, 0.5f, 0.5f, 1.0f});
+        ui::PaintOptions options;
+        options.blend = ui::BlendMode::Multiply;
+        auto layer = painter.scoped_layer(
+            {24.0f, 24.0f, 16.0f, 16.0f},
+            ui::Effect::gaussian_blur(3.0f, 3.0f),
+            options);
+        painter.fill_rounded_rect({24.0f, 24.0f, 16.0f, 16.0f}, 0.0f,
+                                  {1.0f, 0.0f, 0.0f, 1.0f});
+    });
+
+    const auto over_halo = pixel(source_over, 22, 32);
+    const auto multiply_halo = pixel(multiply, 22, 32);
+    NUI_CHECK(over_halo.r > multiply_halo.r + 4);
+    NUI_CHECK(std::abs(static_cast<int>(over_halo.g) -
+                       static_cast<int>(multiply_halo.g)) <= 3);
+}
+
+void inner_transform_does_not_redefine_effect_space() {
+    const auto direct = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {12.0f, 12.0f, 40.0f, 40.0f}, ui::Effect::gaussian_blur(3.0f, 3.0f));
+        painter.fill_rounded_rect({24.0f, 24.0f, 8.0f, 8.0f}, 0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    });
+
+    const auto translated_inside = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {12.0f, 12.0f, 40.0f, 40.0f}, ui::Effect::gaussian_blur(3.0f, 3.0f));
+        painter.translate(8.0f, 0.0f);
+        painter.fill_rounded_rect({16.0f, 24.0f, 8.0f, 8.0f}, 0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    });
+
+    NUI_CHECK(direct == translated_inside);
+}
+
+void device_support_rounding_contract() {
+    auto surface = make_surface();
+    NUI_CHECK(surface && surface->getCanvas());
+    ui::Painter painter{*surface->getCanvas()};
+    painter.scale(1.5f, 2.0f);
+
+    SkRect device_output;
+    const bool valid = ui::detail::PainterEffectFaultAccess::device_output_bounds(
+        painter,
+        {10.25f, 20.25f, 4.0f, 4.0f},
+        ui::Effect::gaussian_blur(0.5f, 0.5f),
+        device_output);
+    NUI_CHECK(valid);
+    NUI_CHECK(device_output.left() == 13.0f);
+    NUI_CHECK(device_output.top() == 37.0f);
+    NUI_CHECK(device_output.right() == 24.0f);
+    NUI_CHECK(device_output.bottom() == 52.0f);
+}
+
+void hidpi_blur_scales_in_logical_space() {
+    ui::UI tree{PainterProbe{[](ui::Painter& painter) {
+        painter.fill_rounded_rect({0.0f, 0.0f, 64.0f, 64.0f}, 0.0f,
+                                  {0.0f, 0.0f, 0.0f, 1.0f});
+        auto layer = painter.scoped_layer(
+            {24.0f, 24.0f, 16.0f, 16.0f}, ui::Effect::gaussian_blur(3.0f, 3.0f));
+        painter.fill_rounded_rect({24.0f, 24.0f, 16.0f, 16.0f}, 0.0f,
+                                  {1.0f, 1.0f, 1.0f, 1.0f});
+    }}};
+
+    ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 2.0f};
+    NUI_CHECK(renderer.render(tree));
+    const auto halo = renderer.pixel(44, 64);
+    const auto outside_support = renderer.pixel(28, 64);
+    NUI_CHECK(halo.r > 4);
+    NUI_CHECK(outside_support.r < 4);
+}
+
+void nested_filtered_scopes_preserve_lifo() {
+    auto surface = make_surface();
+    NUI_CHECK(surface && surface->getCanvas());
+    auto* canvas = surface->getCanvas();
+    const int baseline = canvas->getSaveCount();
+    ui::Painter painter{*canvas};
+    const auto blur = ui::Effect::gaussian_blur(2.0f, 2.0f);
+
+    {
+        auto outer = painter.scoped_layer({4.0f, 4.0f, 56.0f, 56.0f}, blur);
+        NUI_CHECK(painter.save_depth() == 2);
+        {
+            auto clip = painter.scoped_clip({8.0f, 8.0f, 48.0f, 48.0f});
+            NUI_CHECK(painter.save_depth() == 3);
+            {
+                auto plain = painter.scoped_layer({10.0f, 10.0f, 44.0f, 44.0f});
+                NUI_CHECK(painter.save_depth() == 5);
+                {
+                    auto inner =
+                        painter.scoped_layer({12.0f, 12.0f, 40.0f, 40.0f}, blur);
+                    NUI_CHECK(painter.save_depth() == 7);
+                    painter.save();
+                    NUI_CHECK(painter.save_depth() == 8);
+                    painter.restore();
+                    NUI_CHECK(painter.save_depth() == 7);
+                }
+                NUI_CHECK(painter.save_depth() == 5);
+            }
+            NUI_CHECK(painter.save_depth() == 3);
+        }
+        NUI_CHECK(painter.save_depth() == 2);
+    }
+
+    NUI_CHECK(painter.save_depth() == 0);
+    NUI_CHECK(canvas->getSaveCount() == baseline);
+
+    bool caught = false;
+    try {
+        auto outer = painter.scoped_layer({4.0f, 4.0f, 56.0f, 56.0f}, blur);
+        auto inner = painter.scoped_layer({12.0f, 12.0f, 40.0f, 40.0f}, blur);
+        throw 7;
+    } catch (int) {
+        caught = true;
+    }
+    NUI_CHECK(caught);
+    NUI_CHECK(painter.save_depth() == 0);
+    NUI_CHECK(canvas->getSaveCount() == baseline);
+}
+
 void fault_and_stack_recovery_contract() {
     auto surface = make_surface();
     NUI_CHECK(surface && surface->getCanvas());
@@ -435,6 +585,11 @@ void suite() {
     asymmetric_blur_contract();
     parent_clip_remains_authoritative();
     opacity_applies_once_to_filtered_group();
+    blend_applies_to_filtered_group();
+    inner_transform_does_not_redefine_effect_space();
+    device_support_rounding_contract();
+    hidpi_blur_scales_in_logical_space();
+    nested_filtered_scopes_preserve_lifo();
     fault_and_stack_recovery_contract();
     affine_transform_and_overflow_contract();
     independent_painters_do_not_share_effect_state();
