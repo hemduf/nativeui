@@ -288,9 +288,11 @@ private:
 
 } // namespace
 
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
 std::size_t shader_compile_call_count_for_test() noexcept {
     return shader_compile_call_count_for_test_value;
 }
+#endif
 
 } // namespace ui::detail
 
