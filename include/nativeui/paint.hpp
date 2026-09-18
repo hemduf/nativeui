@@ -252,8 +252,9 @@ public:
 
         const SkRect source_bounds = to_sk_rect(logical_bounds);
         SkRect output_bounds;
+        SkRect device_output_bounds;
         if (!effect_output_bounds(logical_bounds, effect, output_bounds) ||
-            !mapped_effect_bounds_are_bounded(output_bounds)) {
+            !effect_device_output_bounds(output_bounds, device_output_bounds)) {
             // A transform or expansion that cannot be represented safely must
             // fail closed. Reuse T076's balanced empty clip-only scope.
             return scoped_layer(Rect{}, options);
@@ -276,11 +277,19 @@ public:
         //   outer output-support clip -> saveLayer(filter) -> source clip.
         // The source clip is inside saveLayer so restoring the filtered layer
         // removes it before compositing the halo back under the output clip.
+        const auto entry_matrix = canvas_.getLocalToDevice();
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         try {
             canvas_.save();
             ++save_depth_;
-            canvas_.clipRect(output_bounds, SkClipOp::kIntersect, false);
+
+            // The support clip is an axis-aligned conservative device-space
+            // envelope. Existing parent clips already live in device space and
+            // remain intersected while only this new clip is installed under
+            // identity coordinates.
+            canvas_.resetMatrix();
+            canvas_.clipRect(device_output_bounds, SkClipOp::kIntersect, false);
+            canvas_.setMatrix(entry_matrix);
             maybe_fail_layer(LayerFaultPoint::AfterEffectOutputClip);
 
             [[maybe_unused]] const int previous_save_count =
@@ -519,27 +528,36 @@ private:
         return output.isFinite() && !output.isEmpty();
     }
 
-    [[nodiscard]] bool mapped_effect_bounds_are_bounded(const SkRect& local_bounds) const noexcept {
+    [[nodiscard]] bool effect_device_output_bounds(const SkRect& local_bounds,
+                                                   SkRect& device_output) const noexcept {
         const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
         if (!matrix.isFinite() || matrix.hasPerspective()) return false;
 
-        const SkRect device_bounds = matrix.mapRect(local_bounds);
-        if (!device_bounds.isFinite() || device_bounds.isEmpty()) return false;
+        const SkRect mapped = matrix.mapRect(local_bounds);
+        if (!mapped.isFinite() || mapped.isEmpty()) return false;
 
-        // saveLayer ultimately allocates in integer device coordinates. Reject
-        // geometry that cannot be conservatively rounded outward into that
-        // domain instead of allowing overflow to become a small/unbounded layer.
-        const double left = std::floor(static_cast<double>(device_bounds.left()));
-        const double top = std::floor(static_cast<double>(device_bounds.top()));
-        const double right = std::ceil(static_cast<double>(device_bounds.right()));
-        const double bottom = std::ceil(static_cast<double>(device_bounds.bottom()));
+        // saveLayer ultimately allocates in integer device coordinates. Build a
+        // conservative outward-rounded device AABB before entering any Painter
+        // frame, and reject arithmetic that cannot be represented safely.
+        const double left = std::floor(static_cast<double>(mapped.left()));
+        const double top = std::floor(static_cast<double>(mapped.top()));
+        const double right = std::ceil(static_cast<double>(mapped.right()));
+        const double bottom = std::ceil(static_cast<double>(mapped.bottom()));
         const double int_min = static_cast<double>(std::numeric_limits<int>::min());
         const double int_max = static_cast<double>(std::numeric_limits<int>::max());
-        return std::isfinite(left) && std::isfinite(top) &&
-               std::isfinite(right) && std::isfinite(bottom) &&
-               left >= int_min && top >= int_min &&
-               right <= int_max && bottom <= int_max &&
-               left < right && top < bottom;
+        if (!std::isfinite(left) || !std::isfinite(top) ||
+            !std::isfinite(right) || !std::isfinite(bottom) ||
+            left < int_min || top < int_min ||
+            right > int_max || bottom > int_max ||
+            !(left < right) || !(top < bottom)) {
+            return false;
+        }
+
+        device_output = SkRect::MakeLTRB(static_cast<float>(left),
+                                         static_cast<float>(top),
+                                         static_cast<float>(right),
+                                         static_cast<float>(bottom));
+        return device_output.isFinite() && !device_output.isEmpty();
     }
 
     [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
