@@ -3,22 +3,11 @@
 #include <nativeui/shader.hpp>
 
 #include <memory>
-#include <new>
 #include <string>
 #include <string_view>
 #include <type_traits>
 
-namespace ui {
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure);
-} // namespace ui
-
 namespace {
-
-constexpr int kFailBeforeDiagnosticOwnership = 1;
-constexpr int kFailProgramDataAllocation = 2;
-constexpr int kFailProgramPublicationAllocation = 3;
-constexpr int kForceEmptyBackendDiagnostic = 4;
 
 constexpr std::string_view kValidShader = R"(
     half4 main(float2 p) {
@@ -119,39 +108,6 @@ void immutable_program_can_be_retained_by_two_uis() {
     NUI_CHECK(lifetime.expired());
 }
 
-void expect_injected_bad_alloc(std::string_view source, int failure_point) {
-    bool threw = false;
-    try {
-        (void)ui::compile_shader_program_for_test(source, failure_point);
-    } catch (const std::bad_alloc&) {
-        threw = true;
-    }
-    NUI_CHECK(threw);
-
-    const auto later = ui::ShaderProgram::compile(kValidShader);
-    NUI_CHECK(later.ok());
-    NUI_CHECK(later.program);
-    NUI_CHECK(later.diagnostics.empty());
-}
-
-void deterministic_failure_injection_has_strong_recovery() {
-    expect_injected_bad_alloc(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kFailBeforeDiagnosticOwnership);
-    expect_injected_bad_alloc(kValidShader, kFailProgramDataAllocation);
-    expect_injected_bad_alloc(kValidShader, kFailProgramPublicationAllocation);
-}
-
-void empty_backend_diagnostic_uses_nativeui_fallback() {
-    const auto result = ui::compile_shader_program_for_test(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kForceEmptyBackendDiagnostic);
-    check_compile_failure(result);
-    NUI_CHECK(result.diagnostics.size() == 1U);
-    NUI_CHECK(result.diagnostics.front().message ==
-              "SkSL runtime-shader compilation failed");
-}
-
 void repeated_failed_compile_remains_usable() {
     for (int i = 0; i < 128; ++i) {
         check_compile_failure(
@@ -167,8 +123,6 @@ void suite() {
     exact_result_contract();
     caller_source_lifetime_is_independent();
     immutable_program_can_be_retained_by_two_uis();
-    deterministic_failure_injection_has_strong_recovery();
-    empty_backend_diagnostic_uses_nativeui_fallback();
     repeated_failed_compile_remains_usable();
 }
 

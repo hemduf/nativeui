@@ -60,11 +60,13 @@ private:
 
     std::shared_ptr<const detail::ShaderProgramData> data_;
 
-    // Hidden friend used only by NativeUI's test build. It is not visible to
-    // ordinary lookup and the symbol is not defined when test seams are off.
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    // Isolated fault-test access only. Production Core and installed consumers
+    // never define this macro.
     friend ShaderCompileResult compile_shader_program_for_test(
         std::string_view sksl,
         int injected_failure);
+#endif
 };
 
 } // namespace ui

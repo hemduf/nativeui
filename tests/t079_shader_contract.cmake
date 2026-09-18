@@ -2,6 +2,7 @@ if(NOT DEFINED SOURCE_DIR)
   message(FATAL_ERROR "SOURCE_DIR is required")
 endif()
 
+file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
 set(_shader_header "${SOURCE_DIR}/include/nativeui/shader.hpp")
 if(NOT EXISTS "${_shader_header}")
   message(FATAL_ERROR "T079: missing public shader.hpp")
@@ -27,10 +28,26 @@ if(_umbrella_pos EQUAL -1)
   message(FATAL_ERROR "T079: nativeui.hpp does not expose shader.hpp")
 endif()
 
+string(FIND
+  "${_root_cmake}"
+  "target_compile_definitions(nativeui_core PRIVATE NATIVEUI_ENABLE_TEST_SEAMS=1)"
+  _core_test_seam)
+if(NOT _core_test_seam EQUAL -1)
+  message(FATAL_ERROR
+    "T079: NativeUI::Core must not compile the shader fault-test seam")
+endif()
+
 file(GLOB_RECURSE _production_files
+  "${SOURCE_DIR}/src/*.c"
+  "${SOURCE_DIR}/src/*.cc"
   "${SOURCE_DIR}/src/*.cpp"
+  "${SOURCE_DIR}/src/*.cxx"
+  "${SOURCE_DIR}/src/*.m"
+  "${SOURCE_DIR}/src/*.mm"
+  "${SOURCE_DIR}/src/*.h"
   "${SOURCE_DIR}/src/*.hpp"
   "${SOURCE_DIR}/src/*.inc"
+  "${SOURCE_DIR}/include/nativeui/*.h"
   "${SOURCE_DIR}/include/nativeui/*.hpp"
   "${SOURCE_DIR}/include/nativeui/*.inc"
 )
@@ -40,8 +57,11 @@ foreach(_path IN LISTS _production_files)
     continue()
   endif()
   file(READ "${_path}" _content)
-  string(FIND "${_content}" "ShaderProgram::compile(" _implicit_compile)
-  if(NOT _implicit_compile EQUAL -1)
+  string(REGEX MATCH
+    "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+    _implicit_compile
+    "${_content}")
+  if(NOT _implicit_compile STREQUAL "")
     message(FATAL_ERROR
       "T079: implicit ShaderProgram::compile call found outside skia_shader.cpp: ${_path}")
   endif()

@@ -139,9 +139,6 @@ endif()
 target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
-if(NATIVEUI_BUILD_TESTS)
-  target_compile_definitions(nativeui_core PRIVATE NATIVEUI_ENABLE_TEST_SEAMS=1)
-endif()
 
 if(NATIVEUI_BUILD_PLATFORM)
   # On macOS the Pugl C core is generic while Objective-C sources are compiled
@@ -491,6 +488,26 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t062_tooltip_tests tests/t062_tooltip_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
   nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
+
+  # T079 allocation/fallback fault seams are compiled only into this isolated
+  # test executable. NativeUI::Core never contains the test-only entry point,
+  # even when the normal test suite is enabled.
+  add_executable(nativeui_shader_fault_tests
+    tests/shader_fault_tests.cpp
+    src/skia_shader.cpp
+  )
+  target_include_directories(nativeui_shader_fault_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_shader_fault_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_shader_fault_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_shader_fault_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_shader_fault_tests)
+  nativeui_enable_sanitizers(nativeui_shader_fault_tests)
+  add_test(NAME nativeui_shader_fault_tests COMMAND nativeui_shader_fault_tests)
+
   nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
   nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
   nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
