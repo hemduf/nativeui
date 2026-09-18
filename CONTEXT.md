@@ -178,6 +178,7 @@ T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
 T076(done) -> T077(done) -> T078(ready) -----> NativeUI 1.1 effects
+T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
 ```
 
 ## Completed foundations relevant to v1
@@ -205,6 +206,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T076 / #159:** hard-bounded group compositing through `Painter::scoped_layer(Rect, PaintOptions)` with exact multi-frame `StateGuard` restore/rollback and deterministic group opacity/blend semantics.
 - **T077 / #160:** bounded Gaussian Effect layers through the same StateGuard/PaintOptions model with conservative backend-derived output support and exact failure recovery.
 - **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`; immutable/const backend ownership, deterministic diagnostics, failure-atomic publication, pinned-m149 source-size guard, no implicit paint-time compilation and installed-package shader smoke on Linux/Windows/macOS.
+- **T080 / #164 / PR #430:** typed SkSL uniform reflection and binding completed on candidate `28025c36`: NativeUI-owned descriptor lifetime/order, supported float/int/vector/Color profile, atomic UnsupportedInterface rejection for arrays/matrices/children, exact zero-initialized per-instance bytes, backend `int` conversion, allocation-free/noexcept setters, strong copy/move/inert semantics, partial-reflection fault injection and explicit zero-recompile proof. Exact-head CI #1914, Package Contracts #330, T050 #207 and T072 #399 are green.
 
 ## Validation policy
 
@@ -253,5 +255,5 @@ Recovery sequence:
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
 4. T078 / #161 remains Ready for the NativeUI 1.1 effects line.
-5. T080 / #164 is now Ready after T079 completion and adds typed SkSL uniform reflection/binding.
+5. T081 / #165 is now Ready for ShaderInstance -> Brush snapshot/materialization after T080 completion; T082 remains Blocked on T081.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
