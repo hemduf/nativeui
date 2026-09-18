@@ -139,6 +139,9 @@ endif()
 target_link_libraries(nativeui_core PUBLIC SkiaBuilder::svg)
 nativeui_enable_project_warnings(nativeui_core)
 nativeui_enable_sanitizers(nativeui_core)
+if(NATIVEUI_BUILD_TESTS)
+  target_compile_definitions(nativeui_core PRIVATE NATIVEUI_ENABLE_TEST_SEAMS=1)
+endif()
 
 if(NATIVEUI_BUILD_PLATFORM)
   # On macOS the Pugl C core is generic while Objective-C sources are compiled

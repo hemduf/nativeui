@@ -37,7 +37,12 @@ require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_retained_tes
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)" "public API test registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)" "semantic API test registration")
 require_text("${_root_cmake}" "nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)" "visual test registration")
-require_text("${_root_cmake}" "resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets" "isolated virtual_list public-header compile coverage")
+string(REGEX MATCH "foreach\\(_header IN ITEMS[^\\n]*\\)" _public_header_loop "${_root_cmake}")
+if(_public_header_loop STREQUAL "")
+  message(FATAL_ERROR
+    "T067 root integration contract: missing public-header compile loop")
+endif()
+require_text("${_public_header_loop}" " virtual_list " "isolated virtual_list public-header compile coverage")
 require_text("${_umbrella}" "#include <nativeui/virtual_list.hpp>" "virtual-list umbrella export")
 require_text("${_t051_cmake}" "nativeui_t067_benchmark_contract" "T051 virtual-list benchmark target")
 require_text("${_t051_cmake}" "t051.t067_virtual_list" "T051 virtual-list benchmark CTest registration")
