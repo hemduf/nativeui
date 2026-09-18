@@ -158,27 +158,41 @@ void effect_value_contract() {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
 
-    const auto zeroed = ui::Effect::gaussian_blur(-2.0f, nan);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_x(zeroed) == 0.0f);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_y(zeroed) == 0.0f);
+    const auto check = [](float sigma_x,
+                          float sigma_y,
+                          float expected_x,
+                          float expected_y) {
+        const auto effect = ui::Effect::gaussian_blur(sigma_x, sigma_y);
+        NUI_CHECK(ui::detail::EffectTestAccess::sigma_x(effect) == expected_x);
+        NUI_CHECK(ui::detail::EffectTestAccess::sigma_y(effect) == expected_y);
+    };
 
-    const auto bounded = ui::Effect::gaussian_blur(65.0f, inf);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_x(bounded) == 64.0f);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_y(bounded) == 0.0f);
+    // Canonicalization is independent and exact on both axes.
+    check(-2.0f, 1.25f, 0.0f, 1.25f);
+    check(1.25f, -2.0f, 1.25f, 0.0f);
+    check(nan, 1.25f, 0.0f, 1.25f);
+    check(1.25f, nan, 1.25f, 0.0f);
+    check(inf, 1.25f, 0.0f, 1.25f);
+    check(1.25f, inf, 1.25f, 0.0f);
+    check(65.0f, 1.25f, 64.0f, 1.25f);
+    check(1.25f, 65.0f, 1.25f, 64.0f);
+    check(0.0f, 64.0f, 0.0f, 64.0f);
+    check(64.0f, 0.0f, 64.0f, 0.0f);
+    check(1.25f, 2.5f, 1.25f, 2.5f);
 
-    const auto exact = ui::Effect::gaussian_blur(1.25f, 64.0f);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_x(exact) == 1.25f);
-    NUI_CHECK(ui::detail::EffectTestAccess::sigma_y(exact) == 64.0f);
-
+    // Include destruction in the zero-allocation proof by checking only after
+    // every temporary Effect has left scope.
     const auto before = allocation_probe::allocation_count;
-    const auto a = ui::Effect::gaussian_blur(3.0f, 4.0f);
-    const auto b = a;
-    auto c = b;
-    c = a;
-    auto d = std::move(c);
-    auto e = ui::Effect::gaussian_blur(1.0f, 1.0f);
-    e = std::move(d);
-    (void)e;
+    {
+        const auto a = ui::Effect::gaussian_blur(3.0f, 4.0f);
+        const auto b = a;
+        auto c = b;
+        c = a;
+        auto d = std::move(c);
+        auto e = ui::Effect::gaussian_blur(1.0f, 1.0f);
+        e = std::move(d);
+        (void)e;
+    }
     NUI_CHECK(allocation_probe::allocation_count == before);
 }
 
