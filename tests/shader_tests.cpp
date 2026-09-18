@@ -92,29 +92,33 @@ void caller_source_lifetime_is_independent() {
 }
 
 void immutable_program_can_be_retained_by_two_uis() {
-    const auto result = ui::ShaderProgram::compile(kValidShader);
+    auto result = ui::ShaderProgram::compile(kValidShader);
     NUI_CHECK(result.ok());
-    auto shared = result.program;
+    auto shared = std::move(result.program);
+    std::weak_ptr<const ui::ShaderProgram> lifetime = shared;
 
-    const auto make_ui = [shared] {
+    const auto make_ui = [](std::shared_ptr<const ui::ShaderProgram> program) {
         return std::make_unique<ui::UI>(
-            ui::Canvas{2.0f, 2.0f, [shared](ui::CanvasContext2D& canvas) {
-                NUI_CHECK(shared);
+            ui::Canvas{2.0f, 2.0f, [program = std::move(program)](ui::CanvasContext2D& canvas) {
+                NUI_CHECK(program);
                 canvas.fill_rect(
                     {0.0f, 0.0f, 2.0f, 2.0f},
                     ui::Color{0.0f, 0.0f, 0.0f, 1.0f});
             }});
     };
 
-    auto first = make_ui();
-    auto second = make_ui();
+    auto first = make_ui(shared);
+    auto second = make_ui(shared);
     shared.reset();
 
     ui::HeadlessRenderer renderer{{2.0f, 2.0f}, 1.0f};
     NUI_CHECK(renderer.render(*first));
     first.reset();
+    NUI_CHECK(!lifetime.expired());
+
     NUI_CHECK(renderer.render(*second));
     second.reset();
+    NUI_CHECK(lifetime.expired());
 }
 
 void expect_injected_bad_alloc(std::string_view source, int failure_point) {
