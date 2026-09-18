@@ -356,6 +356,44 @@ void paint_options_apply_once() {
     NUI_CHECK(std::abs(full_r - 2 * half_r) <= 6);
 }
 
+void blend_and_inner_transform_contract() {
+    const auto source_over = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0.5f, 0.5f, 0.5f, 1});
+        auto layer = painter.scoped_layer(
+            {20, 16, 32, 32},
+            ui::Effect::drop_shadow_only({6, 0}, 3, {1, 0, 0, 1}));
+        painter.fill_rounded_rect({28, 24, 8, 8}, 0, {1, 1, 1, 1});
+    });
+    const auto multiply = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0.5f, 0.5f, 0.5f, 1});
+        ui::PaintOptions options;
+        options.blend = ui::BlendMode::Multiply;
+        auto layer = painter.scoped_layer(
+            {20, 16, 32, 32},
+            ui::Effect::drop_shadow_only({6, 0}, 3, {1, 0, 0, 1}),
+            options);
+        painter.fill_rounded_rect({28, 24, 8, 8}, 0, {1, 1, 1, 1});
+    });
+    NUI_CHECK(pixel(source_over, 42, 28).r > pixel(multiply, 42, 28).r + 4);
+
+    const auto direct = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0, 0, 0, 1});
+        auto layer = painter.scoped_layer(
+            {12, 12, 48, 40},
+            ui::Effect::drop_shadow_only({6, 2}, 3, {0, 1, 0, 1}));
+        painter.fill_rounded_rect({24, 24, 8, 8}, 0, {1, 1, 1, 1});
+    });
+    const auto translated_inside = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0, 0, 0, 1});
+        auto layer = painter.scoped_layer(
+            {12, 12, 48, 40},
+            ui::Effect::drop_shadow_only({6, 2}, 3, {0, 1, 0, 1}));
+        painter.translate(8, 0);
+        painter.fill_rounded_rect({16, 24, 8, 8}, 0, {1, 1, 1, 1});
+    });
+    NUI_CHECK(direct == translated_inside);
+}
+
 struct OutsetProbeState {
     ui::VisualOutset outset{4, 4, 4, 4};
     ui::NodeId node_id{ui::kInvalidNodeId};
@@ -495,7 +533,10 @@ void invalidation_before_first_layout_stays_conservative() {
     tree.set_invalidation_callback([&](ui::Rect rect) { exposed.push_back(rect); });
     tree.layout({200, 120});
     NUI_CHECK(!exposed.empty());
-    check_rect(exposed.back(), {0, 0, 200, 120});
+    // Before first successful layout the retained Tree still owns its initial
+    // conservative viewport. It is valid for the pending region to be wider
+    // than the first explicit layout, but it must cover that layout completely.
+    NUI_CHECK(exposed.back().contains({0, 0, 200, 120}));
 }
 
 
@@ -655,6 +696,31 @@ void independent_tree_visual_state_isolation() {
     NUI_CHECK(b.paint_dirty());
 }
 
+void structural_removal_is_invalidated_before_teardown() {
+    ui::State<bool> visible{true};
+    auto state = std::make_shared<OutsetProbeState>();
+    ui::UI tree{ui::If{visible, OutsetProbe{state}}};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+    tree.resize({200, 120});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+
+    std::vector<ui::Rect> exposed;
+    tree.set_invalidation_callback([&](ui::Rect rect) { exposed.push_back(rect); });
+
+    // Dynamic observers enqueue a full conservative repaint before structural
+    // reconciliation can unmount/destroy the old subtree.
+    visible.set(false);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!exposed.empty());
+    NUI_CHECK(exposed.back().contains({0, 0, 200, 120}));
+
+    tree.resize({200, 120});
+    tree.paint(canvas, platform);
+    NUI_CHECK(!tree.dirty());
+}
+
 void suite() {
     effect_value_contract();
     dirty_region_publication_is_allocation_free();
@@ -663,10 +729,12 @@ void suite() {
     zero_alpha_skips_materialization();
     transform_and_device_support_contract();
     paint_options_apply_once();
+    blend_and_inner_transform_contract();
     retained_visual_bounds_contract();
     zero_sized_layout_can_have_visual_outset();
     failed_layout_does_not_publish_partial_visual_bounds();
     independent_tree_visual_state_isolation();
+    structural_removal_is_invalidated_before_teardown();
     callback_publication_is_transactional();
     invalidation_before_first_layout_stays_conservative();
 }

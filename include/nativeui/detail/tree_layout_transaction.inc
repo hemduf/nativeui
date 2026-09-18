@@ -107,14 +107,29 @@
 
     struct LayoutPublicationCheckpoint {
         Size viewport{};
+        Rect paint_dirty[DirtyRegion::kMaxRects]{};
+        std::size_t paint_dirty_count{};
         LayoutTransactionJournal journal;
 
         LayoutPublicationCheckpoint(Tree& owner, Size next_viewport)
             : viewport(owner.viewport_),
               journal(owner.layout_transaction_overflow_) {
+            const auto& retained_dirty = owner.paint_dirty_.rects();
+            paint_dirty_count = retained_dirty.size();
+            for (std::size_t index = 0; index < paint_dirty_count; ++index) {
+                paint_dirty[index] = retained_dirty[index];
+            }
+
+            // Begin before changing viewport/dirty publication. A reentrant
+            // layout rejection therefore leaves every old public state intact.
             owner.begin_layout_geometry_transaction(journal);
             owner.active_layout_publication_ = this;
             owner.viewport_ = next_viewport;
+
+            // Keep the Tree's already-reserved DirtyRegion storage in place.
+            // Layout callbacks may invalidate without allocation, while the old
+            // region lives in this fixed-size transaction checkpoint.
+            owner.paint_dirty_.clear();
         }
 
         LayoutPublicationCheckpoint(const LayoutPublicationCheckpoint&) = delete;
@@ -128,15 +143,32 @@
     }
 
     void rollback_layout_publication(LayoutPublicationCheckpoint&& checkpoint) noexcept {
+        // Retain any independent invalidation raised while application layout
+        // callbacks were executing. Candidate geometry itself is rolled back.
+        Rect transaction_dirty{};
+        for (const auto rect : paint_dirty_.rects()) {
+            transaction_dirty = unite(transaction_dirty, rect);
+        }
+
         rollback_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
         viewport_ = checkpoint.viewport;
-        (void)retain_dirty(viewport_rect());
+
+        paint_dirty_.clear();
+        for (std::size_t index = 0; index < checkpoint.paint_dirty_count; ++index) {
+            (void)retain_dirty(checkpoint.paint_dirty[index]);
+        }
+        (void)retain_dirty(transaction_dirty);
     }
 
     void commit_layout_publication() {
         commit_layout_geometry_transaction();
         active_layout_publication_ = nullptr;
+
+        // Successful layout supersedes all prior geometry damage. Reuse the
+        // existing bounded storage, publish visual state, then notify one full
+        // viewport invalidation from the coherent committed state.
+        paint_dirty_.clear();
         if (root_) publish_visual_bounds(*root_);
         invalidate_paint(viewport_rect());
     }

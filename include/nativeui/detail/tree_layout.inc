@@ -364,7 +364,11 @@
     }
 
     void invalidate_node_paint(Node& node) {
-        if (!node.visual_bounds_published) {
+        if (layout_transaction_active_ || !node.visual_bounds_published) {
+            // Candidate geometry is not publication authority. A state change
+            // during layout keeps a conservative repaint pending; successful
+            // layout commit will publish the new visual bounds, while rollback
+            // leaves the old publication authoritative.
             invalidate_paint(viewport_rect());
             return;
         }
@@ -387,7 +391,7 @@
 
     void publish_all_visual_bounds_then_invalidate() {
         const auto exposed = retain_dirty(viewport_rect());
-        if (root_) publish_visual_bounds(*root_);
+        if (!layout_transaction_active_ && root_) publish_visual_bounds(*root_);
         if (exposed) notify_invalidation(*exposed);
     }
 
