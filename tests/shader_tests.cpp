@@ -16,7 +16,7 @@ ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
 namespace {
 
 constexpr int kFailBeforeDiagnosticOwnership = 1;
-constexpr int kFailBeforeProgramData = 2;
+constexpr int kFailProgramDataAllocation = 2;
 constexpr int kFailProgramPublicationAllocation = 3;
 constexpr int kForceEmptyBackendDiagnostic = 4;
 
@@ -145,7 +145,7 @@ void deterministic_failure_injection_has_strong_recovery() {
     expect_injected_bad_alloc(
         "half4 main(float2 p) { return missing_symbol; }",
         kFailBeforeDiagnosticOwnership);
-    expect_injected_bad_alloc(kValidShader, kFailBeforeProgramData);
+    expect_injected_bad_alloc(kValidShader, kFailProgramDataAllocation);
     expect_injected_bad_alloc(kValidShader, kFailProgramPublicationAllocation);
 }
 
