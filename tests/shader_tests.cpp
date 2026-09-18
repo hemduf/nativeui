@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -50,15 +51,24 @@ void api_traits() {
     static_assert(std::is_nothrow_move_assignable_v<ui::ShaderInstance>);
     static_assert(std::is_nothrow_destructible_v<ui::ShaderInstance>);
 
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float("", 0.0f)));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float2("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float3("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float4("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int("", std::int32_t{})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int2("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int3("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int4("", {})));
-    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_color("", {})));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float(
+        std::declval<std::string_view>(), std::declval<float>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float2(
+        std::declval<std::string_view>(), std::declval<std::array<float, 2>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float3(
+        std::declval<std::string_view>(), std::declval<std::array<float, 3>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_float4(
+        std::declval<std::string_view>(), std::declval<std::array<float, 4>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int(
+        std::declval<std::string_view>(), std::declval<std::int32_t>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int2(
+        std::declval<std::string_view>(), std::declval<std::array<std::int32_t, 2>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int3(
+        std::declval<std::string_view>(), std::declval<std::array<std::int32_t, 3>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_int4(
+        std::declval<std::string_view>(), std::declval<std::array<std::int32_t, 4>>())));
+    static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_color(
+        std::declval<std::string_view>(), std::declval<ui::Color>())));
 }
 
 void check_compile_failure(const ui::ShaderCompileResult& result) {
@@ -278,7 +288,8 @@ void copy_move_and_inert_contract() {
     NUI_CHECK(source.set_float("gain", 0.75f) == ui::ShaderSetResult::Ok);
     NUI_CHECK(copy.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
 
-    copy = copy;
+    auto* copy_alias = &copy;
+    copy = *copy_alias;
     NUI_CHECK(copy.valid());
 
     ui::ShaderInstance moved{std::move(source)};

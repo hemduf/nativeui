@@ -61,6 +61,8 @@ constexpr std::string_view kFailAfterDiagnosticMarker =
     "/*__NATIVEUI_T079_FAIL_AFTER_DIAGNOSTIC__*/";
 constexpr std::string_view kFailReflectionMarker =
     "/*__NATIVEUI_T080_FAIL_REFLECTION__*/";
+constexpr std::string_view kFailDuringReflectionMarker =
+    "/*__NATIVEUI_T080_FAIL_DURING_REFLECTION__*/";
 constexpr std::string_view kFailAfterReflectionMarker =
     "/*__NATIVEUI_T080_FAIL_AFTER_REFLECTION__*/";
 constexpr std::string_view kFailUnsupportedDiagnosticMarker =
@@ -177,6 +179,10 @@ void compile_publication_faults() {
         kFailAfterDiagnosticMarker,
         "half4 main(float2 p) { return missing_symbol; }");
     expect_bad_alloc(kFailReflectionMarker, kFloatShader);
+    expect_bad_alloc(
+        kFailDuringReflectionMarker,
+        "uniform float first; uniform float second; "
+        "half4 main(float2 p) { return half4(first + second); }");
     expect_bad_alloc(kFailAfterReflectionMarker, kFloatShader);
     expect_bad_alloc(
         kFailUnsupportedDiagnosticMarker,
@@ -249,6 +255,63 @@ void zero_initialization_and_exact_values() {
     check(read_float(color_bytes, sizeof(float)) == extended.g, "color g changed");
     check(read_float(color_bytes, sizeof(float) * 2U) == extended.b, "color b changed");
     check(read_float(color_bytes, sizeof(float) * 3U) == extended.a, "color a changed");
+}
+
+
+void complete_binding_block_matches_reflected_packing() {
+    const auto compiled = ui::ShaderProgram::compile(kAllSetterShader);
+    check(compiled.ok(), "packing program did not compile");
+    ui::ShaderInstance instance{compiled.program};
+
+    check(instance.set_float("scalar", 10.0f) == ui::ShaderSetResult::Ok,
+          "packing scalar setup failed");
+    check(instance.set_float2("pair", {20.0f, 21.0f}) == ui::ShaderSetResult::Ok,
+          "packing float2 setup failed");
+    check(instance.set_float3("triple", {30.0f, 31.0f, 32.0f}) == ui::ShaderSetResult::Ok,
+          "packing float3 setup failed");
+    check(instance.set_float4("vector", {40.0f, 41.0f, 42.0f, 43.0f}) ==
+              ui::ShaderSetResult::Ok,
+          "packing float4 setup failed");
+    check(instance.set_int("integer", 50) == ui::ShaderSetResult::Ok,
+          "packing int setup failed");
+    check(instance.set_int2("ipair", {60, 61}) == ui::ShaderSetResult::Ok,
+          "packing int2 setup failed");
+    check(instance.set_int3("itriple", {70, 71, 72}) == ui::ShaderSetResult::Ok,
+          "packing int3 setup failed");
+    check(instance.set_int4("ivector", {80, 81, 82, 83}) == ui::ShaderSetResult::Ok,
+          "packing int4 setup failed");
+    check(instance.set_color("tint", {-1.0f, 0.5f, 2.0f, 1.25f}) ==
+              ui::ShaderSetResult::Ok,
+          "packing color setup failed");
+
+    const auto bytes = ui::detail::ShaderInstanceAccess::binding_bytes(instance);
+    constexpr std::size_t kExpectedBytes =
+        (1U + 2U + 3U + 4U) * sizeof(float) +
+        (1U + 2U + 3U + 4U) * sizeof(std::int32_t) +
+        4U * sizeof(float);
+    check(bytes.size() == kExpectedBytes, "complete binding block byte size mismatch");
+
+    std::size_t offset = 0;
+    const auto expect_float = [&](float expected) {
+        check(read_float(bytes, offset) == expected, "float packing mismatch");
+        offset += sizeof(float);
+    };
+    const auto expect_int = [&](std::int32_t expected) {
+        check(read_int(bytes, offset) == expected, "int packing mismatch");
+        offset += sizeof(std::int32_t);
+    };
+
+    for (float value : {10.0f, 20.0f, 21.0f, 30.0f, 31.0f, 32.0f,
+                        40.0f, 41.0f, 42.0f, 43.0f}) {
+        expect_float(value);
+    }
+    for (std::int32_t value : {50, 60, 61, 70, 71, 72, 80, 81, 82, 83}) {
+        expect_int(value);
+    }
+    for (float value : {-1.0f, 0.5f, 2.0f, 1.25f}) {
+        expect_float(value);
+    }
+    check(offset == bytes.size(), "packing verification did not consume the full block");
 }
 
 void construction_and_copy_failure_are_atomic() {
@@ -462,6 +525,15 @@ void inert_setters_allocate_nothing() {
 
     ui::ShaderInstance inert_copy{source};
     check(!inert_copy.valid(), "copying inert instance produced valid state");
+
+    ui::ShaderInstance live_target{compiled.program};
+    {
+        ScopedAllocationFailure fail;
+        live_target = source;
+    }
+    check(!live_target.valid(),
+          "copy assignment from inert source allocated or failed to become inert");
+
     inert_copy = live;
     check(inert_copy.valid(), "valid reassignment did not recover inert instance");
 }
@@ -469,6 +541,7 @@ void inert_setters_allocate_nothing() {
 void suite() {
     compile_publication_faults();
     zero_initialization_and_exact_values();
+    complete_binding_block_matches_reflected_packing();
     construction_and_copy_failure_are_atomic();
     setters_and_moves_allocate_nothing();
     setter_failure_is_non_destructive_and_instances_are_isolated();

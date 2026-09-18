@@ -7,10 +7,12 @@
 
 namespace ui::detail {
 
-/// Private renderer/test access to the immutable logical binding bytes.
+/// Private renderer/test access to a borrowed read-only view of logical binding
+/// bytes. The view is valid only while the ShaderInstance remains alive and is
+/// not mutated; snapshot users must copy it before retaining state.
 ///
 /// This is intentionally not installed as a public API surface. T081 may reuse
-/// the same access boundary when snapshotting ShaderInstance into Brush.
+/// the same access boundary while creating an owning Brush snapshot.
 struct ShaderInstanceAccess {
     [[nodiscard]] static std::span<const std::byte> binding_bytes(
         const ShaderInstance& instance) noexcept {

@@ -174,6 +174,7 @@ enum class CompileFailurePoint {
     BeforeDiagnosticOwnership,
     AfterDiagnosticOwnership,
     BeforeReflectionOwnership,
+    DuringReflectionOwnership,
     AfterReflectionOwnership,
     BeforeUnsupportedDiagnostic,
     ProgramDataAllocation,
@@ -192,6 +193,9 @@ enum class CompileFailurePoint {
     }
     if (sksl.find("/*__NATIVEUI_T080_FAIL_REFLECTION__*/") != std::string_view::npos) {
         return CompileFailurePoint::BeforeReflectionOwnership;
+    }
+    if (sksl.find("/*__NATIVEUI_T080_FAIL_DURING_REFLECTION__*/") != std::string_view::npos) {
+        return CompileFailurePoint::DuringReflectionOwnership;
     }
     if (sksl.find("/*__NATIVEUI_T080_FAIL_AFTER_REFLECTION__*/") != std::string_view::npos) {
         return CompileFailurePoint::AfterReflectionOwnership;
@@ -380,6 +384,13 @@ ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
             reflected_size,
         });
         previous_end = reflected.offset + reflected_size;
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+        if (failure == detail::CompileFailurePoint::DuringReflectionOwnership &&
+            uniforms.size() == 1U) {
+            throw std::bad_alloc{};
+        }
+#endif
     }
 
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
