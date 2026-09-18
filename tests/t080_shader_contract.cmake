@@ -71,7 +71,7 @@ endif()
 
 file(READ "${SOURCE_DIR}/examples/features/t080_shader_uniforms.cpp" _example)
 foreach(_example_required IN ITEMS
-    "--self-test"
+    "self_test_requested"
     "ShaderInstance"
     "uniforms()"
     "T081")
