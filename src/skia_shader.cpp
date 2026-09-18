@@ -151,15 +151,15 @@ ShaderCompileResult ShaderProgram::compile_impl(std::string_view sksl,
 } // namespace ui
 
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
-namespace ui::detail {
+namespace ui {
 
-// Test-only private seam. It carries failure selection as an argument so the
-// implementation needs no mutable global/thread-local injection state and is
-// absent from normal release builds.
+// Test-only hidden friend. It carries failure selection as an argument so the
+// implementation needs no mutable global/thread-local injection state and the
+// symbol is absent from normal release builds.
 ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
                                                     int injected_failure) {
     return ShaderProgram::compile_impl(sksl, injected_failure);
 }
 
-} // namespace ui::detail
+} // namespace ui
 #endif
