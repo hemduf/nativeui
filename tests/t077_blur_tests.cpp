@@ -60,10 +60,16 @@ struct PainterEffectFaultAccess {
         painter.layer_fault_point_ = Painter::LayerFaultPoint::None;
     }
 
+    static bool local_output_bounds(Rect source,
+                                    const Effect& effect,
+                                    SkRect& output) noexcept {
+        return Painter::effect_output_bounds(source, effect, output);
+    }
+
     static bool device_output_bounds(Painter& painter,
                                      Rect source,
                                      const Effect& effect,
-                                     SkRect& output) noexcept {
+                                     SkIRect& output) noexcept {
         SkRect local;
         return Painter::effect_output_bounds(source, effect, local) &&
                painter.effect_device_output_bounds(local, output);
@@ -375,22 +381,33 @@ void inner_transform_does_not_redefine_effect_space() {
 }
 
 void device_support_rounding_contract() {
+    {
+        SkRect local_output;
+        const bool valid = ui::detail::PainterEffectFaultAccess::local_output_bounds(
+            {8388608.0f, 0.0f, 1.0f, 1.0f},
+            ui::Effect::gaussian_blur(0.5f, 0.5f),
+            local_output);
+        NUI_CHECK(valid);
+        NUI_CHECK(static_cast<double>(local_output.left()) <= 8388606.5);
+        NUI_CHECK(static_cast<double>(local_output.right()) >= 8388610.5);
+    }
+
     auto surface = make_surface();
     NUI_CHECK(surface && surface->getCanvas());
     ui::Painter painter{*surface->getCanvas()};
     painter.scale(1.5f, 2.0f);
 
-    SkRect device_output;
+    SkIRect device_output;
     const bool valid = ui::detail::PainterEffectFaultAccess::device_output_bounds(
         painter,
         {10.25f, 20.25f, 4.0f, 4.0f},
         ui::Effect::gaussian_blur(0.5f, 0.5f),
         device_output);
     NUI_CHECK(valid);
-    NUI_CHECK(device_output.left() == 13.0f);
-    NUI_CHECK(device_output.top() == 37.0f);
-    NUI_CHECK(device_output.right() == 24.0f);
-    NUI_CHECK(device_output.bottom() == 52.0f);
+    NUI_CHECK(device_output.left() == 13);
+    NUI_CHECK(device_output.top() == 37);
+    NUI_CHECK(device_output.right() == 24);
+    NUI_CHECK(device_output.bottom() == 52);
 }
 
 void hidpi_blur_scales_in_logical_space() {
@@ -547,6 +564,19 @@ void affine_transform_and_overflow_contract() {
     }
     NUI_CHECK(overflow.save_depth() == 0);
     ui::detail::PainterEffectFaultAccess::clear(overflow);
+
+    auto huge_surface = make_surface();
+    NUI_CHECK(huge_surface && huge_surface->getCanvas());
+    ui::Painter huge{*huge_surface->getCanvas()};
+    huge.translate(20000000.0f, 0.0f);
+    ui::detail::PainterEffectFaultAccess::fail_before_materialization(huge);
+    {
+        auto empty = huge.scoped_layer(
+            {0.0f, 0.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        NUI_CHECK(huge.save_depth() == 1);
+    }
+    NUI_CHECK(huge.save_depth() == 0);
+    ui::detail::PainterEffectFaultAccess::clear(huge);
 }
 
 void independent_painters_do_not_share_effect_state() {
