@@ -3,19 +3,19 @@
 #include <cstdlib>
 #include <iostream>
 #include <new>
+#include <string>
 #include <string_view>
-
-namespace ui {
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure);
-} // namespace ui
 
 namespace {
 
-constexpr int kFailBeforeDiagnosticOwnership = 1;
-constexpr int kFailProgramDataAllocation = 2;
-constexpr int kFailProgramPublicationAllocation = 3;
-constexpr int kForceEmptyBackendDiagnostic = 4;
+constexpr std::string_view kFailDiagnosticMarker =
+    "/*__NATIVEUI_T079_FAIL_DIAGNOSTIC__*/";
+constexpr std::string_view kFailProgramDataMarker =
+    "/*__NATIVEUI_T079_FAIL_PROGRAM_DATA__*/";
+constexpr std::string_view kFailPublicationMarker =
+    "/*__NATIVEUI_T079_FAIL_PUBLICATION__*/";
+constexpr std::string_view kEmptyDiagnosticMarker =
+    "/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/";
 
 constexpr std::string_view kValidShader = R"(
     half4 main(float2 p) {
@@ -40,10 +40,13 @@ void check_compile_failure(const ui::ShaderCompileResult& result) {
     }
 }
 
-void expect_bad_alloc(std::string_view source, int failure_point) {
+void expect_bad_alloc(std::string_view marker, std::string_view source) {
+    std::string marked_source{marker};
+    marked_source.append(source);
+
     bool threw = false;
     try {
-        (void)ui::compile_shader_program_for_test(source, failure_point);
+        (void)ui::ShaderProgram::compile(marked_source);
     } catch (const std::bad_alloc&) {
         threw = true;
     }
@@ -56,14 +59,14 @@ void expect_bad_alloc(std::string_view source, int failure_point) {
 
 void suite() {
     expect_bad_alloc(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kFailBeforeDiagnosticOwnership);
-    expect_bad_alloc(kValidShader, kFailProgramDataAllocation);
-    expect_bad_alloc(kValidShader, kFailProgramPublicationAllocation);
+        kFailDiagnosticMarker,
+        "half4 main(float2 p) { return missing_symbol; }");
+    expect_bad_alloc(kFailProgramDataMarker, kValidShader);
+    expect_bad_alloc(kFailPublicationMarker, kValidShader);
 
-    const auto fallback = ui::compile_shader_program_for_test(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kForceEmptyBackendDiagnostic);
+    std::string fallback_source{kEmptyDiagnosticMarker};
+    fallback_source.append("half4 main(float2 p) { return missing_symbol; }");
+    const auto fallback = ui::ShaderProgram::compile(fallback_source);
     check_compile_failure(fallback);
     check(fallback.diagnostics.size() == 1U,
           "fallback diagnostic count mismatch");
