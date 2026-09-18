@@ -66,8 +66,19 @@ struct PainterEffectFaultAccess {
     static bool device_output_bounds(Painter& painter,
                                      Rect source,
                                      const Effect& effect,
-                                     SkIRect& output) noexcept {
-        return painter.effect_device_output_bounds(source, effect, output);
+                                     SkIRect& output) {
+        if (!Painter::valid_clip_rect(source)) return false;
+        const SkRect source_bounds = Painter::to_sk_rect(source);
+        SkIRect device_source;
+        if (!painter.effect_source_device_bounds(source_bounds, device_source)) return false;
+
+        auto filter = SkImageFilters::Blur(
+            EffectTestAccess::sigma_x(effect),
+            EffectTestAccess::sigma_y(effect),
+            SkTileMode::kDecal,
+            nullptr);
+        return filter &&
+               painter.effect_filter_output_bounds(*filter, device_source, output);
     }
 };
 
@@ -420,14 +431,17 @@ void device_support_rounding_contract() {
         auto precision_surface = make_surface();
         NUI_CHECK(precision_surface && precision_surface->getCanvas());
         ui::Painter precision{*precision_surface->getCanvas()};
+        precision.translate(0.25f, 0.0f);
         SkIRect precision_output;
         NUI_CHECK(ui::detail::PainterEffectFaultAccess::device_output_bounds(
             precision,
-            {8388608.0f, 0.0f, 1.0f, 1.0f},
+            {16777210.0f, 0.0f, 1.0f, 1.0f},
             ui::Effect::gaussian_blur(0.5f, 0.5f),
             precision_output));
-        NUI_CHECK(precision_output.left() == 8388606);
-        NUI_CHECK(precision_output.right() == 8388611);
+        // A float mapRect would round the true right edge 16777211.25 down
+        // before roundOut(). The hard bound must preserve the missing pixel.
+        NUI_CHECK(precision_output.left() == 16777208);
+        NUI_CHECK(precision_output.right() == 16777214);
     }
 
     auto surface = make_surface();
@@ -471,10 +485,10 @@ void device_support_rounding_contract() {
         {0.0f, 0.0f, 8.0f, 8.0f},
         ui::Effect::gaussian_blur(0.5f, 0.5f),
         rotated_output));
-    NUI_CHECK(rotated_output.left() == -9);
-    NUI_CHECK(rotated_output.top() == -3);
-    NUI_CHECK(rotated_output.right() == 9);
-    NUI_CHECK(rotated_output.bottom() == 15);
+    NUI_CHECK(rotated_output.left() == -8);
+    NUI_CHECK(rotated_output.top() == -2);
+    NUI_CHECK(rotated_output.right() == 8);
+    NUI_CHECK(rotated_output.bottom() == 14);
 }
 
 std::vector<std::uint8_t> raw_skia_affine_blur_reference() {
@@ -820,10 +834,24 @@ void affine_transform_and_overflow_contract() {
             NUI_CHECK(nonfinite.save_depth() == 2);
         }
         NUI_CHECK(nonfinite.save_depth() == 1);
-        ui::detail::PainterEffectFaultAccess::clear(nonfinite);
     }
     NUI_CHECK(nonfinite.save_depth() == 0);
     NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
+
+    // The seam must still be armed: non-finite transform rejection happened
+    // before backend filter materialization.
+    bool seam_still_armed = false;
+    try {
+        auto should_fail = nonfinite.scoped_layer(
+            {4.0f, 4.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
+        (void)should_fail;
+    } catch (const std::bad_alloc&) {
+        seam_still_armed = true;
+    }
+    NUI_CHECK(seam_still_armed);
+    NUI_CHECK(nonfinite.save_depth() == 0);
+    NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
+
     {
         auto recovered = nonfinite.scoped_layer(
             {4.0f, 4.0f, 8.0f, 8.0f}, ui::Effect::gaussian_blur(2.0f, 2.0f));
