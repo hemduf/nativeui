@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <limits>
 #include <new>
@@ -251,10 +252,8 @@ public:
         }
 
         const SkRect source_bounds = to_sk_rect(logical_bounds);
-        SkRect output_bounds;
         SkIRect device_output_bounds;
-        if (!effect_output_bounds(logical_bounds, effect, output_bounds) ||
-            !effect_device_output_bounds(logical_bounds, effect, device_output_bounds)) {
+        if (!effect_device_output_bounds(logical_bounds, effect, device_output_bounds)) {
             // A transform or expansion that cannot be represented safely must
             // fail closed under a device-space empty clip, even if the current
             // local transform itself contains non-finite values.
@@ -293,8 +292,11 @@ public:
             canvas_.setMatrix(entry_matrix);
             maybe_fail_layer(LayerFaultPoint::AfterEffectOutputClip);
 
+            // For image-filtered saveLayer(), pinned Skia treats user bounds
+            // as a hard filter region. The real finite device clip above is the
+            // output/allocation boundary, so pass no layer-bounds hint here.
             [[maybe_unused]] const int previous_save_count =
-                canvas_.saveLayer(output_bounds, &layer_paint);
+                canvas_.saveLayer(nullptr, &layer_paint);
             ++save_depth_;
             maybe_fail_layer(LayerFaultPoint::AfterEffectSaveLayer);
 
@@ -515,146 +517,93 @@ private:
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
 
-    [[nodiscard]] static bool conservative_lower_float(double value,
-                                                        float& output) noexcept {
-        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
-        if (!std::isfinite(value) || value < -max_float || value > max_float) return false;
-        float rounded = static_cast<float>(value);
-        if (!std::isfinite(rounded)) return false;
-        if (static_cast<double>(rounded) > value) {
-            rounded = std::nextafter(rounded, -std::numeric_limits<float>::infinity());
-        }
-        if (!std::isfinite(rounded)) return false;
-        output = rounded;
-        return true;
-    }
-
-    [[nodiscard]] static bool conservative_upper_float(double value,
-                                                        float& output) noexcept {
-        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
-        if (!std::isfinite(value) || value < -max_float || value > max_float) return false;
-        float rounded = static_cast<float>(value);
-        if (!std::isfinite(rounded)) return false;
-        if (static_cast<double>(rounded) < value) {
-            rounded = std::nextafter(rounded, std::numeric_limits<float>::infinity());
-        }
-        if (!std::isfinite(rounded)) return false;
-        output = rounded;
-        return true;
-    }
-
-    [[nodiscard]] static bool effect_output_bounds(Rect source,
-                                                   const Effect& effect,
-                                                   SkRect& output) noexcept {
-        const double support_x = 3.0 * static_cast<double>(effect.sigma_x_);
-        const double support_y = 3.0 * static_cast<double>(effect.sigma_y_);
-        const double left = static_cast<double>(source.x) - support_x;
-        const double top = static_cast<double>(source.y) - support_y;
-        const double right =
-            static_cast<double>(source.x) + static_cast<double>(source.w) + support_x;
-        const double bottom =
-            static_cast<double>(source.y) + static_cast<double>(source.h) + support_y;
-
-        float local_left{}, local_top{}, local_right{}, local_bottom{};
-        if (!(left < right) || !(top < bottom) ||
-            !conservative_lower_float(left, local_left) ||
-            !conservative_lower_float(top, local_top) ||
-            !conservative_upper_float(right, local_right) ||
-            !conservative_upper_float(bottom, local_bottom)) {
-            return false;
-        }
-
-        output = SkRect::MakeLTRB(local_left, local_top, local_right, local_bottom);
-        return output.isFinite() && !output.isEmpty();
-    }
-
     [[nodiscard]] bool effect_device_output_bounds(Rect source,
                                                    const Effect& effect,
                                                    SkIRect& device_output) const noexcept {
         const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
         if (!matrix.isFinite() || matrix.hasPerspective()) return false;
 
-        auto map_rect_out = [](const SkMatrix& transform,
-                               double left,
-                               double top,
-                               double right,
-                               double bottom,
-                               double& out_left,
-                               double& out_top,
-                               double& out_right,
-                               double& out_bottom) noexcept {
-            const double m00 = static_cast<double>(transform.getScaleX());
-            const double m01 = static_cast<double>(transform.getSkewX());
-            const double m02 = static_cast<double>(transform.getTranslateX());
-            const double m10 = static_cast<double>(transform.getSkewY());
-            const double m11 = static_cast<double>(transform.getScaleY());
-            const double m12 = static_cast<double>(transform.getTranslateY());
+        auto map_source_pixels = [](const SkMatrix& transform,
+                                    Rect source_rect,
+                                    SkIRect& pixels) noexcept {
+            const SkRect source_bounds =
+                SkRect::MakeXYWH(source_rect.x, source_rect.y,
+                                 source_rect.w, source_rect.h);
+            const SkRect mapped = transform.mapRect(source_bounds);
+            if (!mapped.isFinite() || mapped.isEmpty()) return false;
 
-            double min_x = std::numeric_limits<double>::infinity();
-            double min_y = std::numeric_limits<double>::infinity();
-            double max_x = -std::numeric_limits<double>::infinity();
-            double max_y = -std::numeric_limits<double>::infinity();
-            const double xs[2] = {left, right};
-            const double ys[2] = {top, bottom};
-            for (double x : xs) {
-                for (double y : ys) {
-                    const double mapped_x = m00 * x + m01 * y + m02;
-                    const double mapped_y = m10 * x + m11 * y + m12;
-                    if (!std::isfinite(mapped_x) || !std::isfinite(mapped_y)) return false;
-                    min_x = (std::min)(min_x, mapped_x);
-                    min_y = (std::min)(min_y, mapped_y);
-                    max_x = (std::max)(max_x, mapped_x);
-                    max_y = (std::max)(max_y, mapped_y);
-                }
-            }
-            out_left = std::floor(min_x);
-            out_top = std::floor(min_y);
-            out_right = std::ceil(max_x);
-            out_bottom = std::ceil(max_y);
-            return std::isfinite(out_left) && std::isfinite(out_top) &&
-                   std::isfinite(out_right) && std::isfinite(out_bottom) &&
-                   out_left < out_right && out_top < out_bottom;
+            // Skia's internal image-filter mapping applies a small epsilon
+            // before roundOut(); strict roundOut() can only be equal/larger,
+            // which is what a correctness clip requires.
+            pixels = mapped.roundOut();
+            return !pixels.isEmpty();
         };
 
-        double device_left{};
-        double device_top{};
-        double device_right{};
-        double device_bottom{};
-
-        if (matrix.isScaleTranslate()) {
-            // Skia keeps scale+translate entirely in image-filter layer space.
-            // Round source coverage there first, then apply the integer kernel
-            // radius produced by ceil(3 * mapped sigma).
-            if (!map_rect_out(matrix,
-                              static_cast<double>(source.x),
-                              static_cast<double>(source.y),
-                              static_cast<double>(source.x) + static_cast<double>(source.w),
-                              static_cast<double>(source.y) + static_cast<double>(source.h),
-                              device_left,
-                              device_top,
-                              device_right,
-                              device_bottom)) {
+        auto kernel_radius = [](float scale, float sigma, int& radius) noexcept {
+            // Match the pinned backend's float arithmetic for mapped sigma and
+            // its discrete ceil(3*sigma) support. Omitting Skia's private
+            // maximum-sigma clamp is deliberately conservative.
+            const float mapped_sigma = std::abs(scale * sigma);
+            const float support = 3.0f * mapped_sigma;
+            if (!std::isfinite(support) || support < 0.0f) return false;
+            const double rounded = std::ceil(static_cast<double>(support));
+            if (rounded > static_cast<double>(std::numeric_limits<int>::max())) {
                 return false;
             }
+            radius = static_cast<int>(rounded);
+            return true;
+        };
 
-            const double sigma_x = std::abs(
-                static_cast<double>(matrix.getScaleX()) *
-                static_cast<double>(effect.sigma_x_));
-            const double sigma_y = std::abs(
-                static_cast<double>(matrix.getScaleY()) *
-                static_cast<double>(effect.sigma_y_));
-            if (!std::isfinite(sigma_x) || !std::isfinite(sigma_y)) return false;
-            const double radius_x = std::ceil(3.0 * sigma_x);
-            const double radius_y = std::ceil(3.0 * sigma_y);
-            device_left -= radius_x;
-            device_top -= radius_y;
-            device_right += radius_x;
-            device_bottom += radius_y;
+        auto outset_checked = [](SkIRect input,
+                                 int radius_x,
+                                 int radius_y,
+                                 SkIRect& output) noexcept {
+            const std::int64_t left =
+                static_cast<std::int64_t>(input.left()) - radius_x;
+            const std::int64_t top =
+                static_cast<std::int64_t>(input.top()) - radius_y;
+            const std::int64_t right =
+                static_cast<std::int64_t>(input.right()) + radius_x;
+            const std::int64_t bottom =
+                static_cast<std::int64_t>(input.bottom()) + radius_y;
+            const auto int_min =
+                static_cast<std::int64_t>(std::numeric_limits<int>::min());
+            const auto int_max =
+                static_cast<std::int64_t>(std::numeric_limits<int>::max());
+            if (left < int_min || top < int_min ||
+                right > int_max || bottom > int_max ||
+                !(left < right) || !(top < bottom)) {
+                return false;
+            }
+            output = SkIRect::MakeLTRB(static_cast<int>(left),
+                                       static_cast<int>(top),
+                                       static_cast<int>(right),
+                                       static_cast<int>(bottom));
+            return !output.isEmpty();
+        };
+
+        SkIRect output;
+        if (matrix.isScaleTranslate()) {
+            // Skia keeps scale+translate entirely in image-filter layer space.
+            SkIRect source_pixels;
+            if (!map_source_pixels(matrix, source, source_pixels)) return false;
+
+            int radius_x{};
+            int radius_y{};
+            if (!kernel_radius(std::abs(matrix.getScaleX()),
+                               effect.sigma_x_,
+                               radius_x) ||
+                !kernel_radius(std::abs(matrix.getScaleY()),
+                               effect.sigma_y_,
+                               radius_y) ||
+                !outset_checked(source_pixels, radius_x, radius_y, output)) {
+                return false;
+            }
         } else {
-            // Blur supports scale+translate in its layer space. For affine CTMs
-            // Skia factors out positive axis scales, evaluates/rounds the blur
-            // in that scale-only layer, then maps the expanded integer layer
-            // through the remaining affine transform.
+            // Blur supports a scale+translate image-filter layer. For affine
+            // CTMs Skia factors out positive axis scales, evaluates/rounds the
+            // kernel there, then maps that integer layer through the remaining
+            // affine transform.
             SkSize layer_scale;
             SkMatrix layer_to_device;
             if (!matrix.decomposeScale(&layer_scale, &layer_to_device) ||
@@ -662,66 +611,47 @@ private:
                 return false;
             }
 
-            const double sx = static_cast<double>(layer_scale.width());
-            const double sy = static_cast<double>(layer_scale.height());
-            if (!std::isfinite(sx) || !std::isfinite(sy) || !(sx > 0.0) || !(sy > 0.0)) {
+            const SkMatrix parameter_to_layer =
+                SkMatrix::Scale(layer_scale.width(), layer_scale.height());
+            SkIRect source_layer_pixels;
+            if (!map_source_pixels(parameter_to_layer,
+                                   source,
+                                   source_layer_pixels)) {
                 return false;
             }
 
-            double layer_left = std::floor(static_cast<double>(source.x) * sx);
-            double layer_top = std::floor(static_cast<double>(source.y) * sy);
-            double layer_right = std::ceil(
-                (static_cast<double>(source.x) + static_cast<double>(source.w)) * sx);
-            double layer_bottom = std::ceil(
-                (static_cast<double>(source.y) + static_cast<double>(source.h)) * sy);
-            if (!std::isfinite(layer_left) || !std::isfinite(layer_top) ||
-                !std::isfinite(layer_right) || !std::isfinite(layer_bottom) ||
-                !(layer_left < layer_right) || !(layer_top < layer_bottom)) {
+            int radius_x{};
+            int radius_y{};
+            SkIRect expanded_layer;
+            if (!kernel_radius(layer_scale.width(), effect.sigma_x_, radius_x) ||
+                !kernel_radius(layer_scale.height(), effect.sigma_y_, radius_y) ||
+                !outset_checked(source_layer_pixels,
+                                radius_x,
+                                radius_y,
+                                expanded_layer)) {
                 return false;
             }
 
-            const double radius_x =
-                std::ceil(3.0 * sx * static_cast<double>(effect.sigma_x_));
-            const double radius_y =
-                std::ceil(3.0 * sy * static_cast<double>(effect.sigma_y_));
-            if (!std::isfinite(radius_x) || !std::isfinite(radius_y)) return false;
-            layer_left -= radius_x;
-            layer_top -= radius_y;
-            layer_right += radius_x;
-            layer_bottom += radius_y;
-
-            if (!map_rect_out(layer_to_device,
-                              layer_left,
-                              layer_top,
-                              layer_right,
-                              layer_bottom,
-                              device_left,
-                              device_top,
-                              device_right,
-                              device_bottom)) {
-                return false;
-            }
+            const SkRect mapped =
+                layer_to_device.mapRect(SkRect::Make(expanded_layer));
+            if (!mapped.isFinite() || mapped.isEmpty()) return false;
+            output = mapped.roundOut();
+            if (output.isEmpty()) return false;
         }
 
-        // SkCanvas::clipIRect ultimately converts the integer rect to SkScalar
-        // (float). Restrict device coordinates to the exact-integer range of
-        // binary32 so this conversion cannot round an outward edge inward.
-        constexpr double max_exact_float_integer = 16777216.0; // 2^24
-        if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
-            !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
-            device_left < -max_exact_float_integer ||
-            device_top < -max_exact_float_integer ||
-            device_right > max_exact_float_integer ||
-            device_bottom > max_exact_float_integer ||
-            !(device_left < device_right) || !(device_top < device_bottom)) {
+        // clipIRect converts coordinates to SkScalar internally. Keep each edge
+        // in binary32's exact integer range so this conversion cannot shrink
+        // the hard correctness clip.
+        constexpr int max_exact_float_integer = 1 << 24;
+        if (output.left() < -max_exact_float_integer ||
+            output.top() < -max_exact_float_integer ||
+            output.right() > max_exact_float_integer ||
+            output.bottom() > max_exact_float_integer) {
             return false;
         }
 
-        device_output = SkIRect::MakeLTRB(static_cast<int>(device_left),
-                                          static_cast<int>(device_top),
-                                          static_cast<int>(device_right),
-                                          static_cast<int>(device_bottom));
-        return !device_output.isEmpty();
+        device_output = output;
+        return true;
     }
 
     [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
