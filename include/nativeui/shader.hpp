@@ -54,9 +54,9 @@ public:
     [[nodiscard]] static ShaderCompileResult compile(std::string_view sksl);
 
 private:
-    explicit ShaderProgram(std::shared_ptr<const detail::ShaderProgramData> data) noexcept;
+    explicit ShaderProgram(std::unique_ptr<const detail::ShaderProgramData> data) noexcept;
 
-    std::shared_ptr<const detail::ShaderProgramData> data_;
+    std::unique_ptr<const detail::ShaderProgramData> data_;
 };
 
 } // namespace ui
