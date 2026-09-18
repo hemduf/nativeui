@@ -44,6 +44,7 @@ void exact_result_contract() {
     NUI_CHECK(valid.diagnostics.empty());
 
     check_compile_failure(ui::ShaderProgram::compile(""));
+    check_compile_failure(ui::ShaderProgram::compile(std::string_view{}));
     check_compile_failure(ui::ShaderProgram::compile(R"(
         half4 main(float2 p) {
             return half4(1.0, 0.0, 0.0, 1.0)
