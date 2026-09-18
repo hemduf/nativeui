@@ -8,17 +8,16 @@
 #include <string_view>
 #include <type_traits>
 
-namespace ui {
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure);
-} // namespace ui
-
 namespace {
 
-constexpr int kFailBeforeDiagnosticOwnership = 1;
-constexpr int kFailProgramDataAllocation = 2;
-constexpr int kFailProgramPublicationAllocation = 3;
-constexpr int kForceEmptyBackendDiagnostic = 4;
+constexpr std::string_view kFailDiagnosticMarker =
+    "/*__NATIVEUI_T079_FAIL_DIAGNOSTIC__*/";
+constexpr std::string_view kFailProgramDataMarker =
+    "/*__NATIVEUI_T079_FAIL_PROGRAM_DATA__*/";
+constexpr std::string_view kFailPublicationMarker =
+    "/*__NATIVEUI_T079_FAIL_PUBLICATION__*/";
+constexpr std::string_view kEmptyDiagnosticMarker =
+    "/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/";
 
 constexpr std::string_view kValidShader = R"(
     half4 main(float2 p) {
@@ -119,10 +118,14 @@ void immutable_program_can_be_retained_by_two_uis() {
     NUI_CHECK(lifetime.expired());
 }
 
-void expect_injected_bad_alloc(std::string_view source, int failure_point) {
+void expect_injected_bad_alloc(std::string_view marker,
+                               std::string_view source) {
+    std::string marked_source{marker};
+    marked_source.append(source);
+
     bool threw = false;
     try {
-        (void)ui::compile_shader_program_for_test(source, failure_point);
+        (void)ui::ShaderProgram::compile(marked_source);
     } catch (const std::bad_alloc&) {
         threw = true;
     }
@@ -136,16 +139,16 @@ void expect_injected_bad_alloc(std::string_view source, int failure_point) {
 
 void deterministic_failure_injection_has_strong_recovery() {
     expect_injected_bad_alloc(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kFailBeforeDiagnosticOwnership);
-    expect_injected_bad_alloc(kValidShader, kFailProgramDataAllocation);
-    expect_injected_bad_alloc(kValidShader, kFailProgramPublicationAllocation);
+        kFailDiagnosticMarker,
+        "half4 main(float2 p) { return missing_symbol; }");
+    expect_injected_bad_alloc(kFailProgramDataMarker, kValidShader);
+    expect_injected_bad_alloc(kFailPublicationMarker, kValidShader);
 }
 
 void empty_backend_diagnostic_uses_nativeui_fallback() {
-    const auto result = ui::compile_shader_program_for_test(
-        "half4 main(float2 p) { return missing_symbol; }",
-        kForceEmptyBackendDiagnostic);
+    std::string source{kEmptyDiagnosticMarker};
+    source.append("half4 main(float2 p) { return missing_symbol; }");
+    const auto result = ui::ShaderProgram::compile(source);
     check_compile_failure(result);
     NUI_CHECK(result.diagnostics.size() == 1U);
     NUI_CHECK(result.diagnostics.front().message ==

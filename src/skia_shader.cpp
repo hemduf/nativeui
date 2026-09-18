@@ -20,22 +20,32 @@ struct ShaderProgramData final {
 
 namespace {
 
-enum class CompileFailurePoint : int {
-    None = 0,
-    BeforeDiagnosticOwnership = 1,
-    ProgramDataAllocation = 2,
-    ProgramPublicationAllocation = 3,
-    EmptyBackendDiagnostic = 4,
+enum class CompileFailurePoint {
+    None,
+    BeforeDiagnosticOwnership,
+    ProgramDataAllocation,
+    ProgramPublicationAllocation,
+    EmptyBackendDiagnostic,
 };
 
-[[nodiscard]] CompileFailurePoint decode_failure_point(int value) noexcept {
-    switch (value) {
-        case 1: return CompileFailurePoint::BeforeDiagnosticOwnership;
-        case 2: return CompileFailurePoint::ProgramDataAllocation;
-        case 3: return CompileFailurePoint::ProgramPublicationAllocation;
-        case 4: return CompileFailurePoint::EmptyBackendDiagnostic;
-        default: return CompileFailurePoint::None;
+[[nodiscard]] CompileFailurePoint test_failure_point(std::string_view sksl) noexcept {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_DIAGNOSTIC__*/") != std::string_view::npos) {
+        return CompileFailurePoint::BeforeDiagnosticOwnership;
     }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_PROGRAM_DATA__*/") != std::string_view::npos) {
+        return CompileFailurePoint::ProgramDataAllocation;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_PUBLICATION__*/") != std::string_view::npos) {
+        return CompileFailurePoint::ProgramPublicationAllocation;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/") != std::string_view::npos) {
+        return CompileFailurePoint::EmptyBackendDiagnostic;
+    }
+#else
+    (void)sksl;
+#endif
+    return CompileFailurePoint::None;
 }
 
 [[nodiscard]] ShaderDiagnostic compiler_diagnostic(const SkString& error_text) {
@@ -112,12 +122,7 @@ ShaderProgram::ShaderProgram(
 ShaderProgram::~ShaderProgram() noexcept = default;
 
 ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
-    return compile_impl(sksl, 0);
-}
-
-ShaderCompileResult ShaderProgram::compile_impl(std::string_view sksl,
-                                                int injected_failure) {
-    const auto failure = detail::decode_failure_point(injected_failure);
+    const auto failure = detail::test_failure_point(sksl);
     auto backend = SkRuntimeEffect::MakeForShader(SkString{sksl});
 
     if (!backend.effect) {
@@ -149,17 +154,3 @@ ShaderCompileResult ShaderProgram::compile_impl(std::string_view sksl,
 }
 
 } // namespace ui
-
-#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
-namespace ui {
-
-// Test-only hidden friend. It carries failure selection as an argument so the
-// implementation needs no mutable global/thread-local injection state and the
-// symbol is absent from normal release builds.
-ShaderCompileResult compile_shader_program_for_test(std::string_view sksl,
-                                                    int injected_failure) {
-    return ShaderProgram::compile_impl(sksl, injected_failure);
-}
-
-} // namespace ui
-#endif
