@@ -115,6 +115,7 @@ endfunction()
 add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
+  src/skia_shader.cpp
   src/skia_svg.cpp
   src/headless.cpp
   src/dispatcher.cpp
@@ -393,6 +394,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t079_shader_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t079_shader_contract.cmake"
+  )
   set_tests_properties(
     nativeui_feature_example_discovery_contract
     PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
@@ -427,6 +434,10 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t067_root_integration_contract
     PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t079_shader_contract
+    PROPERTIES LABELS "build;cmake;t079;shader" TIMEOUT 20
   )
 
   function(nativeui_add_core_test name source)
@@ -477,6 +488,27 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_t062_tooltip_tests tests/t062_tooltip_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
+  nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
+
+  # T079 allocation/fallback fault seams are compiled only into this isolated
+  # test executable. NativeUI::Core never contains the test-only entry point,
+  # even when the normal test suite is enabled.
+  add_executable(nativeui_shader_fault_tests
+    tests/shader_fault_tests.cpp
+    src/skia_shader.cpp
+  )
+  target_include_directories(nativeui_shader_fault_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_shader_fault_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_shader_fault_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_shader_fault_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_shader_fault_tests)
+  nativeui_enable_sanitizers(nativeui_shader_fault_tests)
+  add_test(NAME nativeui_shader_fault_tests COMMAND nativeui_shader_fault_tests)
+
   nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
   nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
   nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
@@ -583,7 +615,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
