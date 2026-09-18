@@ -38,9 +38,11 @@ struct ShaderProgramCompiler;
 
 /// Immutable compiled runtime-shader program.
 ///
-/// Compilation is explicit resource-preparation work. The returned program owns
-/// its backend representation and does not borrow the caller's SkSL source.
-/// Backend/compiler types remain private to NativeUI.
+/// Compilation is explicit resource-preparation work. It may allocate and is
+/// not an audio-real-time operation. The returned program owns its backend
+/// representation and does not borrow the caller's SkSL source. Rendering never
+/// invokes compilation implicitly. Backend/compiler types remain private to
+/// NativeUI.
 class ShaderProgram final {
 public:
     ShaderProgram() = delete;
