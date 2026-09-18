@@ -112,15 +112,19 @@ private:
     std::function<void(ui::Painter&)> draw_;
 };
 
-std::vector<ui::Rgba8> render(std::function<void(ui::Painter&)> draw) {
+std::vector<std::uint8_t> render(std::function<void(ui::Painter&)> draw) {
     ui::UI tree{PainterProbe{std::move(draw)}};
     ui::HeadlessRenderer renderer{{64.0f, 64.0f}, 1.0f};
     NUI_CHECK(renderer.render(tree));
     return renderer.rgba_pixels();
 }
 
-ui::Rgba8 pixel(const std::vector<ui::Rgba8>& pixels, int x, int y) {
-    return pixels[static_cast<std::size_t>(y * 64 + x)];
+ui::Rgba8 pixel(const std::vector<std::uint8_t>& pixels, int x, int y) {
+    const auto offset = static_cast<std::size_t>((y * 64 + x) * 4);
+    return {pixels[offset],
+            pixels[offset + 1],
+            pixels[offset + 2],
+            pixels[offset + 3]};
 }
 
 sk_sp<SkSurface> make_surface() {
@@ -369,6 +373,15 @@ void affine_transform_and_overflow_contract() {
         threw = true;
     }
     NUI_CHECK(threw);
+    NUI_CHECK(painter.save_depth() == 0);
+    NUI_CHECK(canvas->getSaveCount() == baseline);
+
+    {
+        auto layer = painter.scoped_layer(
+            {-8.0f, -8.0f, 16.0f, 16.0f}, ui::Effect::gaussian_blur(2.0f, 4.0f));
+        painter.fill_rounded_rect(
+            {-6.0f, -6.0f, 12.0f, 12.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    }
     NUI_CHECK(painter.save_depth() == 0);
     NUI_CHECK(canvas->getSaveCount() == baseline);
 
