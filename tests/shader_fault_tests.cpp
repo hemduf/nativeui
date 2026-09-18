@@ -22,20 +22,74 @@
 namespace allocation_probe {
 bool fail_allocations = false;
 std::size_t allocation_count = 0;
+
+[[nodiscard]] void* allocate_unaligned(std::size_t size) noexcept {
+    return std::malloc(size == 0 ? 1U : size);
+}
+
+[[nodiscard]] void* allocate_aligned(std::size_t size,
+                                     std::size_t alignment) noexcept {
+    if (alignment == 0 || (alignment & (alignment - 1U)) != 0U) {
+        return nullptr;
+    }
+
+    constexpr std::size_t kPointerBytes = sizeof(void*);
+    const auto max_size = (std::numeric_limits<std::size_t>::max)();
+    if (alignment - 1U > max_size - kPointerBytes) {
+        return nullptr;
+    }
+
+    const std::size_t overhead = kPointerBytes + alignment - 1U;
+    const std::size_t payload_size = size == 0 ? 1U : size;
+    if (payload_size > max_size - overhead) {
+        return nullptr;
+    }
+
+    void* raw = std::malloc(payload_size + overhead);
+    if (!raw) return nullptr;
+
+    const auto raw_address = reinterpret_cast<std::uintptr_t>(raw);
+    const auto candidate = raw_address + kPointerBytes;
+    const auto aligned_address =
+        (candidate + alignment - 1U) & ~static_cast<std::uintptr_t>(alignment - 1U);
+    auto* aligned = reinterpret_cast<std::byte*>(aligned_address);
+    std::memcpy(aligned - kPointerBytes, &raw, kPointerBytes);
+    return aligned;
+}
+
+void deallocate_aligned(void* pointer) noexcept {
+    if (!pointer) return;
+    void* raw = nullptr;
+    auto* aligned = static_cast<std::byte*>(pointer);
+    std::memcpy(&raw, aligned - sizeof(void*), sizeof(raw));
+    std::free(raw);
+}
 } // namespace allocation_probe
 
 void* operator new(std::size_t size) {
-    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
     ++allocation_probe::allocation_count;
-    if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
     throw std::bad_alloc{};
 }
 
 void* operator new[](std::size_t size) {
-    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
     ++allocation_probe::allocation_count;
-    if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
     throw std::bad_alloc{};
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_unaligned(size);
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_unaligned(size);
 }
 
 void operator delete(void* pointer) noexcept {
@@ -52,6 +106,88 @@ void operator delete(void* pointer, std::size_t) noexcept {
 
 void operator delete[](void* pointer, std::size_t) noexcept {
     std::free(pointer);
+}
+
+void operator delete(void* pointer, const std::nothrow_t&) noexcept {
+    std::free(pointer);
+}
+
+void operator delete[](void* pointer, const std::nothrow_t&) noexcept {
+    std::free(pointer);
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_aligned(
+            size,
+            static_cast<std::size_t>(alignment))) {
+        return pointer;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_aligned(
+            size,
+            static_cast<std::size_t>(alignment))) {
+        return pointer;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new(std::size_t size,
+                   std::align_val_t alignment,
+                   const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_aligned(
+        size,
+        static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t size,
+                     std::align_val_t alignment,
+                     const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_aligned(
+        size,
+        static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* pointer, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+void operator delete[](void* pointer, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+void operator delete(void* pointer,
+                     std::size_t,
+                     std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+void operator delete[](void* pointer,
+                       std::size_t,
+                       std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+void operator delete(void* pointer,
+                     std::align_val_t,
+                     const std::nothrow_t&) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+void operator delete[](void* pointer,
+                       std::align_val_t,
+                       const std::nothrow_t&) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
 }
 
 namespace {
@@ -103,6 +239,10 @@ constexpr std::string_view kAllSetterShader = R"(
     half4 main(float2 p) { return half4(0.0); }
 )";
 
+struct alignas(64) OverAlignedAllocationProbe {
+    std::byte payload[64]{};
+};
+
 class ScopedAllocationFailure {
 public:
     ScopedAllocationFailure() noexcept {
@@ -119,6 +259,10 @@ public:
 
 void check(bool condition, const char* message) {
     if (!condition) throw message;
+}
+
+void check_no_allocation_since(std::size_t before, const char* message) {
+    check(allocation_probe::allocation_count == before, message);
 }
 
 void check_compile_failure(const ui::ShaderCompileResult& result) {
@@ -170,6 +314,52 @@ int read_backend_int(std::span<const std::byte> bytes, std::size_t offset = 0) {
     int value{};
     std::memcpy(&value, bytes.data() + offset, sizeof(value));
     return value;
+}
+
+void allocation_probe_covers_all_replaceable_new_forms() {
+    bool ordinary_throwing = false;
+    try {
+        ScopedAllocationFailure fail;
+        (void)::operator new(sizeof(std::byte));
+    } catch (const std::bad_alloc&) {
+        ordinary_throwing = true;
+    }
+    check(ordinary_throwing, "allocation guard misses ordinary throwing new");
+
+    const auto ordinary_nothrow_before = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        void* probe = ::operator new(sizeof(std::byte), std::nothrow);
+        check(probe == nullptr, "allocation guard misses ordinary nothrow new");
+    }
+    check(allocation_probe::allocation_count == ordinary_nothrow_before + 1U,
+          "ordinary nothrow new was not counted");
+
+    constexpr auto kProbeAlignment =
+        std::align_val_t{alignof(OverAlignedAllocationProbe)};
+
+    bool aligned_throwing = false;
+    try {
+        ScopedAllocationFailure fail;
+        (void)::operator new(
+            sizeof(OverAlignedAllocationProbe),
+            kProbeAlignment);
+    } catch (const std::bad_alloc&) {
+        aligned_throwing = true;
+    }
+    check(aligned_throwing, "allocation guard misses aligned throwing new");
+
+    const auto aligned_nothrow_before = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        void* probe = ::operator new(
+            sizeof(OverAlignedAllocationProbe),
+            kProbeAlignment,
+            std::nothrow);
+        check(probe == nullptr, "allocation guard misses aligned nothrow new");
+    }
+    check(allocation_probe::allocation_count == aligned_nothrow_before + 1U,
+          "aligned nothrow new was not counted");
 }
 
 void compile_publication_faults() {
@@ -418,6 +608,7 @@ void setters_and_moves_allocate_nothing() {
     ui::ShaderSetResult itriple{};
     ui::ShaderSetResult ivector{};
     ui::ShaderSetResult tint{};
+    const auto successful_setter_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         scalar = instance.set_float("scalar", 1.0f);
@@ -430,6 +621,9 @@ void setters_and_moves_allocate_nothing() {
         ivector = instance.set_int4("ivector", {1, 2, 3, 4});
         tint = instance.set_color("tint", {-1.0f, 0.5f, 2.0f, 1.25f});
     }
+    check_no_allocation_since(
+        successful_setter_allocations,
+        "successful setters attempted a heap allocation");
     check(scalar == ui::ShaderSetResult::Ok &&
               pair == ui::ShaderSetResult::Ok &&
               triple == ui::ShaderSetResult::Ok &&
@@ -444,6 +638,7 @@ void setters_and_moves_allocate_nothing() {
     ui::ShaderSetResult missing{};
     ui::ShaderSetResult mismatch{};
     ui::ShaderSetResult invalid{};
+    const auto failed_setter_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         missing = instance.set_float("missing", 1.0f);
@@ -452,6 +647,9 @@ void setters_and_moves_allocate_nothing() {
             "scalar",
             std::numeric_limits<float>::infinity());
     }
+    check_no_allocation_since(
+        failed_setter_allocations,
+        "failed setters attempted a heap allocation");
     check(missing == ui::ShaderSetResult::NotFound,
           "missing setter result mismatch under allocation guard");
     check(mismatch == ui::ShaderSetResult::TypeMismatch,
@@ -465,28 +663,40 @@ void setters_and_moves_allocate_nothing() {
 
     alignas(ui::ShaderInstance) std::byte move_storage[sizeof(ui::ShaderInstance)];
     ui::ShaderInstance* moved = nullptr;
+    const auto move_construct_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         moved = ::new (static_cast<void*>(move_storage))
             ui::ShaderInstance(std::move(move_source));
     }
+    check_no_allocation_since(
+        move_construct_allocations,
+        "ShaderInstance move construction attempted a heap allocation");
     check(moved->valid(), "move construction did not transfer valid state");
     check(!move_source.valid(), "move construction did not leave source inert");
 
     ui::ShaderInstance move_destination{compiled.program};
+    const auto move_assign_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         move_destination = std::move(*moved);
     }
+    check_no_allocation_since(
+        move_assign_allocations,
+        "ShaderInstance move assignment attempted a heap allocation");
     check(move_destination.valid(), "move assignment did not transfer valid state");
     check(!moved->valid(), "move assignment did not leave source inert");
     moved->~ShaderInstance();
 
     auto* move_destination_alias = &move_destination;
+    const auto self_move_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         move_destination = std::move(*move_destination_alias);
     }
+    check_no_allocation_since(
+        self_move_allocations,
+        "ShaderInstance self-move attempted a heap allocation");
     check(move_destination.valid(), "self-move changed valid state");
 }
 
@@ -535,6 +745,7 @@ void inert_setters_allocate_nothing() {
     check(live.valid() && !source.valid(), "failed to produce inert source");
 
     ui::ShaderSetResult results[9]{};
+    const auto inert_setter_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         results[0] = source.set_float("scalar", 1.0f);
@@ -547,20 +758,40 @@ void inert_setters_allocate_nothing() {
         results[7] = source.set_int4("ivector", {1, 2, 3, 4});
         results[8] = source.set_color("tint", {1.0f, 1.0f, 1.0f, 1.0f});
     }
+    check_no_allocation_since(
+        inert_setter_allocations,
+        "inert setters attempted a heap allocation");
 
     for (auto result : results) {
         check(result == ui::ShaderSetResult::NotFound,
               "inert setter did not return NotFound");
     }
 
-    ui::ShaderInstance inert_copy{source};
-    check(!inert_copy.valid(), "copying inert instance produced valid state");
+    alignas(ui::ShaderInstance) std::byte inert_copy_storage[sizeof(ui::ShaderInstance)];
+    ui::ShaderInstance* guarded_inert_copy = nullptr;
+    const auto inert_copy_allocations = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        guarded_inert_copy = ::new (static_cast<void*>(inert_copy_storage))
+            ui::ShaderInstance(source);
+    }
+    check_no_allocation_since(
+        inert_copy_allocations,
+        "copying an inert ShaderInstance attempted a heap allocation");
+    check(!guarded_inert_copy->valid(),
+          "copying inert instance produced valid state");
+    guarded_inert_copy->~ShaderInstance();
 
+    ui::ShaderInstance inert_copy{source};
     ui::ShaderInstance live_target{compiled.program};
+    const auto inert_assign_allocations = allocation_probe::allocation_count;
     {
         ScopedAllocationFailure fail;
         live_target = source;
     }
+    check_no_allocation_since(
+        inert_assign_allocations,
+        "copy assignment from inert ShaderInstance attempted a heap allocation");
     check(!live_target.valid(),
           "copy assignment from inert source allocated or failed to become inert");
 
@@ -569,6 +800,7 @@ void inert_setters_allocate_nothing() {
 }
 
 void suite() {
+    allocation_probe_covers_all_replaceable_new_forms();
     compile_publication_faults();
     zero_initialization_and_exact_values();
     complete_binding_block_matches_reflected_packing();
