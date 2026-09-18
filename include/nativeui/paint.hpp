@@ -252,7 +252,7 @@ public:
 
         const SkRect source_bounds = to_sk_rect(logical_bounds);
         SkRect output_bounds;
-        SkRect device_output_bounds;
+        SkIRect device_output_bounds;
         if (!effect_output_bounds(logical_bounds, effect, output_bounds) ||
             !effect_device_output_bounds(output_bounds, device_output_bounds)) {
             // A transform or expansion that cannot be represented safely must
@@ -288,7 +288,7 @@ public:
             // remain intersected while only this new clip is installed under
             // identity coordinates.
             canvas_.resetMatrix();
-            canvas_.clipRect(device_output_bounds, SkClipOp::kIntersect, false);
+            canvas_.clipIRect(device_output_bounds, SkClipOp::kIntersect);
             canvas_.setMatrix(entry_matrix);
             maybe_fail_layer(LayerFaultPoint::AfterEffectOutputClip);
 
@@ -500,6 +500,34 @@ private:
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
 
+    [[nodiscard]] static bool conservative_lower_float(double value,
+                                                        float& output) noexcept {
+        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
+        if (!std::isfinite(value) || value < -max_float || value > max_float) return false;
+        float rounded = static_cast<float>(value);
+        if (!std::isfinite(rounded)) return false;
+        if (static_cast<double>(rounded) > value) {
+            rounded = std::nextafter(rounded, -std::numeric_limits<float>::infinity());
+        }
+        if (!std::isfinite(rounded)) return false;
+        output = rounded;
+        return true;
+    }
+
+    [[nodiscard]] static bool conservative_upper_float(double value,
+                                                        float& output) noexcept {
+        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
+        if (!std::isfinite(value) || value < -max_float || value > max_float) return false;
+        float rounded = static_cast<float>(value);
+        if (!std::isfinite(rounded)) return false;
+        if (static_cast<double>(rounded) < value) {
+            rounded = std::nextafter(rounded, std::numeric_limits<float>::infinity());
+        }
+        if (!std::isfinite(rounded)) return false;
+        output = rounded;
+        return true;
+    }
+
     [[nodiscard]] static bool effect_output_bounds(Rect source,
                                                    const Effect& effect,
                                                    SkRect& output) noexcept {
@@ -512,52 +540,71 @@ private:
         const double bottom =
             static_cast<double>(source.y) + static_cast<double>(source.h) + support_y;
 
-        const double max_float = static_cast<double>(std::numeric_limits<float>::max());
-        if (!std::isfinite(left) || !std::isfinite(top) ||
-            !std::isfinite(right) || !std::isfinite(bottom) ||
-            left < -max_float || top < -max_float ||
-            right > max_float || bottom > max_float ||
-            !(left < right) || !(top < bottom)) {
+        float local_left{}, local_top{}, local_right{}, local_bottom{};
+        if (!(left < right) || !(top < bottom) ||
+            !conservative_lower_float(left, local_left) ||
+            !conservative_lower_float(top, local_top) ||
+            !conservative_upper_float(right, local_right) ||
+            !conservative_upper_float(bottom, local_bottom)) {
             return false;
         }
 
-        output = SkRect::MakeLTRB(static_cast<float>(left),
-                                  static_cast<float>(top),
-                                  static_cast<float>(right),
-                                  static_cast<float>(bottom));
+        output = SkRect::MakeLTRB(local_left, local_top, local_right, local_bottom);
         return output.isFinite() && !output.isEmpty();
     }
 
     [[nodiscard]] bool effect_device_output_bounds(const SkRect& local_bounds,
-                                                   SkRect& device_output) const noexcept {
+                                                   SkIRect& device_output) const noexcept {
         const SkMatrix matrix = canvas_.getLocalToDeviceAs3x3();
         if (!matrix.isFinite() || matrix.hasPerspective()) return false;
 
-        const SkRect mapped = matrix.mapRect(local_bounds);
-        if (!mapped.isFinite() || mapped.isEmpty()) return false;
+        const double m00 = static_cast<double>(matrix.getScaleX());
+        const double m01 = static_cast<double>(matrix.getSkewX());
+        const double m02 = static_cast<double>(matrix.getTranslateX());
+        const double m10 = static_cast<double>(matrix.getSkewY());
+        const double m11 = static_cast<double>(matrix.getScaleY());
+        const double m12 = static_cast<double>(matrix.getTranslateY());
 
-        // saveLayer ultimately allocates in integer device coordinates. Build a
-        // conservative outward-rounded device AABB before entering any Painter
-        // frame, and reject arithmetic that cannot be represented safely.
-        const double left = std::floor(static_cast<double>(mapped.left()));
-        const double top = std::floor(static_cast<double>(mapped.top()));
-        const double right = std::ceil(static_cast<double>(mapped.right()));
-        const double bottom = std::ceil(static_cast<double>(mapped.bottom()));
-        const double int_min = static_cast<double>(std::numeric_limits<int>::min());
-        const double int_max = static_cast<double>(std::numeric_limits<int>::max());
+        double min_x = std::numeric_limits<double>::infinity();
+        double min_y = std::numeric_limits<double>::infinity();
+        double max_x = -std::numeric_limits<double>::infinity();
+        double max_y = -std::numeric_limits<double>::infinity();
+
+        const double xs[2] = {static_cast<double>(local_bounds.left()),
+                              static_cast<double>(local_bounds.right())};
+        const double ys[2] = {static_cast<double>(local_bounds.top()),
+                              static_cast<double>(local_bounds.bottom())};
+
+        for (double x : xs) {
+            for (double y : ys) {
+                const double mapped_x = m00 * x + m01 * y + m02;
+                const double mapped_y = m10 * x + m11 * y + m12;
+                if (!std::isfinite(mapped_x) || !std::isfinite(mapped_y)) return false;
+                min_x = (std::min)(min_x, mapped_x);
+                min_y = (std::min)(min_y, mapped_y);
+                max_x = (std::max)(max_x, mapped_x);
+                max_y = (std::max)(max_y, mapped_y);
+            }
+        }
+
+        const double left = std::floor(min_x);
+        const double top = std::floor(min_y);
+        const double right = std::ceil(max_x);
+        const double bottom = std::ceil(max_y);
+        constexpr double max_exact_float_integer = 16777216.0;
         if (!std::isfinite(left) || !std::isfinite(top) ||
             !std::isfinite(right) || !std::isfinite(bottom) ||
-            left < int_min || top < int_min ||
-            right > int_max || bottom > int_max ||
+            left < -max_exact_float_integer || top < -max_exact_float_integer ||
+            right > max_exact_float_integer || bottom > max_exact_float_integer ||
             !(left < right) || !(top < bottom)) {
             return false;
         }
 
-        device_output = SkRect::MakeLTRB(static_cast<float>(left),
-                                         static_cast<float>(top),
-                                         static_cast<float>(right),
-                                         static_cast<float>(bottom));
-        return device_output.isFinite() && !device_output.isEmpty();
+        device_output = SkIRect::MakeLTRB(static_cast<int>(left),
+                                          static_cast<int>(top),
+                                          static_cast<int>(right),
+                                          static_cast<int>(bottom));
+        return !device_output.isEmpty();
     }
 
     [[nodiscard]] static bool valid_clip_rect(Rect rect) noexcept {
