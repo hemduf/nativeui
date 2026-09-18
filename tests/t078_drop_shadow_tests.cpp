@@ -63,6 +63,32 @@ struct PainterEffectFaultAccess {
 
 } // namespace ui::detail
 
+namespace ui {
+
+struct TreeTestAccess {
+    static Node* find(Node& node, NodeId id) noexcept {
+        if (node.id == id) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = find(*child, id)) return found;
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] static Rect published_visual_bounds(Tree& tree, NodeId id) noexcept {
+        if (!tree.root_) return {};
+        if (auto* node = find(*tree.root_, id)) return node->published_visual_bounds;
+        return {};
+    }
+
+    [[nodiscard]] static Rect layout_bounds(Tree& tree, NodeId id) noexcept {
+        if (!tree.root_) return {};
+        if (auto* node = find(*tree.root_, id)) return node->bounds;
+        return {};
+    }
+};
+
+} // namespace ui
+
 namespace {
 
 static_assert(noexcept(ui::Effect::drop_shadow(ui::Point{}, 1.0f, ui::Color{})));
@@ -305,9 +331,36 @@ void transform_and_device_support_contract() {
     NUI_CHECK(!rotated_output.isEmpty());
 }
 
+void paint_options_apply_once() {
+    const auto full = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0, 0, 0, 1});
+        auto layer = painter.scoped_layer(
+            {24, 20, 16, 16},
+            ui::Effect::drop_shadow_only({6, 0}, 3, {1, 0, 0, 1}));
+        painter.fill_rounded_rect({24, 20, 16, 16}, 0, {1, 1, 1, 1});
+    });
+    const auto half = render([](ui::Painter& painter) {
+        painter.fill_rounded_rect({0, 0, 80, 64}, 0, {0, 0, 0, 1});
+        ui::PaintOptions options;
+        options.opacity = 0.5f;
+        auto layer = painter.scoped_layer(
+            {24, 20, 16, 16},
+            ui::Effect::drop_shadow_only({6, 0}, 3, {1, 0, 0, 1}),
+            options);
+        painter.fill_rounded_rect({24, 20, 16, 16}, 0, {1, 1, 1, 1});
+    });
+
+    const int full_r = static_cast<int>(pixel(full, 46, 28).r);
+    const int half_r = static_cast<int>(pixel(half, 46, 28).r);
+    NUI_CHECK(full_r > 8);
+    NUI_CHECK(std::abs(full_r - 2 * half_r) <= 6);
+}
+
 struct OutsetProbeState {
     ui::VisualOutset outset{4, 4, 4, 4};
+    ui::NodeId node_id{ui::kInvalidNodeId};
     std::function<void()> invalidate;
+    std::function<void()> invalidate_layout;
 };
 
 class OutsetProbeComponent final : public ui::Component {
@@ -323,7 +376,11 @@ public:
         return state_->outset;
     }
 
-    void mount(ui::MountContext& context) override { state_->invalidate = context.invalidator(); }
+    void mount(ui::MountContext& context) override {
+        state_->node_id = context.node_id();
+        state_->invalidate = context.invalidator();
+        state_->invalidate_layout = context.layout_invalidator();
+    }
     void paint(ui::PaintContext&) const override {}
 
 private:
@@ -441,6 +498,163 @@ void invalidation_before_first_layout_stays_conservative() {
     check_rect(exposed.back(), {0, 0, 200, 120});
 }
 
+
+struct FixedPlacementComponent final : ui::Component {
+    ui::Rect child_bounds{};
+
+    explicit FixedPlacementComponent(ui::Rect bounds) : child_bounds(bounds) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {200, 120};
+    }
+
+    void layout_children(ui::Rect,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>& placements) const override {
+        if (!placements.empty()) placements[0].bounds = child_bounds;
+    }
+
+    void paint(ui::PaintContext&) const override {}
+};
+
+void zero_sized_layout_can_have_visual_outset() {
+    auto state = std::make_shared<OutsetProbeState>();
+    ui::Spec root{
+        [] { return std::make_unique<FixedPlacementComponent>(ui::Rect{50, 30, 0, 40}); },
+        {OutsetProbe{state}.spec()}};
+    ui::Tree tree{ui::compile(std::move(root))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+    tree.mount();
+    tree.layout({200, 120});
+    tree.paint(canvas, platform);
+
+    state->outset = {12, 12, 12, 12};
+    state->invalidate();
+    NUI_CHECK(tree.paint_dirty());
+    check_rect(tree.dirty_regions().front(), {38, 18, 24, 64});
+}
+
+struct LayoutFaultState {
+    float first_x{20.0f};
+    bool throw_second{};
+};
+
+class TwoChildLayoutComponent final : public ui::Component {
+public:
+    explicit TwoChildLayoutComponent(std::shared_ptr<LayoutFaultState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {200, 120};
+    }
+
+    void layout_children(ui::Rect,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>& placements) const override {
+        placements[0].bounds = {state_->first_x, 20, 60, 40};
+        placements[1].bounds = {100, 20, 60, 40};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<LayoutFaultState> state_;
+};
+
+class ThrowingLayoutLeaf final : public ui::Component {
+public:
+    explicit ThrowingLayoutLeaf(std::shared_ptr<LayoutFaultState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {60, 40};
+    }
+
+    void layout_children(ui::Rect,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>&) const override {
+        if (state_->throw_second) throw std::runtime_error("layout failure");
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<LayoutFaultState> state_;
+};
+
+void failed_layout_does_not_publish_partial_visual_bounds() {
+    auto outset = std::make_shared<OutsetProbeState>();
+    auto layout_state = std::make_shared<LayoutFaultState>();
+    ui::Spec root{
+        [layout_state] { return std::make_unique<TwoChildLayoutComponent>(layout_state); },
+        {
+            OutsetProbe{outset}.spec(),
+            ui::Spec{
+                [layout_state] { return std::make_unique<ThrowingLayoutLeaf>(layout_state); },
+                {}}
+        }};
+
+    ui::Tree tree{ui::compile(std::move(root))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+    tree.mount();
+    tree.layout({200, 120});
+    tree.paint(canvas, platform);
+
+    check_rect(ui::TreeTestAccess::published_visual_bounds(tree, outset->node_id),
+               {16, 16, 68, 48});
+    check_rect(ui::TreeTestAccess::layout_bounds(tree, outset->node_id),
+               {20, 20, 60, 40});
+
+    layout_state->first_x = 60.0f;
+    layout_state->throw_second = true;
+    outset->invalidate_layout();
+
+    bool threw = false;
+    try {
+        tree.layout({200, 120});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    check_rect(ui::TreeTestAccess::published_visual_bounds(tree, outset->node_id),
+               {16, 16, 68, 48});
+    check_rect(ui::TreeTestAccess::layout_bounds(tree, outset->node_id),
+               {20, 20, 60, 40});
+
+    layout_state->throw_second = false;
+    tree.layout({200, 120});
+    check_rect(ui::TreeTestAccess::published_visual_bounds(tree, outset->node_id),
+               {56, 16, 68, 48});
+}
+
+void independent_tree_visual_state_isolation() {
+    auto first = std::make_shared<OutsetProbeState>();
+    auto second = std::make_shared<OutsetProbeState>();
+    ui::Tree a{ui::compile(ui::make_spec(ui::Padding{20, OutsetProbe{first}}))};
+    ui::Tree b{ui::compile(ui::make_spec(ui::Padding{20, OutsetProbe{second}}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    a.mount();
+    b.mount();
+    a.layout({200, 120});
+    b.layout({200, 120});
+    a.paint(canvas, platform);
+    b.paint(canvas, platform);
+
+    first->outset = {18, 18, 18, 18};
+    first->invalidate();
+    NUI_CHECK(a.paint_dirty());
+    NUI_CHECK(!b.paint_dirty());
+
+    a.unmount();
+    second->outset = {10, 10, 10, 10};
+    second->invalidate();
+    NUI_CHECK(b.paint_dirty());
+}
+
 void suite() {
     effect_value_contract();
     dirty_region_publication_is_allocation_free();
@@ -448,7 +662,11 @@ void suite() {
     zero_alpha_and_zero_sigma_contract();
     zero_alpha_skips_materialization();
     transform_and_device_support_contract();
+    paint_options_apply_once();
     retained_visual_bounds_contract();
+    zero_sized_layout_can_have_visual_outset();
+    failed_layout_does_not_publish_partial_visual_bounds();
+    independent_tree_visual_state_isolation();
     callback_publication_is_transactional();
     invalidation_before_first_layout_stays_conservative();
 }

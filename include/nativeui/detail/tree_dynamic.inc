@@ -418,18 +418,6 @@
         retained_children.reserve(retained_indices.size());
         const bool removed_structure = retained_indices.size() != current_keys.size();
 
-        Rect removed_visual_dirty{};
-        if (removed_structure) {
-            for (std::size_t i = 0; i < owner.children.size(); ++i) {
-                if (contains_dynamic_key(desired_keys, current_keys[i])) continue;
-                removed_visual_dirty = unite(
-                    removed_visual_dirty,
-                    published_subtree_visual_union(*owner.children[i]));
-            }
-        }
-        const auto removed_visual_exposure =
-            removed_structure ? retain_dirty(removed_visual_dirty) : std::optional<Rect>{};
-
         Node* retained_focus = current_focus_node();
         const NodeId retained_focus_id = retained_focus ? retained_focus->id : kInvalidNodeId;
         clear_removed_focus_restore_targets(*root_, owner, current_keys, desired_keys);
@@ -493,26 +481,13 @@
         // so destructor/lifetime ordering matches the retained-tree contract.
         previous_children.clear();
 
-        std::exception_ptr removal_notification_error;
-        if (removed_structure) {
-            mark_dynamic_structure_dirty(owner);
-            if (removed_visual_exposure) {
-                try {
-                    notify_invalidation(*removed_visual_exposure);
-                } catch (...) {
-                    removal_notification_error = std::current_exception();
-                }
-            }
-        }
+        if (removed_structure) mark_dynamic_structure_dirty(owner);
 
         if (removal_error) {
             std::rethrow_exception(removal_error);
         }
         if (removal_focus_error) {
             std::rethrow_exception(removal_focus_error);
-        }
-        if (removal_notification_error) {
-            std::rethrow_exception(removal_notification_error);
         }
 
         // Removed lifecycle callbacks are arbitrary application code. If they

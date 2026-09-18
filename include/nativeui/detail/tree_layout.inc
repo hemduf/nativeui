@@ -310,7 +310,7 @@
         const Rect layout = node.bounds;
         if (!std::isfinite(layout.x) || !std::isfinite(layout.y) ||
             !std::isfinite(layout.w) || !std::isfinite(layout.h) ||
-            !(layout.w > 0.0f) || !(layout.h > 0.0f)) {
+            layout.w < 0.0f || layout.h < 0.0f) {
             return {};
         }
 
@@ -353,14 +353,6 @@
         node.published_visual_bounds = current_visual_bounds(node);
         node.visual_bounds_published = true;
         for (auto& child : node.children) publish_visual_bounds(*child);
-    }
-
-    [[nodiscard]] Rect published_subtree_visual_union(const Node& node) const noexcept {
-        Rect result = node.visual_bounds_published ? node.published_visual_bounds : Rect{};
-        for (const auto& child : node.children) {
-            result = unite(result, published_subtree_visual_union(*child));
-        }
-        return result;
     }
 
     [[nodiscard]] std::optional<Rect> retain_dirty(Rect rect) noexcept {
