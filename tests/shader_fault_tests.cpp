@@ -1,6 +1,7 @@
 #include <nativeui/shader.hpp>
 
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <new>
 #include <string>
@@ -10,8 +11,12 @@ namespace {
 
 constexpr std::string_view kFailDiagnosticMarker =
     "/*__NATIVEUI_T079_FAIL_DIAGNOSTIC__*/";
+constexpr std::string_view kFailAfterDiagnosticMarker =
+    "/*__NATIVEUI_T079_FAIL_AFTER_DIAGNOSTIC__*/";
 constexpr std::string_view kFailProgramDataMarker =
     "/*__NATIVEUI_T079_FAIL_PROGRAM_DATA__*/";
+constexpr std::string_view kFailWrapperMarker =
+    "/*__NATIVEUI_T079_FAIL_WRAPPER__*/";
 constexpr std::string_view kFailPublicationMarker =
     "/*__NATIVEUI_T079_FAIL_PUBLICATION__*/";
 constexpr std::string_view kEmptyDiagnosticMarker =
@@ -61,7 +66,11 @@ void suite() {
     expect_bad_alloc(
         kFailDiagnosticMarker,
         "half4 main(float2 p) { return missing_symbol; }");
+    expect_bad_alloc(
+        kFailAfterDiagnosticMarker,
+        "half4 main(float2 p) { return missing_symbol; }");
     expect_bad_alloc(kFailProgramDataMarker, kValidShader);
+    expect_bad_alloc(kFailWrapperMarker, kValidShader);
     expect_bad_alloc(kFailPublicationMarker, kValidShader);
 
     std::string fallback_source{kEmptyDiagnosticMarker};
