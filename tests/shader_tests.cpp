@@ -300,7 +300,8 @@ void copy_move_and_inert_contract() {
     NUI_CHECK(source.valid());
     NUI_CHECK(source.set_float("gain", 0.9f) == ui::ShaderSetResult::Ok);
 
-    moved = std::move(moved);
+    auto* moved_alias = &moved;
+    moved = std::move(*moved_alias);
     NUI_CHECK(moved.valid());
 
     copy = std::move(source);

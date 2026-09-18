@@ -389,9 +389,10 @@ void setters_and_moves_allocate_nothing() {
     check(!moved->valid(), "move assignment did not leave source inert");
     moved->~ShaderInstance();
 
+    auto* move_destination_alias = &move_destination;
     {
         ScopedAllocationFailure fail;
-        move_destination = std::move(move_destination);
+        move_destination = std::move(*move_destination_alias);
     }
     check(move_destination.valid(), "self-move changed valid state");
 }
