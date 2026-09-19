@@ -1,5 +1,12 @@
+#include <nativeui/paint_style.hpp>
 #include <nativeui/shader.hpp>
 
+#include "detail/shader_brush_access.hpp"
+#include "detail/shader_instance_access.hpp"
+#include "detail/shader_test_seams.hpp"
+
+#include "include/core/SkData.h"
+#include "include/core/SkShader.h"
 #include "include/core/SkString.h"
 #include "include/effects/SkRuntimeEffect.h"
 
@@ -41,6 +48,27 @@ struct ShaderProgramData final {
     std::vector<ShaderUniformInfo> uniforms;
     std::vector<ShaderUniformSlot> slots;
     std::size_t uniform_size{};
+};
+
+struct ShaderBrushSnapshot final {
+    ShaderBrushSnapshot(std::shared_ptr<const ShaderProgram> program_in,
+                        std::span<const std::byte> bindings_in)
+        : program(std::move(program_in)),
+          bindings(bindings_in.size(), std::byte{0}) {
+        if (!bindings_in.empty()) {
+            std::memcpy(bindings.data(), bindings_in.data(), bindings_in.size());
+        }
+    }
+
+    std::shared_ptr<const ShaderProgram> program;
+    std::vector<std::byte> bindings;
+};
+
+struct ShaderProgramAccess final {
+    [[nodiscard]] static const ShaderProgramData& data(
+        const ShaderProgram& program) noexcept {
+        return *program.data_;
+    }
 };
 
 static_assert(std::is_nothrow_destructible_v<SkRuntimeEffect>,
@@ -191,6 +219,20 @@ template <std::size_t N>
 
 std::size_t shader_compile_call_count_for_test_value = 0;
 
+std::size_t shader_materialization_call_count_for_test_value = 0;
+ShaderMaterializationFailurePoint shader_materialization_failure_point_for_test_value =
+    ShaderMaterializationFailurePoint::None;
+
+[[nodiscard]] bool consume_materialization_failure(
+    ShaderMaterializationFailurePoint point) noexcept {
+    if (shader_materialization_failure_point_for_test_value != point) {
+        return false;
+    }
+    shader_materialization_failure_point_for_test_value =
+        ShaderMaterializationFailurePoint::None;
+    return true;
+}
+
 enum class CompileFailurePoint {
     None,
     BeforeDiagnosticOwnership,
@@ -298,11 +340,114 @@ private:
 std::size_t shader_compile_call_count_for_test() noexcept {
     return shader_compile_call_count_for_test_value;
 }
+
+std::size_t shader_materialization_call_count_for_test() noexcept {
+    return shader_materialization_call_count_for_test_value;
+}
+
+void set_shader_materialization_failure_for_test(
+    ShaderMaterializationFailurePoint point) noexcept {
+    shader_materialization_failure_point_for_test_value = point;
+}
 #endif
+
+bool ShaderBrushAccess::is_shader(const Brush& brush) noexcept {
+    const auto* snapshot =
+        std::get_if<std::shared_ptr<const ShaderBrushSnapshot>>(&brush.value_);
+    return snapshot != nullptr && static_cast<bool>(*snapshot);
+}
+
+bool ShaderBrushAccess::is_transparent_solid(const Brush& brush) noexcept {
+    const auto* color = std::get_if<Color>(&brush.value_);
+    return color != nullptr &&
+           color->r == 0.0f &&
+           color->g == 0.0f &&
+           color->b == 0.0f &&
+           color->a == 0.0f;
+}
+
+const ShaderProgram* ShaderBrushAccess::program(const Brush& brush) noexcept {
+    const auto* snapshot =
+        std::get_if<std::shared_ptr<const ShaderBrushSnapshot>>(&brush.value_);
+    return snapshot != nullptr && *snapshot ? (*snapshot)->program.get() : nullptr;
+}
+
+std::span<const std::byte> ShaderBrushAccess::binding_bytes(
+    const Brush& brush) noexcept {
+    const auto* snapshot =
+        std::get_if<std::shared_ptr<const ShaderBrushSnapshot>>(&brush.value_);
+    if (snapshot == nullptr || !*snapshot) return {};
+    return {(*snapshot)->bindings.data(), (*snapshot)->bindings.size()};
+}
+
+sk_sp<SkShader> materialize_shader_brush(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) {
+    if (!snapshot || !snapshot->program) {
+        throw std::runtime_error("NativeUI shader Brush snapshot is invalid");
+    }
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    ++shader_materialization_call_count_for_test_value;
+    if (consume_materialization_failure(
+            ShaderMaterializationFailurePoint::BeforeUniformData)) {
+        throw std::bad_alloc{};
+    }
+#endif
+
+    const auto& data = ShaderProgramAccess::data(*snapshot->program);
+    if (snapshot->bindings.size() != data.uniform_size) {
+        throw std::runtime_error(
+            "NativeUI shader Brush binding block size does not match program");
+    }
+
+    sk_sp<SkData> uniforms;
+    if (snapshot->bindings.empty()) {
+        uniforms = SkData::MakeEmpty();
+    } else {
+        uniforms = SkData::MakeWithCopy(
+            snapshot->bindings.data(),
+            snapshot->bindings.size());
+    }
+    if (!uniforms) throw std::bad_alloc{};
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    if (consume_materialization_failure(
+            ShaderMaterializationFailurePoint::BeforeShader)) {
+        throw std::bad_alloc{};
+    }
+#endif
+
+    auto shader = data.effect->makeShader(std::move(uniforms), nullptr, 0);
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    if (consume_materialization_failure(
+            ShaderMaterializationFailurePoint::ForceNullShader)) {
+        shader.reset();
+    }
+#endif
+
+    if (!shader) {
+        throw std::runtime_error(
+            "NativeUI runtime shader materialization returned no shader");
+    }
+    return shader;
+}
 
 } // namespace ui::detail
 
 namespace ui {
+
+Brush::Brush(const ShaderInstance& shader)
+    : value_(transparent()) {
+    if (!shader.valid()) return;
+
+    const auto bindings = detail::ShaderInstanceAccess::binding_bytes(shader);
+    std::shared_ptr<const detail::ShaderBrushSnapshot> snapshot =
+        std::make_shared<detail::ShaderBrushSnapshot>(
+            shader.program(),
+            bindings);
+    value_ = Storage{std::move(snapshot)};
+}
 
 ShaderProgram::ShaderProgram(
     std::unique_ptr<const detail::ShaderProgramData> data) noexcept
