@@ -16,6 +16,7 @@
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRRect.h"
+#include "include/core/SkShader.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTileMode.h"
 #include "include/core/SkTypeface.h"
@@ -28,7 +29,9 @@
 #include <cstddef>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +43,10 @@ namespace detail {
 
 struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
+struct ShaderBrushSnapshot;
+
+[[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot);
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -718,6 +725,17 @@ private:
         });
     }
 
+    static void apply_fill_source(
+        SkPaint& paint,
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
+        auto shader = detail::materialize_shader_brush(snapshot);
+        if (!shader) {
+            throw std::runtime_error(
+                "NativeUI runtime shader materialization returned no shader");
+        }
+        paint.setShader(std::move(shader));
+    }
+
     [[nodiscard]] static SkPaint make_fill_paint(Color color, PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -746,6 +764,17 @@ private:
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kFill_Style);
         apply_fill_source(paint, gradient);
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot,
+        PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, snapshot);
         apply_paint_options(paint, options);
         return paint;
     }
