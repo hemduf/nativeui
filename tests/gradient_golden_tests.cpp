@@ -117,6 +117,60 @@ bool verify_brush_linear_path_stroke(bool update) {
         update);
 }
 
+bool verify_shader_brush_primitives(bool update) {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2 p) {
+            return half4(0.25, 0.5, 0.75, 1.0);
+        }
+    )");
+    if (!compiled.ok()) return false;
+
+    ui::ShaderInstance shader{compiled.program};
+    const ui::Brush brush{shader};
+
+    ui::Path triangle;
+    triangle.move_to({8.0f, 1.0f})
+        .line_to({11.0f, 1.0f})
+        .line_to({9.5f, 6.0f})
+        .close();
+
+    ui::Path line;
+    line.move_to({12.0f, 4.0f}).line_to({15.5f, 4.0f});
+
+    ui::UI tree{
+        ui::Canvas{16.0f, 8.0f, [brush, triangle, line](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, {0.0f, 0.0f, 0.0f, 1.0f});
+            g.fill_rounded_rect({0.0f, 1.0f, 3.0f, 6.0f}, 1.0f, brush);
+            g.circle({5.0f, 4.0f}, 2.5f, brush);
+            g.fill_path(triangle, brush);
+            g.stroke_path(
+                line,
+                brush,
+                ui::StrokeStyle{3.0f, ui::StrokeCap::Butt, ui::StrokeJoin::Miter, 4.0f});
+        }}
+    };
+
+    ui::HeadlessRenderer renderer{{16.0f, 8.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    test::golden::CompareOptions options;
+    options.channel_tolerance = 1;
+    options.compare_regions = {
+        test::golden::Region{1, 4, 1, 1},
+        test::golden::Region{5, 4, 1, 1},
+        test::golden::Region{9, 3, 1, 1},
+        test::golden::Region{14, 4, 1, 1},
+    };
+
+    return test::golden::verify(
+        "shader_brush_primitives",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        options,
+        update);
+}
+
 bool verify_brush_radial_circle(bool update) {
     constexpr ui::Color color{
         64.0f / 255.0f, 80.0f / 255.0f, 96.0f / 255.0f, 1.0f};
@@ -163,6 +217,7 @@ int main(int argc, char** argv) {
         NUI_CHECK(verify_gradient(update));
         NUI_CHECK(verify_brush_linear_path(update));
         NUI_CHECK(verify_brush_linear_path_stroke(update));
+        NUI_CHECK(verify_shader_brush_primitives(update));
         NUI_CHECK(verify_brush_radial_circle(update));
         return 0;
     } catch (const std::exception& error) {

@@ -63,6 +63,7 @@ enum class ShaderSetResult {
 };
 
 namespace detail {
+struct ShaderProgramAccess;
 struct ShaderProgramData;
 struct ShaderInstanceAccess;
 } // namespace detail
@@ -91,6 +92,7 @@ private:
     explicit ShaderProgram(std::unique_ptr<const detail::ShaderProgramData> data) noexcept;
 
     friend class ShaderInstance;
+    friend struct detail::ShaderProgramAccess;
     std::unique_ptr<const detail::ShaderProgramData> data_;
 };
 

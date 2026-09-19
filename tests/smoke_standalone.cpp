@@ -241,11 +241,40 @@ int run_regular_smoke() {
             return fail(stage, "platform font manager could not resolve Latin text");
         }
 
+        stage = "shader-brush";
+        const auto shader_program = ui::ShaderProgram::compile(R"(
+            uniform float gain;
+            half4 main(float2 p) {
+                return half4(gain, p.x / 320.0, 0.25, 1.0);
+            }
+        )");
+        if (!shader_program.ok()) {
+            return fail(stage, shader_program.diagnostics.empty()
+                                   ? "runtime shader compilation failed without diagnostic"
+                                   : shader_program.diagnostics.front().message);
+        }
+        ui::ShaderInstance shader_instance{shader_program.program};
+        if (shader_instance.set_float("gain", 0.65f) != ui::ShaderSetResult::Ok) {
+            return fail(stage, "runtime shader binding failed");
+        }
+        const ui::Brush shader_brush{shader_instance};
+
         stage = "construct-ui";
         ui::State<bool> enabled{true};
         ui::UI app_ui{
             ui::Column{
                 ui::Header{"NativeUI standalone smoke"},
+                ui::Canvas{240.0f, 48.0f, [shader_brush](ui::CanvasContext2D& g) {
+                    g.fill_rounded_rect(
+                        {0.0f, 0.0f, 240.0f, 48.0f},
+                        8.0f,
+                        shader_brush);
+                    g.stroke_rounded_rect(
+                        {8.0f, 8.0f, 224.0f, 32.0f},
+                        6.0f,
+                        3.0f,
+                        shader_brush);
+                }},
                 ui::Toggle{"Enabled", enabled},
             }.padding(16.0f).gap(12.0f)};
 
