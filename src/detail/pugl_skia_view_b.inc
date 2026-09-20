@@ -58,6 +58,7 @@
 
         case PUGL_FOCUS_OUT:
             ui_.deactivate(services_);
+            clear_raw_pointer_positions();
             set_text_input(false, {}, 0.0f);
             return PUGL_SUCCESS;
 
@@ -95,6 +96,24 @@
             return PUGL_SUCCESS;
         }
 
+        case PUGL_POINTER_DOWN:
+        case PUGL_POINTER_MOVE:
+        case PUGL_POINTER_UP:
+        case PUGL_POINTER_CANCEL: {
+            InputEvent input{};
+            input.type = detail::translate_pugl_pointer_event(event->type);
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->pointer.x),
+                 static_cast<float>(event->pointer.y)},
+                geometry_.last_valid_scale());
+            input.pointer = detail::translate_pugl_pointer_contact(
+                event->pointer, geometry_.last_valid_scale());
+            apply_modifiers(input, event->pointer.state);
+            update_raw_pointer_position(input);
+            (void)ui_.dispatch(input, services_);
+            return PUGL_SUCCESS;
+        }
+
         case PUGL_POINTER_IN:
         case PUGL_POINTER_OUT: {
             InputEvent input{};
@@ -105,6 +124,7 @@
                 {static_cast<float>(event->crossing.x),
                  static_cast<float>(event->crossing.y)},
                 geometry_.last_valid_scale());
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->crossing.state);
             last_pointer_position_ = input.position;
             have_pointer_position_ = event->type == PUGL_POINTER_IN;
@@ -121,6 +141,7 @@
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->button.x), static_cast<float>(event->button.y)},
                 geometry_.last_valid_scale());
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->button.state);
 
             if (input.type == InputType::PointerDown) {
@@ -150,6 +171,7 @@
             }
             last_pointer_position_ = input.position;
             have_pointer_position_ = true;
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->motion.state);
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
@@ -163,6 +185,7 @@
                 geometry_.last_valid_scale());
             input.delta = Point{static_cast<float>(event->scroll.dx),
                                 static_cast<float>(event->scroll.dy)};
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->scroll.state);
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
@@ -260,6 +283,57 @@
         }
     }
 
+    struct RawPointerPosition {
+        PointerId id{};
+        Point position{};
+    };
+
+    void update_raw_pointer_position(InputEvent& event) noexcept {
+        std::size_t index = raw_pointer_position_count_;
+        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
+            if (raw_pointer_positions_[i].id == event.pointer.id) {
+                index = i;
+                break;
+            }
+        }
+
+        const bool terminal =
+            event.type == InputType::PointerUp ||
+            event.type == InputType::PointerCancel;
+
+        if (index != raw_pointer_position_count_) {
+            if (event.type != InputType::PointerDown) {
+                event.delta = {
+                    event.position.x - raw_pointer_positions_[index].position.x,
+                    event.position.y - raw_pointer_positions_[index].position.y};
+            }
+
+            if (terminal) {
+                --raw_pointer_position_count_;
+                if (index != raw_pointer_position_count_) {
+                    raw_pointer_positions_[index] =
+                        raw_pointer_positions_[raw_pointer_position_count_];
+                }
+                raw_pointer_positions_[raw_pointer_position_count_] = {};
+            } else {
+                raw_pointer_positions_[index].position = event.position;
+            }
+            return;
+        }
+
+        if (!terminal && raw_pointer_position_count_ < raw_pointer_positions_.size()) {
+            raw_pointer_positions_[raw_pointer_position_count_++] = {
+                event.pointer.id, event.position};
+        }
+    }
+
+    void clear_raw_pointer_positions() noexcept {
+        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
+            raw_pointer_positions_[i] = {};
+        }
+        raw_pointer_position_count_ = 0U;
+    }
+
     UI& ui_;
     PlatformServices& services_;
     PuglWorld* world_{};
@@ -281,6 +355,8 @@
     float text_input_physical_cursor_offset_{};
     bool have_pointer_position_{};
     Point last_pointer_position_{};
+    std::array<RawPointerPosition, 16U> raw_pointer_positions_{};
+    std::size_t raw_pointer_position_count_{};
     double last_click_time_{-1000.0};
     Point last_click_position_{};
     int click_count_{};

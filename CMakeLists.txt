@@ -593,6 +593,15 @@ if(NATIVEUI_BUILD_TESTS)
   )
 
   if(NATIVEUI_BUILD_PLATFORM)
+    nativeui_add_core_test(
+      nativeui_t177_pugl_pointer_tests
+      tests/t177_pugl_pointer_tests.cpp
+    )
+    target_include_directories(nativeui_t177_pugl_pointer_tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${NATIVEUI_PUGL_SOURCE_DIR}/include
+    )
+
     add_executable(nativeui_smoke_standalone tests/smoke_standalone.cpp)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_smoke_standalone
