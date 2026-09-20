@@ -22,11 +22,12 @@ enum class ImageFit {
     Cover,
 };
 
+/// Per-axis behavior for ImageTexture coordinates outside one destination period.
 enum class TextureTileMode {
-    Clamp,
-    Repeat,
-    Mirror,
-    Decal,
+    Clamp,  ///< Extend the nearest selected-source edge.
+    Repeat, ///< Repeat complete periods using floor-based periodic coordinates.
+    Mirror, ///< Repeat periods while mirroring every odd mathematical period.
+    Decal,  ///< Return transparent black outside the base period.
 };
 
 enum class ImageLoadError {
@@ -90,6 +91,13 @@ private:
 /// ImageTexture or converting it to a Brush. A logically valid finite mapping
 /// that cannot be represented by the renderer's affine matrix fails visibly at
 /// paint time rather than silently substituting a different mapping.
+///
+/// The destination rectangle defines one complete texture period. Tiling is
+/// independent per axis and defaults to Clamp/Clamp. Tile-mode mutation changes
+/// only this value description: it does not allocate, decode/copy Image data,
+/// create backend resources, invoke callbacks, or mutate process-global caches.
+/// ImageTexture itself is not a synchronization primitive; mutate an instance
+/// only from the owning UI/resource-preparation domain.
 class ImageTexture {
 public:
     ImageTexture() = default;
@@ -142,6 +150,7 @@ public:
     [[nodiscard]] Rect source() const noexcept { return source_; }
     [[nodiscard]] Rect destination() const noexcept { return destination_; }
 
+    /// Change per-axis tiling without touching shared Image/backend state.
     ImageTexture& set_tile_mode(TextureTileMode x,
                                 TextureTileMode y) noexcept {
         tile_mode_x_ = x;
