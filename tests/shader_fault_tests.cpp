@@ -901,6 +901,427 @@ void shader_brush_materialization_failure_recovers() {
           "T081 later normal render did not recover after materialization failures");
 }
 
+
+void child_reflection_faults_are_atomic() {
+    constexpr std::string_view sources[] = {
+        R"(
+            /*__NATIVEUI_T082_FAIL_CHILD_REFLECTION__*/
+            uniform shader first;
+            uniform shader second;
+            half4 main(float2 p) { return first.eval(p) + second.eval(p); }
+        )",
+        R"(
+            /*__NATIVEUI_T082_FAIL_DURING_CHILD_REFLECTION__*/
+            uniform shader first;
+            uniform shader second;
+            half4 main(float2 p) { return first.eval(p) + second.eval(p); }
+        )",
+        R"(
+            /*__NATIVEUI_T082_FAIL_AFTER_CHILD_REFLECTION__*/
+            uniform shader first;
+            uniform shader second;
+            half4 main(float2 p) { return first.eval(p) + second.eval(p); }
+        )",
+    };
+
+    for (const auto source : sources) {
+        bool threw = false;
+        try {
+            (void)ui::ShaderProgram::compile(source);
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+        check(threw, "T082 child reflection failure seam did not throw");
+    }
+
+    const auto retry = ui::ShaderProgram::compile(R"(
+        uniform shader first;
+        uniform shader second;
+        half4 main(float2 p) { return first.eval(p) + second.eval(p); }
+    )");
+    check(retry.ok(), "T082 normal compile did not recover after reflection faults");
+    check(retry.program->children().size() == 2U,
+          "T082 retry child reflection size mismatch");
+}
+
+void child_binding_failure_is_atomic_and_moves_allocate_nothing() {
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(parent_compiled.ok(), "T082 parent program did not compile");
+
+    const ui::Brush red{ui::Color{1.0f, 0.0f, 0.0f, 1.0f}};
+    const ui::Brush gradient{ui::LinearGradient{
+        {0.0f, 0.0f},
+        {8.0f, 0.0f},
+        {
+            ui::GradientStop{0.0f, ui::Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            ui::GradientStop{1.0f, ui::Color{0.0f, 0.0f, 1.0f, 1.0f}},
+        }}};
+
+    ui::ShaderInstance instance{parent_compiled.program};
+    check(instance.set_child("child", red) == ui::ShaderSetResult::Ok,
+          "T082 initial child bind failed");
+    check(ui::detail::ShaderInstanceAccess::child(instance, 0) != nullptr,
+          "T082 initial child slot is empty");
+
+    bool replacement_failed = false;
+    try {
+        ScopedAllocationFailure fail;
+        (void)instance.set_child("child", gradient);
+    } catch (const std::bad_alloc&) {
+        replacement_failed = true;
+    }
+    check(replacement_failed, "T082 replacement OOM did not propagate");
+    check(ui::detail::ShaderInstanceAccess::child(instance, 0) != nullptr,
+          "T082 replacement OOM cleared old child");
+    check(ui::detail::ShaderInstanceAccess::depth(instance) == 1U,
+          "T082 replacement OOM changed cached depth");
+
+    check(instance.set_child("child", gradient) == ui::ShaderSetResult::Ok,
+          "T082 replacement did not recover after OOM");
+
+    ui::ShaderInstance source{parent_compiled.program};
+    check(source.set_child("child", gradient) == ui::ShaderSetResult::Ok,
+          "T082 move source child bind failed");
+
+    alignas(ui::ShaderInstance) std::byte storage[sizeof(ui::ShaderInstance)];
+    ui::ShaderInstance* moved = nullptr;
+    const auto move_before = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        moved = ::new (static_cast<void*>(storage))
+            ui::ShaderInstance(std::move(source));
+    }
+    check_no_allocation_since(
+        move_before,
+        "T082 populated ShaderInstance move construction allocated");
+    check(moved->valid() && !source.valid(),
+          "T082 populated move construction state mismatch");
+
+    ui::ShaderInstance destination{parent_compiled.program};
+    const auto assign_before = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        destination = std::move(*moved);
+    }
+    check_no_allocation_since(
+        assign_before,
+        "T082 populated ShaderInstance move assignment allocated");
+    check(destination.valid() && !moved->valid(),
+          "T082 populated move assignment state mismatch");
+    moved->~ShaderInstance();
+
+    ui::ShaderInstance inert{std::move(destination)};
+    check(inert.valid() && !destination.valid(),
+          "T082 failed to create inert destination");
+    const auto inert_before = allocation_probe::allocation_count;
+    ui::ShaderSetResult inert_result{};
+    {
+        ScopedAllocationFailure fail;
+        inert_result = destination.set_child("child", gradient);
+    }
+    check_no_allocation_since(
+        inert_before,
+        "T082 inert set_child allocated");
+    check(inert_result == ui::ShaderSetResult::NotFound,
+          "T082 inert set_child result mismatch");
+
+    ui::ShaderInstance copy_source{parent_compiled.program};
+    check(copy_source.set_child("child", gradient) == ui::ShaderSetResult::Ok,
+          "T082 copy source child bind failed");
+
+    ui::ShaderInstance nested_child_source{parent_compiled.program};
+    check(nested_child_source.set_child("child", red) == ui::ShaderSetResult::Ok,
+          "T082 nested destination child setup failed");
+    const ui::Brush nested_child{nested_child_source};
+
+    ui::ShaderInstance copy_destination{parent_compiled.program};
+    check(copy_destination.set_child("child", nested_child) == ui::ShaderSetResult::Ok,
+          "T082 copy destination child bind failed");
+    check(ui::detail::ShaderInstanceAccess::depth(copy_destination) == 2U,
+          "T082 copy destination setup depth mismatch");
+
+    bool copy_assign_failed = false;
+    try {
+        ScopedAllocationFailure fail;
+        copy_destination = copy_source;
+    } catch (const std::bad_alloc&) {
+        copy_assign_failed = true;
+    }
+    check(copy_assign_failed, "T082 populated copy assignment OOM did not propagate");
+    check(copy_destination.valid(), "T082 copy assignment OOM invalidated destination");
+    check(ui::detail::ShaderInstanceAccess::child(copy_destination, 0) != nullptr,
+          "T082 copy assignment OOM cleared destination child");
+    check(ui::detail::ShaderInstanceAccess::depth(copy_destination) == 2U,
+          "T082 copy assignment OOM changed destination depth");
+}
+
+void child_depth_uses_cached_metadata_once() {
+    const auto leaf_compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2 p) { return half4(1.0, 0.0, 0.0, 1.0); }
+    )");
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(leaf_compiled.ok() && parent_compiled.ok(),
+          "T082 cached-depth fixtures did not compile");
+
+    ui::ShaderInstance leaf{leaf_compiled.program};
+    ui::Brush current{leaf};
+    for (std::size_t depth = 2U; depth <= 8U; ++depth) {
+        ui::ShaderInstance parent{parent_compiled.program};
+        check(parent.set_child("child", current) == ui::ShaderSetResult::Ok,
+              "T082 cached-depth chain bind failed");
+        current = ui::Brush{parent};
+    }
+    check(ui::detail::ShaderBrushAccess::depth(current) == 8U,
+          "T082 cached-depth chain depth mismatch");
+
+    ui::ShaderInstance target{parent_compiled.program};
+    const auto depth_reads_before =
+        ui::detail::shader_depth_read_call_count_for_test();
+    check(target.set_child("child", current) == ui::ShaderSetResult::Ok,
+          "T082 cached-depth bind failed");
+    check(ui::detail::shader_depth_read_call_count_for_test() ==
+              depth_reads_before + 1U,
+          "T082 set_child recursively rediscovered nested depth");
+    check(ui::detail::ShaderInstanceAccess::depth(target) == 9U,
+          "T082 cached-depth bind produced wrong depth");
+}
+
+void populated_child_uniform_setters_allocate_nothing() {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform float gain;
+        uniform shader child;
+        half4 main(float2 p) { return gain * child.eval(p); }
+    )");
+    check(compiled.ok(), "T082 populated uniform-setter fixture did not compile");
+
+    ui::ShaderInstance instance{compiled.program};
+    const ui::Brush red{ui::Color{1.0f, 0.0f, 0.0f, 1.0f}};
+    check(instance.set_child("child", red) == ui::ShaderSetResult::Ok,
+          "T082 populated uniform-setter child bind failed");
+
+    const auto before = allocation_probe::allocation_count;
+    ui::ShaderSetResult result{};
+    {
+        ScopedAllocationFailure fail;
+        result = instance.set_float("gain", 0.5f);
+    }
+    check_no_allocation_since(
+        before,
+        "T082 populated ShaderInstance uniform setter allocated");
+    check(result == ui::ShaderSetResult::Ok,
+          "T082 populated ShaderInstance uniform setter failed");
+}
+
+void child_construction_and_snapshot_do_not_materialize_backend() {
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(parent_compiled.ok(), "T082 construction fixture did not compile");
+
+    const ui::Brush child{ui::LinearGradient{
+        {0.0f, 0.0f},
+        {8.0f, 0.0f},
+        ui::Color{1.0f, 0.0f, 0.0f, 1.0f},
+        ui::Color{0.0f, 0.0f, 1.0f, 1.0f}}};
+
+    const auto compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+    const auto materialize_before =
+        ui::detail::shader_materialization_call_count_for_test();
+
+    ui::ShaderInstance parent{parent_compiled.program};
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T082 ShaderInstance construction recompiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T082 ShaderInstance construction materialized backend state");
+
+    check(parent.set_child("child", child) == ui::ShaderSetResult::Ok,
+          "T082 construction fixture child bind failed");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T082 set_child materialized backend state");
+
+    const ui::Brush snapshot{parent};
+    check(ui::detail::ShaderBrushAccess::is_shader(snapshot),
+          "T082 populated snapshot was not a shader Brush");
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T082 populated Brush snapshot recompiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T082 populated Brush snapshot materialized backend state");
+}
+
+void child_bind_snapshot_and_draw_do_not_recompile_source() {
+    const auto leaf_compiled = ui::ShaderProgram::compile(R"(
+        uniform float value;
+        half4 main(float2 p) { return half4(value, 0.0, 0.0, 1.0); }
+    )");
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(leaf_compiled.ok() && parent_compiled.ok(),
+          "T082 compile-count fixtures did not compile");
+
+    ui::ShaderInstance leaf{leaf_compiled.program};
+    check(leaf.set_float("value", 1.0f) == ui::ShaderSetResult::Ok,
+          "T082 leaf uniform setup failed");
+    const ui::Brush leaf_brush{leaf};
+
+    const auto compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+    const auto materialize_before =
+        ui::detail::shader_materialization_call_count_for_test();
+
+    ui::ShaderInstance parent{parent_compiled.program};
+    check(parent.set_child("child", leaf_brush) == ui::ShaderSetResult::Ok,
+          "T082 compile-count child bind failed");
+    const ui::Brush first{parent};
+    check(parent.set_child("child", leaf_brush) == ui::ShaderSetResult::Ok,
+          "T082 repeated child bind failed");
+    const ui::Brush second{parent};
+    (void)first;
+    (void)second;
+
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T082 child bind/snapshot recompiled NativeUI SkSL source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T082 child bind/snapshot created backend shader materialization");
+}
+
+void nested_materialization_is_transient_per_shader_node() {
+    const auto leaf_compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2 p) { return half4(0.2, 0.6, 0.4, 1.0); }
+    )");
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(leaf_compiled.ok() && parent_compiled.ok(),
+          "T082 transient-materialization fixtures did not compile");
+
+    ui::ShaderInstance leaf_instance{leaf_compiled.program};
+    const ui::Brush leaf{leaf_instance};
+    ui::ShaderInstance middle_instance{parent_compiled.program};
+    check(middle_instance.set_child("child", leaf) == ui::ShaderSetResult::Ok,
+          "T082 transient middle bind failed");
+    const ui::Brush middle{middle_instance};
+    ui::ShaderInstance outer_instance{parent_compiled.program};
+    check(outer_instance.set_child("child", middle) == ui::ShaderSetResult::Ok,
+          "T082 transient outer bind failed");
+    const ui::Brush outer{outer_instance};
+
+    const auto info = SkImageInfo::Make(
+        8, 8, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto surface = SkSurfaces::Raster(info);
+    check(static_cast<bool>(surface), "T082 transient raster surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "T082 transient raster canvas missing");
+
+    const auto compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+    const auto materialize_before =
+        ui::detail::shader_materialization_call_count_for_test();
+
+    for (int pass = 0; pass < 2; ++pass) {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, outer);
+    }
+
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T082 repeated nested draw recompiled NativeUI SkSL source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before + 6U,
+          "T082 expected three transient shader-node materializations per draw");
+}
+
+void nested_child_materialization_failure_recovers() {
+    const auto leaf_compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2 p) { return half4(1.0, 0.0, 0.0, 1.0); }
+    )");
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    check(leaf_compiled.ok() && parent_compiled.ok(),
+          "T082 nested failure fixtures did not compile");
+
+    ui::ShaderInstance leaf_instance{leaf_compiled.program};
+    const ui::Brush leaf{leaf_instance};
+
+    ui::ShaderInstance middle_instance{parent_compiled.program};
+    check(middle_instance.set_child("child", leaf) == ui::ShaderSetResult::Ok,
+          "T082 middle child bind failed");
+    const ui::Brush middle{middle_instance};
+
+    ui::ShaderInstance outer_instance{parent_compiled.program};
+    check(outer_instance.set_child("child", middle) == ui::ShaderSetResult::Ok,
+          "T082 outer child bind failed");
+    const ui::Brush outer{outer_instance};
+
+    const auto info = SkImageInfo::Make(
+        8, 8, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto surface = SkSurfaces::Raster(info);
+    check(static_cast<bool>(surface), "T082 nested raster surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "T082 nested raster canvas missing");
+
+    auto pixel_is_black = [&]() {
+        SkPixmap pixels;
+        check(surface->peekPixels(&pixels), "T082 nested pixels unavailable");
+        const auto pixel = pixels.getColor4f(4, 4);
+        return pixel.fR < 0.01f && pixel.fG < 0.01f && pixel.fB < 0.01f;
+    };
+
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::set_shader_materialization_failure_after_calls_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeUniformData,
+        2U);
+    bool middle_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, outer);
+    } catch (const std::bad_alloc&) {
+        middle_failed = true;
+    }
+    check(middle_failed, "T082 middle-level materialization failure did not fire");
+    check(pixel_is_black(), "T082 middle-level failure submitted a partial draw");
+
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::set_shader_materialization_failure_after_calls_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeUniformData,
+        3U);
+    bool leaf_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, outer);
+    } catch (const std::bad_alloc&) {
+        leaf_failed = true;
+    }
+    check(leaf_failed, "T082 leaf-level materialization failure did not fire");
+    check(pixel_is_black(), "T082 leaf-level failure submitted a partial draw");
+
+    canvas->clear(SK_ColorBLACK);
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, outer);
+    }
+    SkPixmap pixels;
+    check(surface->peekPixels(&pixels), "T082 recovery pixels unavailable");
+    const auto recovered = pixels.getColor4f(4, 4);
+    check(recovered.fR > 0.9f,
+          "T082 normal draw did not recover after nested failures");
+}
+
 void inert_setters_allocate_nothing() {
     const auto compiled = ui::ShaderProgram::compile(kAllSetterShader);
     check(compiled.ok(), "all-setter program did not compile");
@@ -974,6 +1395,14 @@ void suite() {
     setter_failure_is_non_destructive_and_instances_are_isolated();
     shader_brush_snapshot_failure_and_noallocation_edges();
     shader_brush_materialization_failure_recovers();
+    child_reflection_faults_are_atomic();
+    child_binding_failure_is_atomic_and_moves_allocate_nothing();
+    child_depth_uses_cached_metadata_once();
+    populated_child_uniform_setters_allocate_nothing();
+    child_construction_and_snapshot_do_not_materialize_backend();
+    child_bind_snapshot_and_draw_do_not_recompile_source();
+    nested_materialization_is_transient_per_shader_node();
+    nested_child_materialization_failure_recovers();
     inert_setters_allocate_nothing();
 }
 

@@ -412,6 +412,12 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t081_shader_contract.cmake"
   )
+  add_test(
+    NAME nativeui_t082_shader_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t082_shader_contract.cmake"
+  )
   set_tests_properties(
     nativeui_feature_example_discovery_contract
     PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
@@ -458,6 +464,10 @@ if(NATIVEUI_BUILD_TESTS)
   set_tests_properties(
     nativeui_t081_shader_contract
     PROPERTIES LABELS "build;cmake;t081;shader" TIMEOUT 20
+  )
+  set_tests_properties(
+    nativeui_t082_shader_contract
+    PROPERTIES LABELS "build;cmake;t082;shader" TIMEOUT 20
   )
 
   function(nativeui_add_core_test name source)
@@ -517,8 +527,12 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_t081_shader_brush_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  nativeui_add_core_test(nativeui_t082_shader_children_tests tests/t082_shader_children_tests.cpp)
+  target_include_directories(nativeui_t082_shader_children_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
 
-  # T079/T080/T081 shader allocation/fallback/materialization fault seams are
+  # T079/T080/T081/T082 shader allocation/fallback/materialization fault seams are
   # compiled only into
   # this isolated test executable. NativeUI::Core never contains the test-only
   # entry point,

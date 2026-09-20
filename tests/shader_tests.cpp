@@ -69,6 +69,9 @@ void api_traits() {
         std::declval<std::string_view>(), std::declval<std::array<std::int32_t, 4>>())));
     static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_color(
         std::declval<std::string_view>(), std::declval<ui::Color>())));
+    static_assert(!noexcept(std::declval<ui::ShaderInstance&>().set_child(
+        std::declval<std::string_view>(), std::declval<const ui::Brush&>())));
+    static_assert(ui::ShaderInstance::kMaxChildDepth == 16U);
 }
 
 void check_compile_failure(const ui::ShaderCompileResult& result) {
@@ -101,6 +104,7 @@ void exact_result_contract() {
     NUI_CHECK(valid.program);
     NUI_CHECK(valid.diagnostics.empty());
     NUI_CHECK(valid.program->uniforms().empty());
+    NUI_CHECK(valid.program->children().empty());
 
     check_compile_failure(ui::ShaderProgram::compile(""));
     check_compile_failure(ui::ShaderProgram::compile(std::string_view{}));
@@ -156,6 +160,41 @@ void typed_reflection_preserves_backend_order() {
     }
 }
 
+void child_reflection_preserves_source_order() {
+    const auto result = ui::ShaderProgram::compile(R"(
+        uniform float before;
+        uniform shader albedo;
+        uniform half2 middle;
+        uniform shader detail;
+        uniform float after;
+
+        half4 main(float2 p) {
+            return albedo.eval(p) * before +
+                   detail.eval(p) * after +
+                   half4(middle.x * 0.0);
+        }
+    )");
+    NUI_CHECK(result.ok());
+    NUI_CHECK(result.program);
+    NUI_CHECK(result.diagnostics.empty());
+
+    const auto children = result.program->children();
+    NUI_CHECK(children.size() == 2U);
+    NUI_CHECK(children[0].name == "albedo");
+    NUI_CHECK(children[1].name == "detail");
+
+    const auto uniforms = result.program->uniforms();
+    NUI_CHECK(uniforms.size() == 3U);
+    NUI_CHECK(uniforms[0].name == "before");
+    NUI_CHECK(uniforms[1].name == "middle");
+    NUI_CHECK(uniforms[2].name == "after");
+
+    ui::ShaderInstance first{result.program};
+    ui::ShaderInstance second{result.program};
+    NUI_CHECK(first.valid());
+    NUI_CHECK(second.valid());
+}
+
 void half_and_color_reflection_contract() {
     const auto result = ui::ShaderProgram::compile(R"(
         uniform half h;
@@ -193,13 +232,25 @@ void unsupported_profile_is_atomic() {
         layout(color) uniform half3 tint;
         half4 main(float2 p) { return half4(0.0); }
     )"));
-    check_unsupported(ui::ShaderProgram::compile(R"(
-        uniform shader child;
-        half4 main(float2 p) { return child.eval(p); }
-    )"));
+    {
+        const auto supported_child = ui::ShaderProgram::compile(R"(
+            uniform shader child;
+            half4 main(float2 p) { return child.eval(p); }
+        )");
+        NUI_CHECK(supported_child.ok());
+        NUI_CHECK(supported_child.program->children().size() == 1U);
+        NUI_CHECK(supported_child.program->children().front().name == "child");
+    }
     check_unsupported(ui::ShaderProgram::compile(R"(
         uniform colorFilter child;
         half4 main(float2 p) { return child.eval(half4(0.25, 0.5, 0.75, 1.0)); }
+    )"));
+    check_unsupported(ui::ShaderProgram::compile(R"(
+        uniform shader accepted;
+        uniform colorFilter rejected;
+        half4 main(float2 p) {
+            return rejected.eval(accepted.eval(p));
+        }
     )"));
     check_unsupported(ui::ShaderProgram::compile(R"(
         uniform blender child;
@@ -214,6 +265,15 @@ void unsupported_profile_is_atomic() {
     check_compile_failure(ui::ShaderProgram::compile(R"(
         uniform unsupported_type value;
         half4 main(float2 p) { return half4(0.0); }
+    )"));
+    check_compile_failure(ui::ShaderProgram::compile(R"(
+        uniform shader children[2];
+        half4 main(float2 p) { return half4(0.0); }
+    )"));
+    check_compile_failure(ui::ShaderProgram::compile(R"(
+        uniform shader duplicateChild;
+        uniform shader duplicateChild;
+        half4 main(float2 p) { return duplicateChild.eval(p); }
     )"));
 }
 
@@ -347,6 +407,21 @@ void caller_source_and_reflection_lifetime_are_independent() {
     NUI_CHECK(!failure.diagnostics.front().message.empty());
 }
 
+void child_reflection_lifetime_is_source_independent() {
+    const auto compiled = [] {
+        std::string source{R"(
+            uniform shader lifetimeChild;
+            half4 main(float2 p) { return lifetimeChild.eval(p); }
+        )"};
+        return ui::ShaderProgram::compile(source);
+    }();
+
+    NUI_CHECK(compiled.ok());
+    NUI_CHECK(compiled.program);
+    NUI_CHECK(compiled.program->children().size() == 1U);
+    NUI_CHECK(compiled.program->children().front().name == "lifetimeChild");
+}
+
 void immutable_program_can_be_retained_by_two_uis() {
     auto result = ui::ShaderProgram::compile(kValidShader);
     NUI_CHECK(result.ok());
@@ -393,12 +468,14 @@ void suite() {
     api_traits();
     exact_result_contract();
     typed_reflection_preserves_backend_order();
+    child_reflection_preserves_source_order();
     half_and_color_reflection_contract();
     unsupported_profile_is_atomic();
     instance_setter_matrix();
     null_and_zero_uniform_construction();
     copy_move_and_inert_contract();
     caller_source_and_reflection_lifetime_are_independent();
+    child_reflection_lifetime_is_source_independent();
     immutable_program_can_be_retained_by_two_uis();
     repeated_failed_compile_remains_usable();
 }

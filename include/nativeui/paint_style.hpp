@@ -18,6 +18,7 @@ class ShaderInstance;
 namespace detail {
 struct EffectTestAccess;
 struct ShaderBrushAccess;
+struct ShaderBrushMaterializer;
 struct ShaderBrushSnapshot;
 }
 
@@ -272,6 +273,7 @@ private:
 
     friend class Painter;
     friend struct detail::ShaderBrushAccess;
+    friend struct detail::ShaderBrushMaterializer;
     Storage value_;
 };
 
