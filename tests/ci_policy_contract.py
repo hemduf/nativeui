@@ -150,7 +150,7 @@ def main() -> None:
         "os: ubuntu-24.04-arm",
         "skia-build-linux-arm64-gpu-release.zip",
         "https://github.com/hemduf/skia-builder/releases/download/chrome/m153/",
-        "a732337385ff9f36605db0fedf7e88c8d77400585932fa11c85a25aaafc66119",
+        "b45e8e40f3d8e29176ea5fc6e3ecafdbc87ac0a58469f649058fbc8ac0831687",
         "Machine:.*AArch64",
         "nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-",
     ):
