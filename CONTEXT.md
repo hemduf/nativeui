@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-18
+**Updated:** 2026-09-20
 
 ## Mission and invariants
 
@@ -209,7 +209,7 @@ T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
 T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
-T079(done) -> T080(done) -> T081(ready) -> T082(blocked) -> NativeUI 1.1 shaders
+T079(done) -> T080(done) -> T081(done) -> T082(ready) -> NativeUI 1.1 shaders
 ```
 
 ## Completed foundations relevant to v1
@@ -239,7 +239,8 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T077 / #160:** bounded Gaussian Effect layers through the same StateGuard/PaintOptions model with conservative backend-derived output support and exact failure recovery.
 - **T078 / #161 / PR #431:** DropShadow/DropShadowOnly plus exact continuous `VisualOutset`, retained published visual bounds, old/new invalidation and transaction-safe layout/dirty publication; merged as `da4ba30bcc9453029aee689b56543d4a74be6db3` from `23f0e0e08b94be5c82bf2896104643768a6d0e96` after exact-head normal and final T042/T052 qualification.
 - **T079 / #162:** explicit backend-neutral SkSL `ShaderProgram` compilation merged through PR #427 as `99762beb9bbb42f9f15bebcf318b60e84d746fd1`; immutable/const backend ownership, deterministic diagnostics, failure-atomic publication, pinned-m149 source-size guard, no implicit paint-time compilation and installed-package shader smoke on Linux/Windows/macOS.
-- **T080 / #164:** typed SkSL uniform reflection/binding is complete after original PR #430 and post-merge hardening PR #432, squash-merged as `3fdaacf30fdf1a67c936cb97ee7f889c8eadd49e` from frozen executable head `018b76c50e3ec2a2eac893a618aedab36976b27d`. The correction locks exact vector/Color element byte extents, requires contiguous/full pinned-Skia uniform-block coverage before publication, and makes the zero-allocation proof cover ordinary/aligned throwing+nothrow allocation forms plus inert-copy paths. Exact-head CI #1929 and Package Contracts #345 are green; final T042 Lifecycle Stress #847 and T052 v0.1 Release Gate #571 are green, including the exact-head T051 benchmark and clean Linux/macOS/Windows bootstraps. T081 / #165 is Ready.
+- **T080 / #164:** typed SkSL uniform reflection/binding is complete after original PR #430 and post-merge hardening PR #432, squash-merged as `3fdaacf30fdf1a67c936cb97ee7f889c8eadd49e` from frozen executable head `018b76c50e3ec2a2eac893a618aedab36976b27d`. The correction locks exact vector/Color element byte extents, requires contiguous/full pinned-Skia uniform-block coverage before publication, and makes the zero-allocation proof cover ordinary/aligned throwing+nothrow allocation forms plus inert-copy paths. Exact-head CI #1929 and Package Contracts #345 are green; final T042 Lifecycle Stress #847 and T052 v0.1 Release Gate #571 are green, including the exact-head T051 benchmark and clean Linux/macOS/Windows bootstraps.
+- **T081 / #165 / PR #434:** ShaderInstance is now a backend-neutral immutable Brush source, squash-merged as `ae4280b6e52c6b68ed49b230883965e632e0e9f8` from frozen executable head `2c7749583fa698d910ee7e06e4f40ef2f969a2fd`. Brush construction owns an immutable program + copied T080 binding snapshot, inert ShaderInstance maps to the canonical transparent solid Brush, existing Brush copy/move/self-move/noexcept contracts are preserved, and Painter performs transient runtime-shader materialization without SkSL source recompilation or retained context/GPU state. The implementation preserves pinned-Skia `layout(color)` destination-space semantics, supports fill/stroke/Painter-local coordinates/PaintOptions, handles zero-uniform programs, exposes deterministic snapshot/materialization failure recovery, adds a dedicated shader Brush golden and native GPU smoke, and intentionally leaves retained per-view caching to T097. Exact-head CI #1941, Package Contracts #352, T050 #219 and T072 #408 are green. Final T042 #848 and T052 #572 are green, including clean Linux/macOS/Windows bootstraps and the exact-head T051 benchmark. T082 / #166 is Ready.
 
 ## Validation policy
 
