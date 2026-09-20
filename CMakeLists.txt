@@ -526,6 +526,8 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_t083_image_texture_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
+  nativeui_add_core_test(nativeui_t084_image_texture_tiling_tests
+    tests/t084_image_texture_tiling_tests.cpp)
 
   # T083 value/materialization fault seams are compiled only into this isolated
   # executable. NativeUI::Core contains no mutable test instrumentation.
