@@ -66,10 +66,13 @@
                     continue;
                 }
 
-                if (auto* capture = pointer_capture_owner()) {
-                    if (!pending_availability_for(pending, capture).interactive()) {
-                        (void)cancel_pointer_capture(platform);
-                    }
+                while (const auto pointer = find_pointer_capture_if(
+                           [&](Node* capture) {
+                               return !pending_availability_for(pending, capture).interactive();
+                           })) {
+                    InputEvent cancel{};
+                    cancel.pointer.id = *pointer;
+                    (void)cancel_pointer_capture(platform, cancel);
                 }
 
                 if (pointer_hover_target_ &&

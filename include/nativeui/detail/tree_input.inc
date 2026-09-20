@@ -6,40 +6,105 @@
         return EventResult::Ignored;
     }
 
+    static constexpr std::size_t kMaxTrackedPointers = 16U;
+
     struct PointerCaptureState {
+        PointerId pointer{};
         Node* node{};
         NodeId owner{kInvalidNodeId};
     };
 
-    [[nodiscard]] Node* pointer_capture_owner() noexcept {
-        if (!pointer_capture_.node) return nullptr;
-        if (pointer_capture_.owner == kInvalidNodeId ||
-            pointer_capture_.node->id != pointer_capture_.owner) {
-            clear_pointer_capture();
+    [[nodiscard]] std::size_t pointer_capture_index(PointerId pointer) const noexcept {
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            if (pointer_captures_[i].pointer == pointer) return i;
+        }
+        return pointer_capture_count_;
+    }
+
+    [[nodiscard]] Node* pointer_capture_owner(PointerId pointer) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_) return nullptr;
+        auto& capture = pointer_captures_[index];
+        if (!capture.node || capture.owner == kInvalidNodeId ||
+            capture.node->id != capture.owner) {
+            clear_pointer_capture(pointer);
             return nullptr;
         }
-        return pointer_capture_.node;
+        return capture.node;
     }
 
-    void set_pointer_capture(Node& node) noexcept {
-        if (pointer_capture_blocked_ || dynamic_teardown_quarantines(&node)) return;
-        if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) return;
-
-        if (pointer_capture_.node) clear_pointer_capture();
-        pointer_capture_ = PointerCaptureState{&node, node.id};
-        if (active_platform_) active_platform_->begin_pointer_capture();
-    }
-
-    void release_pointer_capture(Node& node) noexcept {
-        if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) {
-            clear_pointer_capture();
+    [[nodiscard]] std::optional<PointerId> first_pointer_capture_id() noexcept {
+        while (pointer_capture_count_ != 0U) {
+            const auto pointer = pointer_captures_[0].pointer;
+            if (pointer_capture_owner(pointer)) return pointer;
         }
+        return std::nullopt;
+    }
+
+    template <class Predicate>
+    [[nodiscard]] std::optional<PointerId> find_pointer_capture_if(Predicate&& predicate) {
+        std::size_t i = 0U;
+        while (i < pointer_capture_count_) {
+            const auto pointer = pointer_captures_[i].pointer;
+            if (auto* owner = pointer_capture_owner(pointer)) {
+                if (predicate(owner)) return pointer;
+                ++i;
+            }
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool node_has_pointer_capture(NodeId owner) const noexcept {
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            const auto& capture = pointer_captures_[i];
+            if (capture.owner == owner && capture.node && capture.node->id == owner) return true;
+        }
+        return false;
+    }
+
+    void set_pointer_capture(Node& node, PointerId pointer) noexcept {
+        if ((pointer_capture_blocked_id_ && *pointer_capture_blocked_id_ == pointer) ||
+            dynamic_teardown_quarantines(&node)) {
+            return;
+        }
+        if (auto* current = pointer_capture_owner(pointer)) {
+            if (current == &node) return;
+            clear_pointer_capture(pointer);
+        }
+        if (pointer_capture_count_ >= pointer_captures_.size()) return;
+        pointer_captures_[pointer_capture_count_++] = {pointer, &node, node.id};
+        if (pointer == 0U && active_platform_) active_platform_->begin_pointer_capture();
+    }
+
+    void release_pointer_capture(Node& node, PointerId pointer) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index != pointer_capture_count_ &&
+            pointer_captures_[index].node == &node &&
+            pointer_captures_[index].owner == node.id) {
+            clear_pointer_capture(pointer);
+        }
+    }
+
+    void clear_pointer_capture(PointerId pointer) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_) return;
+        const bool release_platform = pointer == 0U;
+        --pointer_capture_count_;
+        if (index != pointer_capture_count_) {
+            pointer_captures_[index] = pointer_captures_[pointer_capture_count_];
+        }
+        pointer_captures_[pointer_capture_count_] = {};
+        if (release_platform && active_platform_) active_platform_->end_pointer_capture();
     }
 
     void clear_pointer_capture() noexcept {
-        if (!pointer_capture_.node) return;
-        pointer_capture_ = {};
-        if (active_platform_) active_platform_->end_pointer_capture();
+        bool release_platform = false;
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            release_platform = release_platform || pointer_captures_[i].pointer == 0U;
+            pointer_captures_[i] = {};
+        }
+        pointer_capture_count_ = 0U;
+        if (release_platform && active_platform_) active_platform_->end_pointer_capture();
     }
 
     enum class PointerHoverTransitionPhase {
@@ -67,7 +132,7 @@
     }
 
     [[nodiscard]] InputContext prepare_input_context(
-        Node& node, PlatformServices& platform) {
+        Node& node, const InputEvent& event, PlatformServices& platform) {
         if (fail_next_input_context_preparation_for_testing_) {
             fail_next_input_context_preparation_for_testing_ = false;
             throw std::bad_alloc{};
@@ -77,8 +142,12 @@
             platform,
             unsafe_paint_invalidator(node),
             unsafe_layout_invalidator(node),
-            [this, &node] { set_pointer_capture(node); },
-            [this, &node] { release_pointer_capture(node); }};
+            [this, &node, pointer = event.pointer.id] {
+                set_pointer_capture(node, pointer);
+            },
+            [this, &node, pointer = event.pointer.id] {
+                release_pointer_capture(node, pointer);
+            }};
     }
 
     [[nodiscard]] EventResult send_prepared_to(
@@ -93,8 +162,8 @@
                 // Framework-only cleanup is noexcept and performs no component
                 // callback, so later pointer input starts from a coherent idle
                 // interaction instead of inheriting a failed native capture.
-                clear_pointer_capture();
-                pointer_interaction_active_ = false;
+                clear_pointer_capture(event.pointer.id);
+                end_pointer_interaction(event.pointer.id);
             }
             throw;
         }
@@ -211,7 +280,7 @@
                         // retryable; after cursor advance only Component::input is
                         // allowed to throw, so begun callbacks remain at-most-once.
                         const auto leave = pointer_hover_transition_stack_[index].leave;
-                        auto context = prepare_input_context(*current, platform);
+                        auto context = prepare_input_context(*current, leave, platform);
                         pointer_hover_transition_stack_[index].cursor = following;
                         (void)send_prepared_to(*current, leave, context);
                         cursor = following;
@@ -376,53 +445,75 @@
         // Some targeted events are explicitly not allowed to establish pointer
         // capture. Preserve an outer guard across reentrant dispatch and restore
         // it exactly even when application input code throws.
-        const bool previous_blocked = pointer_capture_blocked_;
-        pointer_capture_blocked_ = true;
+        const auto previous_blocked = pointer_capture_blocked_id_;
+        pointer_capture_blocked_id_ = event.pointer.id;
         try {
             const auto result = route_from(target, event, platform);
-            pointer_capture_blocked_ = previous_blocked;
+            pointer_capture_blocked_id_ = previous_blocked;
             return result;
         } catch (...) {
-            pointer_capture_blocked_ = previous_blocked;
+            pointer_capture_blocked_id_ = previous_blocked;
             throw;
         }
     }
 
     [[nodiscard]] EventResult cancel_pointer_capture(
         PlatformServices& platform, InputEvent event = InputEvent{}) {
-        auto* owner = pointer_capture_owner();
-        if (!owner) return EventResult::Ignored;
+        const auto pointer = event.pointer.id;
+        auto* owner = pointer_capture_owner(pointer);
+        if (!owner) {
+            end_pointer_interaction(pointer);
+            return EventResult::Ignored;
+        }
 
         event.type = InputType::PointerCancel;
-        // Keep the owner recorded while routing so release_pointer() remains
-        // idempotent, but prevent a cancellation handler from re-capturing.
-        // Terminate the stale capture even when application code throws.
-        // Cleanup performs no component callback, so the original exception can
-        // propagate to the C++ caller while later input remains usable.
         try {
             const auto result = route_without_pointer_capture(*owner, event, platform);
-            clear_pointer_capture();
+            clear_pointer_capture(pointer);
+            end_pointer_interaction(pointer);
             return result;
         } catch (...) {
-            clear_pointer_capture();
+            clear_pointer_capture(pointer);
+            end_pointer_interaction(pointer);
             throw;
         }
     }
 
+    [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
+        EventResult result = EventResult::Ignored;
+        std::exception_ptr first_error;
+        while (const auto pointer = first_pointer_capture_id()) {
+            InputEvent event{};
+            event.pointer.id = *pointer;
+            try {
+                const auto one = cancel_pointer_capture(platform, event);
+                if (handled(one)) result = one;
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        }
+        clear_pointer_interactions();
+        if (first_error) std::rethrow_exception(first_error);
+        return result;
+    }
+
     [[nodiscard]] EventResult send_to(
         Node& node, const InputEvent& event, PlatformServices& platform) {
-        auto context = prepare_input_context(node, platform);
+        auto context = prepare_input_context(node, event, platform);
         return send_prepared_to(node, event, context);
     }
 
     std::unique_ptr<Node> root_;
     std::vector<Node*> focusables_;
     std::size_t focused_index_{};
-    PointerCaptureState pointer_capture_{};
+    std::array<PointerCaptureState, kMaxTrackedPointers> pointer_captures_{};
+    std::size_t pointer_capture_count_{};
     Node* pointer_hover_target_{};
     detail::OverlayService* overlay_service_{};
+    std::array<PointerId, kMaxTrackedPointers> active_pointer_interactions_{};
+    std::size_t active_pointer_interaction_count_{};
     bool pointer_interaction_active_{};
-    bool pointer_capture_blocked_{};
+    std::optional<PointerId> pointer_capture_blocked_id_;
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};

@@ -1,0 +1,220 @@
+#include "test_support.hpp"
+
+#include <memory>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace {
+
+struct ContactState {
+    std::vector<ui::PointerId> move;
+    std::vector<ui::PointerId> up;
+    std::vector<ui::PointerId> cancel;
+    bool throw_on_cancel{};
+};
+
+class ContactProbeComponent final : public ui::Component {
+public:
+    explicit ContactProbeComponent(std::shared_ptr<ContactState> state)
+        : state_(std::move(state)) {}
+    [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {100.0f, 100.0f};
+    }
+    ui::EventResult input(const ui::InputEvent& event, ui::InputContext& context) override {
+        switch (event.type) {
+        case ui::InputType::PointerDown:
+            context.capture_pointer();
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerMove:
+            state_->move.push_back(event.pointer.id);
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerUp:
+            state_->up.push_back(event.pointer.id);
+            return ui::EventResult::Handled;
+        case ui::InputType::PointerCancel:
+            state_->cancel.push_back(event.pointer.id);
+            if (state_->throw_on_cancel) {
+                state_->throw_on_cancel = false;
+                throw std::runtime_error("contact cancel fault");
+            }
+            return ui::EventResult::Handled;
+        default:
+            return ui::EventResult::Ignored;
+        }
+    }
+    void paint(ui::PaintContext&) const override {}
+private:
+    std::shared_ptr<ContactState> state_;
+};
+
+class ContactProbe {
+public:
+    explicit ContactProbe(std::shared_ptr<ContactState> state) : state_(std::move(state)) {}
+    ui::Spec spec() && {
+        auto state = std::move(state_);
+        return ui::Spec{
+            [state = std::move(state)] {
+                return std::make_unique<ContactProbeComponent>(state);
+            },
+            {}};
+    }
+private:
+    std::shared_ptr<ContactState> state_;
+};
+
+class SplitComponent final : public ui::Component {
+public:
+    [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {200.0f, 100.0f};
+    }
+    void layout_children(ui::Rect bounds,
+                         const std::vector<ui::ChildMetrics>&,
+                         std::vector<ui::ChildPlacement>& placements) const override {
+        if (placements.size() < 2U) return;
+        const float half = bounds.w * 0.5f;
+        placements[0].bounds = {bounds.x, bounds.y, half, bounds.h};
+        placements[1].bounds = {bounds.x + half, bounds.y, bounds.w - half, bounds.h};
+    }
+    void paint(ui::PaintContext&) const override {}
+};
+
+class Split {
+public:
+    Split(ContactProbe first, ContactProbe second) {
+        children_.push_back(std::move(first).spec());
+        children_.push_back(std::move(second).spec());
+    }
+    ui::Spec spec() && {
+        return ui::Spec{[] { return std::make_unique<SplitComponent>(); },
+                        std::move(children_)};
+    }
+private:
+    std::vector<ui::Spec> children_;
+};
+
+ui::InputEvent pointer(ui::InputType type,
+                       ui::PointerId id,
+                       float x,
+                       float y,
+                       ui::PointerType source = ui::PointerType::Touch) {
+    ui::InputEvent event{};
+    event.type = type;
+    event.position = {x, y};
+    event.pointer.id = id;
+    event.pointer.type = source;
+    event.pointer.primary = id == 1U;
+    event.pointer.pressure = 0.5f;
+    event.pointer.contact_size = {12.0f, 10.0f};
+    return event;
+}
+
+void suite() {
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        NUI_CHECK(tree.dispatch(pointer(ui::InputType::PointerDown, 1U, 25.0f, 50.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(tree.dispatch(pointer(ui::InputType::PointerDown, 2U, 175.0f, 50.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(platform.pointer_capture_begin_count == 0);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 1U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 2U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->move.size() == 1U && left->move.back() == 1U);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 2U);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 1U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 2U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->up.size() == 1U && left->up.back() == 1U);
+        NUI_CHECK(right->move.size() == 2U);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerCancel, 2U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->cancel.size() == 1U && right->cancel.back() == 2U);
+        NUI_CHECK(platform.pointer_capture_end_count == 0);
+    }
+
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 0U, 25.0f, 50.0f, ui::PointerType::Mouse),
+            platform);
+        NUI_CHECK(platform.pointer_capture_begin_count == 1);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerMove, 0U, 175.0f, 50.0f, ui::PointerType::Mouse),
+            platform);
+        NUI_CHECK(left->move.size() == 1U);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerUp, 0U, 175.0f, 50.0f, ui::PointerType::Mouse),
+            platform);
+        NUI_CHECK(platform.pointer_capture_end_count == 1);
+    }
+
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        left->throw_on_cancel = true;
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 3U, 25.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 4U, 175.0f, 50.0f), platform);
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerCancel, 3U, 25.0f, 50.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 4U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 4U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 4U, 25.0f, 50.0f), platform);
+    }
+
+    {
+        auto a_left = std::make_shared<ContactState>();
+        auto a_right = std::make_shared<ContactState>();
+        auto b_left = std::make_shared<ContactState>();
+        auto b_right = std::make_shared<ContactState>();
+        test::MockPlatform platform_a;
+        test::MockPlatform platform_b;
+
+        auto a = std::make_unique<ui::UI>(
+            Split{ContactProbe{a_left}, ContactProbe{a_right}});
+        ui::UI b{Split{ContactProbe{b_left}, ContactProbe{b_right}}};
+        a->resize({200.0f, 100.0f});
+        b.resize({200.0f, 100.0f});
+        a->activate(platform_a);
+        b.activate(platform_b);
+
+        (void)a->dispatch(pointer(ui::InputType::PointerDown, 1U, 25.0f, 50.0f), platform_a);
+        (void)b.dispatch(pointer(ui::InputType::PointerDown, 1U, 175.0f, 50.0f), platform_b);
+        a.reset();
+
+        (void)b.dispatch(pointer(ui::InputType::PointerMove, 1U, 25.0f, 50.0f), platform_b);
+        NUI_CHECK(b_right->move.size() == 1U && b_right->move.back() == 1U);
+        (void)b.dispatch(pointer(ui::InputType::PointerUp, 1U, 25.0f, 50.0f), platform_b);
+    }
+}
+
+} // namespace
+
+int main() {
+    return test::run("t177 multitouch pointer routing", suite);
+}

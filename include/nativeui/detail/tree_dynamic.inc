@@ -352,9 +352,14 @@
                 (void)clear_pointer_hover(leave, *active_platform_);
             }
 
-            if (auto* capture = pointer_capture_owner();
-                subtree_is_being_removed(capture, owner, current_keys, desired_keys)) {
-                (void)cancel_pointer_capture(*active_platform_);
+            while (const auto pointer = find_pointer_capture_if(
+                       [&](Node* capture) {
+                           return subtree_is_being_removed(
+                               capture, owner, current_keys, desired_keys);
+                       })) {
+                InputEvent cancel{};
+                cancel.pointer.id = *pointer;
+                (void)cancel_pointer_capture(*active_platform_, cancel);
             }
 
             if (auto* focused = current_focus_node();

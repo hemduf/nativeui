@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,6 +84,33 @@ struct CompositionEvent {
     std::size_t selection_bytes{};
 };
 
+using PointerId = std::uint32_t;
+
+enum class PointerType {
+    Unknown,
+    Mouse,
+    Touch,
+    Pen,
+    Eraser
+};
+
+struct PointerContact {
+    PointerId id{};
+    PointerType type{PointerType::Unknown};
+    float pressure{std::numeric_limits<float>::quiet_NaN()};
+    Size contact_size{
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::quiet_NaN()};
+    bool primary{};
+    bool coalesced{};
+    bool predicted{};
+
+    [[nodiscard]] constexpr bool tracked() const noexcept { return id != 0U; }
+    [[nodiscard]] constexpr bool hover_capable() const noexcept {
+        return type == PointerType::Unknown || type == PointerType::Mouse;
+    }
+};
+
 enum class InputType {
     None,
     KeyDown,
@@ -130,6 +158,7 @@ struct InputEvent {
     Command command{Command::None};
     Point position{};
     Point delta{};
+    PointerContact pointer{};
     std::string text;
     CompositionEvent composition{};
     // Drag-and-drop payload. `drop_types` is populated for DropOffer, while

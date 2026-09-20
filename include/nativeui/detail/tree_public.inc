@@ -24,7 +24,7 @@
 
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         focus_structure_dirty_ = true;
         pointer_passthrough_dynamic_root_ =
             dynamic_source(*root_) != nullptr &&
@@ -49,7 +49,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             active_ = false;
             availability_structure_dirty_ = false;
@@ -102,7 +102,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
@@ -129,7 +129,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
@@ -171,7 +171,7 @@
         InputEvent leave{};
         leave.type = InputType::PointerLeave;
         capture_error([&] { (void)clear_pointer_hover(leave, platform); });
-        capture_error([&] { (void)cancel_pointer_capture(platform); });
+        capture_error([&] { (void)cancel_all_pointer_captures(platform); });
 
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
@@ -184,7 +184,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         active_platform_ = nullptr;
 
         capture_error([&] { deactivate_node(*root_); });
@@ -219,7 +219,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         active_platform_ = nullptr;
         if (active_) {
             capture_error([&] { deactivate_node(*root_); });
@@ -297,8 +297,40 @@
         global_key_down_handler_ = std::move(handler);
     }
 
-    void begin_pointer_interaction() noexcept { pointer_interaction_active_ = true; }
-    void end_pointer_interaction() noexcept { pointer_interaction_active_ = false; }
+    void begin_pointer_interaction(PointerId pointer = 0U) noexcept {
+        for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
+            if (active_pointer_interactions_[i] == pointer) {
+                pointer_interaction_active_ = true;
+                return;
+            }
+        }
+        if (active_pointer_interaction_count_ < active_pointer_interactions_.size()) {
+            active_pointer_interactions_[active_pointer_interaction_count_++] = pointer;
+        }
+        pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
+    }
+
+    void end_pointer_interaction(PointerId pointer = 0U) noexcept {
+        for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
+            if (active_pointer_interactions_[i] != pointer) continue;
+            --active_pointer_interaction_count_;
+            if (i != active_pointer_interaction_count_) {
+                active_pointer_interactions_[i] =
+                    active_pointer_interactions_[active_pointer_interaction_count_];
+            }
+            active_pointer_interactions_[active_pointer_interaction_count_] = 0U;
+            break;
+        }
+        pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
+    }
+
+    void clear_pointer_interactions() noexcept {
+        for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
+            active_pointer_interactions_[i] = 0U;
+        }
+        active_pointer_interaction_count_ = 0U;
+        pointer_interaction_active_ = false;
+    }
 
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
@@ -402,18 +434,21 @@
 
             if (event.type == InputType::PointerCancel) {
                 const auto result = cancel_pointer_capture(platform, event);
-                pointer_interaction_active_ = false;
                 pointer_route_committed = true;
                 return finish(result);
             }
 
             if (event.type == InputType::PointerDown) {
-                pointer_interaction_active_ = true;
-                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
+                if (pointer_capture_owner(event.pointer.id)) {
+                    (void)cancel_pointer_capture(platform, event);
+                }
+                begin_pointer_interaction(event.pointer.id);
 
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
+                if (event.pointer.hover_capable()) {
+                    (void)update_pointer_hover_target(target, event, platform);
+                }
                 if (target) {
                     focus_nearest_ancestor(target);
                     const auto result = route_from(*target, event, platform);
@@ -430,8 +465,10 @@
                 // coexist with a stale drag, then the hit component is
                 // targeted. Context-menu handlers are not allowed to establish
                 // a replacement capture; ignored events still bubble normally.
-                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
-                pointer_interaction_active_ = false;
+                if (pointer_capture_owner(event.pointer.id)) {
+                    (void)cancel_pointer_capture(platform, event);
+                }
+                end_pointer_interaction(event.pointer.id);
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
                 if (target) {
@@ -443,8 +480,10 @@
             if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
-                if (auto* owner = pointer_capture_owner()) {
+                if (event.pointer.hover_capable()) {
+                    (void)update_pointer_hover_target(target, event, platform);
+                }
+                if (auto* owner = pointer_capture_owner(event.pointer.id)) {
                     return finish(route_from(*owner, event, platform));
                 }
                 if (target) return finish(route_from(*target, event, platform));
@@ -454,15 +493,17 @@
             if (event.type == InputType::PointerUp) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
-                if (auto* owner = pointer_capture_owner()) {
+                if (event.pointer.hover_capable()) {
+                    (void)update_pointer_hover_target(target, event, platform);
+                }
+                if (auto* owner = pointer_capture_owner(event.pointer.id)) {
                     const auto result = route_from(*owner, event, platform);
-                    clear_pointer_capture();
-                    pointer_interaction_active_ = false;
+                    clear_pointer_capture(event.pointer.id);
+                    end_pointer_interaction(event.pointer.id);
                     pointer_route_committed = true;
                     return finish(result);
                 }
-                pointer_interaction_active_ = false;
+                end_pointer_interaction(event.pointer.id);
                 if (target) {
                     const auto result = route_from(*target, event, platform);
                     pointer_route_committed = true;
@@ -503,8 +544,8 @@
                  event.type == InputType::PointerUp ||
                  event.type == InputType::PointerCancel ||
                  event.type == InputType::ContextMenu)) {
-                clear_pointer_capture();
-                pointer_interaction_active_ = false;
+                clear_pointer_capture(event.pointer.id);
+                end_pointer_interaction(event.pointer.id);
             }
             dispatch_depth_ = previous_dispatch_depth;
             throw;
@@ -515,7 +556,7 @@
         if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
-        return cancel_pointer_capture(platform);
+        return cancel_all_pointer_captures(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
