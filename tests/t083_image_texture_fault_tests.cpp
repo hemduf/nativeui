@@ -210,15 +210,25 @@ void value_operations_allocate_nothing() {
 
         ui::ImageTexture texture{image, {0.0f, 0.0f, 8.0f, 8.0f}};
         ui::ImageTexture copied_texture{texture};
+        ui::ImageTexture copy_assigned_texture;
+        copy_assigned_texture = texture;
         ui::ImageTexture moved_texture{std::move(copied_texture)};
+        ui::ImageTexture move_assigned_texture;
+        move_assigned_texture = std::move(copy_assigned_texture);
 
         ui::Brush brush{texture};
         ui::Brush copied_brush{brush};
+        ui::Brush copy_assigned_brush{ui::Color{}};
+        copy_assigned_brush = brush;
         ui::Brush moved_brush{std::move(copied_brush)};
+        ui::Brush move_assigned_brush{ui::Color{}};
+        move_assigned_brush = std::move(copy_assigned_brush);
         ui::Brush invalid{ui::ImageTexture{}};
 
         (void)moved_texture;
+        (void)move_assigned_texture;
         (void)moved_brush;
+        (void)move_assigned_brush;
         (void)invalid;
     }
     check(allocation_probe::allocation_count == before,
@@ -251,6 +261,17 @@ void decode_materialization_and_failure_recovery() {
     check(ui::detail::image_texture_materialization_call_count_for_test() ==
               materialization_before + 2U,
           "pre-T097 draws did not materialize independently");
+
+    const ui::Brush invalid{ui::ImageTexture{}};
+    const auto invalid_before =
+        ui::detail::image_texture_materialization_call_count_for_test();
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, invalid);
+    }
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              invalid_before,
+          "invalid ImageTexture Brush attempted backend materialization");
     check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
           "painting unexpectedly called Image::decode");
 
