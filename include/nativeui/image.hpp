@@ -3,10 +3,12 @@
 #include <nativeui/geometry.hpp>
 #include <nativeui/resource.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace ui {
@@ -39,11 +41,12 @@ void draw_image(Painter& painter,
 
 /// Copyable backend-neutral handle to a decoded image resource.
 ///
-/// Encoded bytes are copied during decode, so the caller does not need to keep
-/// the source buffer alive. Renderer-specific ownership stays behind ImageData
-/// and is never exposed through the public API. Decoding may allocate and is a
-/// resource-preparation/UI-domain operation, never a real-time audio callback
-/// operation.
+/// Encoded bytes are copied and fully raster-decoded before the Image is
+/// published, so the caller does not need to keep the source buffer alive and
+/// paint paths never perform encoded-image decoding. Renderer-specific ownership
+/// stays behind ImageData and is never exposed through the public API. Decoding
+/// may allocate and is a resource-preparation/UI-domain operation, never a
+/// real-time audio callback operation.
 class Image {
 public:
     Image() = default;
@@ -64,6 +67,117 @@ private:
 
     friend struct detail::ImageAccess;
 };
+
+
+/// Immutable backend-neutral image-backed Brush source.
+///
+/// `source_pixels` is expressed in decoded-image pixel coordinates and may be
+/// fractional. `destination` is expressed in the Painter's current local
+/// logical coordinates; it defines the texture mapping, not primitive bounds or
+/// clipping. Source/destination rectangles must be finite with positive size,
+/// and the complete source rectangle must stay inside the Image bounds.
+///
+/// Invalid construction canonicalizes to an inert state (invalid Image plus zero
+/// rectangles). Copying shares the immutable Image backing; no decode, backend
+/// materialization, or full-raster copy occurs when constructing/copying an
+/// ImageTexture or converting it to a Brush. A logically valid finite mapping
+/// that cannot be represented by the renderer's affine matrix fails visibly at
+/// paint time rather than silently substituting a different mapping.
+class ImageTexture {
+public:
+    ImageTexture() = default;
+
+    ImageTexture(Image image, Rect destination) noexcept
+        : image_(std::move(image)),
+          destination_(destination) {
+        const auto image_size = image_.size();
+        source_ = Rect{0.0f, 0.0f, image_size.w, image_size.h};
+        canonicalize();
+    }
+
+    ImageTexture(Image image, Rect source_pixels, Rect destination) noexcept
+        : image_(std::move(image)),
+          source_(source_pixels),
+          destination_(destination) {
+        canonicalize();
+    }
+
+    ImageTexture(const ImageTexture&) noexcept = default;
+    ImageTexture& operator=(const ImageTexture&) noexcept = default;
+
+    ImageTexture(ImageTexture&& other) noexcept
+        : image_(std::move(other.image_)),
+          source_(other.source_),
+          destination_(other.destination_) {
+        other.reset();
+    }
+
+    ImageTexture& operator=(ImageTexture&& other) noexcept {
+        if (this == &other) {
+            reset();
+            return *this;
+        }
+        image_ = std::move(other.image_);
+        source_ = other.source_;
+        destination_ = other.destination_;
+        other.reset();
+        return *this;
+    }
+
+    ~ImageTexture() noexcept = default;
+
+    [[nodiscard]] bool valid() const noexcept { return image_.valid(); }
+    [[nodiscard]] const Image& image() const noexcept { return image_; }
+    [[nodiscard]] Rect source() const noexcept { return source_; }
+    [[nodiscard]] Rect destination() const noexcept { return destination_; }
+
+private:
+    [[nodiscard]] static bool finite_rect(Rect rect) noexcept {
+        return std::isfinite(rect.x) && std::isfinite(rect.y) &&
+               std::isfinite(rect.w) && std::isfinite(rect.h);
+    }
+
+    [[nodiscard]] bool fields_valid() const noexcept {
+        if (!image_.valid()) return false;
+
+        const auto image_size = image_.size();
+        if (!std::isfinite(image_size.w) || !std::isfinite(image_size.h) ||
+            image_size.w <= 0.0f || image_size.h <= 0.0f) {
+            return false;
+        }
+
+        if (!finite_rect(source_) || source_.w <= 0.0f || source_.h <= 0.0f ||
+            source_.x < 0.0f || source_.y < 0.0f ||
+            source_.x > image_size.w || source_.y > image_size.h ||
+            source_.w > image_size.w - source_.x ||
+            source_.h > image_size.h - source_.y) {
+            return false;
+        }
+
+        return finite_rect(destination_) &&
+               destination_.w > 0.0f && destination_.h > 0.0f;
+    }
+
+    void canonicalize() noexcept {
+        if (!fields_valid()) reset();
+    }
+
+    void reset() noexcept {
+        image_ = {};
+        source_ = {};
+        destination_ = {};
+    }
+
+    Image image_;
+    Rect source_{};
+    Rect destination_{};
+};
+
+static_assert(std::is_nothrow_copy_constructible_v<ImageTexture>);
+static_assert(std::is_nothrow_copy_assignable_v<ImageTexture>);
+static_assert(std::is_nothrow_move_constructible_v<ImageTexture>);
+static_assert(std::is_nothrow_move_assignable_v<ImageTexture>);
+static_assert(std::is_nothrow_destructible_v<ImageTexture>);
 
 struct ImageLoadResult {
     Image image;

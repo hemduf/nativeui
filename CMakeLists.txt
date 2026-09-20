@@ -522,6 +522,34 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_t062_tooltip_tests tests/t062_tooltip_tests.cpp)
   nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
+  nativeui_add_core_test(nativeui_t083_image_texture_tests tests/t083_image_texture_tests.cpp)
+  target_include_directories(nativeui_t083_image_texture_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+
+  # T083 value/materialization fault seams are compiled only into this isolated
+  # executable. NativeUI::Core contains no mutable test instrumentation.
+  add_executable(nativeui_t083_image_texture_fault_tests
+    tests/t083_image_texture_fault_tests.cpp
+    src/skia_image.cpp
+    src/skia_shader.cpp
+  )
+  target_include_directories(nativeui_t083_image_texture_fault_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_t083_image_texture_fault_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_t083_image_texture_fault_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_t083_image_texture_fault_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_t083_image_texture_fault_tests)
+  nativeui_enable_sanitizers(nativeui_t083_image_texture_fault_tests)
+  add_test(
+    NAME nativeui_t083_image_texture_fault_tests
+    COMMAND nativeui_t083_image_texture_fault_tests
+  )
+
   nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
   nativeui_add_core_test(nativeui_t081_shader_brush_tests tests/t081_shader_brush_tests.cpp)
   target_include_directories(nativeui_t081_shader_brush_tests PRIVATE
@@ -540,6 +568,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_shader_fault_tests
     tests/shader_fault_tests.cpp
     src/skia_shader.cpp
+    src/skia_image.cpp
   )
   target_include_directories(nativeui_shader_fault_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

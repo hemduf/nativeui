@@ -47,6 +47,8 @@ struct ShaderBrushSnapshot;
 
 [[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
     const std::shared_ptr<const ShaderBrushSnapshot>& snapshot);
+[[nodiscard]] sk_sp<SkShader> materialize_image_texture(
+    const ImageTexture& texture);
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -725,6 +727,15 @@ private:
         });
     }
 
+    static void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
+        auto shader = detail::materialize_image_texture(texture);
+        if (!shader) {
+            throw std::runtime_error(
+                "NativeUI image texture materialization returned no shader");
+        }
+        paint.setShader(std::move(shader));
+    }
+
     static void apply_fill_source(
         SkPaint& paint,
         const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
@@ -764,6 +775,17 @@ private:
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kFill_Style);
         apply_fill_source(paint, gradient);
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(
+        const ImageTexture& texture,
+        PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, texture);
         apply_paint_options(paint, options);
         return paint;
     }

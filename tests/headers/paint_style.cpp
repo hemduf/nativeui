@@ -29,7 +29,9 @@ void nativeui_header_compile_paint_style() {
     const ui::Brush solid{{0.25f, 0.5f, 0.75f, 1.0f}};
     const ui::Brush linear_brush{linear};
     const ui::Brush radial_brush{radial};
+    const ui::Brush image_texture_brush{ui::ImageTexture{}};
     static_assert(std::is_constructible_v<ui::Brush, const ui::ShaderInstance&>);
+    static_assert(noexcept(ui::Brush{ui::ImageTexture{}}));
     (void)linear;
     (void)radial;
     (void)options;
@@ -40,4 +42,5 @@ void nativeui_header_compile_paint_style() {
     (void)solid;
     (void)linear_brush;
     (void)radial_brush;
+    (void)image_texture_brush;
 }

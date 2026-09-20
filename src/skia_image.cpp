@@ -4,11 +4,17 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkTileMode.h"
+#include "detail/image_texture_test_seams.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -27,6 +33,13 @@ struct ImageAccess {
 };
 
 namespace {
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+std::size_t g_image_decode_calls{};
+std::size_t g_image_texture_materialization_calls{};
+ImageTextureMaterializationFailurePoint g_image_texture_failure{
+    ImageTextureMaterializationFailurePoint::None};
+#endif
 
 [[nodiscard]] bool finite_rect(Rect rect) noexcept {
     return std::isfinite(rect.x) && std::isfinite(rect.y) &&
@@ -115,6 +128,89 @@ void draw_resolved_image(Painter& painter,
 
 } // namespace
 
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+[[nodiscard]] std::size_t image_decode_call_count_for_test() noexcept {
+    return g_image_decode_calls;
+}
+
+[[nodiscard]] std::size_t image_texture_materialization_call_count_for_test() noexcept {
+    return g_image_texture_materialization_calls;
+}
+
+[[nodiscard]] bool image_backing_is_lazy_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->image && data->image->isLazyGenerated();
+}
+
+void set_image_texture_materialization_failure_for_test(
+    ImageTextureMaterializationFailurePoint point) noexcept {
+    g_image_texture_failure = point;
+}
+
+void record_image_decode_for_test() noexcept {
+    ++g_image_decode_calls;
+}
+#endif
+
+sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    ++g_image_texture_materialization_calls;
+    if (g_image_texture_failure ==
+        ImageTextureMaterializationFailurePoint::BeforeShader) {
+        throw std::bad_alloc{};
+    }
+    if (g_image_texture_failure ==
+        ImageTextureMaterializationFailurePoint::ForceNullShader) {
+        return {};
+    }
+#endif
+
+    if (!texture.valid()) return {};
+
+    const auto& data = ImageAccess::data(texture.image());
+    if (!data || !data->image) return {};
+
+    const auto source = texture.source();
+    const auto destination = texture.destination();
+    const SkRect subset =
+        SkRect::MakeXYWH(source.x, source.y, source.w, source.h);
+    const SkRect destination_rect =
+        SkRect::MakeXYWH(destination.x, destination.y,
+                         destination.w, destination.h);
+    const auto local_matrix =
+        SkMatrix::Rect2Rect(subset, destination_rect);
+    if (!local_matrix || !local_matrix->isFinite() ||
+        !local_matrix->invert().has_value()) {
+        return {};
+    }
+
+    auto shader = data->image->makeShader(
+        SkTileMode::kClamp,
+        SkTileMode::kClamp,
+        SkSamplingOptions(SkFilterMode::kLinear));
+    if (!shader) return {};
+
+    // CoordClamp bounds coordinates, while the image shader still owns the
+    // linear filter footprint. Clamp to the centers of the first/last texels
+    // intersected by the selected source rectangle so bilinear sampling cannot
+    // pull a neighboring texel from outside that selection. This reproduces
+    // strict source-subrect isolation without depending on Skia's private
+    // SkImageShader::MakeSubset API.
+    const float source_right = source.x + source.w;
+    const float source_bottom = source.y + source.h;
+    const SkRect sampling_domain = SkRect::MakeLTRB(
+        std::floor(source.x) + 0.5f,
+        std::floor(source.y) + 0.5f,
+        std::ceil(source_right) - 0.5f,
+        std::ceil(source_bottom) - 0.5f);
+
+    shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
+    if (!shader) return {};
+
+    return shader->makeWithLocalMatrix(*local_matrix);
+}
+
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {
     const auto& data = ImageAccess::data(image);
     if (!data) return;
@@ -136,12 +232,23 @@ void draw_image(Painter& painter,
 namespace ui {
 
 Image Image::decode(std::span<const std::byte> encoded) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    detail::record_image_decode_for_test();
+#endif
     if (encoded.empty()) return {};
 
     auto bytes = SkData::MakeWithCopy(encoded.data(), encoded.size());
     if (!bytes) return {};
 
-    auto image = SkImages::DeferredFromEncodedData(std::move(bytes));
+    auto deferred = SkImages::DeferredFromEncodedData(std::move(bytes));
+    if (!deferred) return {};
+
+    // Publish only a realized raster image. DeferredFromEncodedData may parse
+    // metadata successfully while postponing pixel decode until first draw,
+    // which would violate Image's resource-preparation contract and T083's
+    // zero-decode paint path.
+    auto image = deferred->makeRasterImage(
+        nullptr, SkImage::kDisallow_CachingHint);
     if (!image) return {};
 
     auto data = std::make_shared<detail::ImageData>();
