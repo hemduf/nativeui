@@ -4,11 +4,17 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkTileMode.h"
+#include "src/detail/image_texture_test_seams.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -27,6 +33,13 @@ struct ImageAccess {
 };
 
 namespace {
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+std::size_t g_image_decode_calls{};
+std::size_t g_image_texture_materialization_calls{};
+ImageTextureMaterializationFailurePoint g_image_texture_failure{
+    ImageTextureMaterializationFailurePoint::None};
+#endif
 
 [[nodiscard]] bool finite_rect(Rect rect) noexcept {
     return std::isfinite(rect.x) && std::isfinite(rect.y) &&
@@ -115,6 +128,66 @@ void draw_resolved_image(Painter& painter,
 
 } // namespace
 
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+[[nodiscard]] std::size_t image_decode_call_count_for_test() noexcept {
+    return g_image_decode_calls;
+}
+
+[[nodiscard]] std::size_t image_texture_materialization_call_count_for_test() noexcept {
+    return g_image_texture_materialization_calls;
+}
+
+void set_image_texture_materialization_failure_for_test(
+    ImageTextureMaterializationFailurePoint point) noexcept {
+    g_image_texture_failure = point;
+}
+
+void record_image_decode_for_test() noexcept {
+    ++g_image_decode_calls;
+}
+#endif
+
+sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    ++g_image_texture_materialization_calls;
+    if (g_image_texture_failure ==
+        ImageTextureMaterializationFailurePoint::BeforeShader) {
+        throw std::bad_alloc{};
+    }
+    if (g_image_texture_failure ==
+        ImageTextureMaterializationFailurePoint::ForceNullShader) {
+        return {};
+    }
+#endif
+
+    if (!texture.valid()) return {};
+
+    const auto& data = ImageAccess::data(texture.image());
+    if (!data || !data->image) return {};
+
+    const auto source = texture.source();
+    const auto destination = texture.destination();
+    const SkRect subset =
+        SkRect::MakeXYWH(source.x, source.y, source.w, source.h);
+    const SkRect destination_rect =
+        SkRect::MakeXYWH(destination.x, destination.y,
+                         destination.w, destination.h);
+    const SkMatrix local_matrix =
+        SkMatrix::RectToRectOrIdentity(subset, destination_rect);
+
+    auto shader = data->image->makeShader(
+        SkTileMode::kClamp,
+        SkTileMode::kClamp,
+        SkSamplingOptions(SkFilterMode::kLinear));
+    if (!shader) return {};
+
+    shader = SkShaders::CoordClamp(std::move(shader), subset);
+    if (!shader) return {};
+
+    return shader->makeWithLocalMatrix(local_matrix);
+}
+
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {
     const auto& data = ImageAccess::data(image);
     if (!data) return;
@@ -136,6 +209,9 @@ void draw_image(Painter& painter,
 namespace ui {
 
 Image Image::decode(std::span<const std::byte> encoded) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    detail::record_image_decode_for_test();
+#endif
     if (encoded.empty()) return {};
 
     auto bytes = SkData::MakeWithCopy(encoded.data(), encoded.size());
