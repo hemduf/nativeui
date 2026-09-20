@@ -55,10 +55,6 @@ constexpr std::array<std::byte, 84> kCropIsolationPng{
     return p.b > 180 && p.r < 70 && p.g < 70;
 }
 
-[[nodiscard]] bool black(ui::Rgba8 p) noexcept {
-    return p.r < 8 && p.g < 8 && p.b < 8;
-}
-
 [[nodiscard]] bool magenta(ui::Rgba8 p) noexcept {
     return p.r > 240 && p.g < 15 && p.b > 240;
 }
