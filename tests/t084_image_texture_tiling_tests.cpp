@@ -186,6 +186,12 @@ void api_and_reference_contract() {
     NUI_CHECK(copied.tile_mode_x() == ui::TextureTileMode::Clamp);
     NUI_CHECK(copied.tile_mode_y() == ui::TextureTileMode::Clamp);
 
+    auto* moved_alias = &moved;
+    moved = std::move(*moved_alias);
+    NUI_CHECK(!moved.valid());
+    NUI_CHECK(moved.tile_mode_x() == ui::TextureTileMode::Clamp);
+    NUI_CHECK(moved.tile_mode_y() == ui::TextureTileMode::Clamp);
+
     struct ReferenceCase {
         float q;
         float clamp;
@@ -311,9 +317,9 @@ void selected_source_isolation_for_every_mode() {
     constexpr std::array<int, 5> xs{12, 28, 36, 52, 68};
     constexpr std::array<int, 5> ys{4, 20, 28, 44, 60};
 
-    for (const auto mode : opaque_modes) {
+    const auto verify_opaque = [&](ui::Rect source, ui::TextureTileMode mode) {
         ui::ImageTexture texture{
-            image, {1.0f, 0.0f, 2.0f, 2.0f}, {32.0f, 24.0f, 16.0f, 16.0f}};
+            image, source, {32.0f, 24.0f, 16.0f, 16.0f}};
         texture.set_tile_mode(mode, mode);
         const auto rendered = render_texture(texture, 80, 72);
         for (const int y : ys) {
@@ -321,17 +327,29 @@ void selected_source_isolation_for_every_mode() {
                 NUI_CHECK(red(rendered.at(x, y)));
             }
         }
+    };
+
+    for (const auto mode : opaque_modes) {
+        verify_opaque({1.0f, 0.0f, 2.0f, 2.0f}, mode);
+        // Fractional T083 source rectangles must keep the same isolation when
+        // repeated/mirrored/clamped across multiple periods.
+        verify_opaque({1.25f, 0.0f, 1.5f, 2.0f}, mode);
     }
 
-    ui::ImageTexture decal{
-        image, {1.0f, 0.0f, 2.0f, 2.0f}, {32.0f, 24.0f, 16.0f, 16.0f}};
-    decal.set_tile_mode(ui::TextureTileMode::Decal, ui::TextureTileMode::Decal);
-    const auto rendered = render_texture(decal, 80, 72);
-    NUI_CHECK(red(rendered.at(36, 28)));
-    NUI_CHECK(black(rendered.at(28, 28)));
-    NUI_CHECK(black(rendered.at(52, 28)));
-    NUI_CHECK(black(rendered.at(36, 20)));
-    NUI_CHECK(black(rendered.at(36, 44)));
+    const auto verify_decal = [&](ui::Rect source) {
+        ui::ImageTexture decal{
+            image, source, {32.0f, 24.0f, 16.0f, 16.0f}};
+        decal.set_tile_mode(
+            ui::TextureTileMode::Decal, ui::TextureTileMode::Decal);
+        const auto rendered = render_texture(decal, 80, 72);
+        NUI_CHECK(red(rendered.at(36, 28)));
+        NUI_CHECK(black(rendered.at(28, 28)));
+        NUI_CHECK(black(rendered.at(52, 28)));
+        NUI_CHECK(black(rendered.at(36, 20)));
+        NUI_CHECK(black(rendered.at(36, 44)));
+    };
+    verify_decal({1.0f, 0.0f, 2.0f, 2.0f});
+    verify_decal({1.25f, 0.0f, 1.5f, 2.0f});
 }
 
 void painter_transform_preserves_pattern_space_tiling() {
