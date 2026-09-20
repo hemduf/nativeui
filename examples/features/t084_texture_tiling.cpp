@@ -4,6 +4,10 @@
 
 #include <array>
 #include <cstddef>
+#include <exception>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace {
 
@@ -29,6 +33,26 @@ constexpr std::array<std::byte, 75> kTinyRgbaPng{
 
 [[nodiscard]] bool blue(ui::Rgba8 p) noexcept {
     return p.b > 180 && p.r < 70 && p.g < 70;
+}
+
+[[nodiscard]] std::unique_ptr<ui::UI> make_demo_ui() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    if (!image.valid()) return {};
+
+    ui::ImageTexture texture{
+        image, {0.0f, 0.0f, 2.0f, 2.0f}, {24.0f, 24.0f, 32.0f, 32.0f}};
+    texture.set_tile_mode(
+        ui::TextureTileMode::Repeat, ui::TextureTileMode::Mirror);
+    const ui::Brush brush{texture};
+
+    return std::make_unique<ui::UI>(
+        ui::Canvas{320.0f, 180.0f, [brush](ui::CanvasContext2D& g) {
+            g.fill_rect(
+                {0.0f, 0.0f, 320.0f, 180.0f},
+                {0.06f, 0.06f, 0.07f, 1.0f});
+            g.fill_rounded_rect(
+                {24.0f, 20.0f, 272.0f, 140.0f}, 14.0f, brush);
+        }});
 }
 
 int self_test() {
@@ -61,24 +85,76 @@ int self_test() {
     return 0;
 }
 
+int platform_smoke() {
+    const char* stage = "application";
+    try {
+        ui::Application application;
+        if (!application.valid()) {
+            return example::fail(
+                application.last_error().empty()
+                    ? "T084 platform application is invalid"
+                    : application.last_error());
+        }
+
+        stage = "standalone";
+        auto standalone_ui = make_demo_ui();
+        if (!standalone_ui) return example::fail("T084 smoke image did not decode");
+        ui::StandaloneWindow standalone{
+            application,
+            *standalone_ui,
+            ui::WindowDesc{
+                .title = "NativeUI T084 platform smoke",
+                .size = {360.0f, 220.0f},
+                .resizable = true}};
+        if (!standalone.valid() || !standalone.native_handle()) {
+            return example::fail(
+                standalone.last_error().empty()
+                    ? "T084 standalone window is invalid"
+                    : standalone.last_error());
+        }
+
+        stage = "embedded";
+        auto embedded_ui = make_demo_ui();
+        if (!embedded_ui) return example::fail("T084 embedded smoke image did not decode");
+        ui::EmbeddedView embedded{
+            *embedded_ui, standalone.native_handle(), {320.0f, 180.0f}};
+        if (!embedded.native_handle()) {
+            return example::fail(
+                embedded.last_error().empty()
+                    ? "T084 embedded view is invalid"
+                    : embedded.last_error());
+        }
+
+        // Force Repeat/Mirror ImageTexture materialization through the native
+        // Ganesh/OpenGL path in two independent view/resource contexts.
+        stage = "native-paint";
+        for (int i = 0; i < 12; ++i) {
+            (void)application.poll(0.0);
+            (void)embedded.poll();
+        }
+        if (!standalone.last_error().empty()) {
+            return example::fail(standalone.last_error());
+        }
+        if (!embedded.last_error().empty()) {
+            return example::fail(embedded.last_error());
+        }
+        return 0;
+    } catch (const std::exception& error) {
+        return example::fail(
+            std::string{"T084 platform smoke "} + stage + ": " + error.what());
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
+    if (argc == 2 && std::string_view{argv[1]} == "--platform-smoke") {
+        return platform_smoke();
+    }
 
-    const auto image = ui::Image::decode(kTinyRgbaPng);
-    if (!image.valid()) return 1;
-
-    ui::ImageTexture texture{
-        image, {0.0f, 0.0f, 2.0f, 2.0f}, {24.0f, 24.0f, 32.0f, 32.0f}};
-    texture.set_tile_mode(
-        ui::TextureTileMode::Repeat, ui::TextureTileMode::Mirror);
-    const ui::Brush brush{texture};
-
-    ui::UI tree{ui::Canvas{320.0f, 180.0f, [brush](ui::CanvasContext2D& g) {
-        g.fill_rect({0.0f, 0.0f, 320.0f, 180.0f}, {0.06f, 0.06f, 0.07f, 1.0f});
-        g.fill_rounded_rect({24.0f, 20.0f, 272.0f, 140.0f}, 14.0f, brush);
-    }}};
+    auto tree = make_demo_ui();
+    if (!tree) return 1;
     return example::run_window(
-        tree, "NativeUI T084 ImageTexture Tiling", {320.0f, 180.0f});
+        *tree, "NativeUI T084 ImageTexture Tiling", {360.0f, 220.0f});
 }
