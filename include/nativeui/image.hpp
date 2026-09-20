@@ -80,7 +80,9 @@ private:
 /// Invalid construction canonicalizes to an inert state (invalid Image plus zero
 /// rectangles). Copying shares the immutable Image backing; no decode, backend
 /// materialization, or full-raster copy occurs when constructing/copying an
-/// ImageTexture or converting it to a Brush.
+/// ImageTexture or converting it to a Brush. A logically valid finite mapping
+/// that cannot be represented by the renderer's affine matrix fails visibly at
+/// paint time rather than silently substituting a different mapping.
 class ImageTexture {
 public:
     ImageTexture() = default;

@@ -235,6 +235,60 @@ void value_operations_allocate_nothing() {
           "ImageTexture/Brush value operation allocated");
 }
 
+void nonrepresentable_mapping_fails_visibly_and_recovers() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    check(image.valid(), "mapping failure image did not decode");
+
+    const float tiny = std::numeric_limits<float>::denorm_min();
+    const std::array<ui::ImageTexture, 2> mappings{
+        ui::ImageTexture{
+            image,
+            {0.0f, 0.0f, tiny, 1.0f},
+            {0.0f, 0.0f, 8.0f, 8.0f}},
+        ui::ImageTexture{
+            image,
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            {0.0f, 0.0f, tiny, 8.0f}},
+    };
+    for (const auto& texture : mappings) {
+        check(texture.valid(),
+              "finite positive extreme mapping was incorrectly canonicalized invalid");
+    }
+
+    const auto info = SkImageInfo::MakeN32Premul(8, 8);
+    auto surface = SkSurfaces::Raster(info);
+    check(static_cast<bool>(surface), "mapping failure raster surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "mapping failure raster canvas is null");
+
+    for (const auto& texture : mappings) {
+        canvas->clear(SK_ColorBLACK);
+        bool failed = false;
+        try {
+            ui::Painter painter{*canvas};
+            painter.fill_rounded_rect(
+                {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, ui::Brush{texture});
+        } catch (const std::runtime_error&) {
+            failed = true;
+        }
+        check(failed,
+              "non-representable ImageTexture mapping did not fail visibly");
+        check(black(pixel(surface, 1, 1)),
+              "non-representable mapping submitted a partial primitive");
+    }
+
+    canvas->clear(SK_ColorBLACK);
+    const ui::Brush normal{
+        ui::ImageTexture{image, {0.0f, 0.0f, 8.0f, 8.0f}}};
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, normal);
+    }
+    check(red(pixel(surface, 1, 1)),
+          "normal image paint did not recover after mapping failure");
+}
+
 void decode_materialization_and_failure_recovery() {
     const auto decode_before = ui::detail::image_decode_call_count_for_test();
     const auto image = ui::Image::decode(kTinyRgbaPng);
@@ -331,6 +385,7 @@ void decode_materialization_and_failure_recovery() {
 int main() {
     try {
         value_operations_allocate_nothing();
+        nonrepresentable_mapping_fails_visibly_and_recovers();
         decode_materialization_and_failure_recovery();
         return 0;
     } catch (const std::exception& error) {

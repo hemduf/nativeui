@@ -178,8 +178,12 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     const SkRect destination_rect =
         SkRect::MakeXYWH(destination.x, destination.y,
                          destination.w, destination.h);
-    const SkMatrix local_matrix =
-        SkMatrix::RectToRectOrIdentity(subset, destination_rect);
+    const auto local_matrix =
+        SkMatrix::Rect2Rect(subset, destination_rect);
+    if (!local_matrix || !local_matrix->isFinite() ||
+        !local_matrix->invert().has_value()) {
+        return {};
+    }
 
     auto shader = data->image->makeShader(
         SkTileMode::kClamp,
@@ -204,7 +208,7 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
     if (!shader) return {};
 
-    return shader->makeWithLocalMatrix(local_matrix);
+    return shader->makeWithLocalMatrix(*local_matrix);
 }
 
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {
