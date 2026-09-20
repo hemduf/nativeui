@@ -109,10 +109,21 @@ int run_self_test() {
     (void)tree->dispatch(touch(ui::InputType::PointerDown, 2U, 360.0f, 140.0f), platform);
     if (model.contacts.size() != 2U) return example::fail("two contacts were not retained");
 
+    const auto* first_before = find_contact(model, 1U);
+    const auto* second_before = find_contact(model, 2U);
+    if (!first_before || !second_before) return example::fail("missing contact before move");
+    const ui::Point first_start = first_before->position;
+    const ui::Point second_start = second_before->position;
+
     (void)tree->dispatch(touch(ui::InputType::PointerMove, 1U, 500.0f, 280.0f), platform);
     const auto* first = find_contact(model, 1U);
-    if (!first || !example::near(first->position.x, 500.0f)) {
+    const auto* second = find_contact(model, 2U);
+    if (!first || example::near(first->position.x, first_start.x)) {
         return example::fail("first captured contact did not move independently");
+    }
+    if (!second || !example::near(second->position.x, second_start.x) ||
+        !example::near(second->position.y, second_start.y)) {
+        return example::fail("moving first contact disturbed second contact");
     }
 
     (void)tree->dispatch(touch(ui::InputType::PointerUp, 1U, 500.0f, 280.0f), platform);

@@ -57,8 +57,8 @@
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_OUT:
-            ui_.deactivate(services_);
             clear_raw_pointer_positions();
+            ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
             return PUGL_SUCCESS;
 
@@ -100,6 +100,8 @@
         case PUGL_POINTER_MOVE:
         case PUGL_POINTER_UP:
         case PUGL_POINTER_CANCEL: {
+            if (event->pointer.id == PUGL_POINTER_ID_NONE) return PUGL_SUCCESS;
+
             InputEvent input{};
             input.type = detail::translate_pugl_pointer_event(event->type);
             input.position = detail::physical_to_logical_point(

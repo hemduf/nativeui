@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 
@@ -57,8 +58,8 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    source.width = NAN;
-    source.height = NAN;
+    source.width = std::numeric_limits<double>::quiet_NaN();
+    source.height = std::numeric_limits<double>::quiet_NaN();
     const auto unknown_size =
         ui::detail::translate_pugl_pointer_contact(source, 2.0f);
     if (!std::isnan(unknown_size.contact_size.w) ||
