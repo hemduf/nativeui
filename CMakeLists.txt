@@ -532,6 +532,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_t083_image_texture_fault_tests
     tests/t083_image_texture_fault_tests.cpp
     src/skia_image.cpp
+    src/skia_shader.cpp
   )
   target_include_directories(nativeui_t083_image_texture_fault_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
