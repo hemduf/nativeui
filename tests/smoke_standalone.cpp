@@ -306,6 +306,7 @@ int run_regular_smoke() {
         const ui::Brush image_texture_brush{
             ui::ImageTexture{
                 texture_image,
+                {0.10f, 0.10f, 0.30f, 0.30f},
                 {120.0f, 0.0f, 120.0f, 48.0f}}};
 
         stage = "construct-ui";

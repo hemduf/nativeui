@@ -69,6 +69,18 @@ private:
 };
 
 
+/// Immutable backend-neutral image-backed Brush source.
+///
+/// `source_pixels` is expressed in decoded-image pixel coordinates and may be
+/// fractional. `destination` is expressed in the Painter's current local
+/// logical coordinates; it defines the texture mapping, not primitive bounds or
+/// clipping. Source/destination rectangles must be finite with positive size,
+/// and the complete source rectangle must stay inside the Image bounds.
+///
+/// Invalid construction canonicalizes to an inert state (invalid Image plus zero
+/// rectangles). Copying shares the immutable Image backing; no decode, backend
+/// materialization, or full-raster copy occurs when constructing/copying an
+/// ImageTexture or converting it to a Brush.
 class ImageTexture {
 public:
     ImageTexture() = default;
