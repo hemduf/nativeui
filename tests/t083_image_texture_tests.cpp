@@ -279,7 +279,7 @@ void subtexel_fractional_sources_match_strict_draw_image() {
 
     for (const auto source : sources) {
         ui::UI oracle_tree{
-            ui::Canvas{8.0f, 8.0f, [image, source](ui::CanvasContext2D& g) {
+            ui::Canvas{8.0f, 8.0f, [image, source, destination](ui::CanvasContext2D& g) {
                 g.draw_image(image, source, destination);
             }}
         };
@@ -289,7 +289,7 @@ void subtexel_fractional_sources_match_strict_draw_image() {
         const ui::Brush texture{
             ui::ImageTexture{image, source, destination}};
         ui::UI texture_tree{
-            ui::Canvas{8.0f, 8.0f, [texture](ui::CanvasContext2D& g) {
+            ui::Canvas{8.0f, 8.0f, [texture, destination](ui::CanvasContext2D& g) {
                 g.fill_rect(destination, texture);
             }}
         };
