@@ -89,7 +89,9 @@ void api_and_validation_contract() {
         ui::Rect{0.5f, 1.0f, 1.0f, 1.0f},
     };
     for (const auto source : touching) {
-        NUI_CHECK(ui::ImageTexture{image, source, {0.0f, 0.0f, 8.0f, 8.0f}}.valid());
+        const ui::ImageTexture boundary{
+            image, source, {0.0f, 0.0f, 8.0f, 8.0f}};
+        NUI_CHECK(boundary.valid());
     }
 
     const std::array<ui::Rect, 4> outside{
