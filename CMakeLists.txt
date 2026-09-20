@@ -567,6 +567,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_shader_fault_tests
     tests/shader_fault_tests.cpp
     src/skia_shader.cpp
+    src/skia_image.cpp
   )
   target_include_directories(nativeui_shader_fault_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
