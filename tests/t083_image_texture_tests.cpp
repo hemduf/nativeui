@@ -231,6 +231,41 @@ void source_subrect_isolation_golden() {
     NUI_CHECK(red_dominant(fractional_renderer.pixel(10, 4)));
 }
 
+void fractional_source_mapping_matches_strict_draw_image() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    constexpr ui::Rect source{0.25f, 0.25f, 1.5f, 1.5f};
+    constexpr ui::Rect destination{0.0f, 0.0f, 12.0f, 10.0f};
+
+    ui::UI oracle_tree{
+        ui::Canvas{12.0f, 10.0f, [image](ui::CanvasContext2D& g) {
+            g.draw_image(image, source, destination);
+        }}
+    };
+    ui::HeadlessRenderer oracle{{12.0f, 10.0f}, 1.0f};
+    NUI_CHECK(oracle.render(oracle_tree));
+
+    const ui::Brush texture{
+        ui::ImageTexture{image, source, destination}};
+    ui::UI texture_tree{
+        ui::Canvas{12.0f, 10.0f, [texture](ui::CanvasContext2D& g) {
+            g.fill_rect(destination, texture);
+        }}
+    };
+    ui::HeadlessRenderer rendered{{12.0f, 10.0f}, 1.0f};
+    NUI_CHECK(rendered.render(texture_tree));
+
+    test::golden::CompareOptions options;
+    options.channel_tolerance = 2;
+    const auto result = test::golden::compare(
+        test::golden::from_renderer(oracle),
+        test::golden::from_renderer(rendered),
+        options);
+    NUI_CHECK(result.matched);
+    NUI_CHECK(result.compared_pixels == 120U);
+}
+
 void painter_local_mapping_transform_and_stroke() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     const ui::Brush brush{ui::ImageTexture{image, {0.0f, 0.0f, 16.0f, 8.0f}}};
@@ -432,6 +467,7 @@ void suite() {
     api_and_validation_contract();
     whole_image_mapping_golden();
     source_subrect_isolation_golden();
+    fractional_source_mapping_matches_strict_draw_image();
     painter_local_mapping_transform_and_stroke();
     paint_options_apply_once();
     lifetime_sharing_and_two_renderer_isolation();

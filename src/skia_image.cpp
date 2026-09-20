@@ -138,6 +138,11 @@ void draw_resolved_image(Painter& painter,
     return g_image_texture_materialization_calls;
 }
 
+[[nodiscard]] bool image_backing_is_lazy_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->image && data->image->isLazyGenerated();
+}
+
 void set_image_texture_materialization_failure_for_test(
     ImageTextureMaterializationFailurePoint point) noexcept {
     g_image_texture_failure = point;
@@ -231,7 +236,15 @@ Image Image::decode(std::span<const std::byte> encoded) {
     auto bytes = SkData::MakeWithCopy(encoded.data(), encoded.size());
     if (!bytes) return {};
 
-    auto image = SkImages::DeferredFromEncodedData(std::move(bytes));
+    auto deferred = SkImages::DeferredFromEncodedData(std::move(bytes));
+    if (!deferred) return {};
+
+    // Publish only a realized raster image. DeferredFromEncodedData may parse
+    // metadata successfully while postponing pixel decode until first draw,
+    // which would violate Image's resource-preparation contract and T083's
+    // zero-decode paint path.
+    auto image = deferred->makeRasterImage(
+        nullptr, SkImage::kDisallow_CachingHint);
     if (!image) return {};
 
     auto data = std::make_shared<detail::ImageData>();

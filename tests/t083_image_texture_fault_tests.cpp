@@ -241,6 +241,8 @@ void decode_materialization_and_failure_recovery() {
     check(image.valid(), "fault test image did not decode");
     check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
           "decode instrumentation did not observe Image::decode");
+    check(!ui::detail::image_backing_is_lazy_for_test(image),
+          "Image::decode published a lazy backing that can decode during paint");
 
     const ui::Brush brush{
         ui::ImageTexture{image, {0.0f, 0.0f, 8.0f, 8.0f}}};

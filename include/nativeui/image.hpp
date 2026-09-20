@@ -41,11 +41,12 @@ void draw_image(Painter& painter,
 
 /// Copyable backend-neutral handle to a decoded image resource.
 ///
-/// Encoded bytes are copied during decode, so the caller does not need to keep
-/// the source buffer alive. Renderer-specific ownership stays behind ImageData
-/// and is never exposed through the public API. Decoding may allocate and is a
-/// resource-preparation/UI-domain operation, never a real-time audio callback
-/// operation.
+/// Encoded bytes are copied and fully raster-decoded before the Image is
+/// published, so the caller does not need to keep the source buffer alive and
+/// paint paths never perform encoded-image decoding. Renderer-specific ownership
+/// stays behind ImageData and is never exposed through the public API. Decoding
+/// may allocate and is a resource-preparation/UI-domain operation, never a
+/// real-time audio callback operation.
 class Image {
 public:
     Image() = default;
