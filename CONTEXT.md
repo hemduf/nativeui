@@ -28,7 +28,7 @@ Non-negotiable rules:
 ## Pinned dependencies
 
 - Pugl: `hemduf/pugl` commit `195f79b22644010c81a5e0c3231c591856787ec6`.
-- Skia: `hemduf/skia-builder` `chrome/m153`, forked from `olilarkin/skia-builder`.
+- Skia: `hemduf/skia-builder` `chrome/m153`, rebuilt from commit `f21749b18c14976415ec30d068c3a13e8456c3a1` with PartitionAlloc disabled for self-contained static consumers; forked from `olilarkin/skia-builder`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
 - Linux: x64 GPU Release for the normal dependency path; CI additionally validates NativeUI natively on ARM64 against the forked `skia-build-linux-arm64-gpu-release.zip` asset.
