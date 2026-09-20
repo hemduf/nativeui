@@ -109,8 +109,8 @@ jobs:
           set -euo pipefail
           archive="${RUNNER_TEMP}/skia-build-linux-arm64-gpu-release.zip"
           root="${{ github.workspace }}/.skia-arm64"
-          url="https://github.com/hemduf/skia-builder/releases/download/chrome/m149/skia-build-linux-arm64-gpu-release.zip"
-          expected="0c5b366864d2ecec9b3de87b100ccea038f6289e6fccf279031bf7501b332ef1"
+          url="https://github.com/hemduf/skia-builder/releases/download/chrome/m153/skia-build-linux-arm64-gpu-release.zip"
+          expected="a732337385ff9f36605db0fedf7e88c8d77400585932fa11c85a25aaafc66119"
 
           curl --fail --location --retry 3 --output "$archive" "$url"
           echo "$expected  $archive" | sha256sum --check --strict

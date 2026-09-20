@@ -111,7 +111,7 @@ jobs:
         run: |
           grep -F 'GITHUB_REPOSITORY hemduf/pugl' cmake/Dependencies.cmake
           grep -F 'URL_HASH "${_skia_hash}"' cmake/Dependencies.cmake
-          grep -F 'NATIVEUI_SKIA_TAG "chrome/m149"' cmake/Dependencies.cmake
+          grep -F 'NATIVEUI_SKIA_TAG "chrome/m153"' cmake/Dependencies.cmake
 
       - name: Install exact candidate package
         run: cmake --install build-t052-bootstrap --config Release --prefix "${{ env.T052_INSTALL_PREFIX }}"
