@@ -9,7 +9,7 @@
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkTileMode.h"
-#include "src/detail/image_texture_test_seams.hpp"
+#include "detail/image_texture_test_seams.hpp"
 
 #include <algorithm>
 #include <cmath>
