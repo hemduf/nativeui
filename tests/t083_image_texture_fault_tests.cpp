@@ -1,0 +1,318 @@
+#include <nativeui/paint.hpp>
+
+#include "src/detail/image_texture_test_seams.hpp"
+
+#include "include/core/SkColor.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <iostream>
+#include <limits>
+#include <new>
+#include <stdexcept>
+#include <utility>
+
+namespace allocation_probe {
+
+bool fail_allocations = false;
+std::size_t allocation_count = 0;
+
+[[nodiscard]] void* allocate_unaligned(std::size_t size) noexcept {
+    return std::malloc(size == 0 ? 1U : size);
+}
+
+[[nodiscard]] void* allocate_aligned(std::size_t size,
+                                     std::size_t alignment) noexcept {
+    if (alignment == 0 || (alignment & (alignment - 1U)) != 0U) return nullptr;
+
+    constexpr std::size_t pointer_bytes = sizeof(void*);
+    const auto max_size = (std::numeric_limits<std::size_t>::max)();
+    if (alignment - 1U > max_size - pointer_bytes) return nullptr;
+
+    const std::size_t overhead = pointer_bytes + alignment - 1U;
+    const std::size_t payload_size = size == 0 ? 1U : size;
+    if (payload_size > max_size - overhead) return nullptr;
+
+    void* raw = std::malloc(payload_size + overhead);
+    if (!raw) return nullptr;
+
+    const auto raw_address = reinterpret_cast<std::uintptr_t>(raw);
+    const auto candidate = raw_address + pointer_bytes;
+    const auto aligned_address =
+        (candidate + alignment - 1U) &
+        ~static_cast<std::uintptr_t>(alignment - 1U);
+    auto* aligned = reinterpret_cast<std::byte*>(aligned_address);
+    std::memcpy(aligned - pointer_bytes, &raw, pointer_bytes);
+    return aligned;
+}
+
+void deallocate_aligned(void* pointer) noexcept {
+    if (!pointer) return;
+    void* raw = nullptr;
+    auto* aligned = static_cast<std::byte*>(pointer);
+    std::memcpy(&raw, aligned - sizeof(void*), sizeof(raw));
+    std::free(raw);
+}
+
+struct ScopedFailure {
+    ScopedFailure() noexcept { fail_allocations = true; }
+    ScopedFailure(const ScopedFailure&) = delete;
+    ScopedFailure& operator=(const ScopedFailure&) = delete;
+    ~ScopedFailure() noexcept { fail_allocations = false; }
+};
+
+} // namespace allocation_probe
+
+void* operator new(std::size_t size) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
+    throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
+    throw std::bad_alloc{};
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_unaligned(size);
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_unaligned(size);
+}
+
+void operator delete(void* pointer) noexcept { std::free(pointer); }
+void operator delete[](void* pointer) noexcept { std::free(pointer); }
+void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); }
+void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
+void operator delete(void* pointer, const std::nothrow_t&) noexcept { std::free(pointer); }
+void operator delete[](void* pointer, const std::nothrow_t&) noexcept { std::free(pointer); }
+
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_aligned(
+            size, static_cast<std::size_t>(alignment))) {
+        return pointer;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) throw std::bad_alloc{};
+    if (void* pointer = allocation_probe::allocate_aligned(
+            size, static_cast<std::size_t>(alignment))) {
+        return pointer;
+    }
+    throw std::bad_alloc{};
+}
+
+void* operator new(std::size_t size,
+                   std::align_val_t alignment,
+                   const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_aligned(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t size,
+                     std::align_val_t alignment,
+                     const std::nothrow_t&) noexcept {
+    ++allocation_probe::allocation_count;
+    if (allocation_probe::fail_allocations) return nullptr;
+    return allocation_probe::allocate_aligned(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* pointer, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+void operator delete[](void* pointer, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+void operator delete(void* pointer, std::size_t, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+void operator delete[](void* pointer, std::size_t, std::align_val_t) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+void operator delete(void* pointer, std::align_val_t, const std::nothrow_t&) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+void operator delete[](void* pointer, std::align_val_t, const std::nothrow_t&) noexcept {
+    allocation_probe::deallocate_aligned(pointer);
+}
+
+namespace {
+
+constexpr std::array<std::byte, 75> kTinyRgbaPng{
+    std::byte{137}, std::byte{80}, std::byte{78}, std::byte{71}, std::byte{13}, std::byte{10},
+    std::byte{26}, std::byte{10}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{13},
+    std::byte{73}, std::byte{72}, std::byte{68}, std::byte{82}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{2}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{2},
+    std::byte{8}, std::byte{6}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{114},
+    std::byte{182}, std::byte{13}, std::byte{36}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{18}, std::byte{73}, std::byte{68}, std::byte{65}, std::byte{84}, std::byte{120},
+    std::byte{218}, std::byte{99}, std::byte{248}, std::byte{207}, std::byte{192}, std::byte{240},
+    std::byte{31}, std::byte{12}, std::byte{129}, std::byte{52}, std::byte{24}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{200}, std::byte{9}, std::byte{247}, std::byte{3},
+    std::byte{217}, std::byte{100}, std::byte{241}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{69}, std::byte{78}, std::byte{68}, std::byte{174},
+    std::byte{66}, std::byte{96}, std::byte{130},
+};
+
+void check(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+
+[[nodiscard]] SkColor pixel(const sk_sp<SkSurface>& surface, int x, int y) {
+    SkPixmap pixmap;
+    check(surface->peekPixels(&pixmap), "raster surface did not expose pixels");
+    return pixmap.getColor(x, y);
+}
+
+[[nodiscard]] bool black(SkColor color) noexcept {
+    return SkColorGetR(color) < 8 &&
+           SkColorGetG(color) < 8 &&
+           SkColorGetB(color) < 8;
+}
+
+[[nodiscard]] bool red(SkColor color) noexcept {
+    return SkColorGetR(color) > 180 &&
+           SkColorGetG(color) < 60 &&
+           SkColorGetB(color) < 60;
+}
+
+void value_operations_allocate_nothing() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    check(image.valid(), "allocation test image did not decode");
+
+    const auto before = allocation_probe::allocation_count;
+    {
+        allocation_probe::ScopedFailure fail;
+
+        ui::ImageTexture texture{image, {0.0f, 0.0f, 8.0f, 8.0f}};
+        ui::ImageTexture copied_texture{texture};
+        ui::ImageTexture moved_texture{std::move(copied_texture)};
+
+        ui::Brush brush{texture};
+        ui::Brush copied_brush{brush};
+        ui::Brush moved_brush{std::move(copied_brush)};
+        ui::Brush invalid{ui::ImageTexture{}};
+
+        (void)moved_texture;
+        (void)moved_brush;
+        (void)invalid;
+    }
+    check(allocation_probe::allocation_count == before,
+          "ImageTexture/Brush value operation allocated");
+}
+
+void decode_materialization_and_failure_recovery() {
+    const auto decode_before = ui::detail::image_decode_call_count_for_test();
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    check(image.valid(), "fault test image did not decode");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
+          "decode instrumentation did not observe Image::decode");
+
+    const ui::Brush brush{
+        ui::ImageTexture{image, {0.0f, 0.0f, 8.0f, 8.0f}}};
+
+    const auto info = SkImageInfo::MakeN32Premul(8, 8);
+    auto surface = SkSurfaces::Raster(info);
+    check(static_cast<bool>(surface), "raster surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "raster canvas is null");
+
+    const auto materialization_before =
+        ui::detail::image_texture_materialization_call_count_for_test();
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    }
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              materialization_before + 2U,
+          "pre-T097 draws did not materialize independently");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
+          "painting unexpectedly called Image::decode");
+
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::set_image_texture_materialization_failure_for_test(
+        ui::detail::ImageTextureMaterializationFailurePoint::BeforeShader);
+    bool allocation_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    } catch (const std::bad_alloc&) {
+        allocation_failed = true;
+    }
+    ui::detail::set_image_texture_materialization_failure_for_test(
+        ui::detail::ImageTextureMaterializationFailurePoint::None);
+    check(allocation_failed, "injected image materialization allocation failure was hidden");
+    check(black(pixel(surface, 1, 1)),
+          "failed materialization submitted a partial primitive");
+
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    }
+    check(red(pixel(surface, 1, 1)),
+          "normal image paint did not recover after allocation failure");
+
+    canvas->clear(SK_ColorBLACK);
+    ui::detail::set_image_texture_materialization_failure_for_test(
+        ui::detail::ImageTextureMaterializationFailurePoint::ForceNullShader);
+    bool null_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    } catch (const std::runtime_error&) {
+        null_failed = true;
+    }
+    ui::detail::set_image_texture_materialization_failure_for_test(
+        ui::detail::ImageTextureMaterializationFailurePoint::None);
+    check(null_failed, "null backend image shader silently fell back");
+    check(black(pixel(surface, 1, 1)),
+          "null image shader failure submitted a partial primitive");
+
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    }
+    check(red(pixel(surface, 1, 1)),
+          "normal image paint did not recover after null materialization");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
+          "failure recovery unexpectedly re-decoded image bytes");
+}
+
+} // namespace
+
+int main() {
+    try {
+        value_operations_allocate_nothing();
+        decode_materialization_and_failure_recovery();
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "FAIL T083 ImageTexture fault/value tests: "
+                  << error.what() << '\n';
+        return 1;
+    }
+}
