@@ -239,7 +239,7 @@ void fractional_source_mapping_matches_strict_draw_image() {
     constexpr ui::Rect destination{0.0f, 0.0f, 12.0f, 10.0f};
 
     ui::UI oracle_tree{
-        ui::Canvas{12.0f, 10.0f, [image](ui::CanvasContext2D& g) {
+        ui::Canvas{12.0f, 10.0f, [image, source, destination](ui::CanvasContext2D& g) {
             g.draw_image(image, source, destination);
         }}
     };
@@ -249,7 +249,7 @@ void fractional_source_mapping_matches_strict_draw_image() {
     const ui::Brush texture{
         ui::ImageTexture{image, source, destination}};
     ui::UI texture_tree{
-        ui::Canvas{12.0f, 10.0f, [texture](ui::CanvasContext2D& g) {
+        ui::Canvas{12.0f, 10.0f, [texture, destination](ui::CanvasContext2D& g) {
             g.fill_rect(destination, texture);
         }}
     };
