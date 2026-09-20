@@ -242,22 +242,45 @@ int run_regular_smoke() {
         }
 
         stage = "shader-brush";
-        const auto shader_program = ui::ShaderProgram::compile(R"(
+        const auto leaf_program = ui::ShaderProgram::compile(R"(
             uniform float gain;
             half4 main(float2 p) {
                 return half4(gain, p.x / 320.0, 0.25, 1.0);
             }
         )");
-        if (!shader_program.ok()) {
-            return fail(stage, shader_program.diagnostics.empty()
+        const auto parent_program = ui::ShaderProgram::compile(R"(
+            uniform shader base;
+            uniform shader accent;
+            uniform shader optional;
+            half4 main(float2 p) {
+                return mix(base.eval(p), accent.eval(p * 0.75), 0.25) +
+                       optional.eval(p);
+            }
+        )");
+        if (!leaf_program.ok() || !parent_program.ok()) {
+            const auto& failed = leaf_program.ok() ? parent_program : leaf_program;
+            return fail(stage, failed.diagnostics.empty()
                                    ? "runtime shader compilation failed without diagnostic"
-                                   : shader_program.diagnostics.front().message);
+                                   : failed.diagnostics.front().message);
         }
-        ui::ShaderInstance shader_instance{shader_program.program};
-        if (shader_instance.set_float("gain", 0.65f) != ui::ShaderSetResult::Ok) {
-            return fail(stage, "runtime shader binding failed");
+
+        ui::ShaderInstance leaf_instance{leaf_program.program};
+        if (leaf_instance.set_float("gain", 0.65f) != ui::ShaderSetResult::Ok) {
+            return fail(stage, "runtime shader uniform binding failed");
         }
-        const ui::Brush shader_brush{shader_instance};
+        const ui::Brush leaf_brush{leaf_instance};
+        const ui::Brush accent{ui::LinearGradient{
+            {0.0f, 0.0f},
+            {240.0f, 0.0f},
+            ui::Color{0.0f, 0.1f, 1.0f, 1.0f},
+            ui::Color{1.0f, 0.1f, 0.0f, 1.0f}}};
+
+        ui::ShaderInstance parent_instance{parent_program.program};
+        if (parent_instance.set_child("base", leaf_brush) != ui::ShaderSetResult::Ok ||
+            parent_instance.set_child("accent", accent) != ui::ShaderSetResult::Ok) {
+            return fail(stage, "runtime shader child binding failed");
+        }
+        const ui::Brush shader_brush{parent_instance};
 
         stage = "construct-ui";
         ui::State<bool> enabled{true};

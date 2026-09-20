@@ -37,3 +37,7 @@ static_assert(noexcept(std::declval<ui::ShaderInstance&>().set_color(
     std::declval<std::string_view>(), std::declval<ui::Color>())));
 
 void nativeui_header_compile_shader() {}
+
+static_assert(ui::ShaderInstance::kMaxChildDepth == 16U);
+static_assert(!noexcept(std::declval<ui::ShaderInstance&>().set_child(
+    std::declval<std::string_view>(), std::declval<const ui::Brush&>())));

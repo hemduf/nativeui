@@ -14,6 +14,8 @@
 
 namespace ui {
 
+class Brush;
+
 enum class ShaderCompileError {
     None,
     CompileError,
@@ -55,6 +57,10 @@ struct ShaderUniformInfo {
     ShaderUniformType type{};
 };
 
+struct ShaderChildInfo {
+    std::string name;
+};
+
 enum class ShaderSetResult {
     Ok,
     NotFound,
@@ -66,6 +72,7 @@ namespace detail {
 struct ShaderProgramAccess;
 struct ShaderProgramData;
 struct ShaderInstanceAccess;
+struct ShaderInstanceChildState;
 } // namespace detail
 
 /// Immutable compiled runtime-shader program.
@@ -87,6 +94,7 @@ public:
 
     [[nodiscard]] static ShaderCompileResult compile(std::string_view sksl);
     [[nodiscard]] std::span<const ShaderUniformInfo> uniforms() const noexcept;
+    [[nodiscard]] std::span<const ShaderChildInfo> children() const noexcept;
 
 private:
     explicit ShaderProgram(std::unique_ptr<const detail::ShaderProgramData> data) noexcept;
@@ -99,9 +107,12 @@ private:
 /// Mutable logical bindings for one immutable ShaderProgram.
 ///
 /// Construction prepares and zero-initializes the complete per-instance uniform
-/// byte block. Setters perform no allocation, compilation, backend resource
-/// creation or callback invocation. Mutation is ordinary UI/resource-preparation
-/// work; concurrent mutation of one ShaderInstance is not synchronized.
+/// byte block plus one logical slot per reflected shader child. Numeric uniform
+/// setters remain allocation-free/noexcept and create no backend resource.
+/// set_child() snapshots a Brush value and may allocate, but performs no source
+/// compilation or backend/context resource creation. Mutation is ordinary
+/// UI/resource-preparation work; concurrent mutation of one ShaderInstance is
+/// not synchronized.
 class ShaderInstance final {
 public:
     ShaderInstance() = delete;
@@ -124,10 +135,14 @@ public:
     ShaderSetResult set_int3(std::string_view name, std::array<std::int32_t, 3> value) noexcept;
     ShaderSetResult set_int4(std::string_view name, std::array<std::int32_t, 4> value) noexcept;
     ShaderSetResult set_color(std::string_view name, Color value) noexcept;
+    ShaderSetResult set_child(std::string_view name, const Brush& brush);
+
+    static constexpr std::size_t kMaxChildDepth = 16;
 
     [[nodiscard]] const std::shared_ptr<const ShaderProgram>& program() const noexcept;
 
 private:
+    friend class Brush;
     friend struct detail::ShaderInstanceAccess;
 
     [[nodiscard]] static std::size_t prepared_binding_size(
@@ -144,6 +159,8 @@ private:
 
     std::shared_ptr<const ShaderProgram> program_;
     std::vector<std::byte> bindings_;
+    std::unique_ptr<detail::ShaderInstanceChildState> child_state_;
+    std::size_t depth_{};
 };
 
 static_assert(!std::is_default_constructible_v<ShaderInstance>);

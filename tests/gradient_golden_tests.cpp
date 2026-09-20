@@ -171,6 +171,99 @@ bool verify_shader_brush_primitives(bool update) {
         update);
 }
 
+std::shared_ptr<const ui::ShaderProgram> golden_compile_shader(
+    std::string_view source) {
+    const auto compiled = ui::ShaderProgram::compile(source);
+    if (!compiled.ok()) return {};
+    return compiled.program;
+}
+
+test::golden::CompareOptions shader_child_golden_options() {
+    test::golden::CompareOptions options;
+    options.channel_tolerance = 1;
+    options.compare_regions = {
+        test::golden::Region{1, 4, 1, 1},
+        test::golden::Region{5, 4, 1, 1},
+        test::golden::Region{9, 3, 1, 1},
+        test::golden::Region{14, 4, 1, 1},
+    };
+    return options;
+}
+
+bool verify_shader_child_two_level(bool update) {
+    const auto leaf_program = golden_compile_shader(R"(
+        half4 main(float2 p) { return half4(0.25, 0.5, 0.75, 1.0); }
+    )");
+    const auto parent_program = golden_compile_shader(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    if (!leaf_program || !parent_program) return false;
+
+    ui::ShaderInstance leaf{leaf_program};
+    const ui::Brush leaf_brush{leaf};
+    ui::ShaderInstance parent{parent_program};
+    if (parent.set_child("child", leaf_brush) != ui::ShaderSetResult::Ok) {
+        return false;
+    }
+    const ui::Brush composed{parent};
+
+    ui::UI tree{
+        ui::Canvas{16.0f, 8.0f, [composed](ui::CanvasContext2D& canvas) {
+            canvas.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, composed);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{16.0f, 8.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    return test::golden::verify(
+        "shader_child_two_level",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        shader_child_golden_options(),
+        update);
+}
+
+bool verify_shader_child_deep(bool update) {
+    const auto leaf_program = golden_compile_shader(R"(
+        half4 main(float2 p) { return half4(0.25, 0.5, 0.75, 1.0); }
+    )");
+    const auto parent_program = golden_compile_shader(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    if (!leaf_program || !parent_program) return false;
+
+    ui::ShaderInstance leaf{leaf_program};
+    ui::Brush current{leaf};
+
+    constexpr std::size_t kGoldenDepth = 8U;
+    for (std::size_t depth = 2U; depth <= kGoldenDepth; ++depth) {
+        ui::ShaderInstance parent{parent_program};
+        if (parent.set_child("child", current) != ui::ShaderSetResult::Ok) {
+            return false;
+        }
+        current = ui::Brush{parent};
+    }
+
+    ui::UI tree{
+        ui::Canvas{16.0f, 8.0f, [current](ui::CanvasContext2D& canvas) {
+            canvas.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, current);
+        }}
+    };
+    ui::HeadlessRenderer renderer{{16.0f, 8.0f}, 1.0f};
+    if (!renderer.render(tree)) return false;
+
+    return test::golden::verify(
+        "shader_child_deep",
+        test::golden::from_renderer(renderer),
+        NATIVEUI_GOLDEN_BASELINE_DIR,
+        NATIVEUI_GOLDEN_ARTIFACT_DIR,
+        shader_child_golden_options(),
+        update);
+}
+
 bool verify_brush_radial_circle(bool update) {
     constexpr ui::Color color{
         64.0f / 255.0f, 80.0f / 255.0f, 96.0f / 255.0f, 1.0f};
@@ -218,6 +311,8 @@ int main(int argc, char** argv) {
         NUI_CHECK(verify_brush_linear_path(update));
         NUI_CHECK(verify_brush_linear_path_stroke(update));
         NUI_CHECK(verify_shader_brush_primitives(update));
+        NUI_CHECK(verify_shader_child_two_level(update));
+        NUI_CHECK(verify_shader_child_deep(update));
         NUI_CHECK(verify_brush_radial_circle(update));
         return 0;
     } catch (const std::exception& error) {

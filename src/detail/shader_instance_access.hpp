@@ -18,6 +18,14 @@ struct ShaderInstanceAccess {
         const ShaderInstance& instance) noexcept {
         return instance.binding_bytes();
     }
+
+    [[nodiscard]] static std::size_t child_count(
+        const ShaderInstance& instance) noexcept;
+    [[nodiscard]] static const Brush* child(
+        const ShaderInstance& instance,
+        std::size_t index) noexcept;
+    [[nodiscard]] static std::size_t depth(
+        const ShaderInstance& instance) noexcept;
 };
 
 } // namespace ui::detail
