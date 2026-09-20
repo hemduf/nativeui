@@ -365,6 +365,33 @@ void lifetime_sharing_and_two_renderer_isolation() {
     NUI_CHECK(green_dominant(second.pixel(14, 1)));
 }
 
+void shader_child_materializes_image_texture() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    const auto program = ui::ShaderProgram::compile(R"(
+        uniform shader source;
+        half4 main(float2 p) {
+            return source.eval(p);
+        }
+    )");
+    NUI_CHECK(program.ok());
+
+    ui::ShaderInstance instance{program.program};
+    const ui::Brush texture{
+        ui::ImageTexture{image, {0.0f, 0.0f, 16.0f, 8.0f}}};
+    NUI_CHECK(instance.set_child("source", texture) == ui::ShaderSetResult::Ok);
+
+    const ui::Brush shader{instance};
+    ui::UI tree{ui::Canvas{16.0f, 8.0f, [shader](ui::CanvasContext2D& g) {
+        g.fill_rect({0.0f, 0.0f, 16.0f, 8.0f}, shader);
+    }}};
+    ui::HeadlessRenderer renderer{{16.0f, 8.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(red_dominant(renderer.pixel(2, 1)));
+    NUI_CHECK(green_dominant(renderer.pixel(13, 1)));
+}
+
 void brush_value_and_invalid_contract() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     ui::Brush source{ui::ImageTexture{image, {0.0f, 0.0f, 16.0f, 8.0f}}};
@@ -406,6 +433,7 @@ void suite() {
     painter_local_mapping_transform_and_stroke();
     paint_options_apply_once();
     lifetime_sharing_and_two_renderer_isolation();
+    shader_child_materializes_image_texture();
     brush_value_and_invalid_contract();
 }
 
