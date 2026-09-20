@@ -1,7 +1,12 @@
+#include <nativeui/paint.hpp>
 #include <nativeui/shader.hpp>
 
+#include "src/detail/shader_brush_access.hpp"
 #include "src/detail/shader_instance_access.hpp"
 #include "src/detail/shader_test_seams.hpp"
+
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
 
 #include <algorithm>
 #include <array>
@@ -737,6 +742,165 @@ void setter_failure_is_non_destructive_and_instances_are_isolated() {
           "copy isolation mutation was not observable");
 }
 
+void shader_brush_snapshot_failure_and_noallocation_edges() {
+    const auto compiled = ui::ShaderProgram::compile(kFloatShader);
+    check(compiled.ok(), "T081 float program did not compile");
+
+    ui::ShaderInstance instance{compiled.program};
+    check(instance.set_float("value", 0.5f) == ui::ShaderSetResult::Ok,
+          "T081 source setup failed");
+
+    const std::size_t compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+    const std::size_t materialize_before =
+        ui::detail::shader_materialization_call_count_for_test();
+
+    bool snapshot_bad_alloc = false;
+    try {
+        ScopedAllocationFailure fail;
+        ui::Brush failed{instance};
+        (void)failed;
+    } catch (const std::bad_alloc&) {
+        snapshot_bad_alloc = true;
+    }
+    check(snapshot_bad_alloc, "T081 snapshot allocation failure was not observable");
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T081 Brush construction recompiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T081 Brush construction materialized a backend shader");
+
+    ui::Brush live{instance};
+    check(ui::detail::ShaderBrushAccess::is_shader(live),
+          "T081 normal Brush construction did not recover");
+
+    ui::Brush repeated{instance};
+    check(ui::detail::ShaderBrushAccess::is_shader(repeated),
+          "T081 repeated Brush construction lost snapshot");
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T081 repeated Brush construction recompiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before,
+          "T081 repeated Brush construction materialized a backend shader");
+
+    ui::Brush assigned{ui::Color{0.0f, 0.0f, 1.0f, 1.0f}};
+    const auto assign_before = allocation_probe::allocation_count;
+    {
+        ScopedAllocationFailure fail;
+        assigned = live;
+    }
+    check_no_allocation_since(
+        assign_before,
+        "T081 shader Brush copy assignment attempted allocation");
+    check(ui::detail::ShaderBrushAccess::is_shader(assigned),
+          "T081 shader Brush copy assignment lost snapshot");
+
+    ui::ShaderInstance move_source{compiled.program};
+    ui::ShaderInstance moved{std::move(move_source)};
+    check(moved.valid() && !move_source.valid(),
+          "T081 failed to create inert ShaderInstance");
+
+    const auto inert_before = allocation_probe::allocation_count;
+    alignas(ui::Brush) std::byte inert_storage[sizeof(ui::Brush)];
+    ui::Brush* inert = nullptr;
+    {
+        ScopedAllocationFailure fail;
+        inert = ::new (static_cast<void*>(inert_storage)) ui::Brush(move_source);
+    }
+    check_no_allocation_since(
+        inert_before,
+        "T081 inert ShaderInstance -> Brush attempted allocation");
+    check(ui::detail::ShaderBrushAccess::is_transparent_solid(*inert),
+          "T081 inert ShaderInstance did not become transparent solid Brush");
+    inert->~Brush();
+
+    const auto copy_before = allocation_probe::allocation_count;
+    alignas(ui::Brush) std::byte copy_storage[sizeof(ui::Brush)];
+    ui::Brush* copy = nullptr;
+    {
+        ScopedAllocationFailure fail;
+        copy = ::new (static_cast<void*>(copy_storage)) ui::Brush(live);
+    }
+    check_no_allocation_since(
+        copy_before,
+        "T081 shader Brush copy attempted allocation");
+    check(ui::detail::ShaderBrushAccess::is_shader(*copy),
+          "T081 shader Brush copy lost snapshot");
+    copy->~Brush();
+}
+
+void shader_brush_materialization_failure_recovers() {
+    const auto compiled = ui::ShaderProgram::compile(kFloatShader);
+    check(compiled.ok(), "T081 materialization program did not compile");
+    ui::ShaderInstance instance{compiled.program};
+    check(instance.set_float("value", 1.0f) == ui::ShaderSetResult::Ok,
+          "T081 materialization setup failed");
+    const ui::Brush brush{instance};
+
+    const auto info = SkImageInfo::Make(
+        8, 8, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto surface = SkSurfaces::Raster(info);
+    check(static_cast<bool>(surface), "T081 raster surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "T081 raster canvas missing");
+    canvas->clear(SK_ColorBLACK);
+
+    const std::size_t compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+    const std::size_t materialize_before =
+        ui::detail::shader_materialization_call_count_for_test();
+
+    ui::detail::set_shader_materialization_failure_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeUniformData);
+    bool before_data_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    } catch (const std::bad_alloc&) {
+        before_data_failed = true;
+    }
+    check(before_data_failed, "T081 pre-uniform failure seam did not fire");
+
+    ui::detail::set_shader_materialization_failure_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeShader);
+    bool before_shader_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    } catch (const std::bad_alloc&) {
+        before_shader_failed = true;
+    }
+    check(before_shader_failed, "T081 pre-shader failure seam did not fire");
+
+    ui::detail::set_shader_materialization_failure_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::ForceNullShader);
+    bool null_shader_failed = false;
+    try {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    } catch (const std::runtime_error&) {
+        null_shader_failed = true;
+    }
+    check(null_shader_failed, "T081 null-shader failure did not propagate");
+
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, brush);
+    }
+
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "T081 repeated paint recompiled SkSL source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              materialize_before + 4U,
+          "T081 transient materialization count mismatch");
+
+    SkPixmap pixels;
+    check(surface->peekPixels(&pixels), "T081 recovery pixels unavailable");
+    const auto recovered = pixels.getColor4f(4, 4);
+    check(recovered.fR > 0.9f,
+          "T081 later normal render did not recover after materialization failures");
+}
+
 void inert_setters_allocate_nothing() {
     const auto compiled = ui::ShaderProgram::compile(kAllSetterShader);
     check(compiled.ok(), "all-setter program did not compile");
@@ -808,6 +972,8 @@ void suite() {
     construction_and_copy_failure_are_atomic();
     setters_and_moves_allocate_nothing();
     setter_failure_is_non_destructive_and_instances_are_isolated();
+    shader_brush_snapshot_failure_and_noallocation_edges();
+    shader_brush_materialization_failure_recovers();
     inert_setters_allocate_nothing();
 }
 

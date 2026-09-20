@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -12,8 +13,12 @@
 
 namespace ui {
 
+class ShaderInstance;
+
 namespace detail {
 struct EffectTestAccess;
+struct ShaderBrushAccess;
+struct ShaderBrushSnapshot;
 }
 
 struct VisualOutset {
@@ -212,6 +217,7 @@ public:
     Brush(Color color) noexcept : value_(color) {}
     Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
     Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
+    explicit Brush(const ShaderInstance& shader);
 
     Brush(const Brush&) = default;
 
@@ -239,7 +245,11 @@ public:
     ~Brush() noexcept = default;
 
 private:
-    using Storage = std::variant<Color, LinearGradient, RadialGradient>;
+    using Storage = std::variant<
+        Color,
+        LinearGradient,
+        RadialGradient,
+        std::shared_ptr<const detail::ShaderBrushSnapshot>>;
 
     static_assert(std::is_nothrow_constructible_v<Storage, Color>);
     static_assert(std::is_nothrow_move_constructible_v<Storage>);
@@ -261,6 +271,7 @@ private:
     }
 
     friend class Painter;
+    friend struct detail::ShaderBrushAccess;
     Storage value_;
 };
 
