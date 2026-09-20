@@ -107,7 +107,8 @@ struct PointerContact {
 
     [[nodiscard]] constexpr bool tracked() const noexcept { return id != 0U; }
     [[nodiscard]] constexpr bool hover_capable() const noexcept {
-        return type == PointerType::Unknown || type == PointerType::Mouse;
+        return type == PointerType::Mouse ||
+               (type == PointerType::Unknown && !tracked());
     }
 };
 
@@ -158,7 +159,6 @@ struct InputEvent {
     Command command{Command::None};
     Point position{};
     Point delta{};
-    PointerContact pointer{};
     std::string text;
     CompositionEvent composition{};
     // Drag-and-drop payload. `drop_types` is populated for DropOffer, while
@@ -175,6 +175,9 @@ struct InputEvent {
     // Platform-normalized primary accelerator: Command on macOS, Ctrl on
     // Windows/Linux. Platform adapters set this explicitly.
     bool primary{};
+    // Appended to preserve the field order of all pre-existing aggregate
+    // initializers. Legacy pointer events leave this at its id-0 default.
+    PointerContact pointer{};
 
     [[nodiscard]] bool primary_shortcut() const noexcept { return primary; }
     [[nodiscard]] bool offers_drop_type(std::string_view requested_type) const noexcept {
