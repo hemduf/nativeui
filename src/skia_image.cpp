@@ -182,7 +182,21 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         SkSamplingOptions(SkFilterMode::kLinear));
     if (!shader) return {};
 
-    shader = SkShaders::CoordClamp(std::move(shader), subset);
+    // CoordClamp bounds coordinates, while the image shader still owns the
+    // linear filter footprint. Clamp to the centers of the first/last texels
+    // intersected by the selected source rectangle so bilinear sampling cannot
+    // pull a neighboring texel from outside that selection. This reproduces
+    // strict source-subrect isolation without depending on Skia's private
+    // SkImageShader::MakeSubset API.
+    const float source_right = source.x + source.w;
+    const float source_bottom = source.y + source.h;
+    const SkRect sampling_domain = SkRect::MakeLTRB(
+        std::floor(source.x) + 0.5f,
+        std::floor(source.y) + 0.5f,
+        std::ceil(source_right) - 0.5f,
+        std::ceil(source_bottom) - 0.5f);
+
+    shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
     if (!shader) return {};
 
     return shader->makeWithLocalMatrix(local_matrix);
