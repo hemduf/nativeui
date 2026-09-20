@@ -59,6 +59,10 @@ constexpr std::array<std::byte, 84> kCropIsolationPng{
     return p.r < 8 && p.g < 8 && p.b < 8;
 }
 
+[[nodiscard]] bool magenta(ui::Rgba8 p) noexcept {
+    return p.r > 240 && p.g < 15 && p.b > 240;
+}
+
 [[nodiscard]] bool near(float a, float b) noexcept {
     return std::fabs(a - b) <= 1.0e-6f;
 }
@@ -108,17 +112,18 @@ struct Rendered {
 [[nodiscard]] Rendered render_texture(
     const ui::ImageTexture& texture,
     int width,
-    int height) {
+    int height,
+    ui::Color background = {0.0f, 0.0f, 0.0f, 1.0f}) {
     const ui::Brush brush{texture};
     ui::UI tree{ui::Canvas{
         static_cast<float>(width),
         static_cast<float>(height),
-        [brush, width, height](ui::CanvasContext2D& g) {
+        [brush, width, height, background](ui::CanvasContext2D& g) {
             const ui::Rect bounds{
                 0.0f, 0.0f,
                 static_cast<float>(width),
                 static_cast<float>(height)};
-            g.fill_rect(bounds, {0.0f, 0.0f, 0.0f, 1.0f});
+            g.fill_rect(bounds, background);
             g.fill_rect(bounds, brush);
         }}};
 
@@ -281,12 +286,17 @@ void negative_coordinate_rendering_matches_reference() {
     NUI_CHECK(green(mirror.at(52, 12))); // 1.25 -> .75
     NUI_CHECK(red(mirror.at(68, 12)));   // 2.25 -> .25
 
-    const auto decal = make(ui::TextureTileMode::Decal);
-    NUI_CHECK(black(decal.at(12, 12)));
-    NUI_CHECK(black(decal.at(28, 12)));
+    ui::ImageTexture decal_texture{
+        image, {0.0f, 0.0f, 2.0f, 2.0f}, {32.0f, 8.0f, 16.0f, 16.0f}};
+    decal_texture.set_tile_mode(
+        ui::TextureTileMode::Decal, ui::TextureTileMode::Clamp);
+    const auto decal = render_texture(
+        decal_texture, 80, 32, {1.0f, 0.0f, 1.0f, 1.0f});
+    NUI_CHECK(magenta(decal.at(12, 12)));
+    NUI_CHECK(magenta(decal.at(28, 12)));
     NUI_CHECK(red(decal.at(36, 12)));    // .25 stays inside
-    NUI_CHECK(black(decal.at(52, 12)));
-    NUI_CHECK(black(decal.at(68, 12)));
+    NUI_CHECK(magenta(decal.at(52, 12)));
+    NUI_CHECK(magenta(decal.at(68, 12)));
 }
 
 void mixed_axes_are_independent() {
@@ -341,12 +351,13 @@ void selected_source_isolation_for_every_mode() {
             image, source, {32.0f, 24.0f, 16.0f, 16.0f}};
         decal.set_tile_mode(
             ui::TextureTileMode::Decal, ui::TextureTileMode::Decal);
-        const auto rendered = render_texture(decal, 80, 72);
+        const auto rendered = render_texture(
+            decal, 80, 72, {1.0f, 0.0f, 1.0f, 1.0f});
         NUI_CHECK(red(rendered.at(36, 28)));
-        NUI_CHECK(black(rendered.at(28, 28)));
-        NUI_CHECK(black(rendered.at(52, 28)));
-        NUI_CHECK(black(rendered.at(36, 20)));
-        NUI_CHECK(black(rendered.at(36, 44)));
+        NUI_CHECK(magenta(rendered.at(28, 28)));
+        NUI_CHECK(magenta(rendered.at(52, 28)));
+        NUI_CHECK(magenta(rendered.at(36, 20)));
+        NUI_CHECK(magenta(rendered.at(36, 44)));
     };
     verify_decal({1.0f, 0.0f, 2.0f, 2.0f});
     verify_decal({1.25f, 0.0f, 1.5f, 2.0f});
