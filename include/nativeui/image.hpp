@@ -22,6 +22,13 @@ enum class ImageFit {
     Cover,
 };
 
+enum class TextureTileMode {
+    Clamp,
+    Repeat,
+    Mirror,
+    Decal,
+};
+
 enum class ImageLoadError {
     None,
     NotFound,
@@ -69,7 +76,7 @@ private:
 };
 
 
-/// Immutable backend-neutral image-backed Brush source.
+/// Backend-neutral value description for an image-backed Brush source.
 ///
 /// `source_pixels` is expressed in decoded-image pixel coordinates and may be
 /// fractional. `destination` is expressed in the Painter's current local
@@ -108,7 +115,9 @@ public:
     ImageTexture(ImageTexture&& other) noexcept
         : image_(std::move(other.image_)),
           source_(other.source_),
-          destination_(other.destination_) {
+          destination_(other.destination_),
+          tile_mode_x_(other.tile_mode_x_),
+          tile_mode_y_(other.tile_mode_y_) {
         other.reset();
     }
 
@@ -120,6 +129,8 @@ public:
         image_ = std::move(other.image_);
         source_ = other.source_;
         destination_ = other.destination_;
+        tile_mode_x_ = other.tile_mode_x_;
+        tile_mode_y_ = other.tile_mode_y_;
         other.reset();
         return *this;
     }
@@ -130,6 +141,21 @@ public:
     [[nodiscard]] const Image& image() const noexcept { return image_; }
     [[nodiscard]] Rect source() const noexcept { return source_; }
     [[nodiscard]] Rect destination() const noexcept { return destination_; }
+
+    ImageTexture& set_tile_mode(TextureTileMode x,
+                                TextureTileMode y) noexcept {
+        tile_mode_x_ = x;
+        tile_mode_y_ = y;
+        return *this;
+    }
+
+    [[nodiscard]] TextureTileMode tile_mode_x() const noexcept {
+        return tile_mode_x_;
+    }
+
+    [[nodiscard]] TextureTileMode tile_mode_y() const noexcept {
+        return tile_mode_y_;
+    }
 
 private:
     [[nodiscard]] static bool finite_rect(Rect rect) noexcept {
@@ -166,11 +192,15 @@ private:
         image_ = {};
         source_ = {};
         destination_ = {};
+        tile_mode_x_ = TextureTileMode::Clamp;
+        tile_mode_y_ = TextureTileMode::Clamp;
     }
 
     Image image_;
     Rect source_{};
     Rect destination_{};
+    TextureTileMode tile_mode_x_{TextureTileMode::Clamp};
+    TextureTileMode tile_mode_y_{TextureTileMode::Clamp};
 };
 
 static_assert(std::is_nothrow_copy_constructible_v<ImageTexture>);
@@ -178,6 +208,10 @@ static_assert(std::is_nothrow_copy_assignable_v<ImageTexture>);
 static_assert(std::is_nothrow_move_constructible_v<ImageTexture>);
 static_assert(std::is_nothrow_move_assignable_v<ImageTexture>);
 static_assert(std::is_nothrow_destructible_v<ImageTexture>);
+static_assert(noexcept(std::declval<ImageTexture&>().set_tile_mode(
+    TextureTileMode::Clamp, TextureTileMode::Clamp)));
+static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_x()));
+static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_y()));
 
 struct ImageLoadResult {
     Image image;
