@@ -55,6 +55,10 @@ constexpr std::array<std::byte, 84> kCropIsolationPng{
     return p.b > 180 && p.r < 70 && p.g < 70;
 }
 
+[[nodiscard]] bool white(ui::Rgba8 p) noexcept {
+    return p.r > 220 && p.g > 220 && p.b > 220;
+}
+
 [[nodiscard]] bool magenta(ui::Rgba8 p) noexcept {
     return p.r > 240 && p.g < 15 && p.b > 240;
 }
@@ -311,6 +315,69 @@ void mixed_axes_are_independent() {
     NUI_CHECK(green(rendered.at(12, 12)));
 }
 
+void all_axis_mode_combinations_match_reference() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    constexpr std::array<ui::TextureTileMode, 4> modes{
+        ui::TextureTileMode::Clamp,
+        ui::TextureTileMode::Repeat,
+        ui::TextureTileMode::Mirror,
+        ui::TextureTileMode::Decal,
+    };
+    struct Probe {
+        float qx;
+        float qy;
+        int x;
+        int y;
+    };
+    constexpr std::array<Probe, 6> probes{{
+        {-0.25f,  0.25f, 12, 20},
+        { 1.25f,  0.25f, 36, 20},
+        { 0.25f, -0.25f, 20, 12},
+        { 0.25f,  1.25f, 20, 36},
+        {-0.25f, -0.25f, 12, 12},
+        { 1.25f,  1.25f, 36, 36},
+    }};
+
+    const auto matches_reference = [](ui::Rgba8 pixel,
+                                      ui::TextureTileMode x_mode,
+                                      ui::TextureTileMode y_mode,
+                                      float qx,
+                                      float qy) {
+        const auto x = reference_coordinate(x_mode, qx);
+        const auto y = reference_coordinate(y_mode, qy);
+        if (!x.visible || !y.visible) return magenta(pixel);
+
+        const bool right = x.q > 0.5f;
+        const bool bottom = y.q > 0.5f;
+        if (!right && !bottom) return red(pixel);
+        if (right && !bottom) return green(pixel);
+        if (!right && bottom) return blue(pixel);
+        return white(pixel);
+    };
+
+    for (const auto x_mode : modes) {
+        for (const auto y_mode : modes) {
+            ui::ImageTexture texture{
+                image,
+                {0.0f, 0.0f, 2.0f, 2.0f},
+                {16.0f, 16.0f, 16.0f, 16.0f}};
+            texture.set_tile_mode(x_mode, y_mode);
+            const auto rendered = render_texture(
+                texture, 48, 48, {1.0f, 0.0f, 1.0f, 1.0f});
+            for (const auto& probe : probes) {
+                NUI_CHECK(matches_reference(
+                    rendered.at(probe.x, probe.y),
+                    x_mode,
+                    y_mode,
+                    probe.qx,
+                    probe.qy));
+            }
+        }
+    }
+}
+
 void selected_source_isolation_for_every_mode() {
     const auto image = ui::Image::decode(kCropIsolationPng);
     NUI_CHECK(image.valid());
@@ -451,6 +518,7 @@ void suite() {
     default_and_explicit_clamp_are_identical();
     negative_coordinate_rendering_matches_reference();
     mixed_axes_are_independent();
+    all_axis_mode_combinations_match_reference();
     selected_source_isolation_for_every_mode();
     painter_transform_preserves_pattern_space_tiling();
     shared_image_texture_state_is_independent();
