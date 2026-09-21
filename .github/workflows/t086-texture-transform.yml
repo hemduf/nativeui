@@ -8,7 +8,7 @@ on:
       - 'include/nativeui/paint_style.hpp'
       - 'src/skia_image.cpp'
       - 'examples/features/t086_texture_transform.cpp'
-      - '.github/workflows/t085-texture-sampling.yml'
+      - '.github/workflows/t086-texture-transform.yml'
   workflow_dispatch:
 
 permissions:
