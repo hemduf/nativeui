@@ -149,7 +149,7 @@ struct Transform2D {
         };
 
         constexpr double max_float =
-            static_cast<double>(std::numeric_limits<float>::max());
+            static_cast<double>((std::numeric_limits<float>::max)());
         for (const double value : inverse_values) {
             if (!std::isfinite(value) || std::abs(value) > max_float) {
                 return std::nullopt;
