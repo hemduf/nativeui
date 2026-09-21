@@ -152,6 +152,13 @@ private:
 /// callbacks, or mutate process-global caches. Mipmap/backend materialization is
 /// renderer-owned and never stored by the public ImageTexture value.
 ///
+/// An optional texture-local affine transform maps the T083 destination/pattern
+/// coordinates into Painter-local logical coordinates before the Painter/device
+/// transform. Identity preserves T083-T085 behavior. Transform mutation is
+/// allocation/decode/backend-free and semantic validity is decided exclusively
+/// by Transform2D::inverse(); invalid transform values are retained verbatim so
+/// callers can inspect/recover them without losing Image/mapping/sampling state.
+///
 /// ImageTexture itself is not a synchronization primitive; mutate an instance
 /// only from the owning UI/resource-preparation domain. Texture materialization
 /// is not real-time-audio-safe.
@@ -183,7 +190,9 @@ public:
           destination_(other.destination_),
           tile_mode_x_(other.tile_mode_x_),
           tile_mode_y_(other.tile_mode_y_),
-          sampling_(other.sampling_) {
+          sampling_(other.sampling_),
+          transform_(other.transform_),
+          transform_valid_(other.transform_valid_) {
         other.reset();
     }
 
@@ -198,13 +207,17 @@ public:
         tile_mode_x_ = other.tile_mode_x_;
         tile_mode_y_ = other.tile_mode_y_;
         sampling_ = other.sampling_;
+        transform_ = other.transform_;
+        transform_valid_ = other.transform_valid_;
         other.reset();
         return *this;
     }
 
     ~ImageTexture() noexcept = default;
 
-    [[nodiscard]] bool valid() const noexcept { return image_.valid(); }
+    [[nodiscard]] bool valid() const noexcept {
+        return image_.valid() && transform_valid_;
+    }
     [[nodiscard]] const Image& image() const noexcept { return image_; }
     [[nodiscard]] Rect source() const noexcept { return source_; }
     [[nodiscard]] Rect destination() const noexcept { return destination_; }
@@ -233,6 +246,19 @@ public:
 
     [[nodiscard]] TextureSampling sampling() const noexcept {
         return sampling_;
+    }
+
+    /// Map T083 destination/pattern coordinates into Painter-local coordinates.
+    /// The raw value is always retained; public validity uses the exact shared
+    /// T098 Transform2D::inverse() contract.
+    ImageTexture& set_transform(Transform2D texture_to_local) noexcept {
+        transform_ = texture_to_local;
+        transform_valid_ = transform_.inverse().has_value();
+        return *this;
+    }
+
+    [[nodiscard]] Transform2D transform() const noexcept {
+        return transform_;
     }
 
 private:
@@ -273,6 +299,8 @@ private:
         tile_mode_x_ = TextureTileMode::Clamp;
         tile_mode_y_ = TextureTileMode::Clamp;
         sampling_ = {};
+        transform_ = Transform2D::identity();
+        transform_valid_ = true;
     }
 
     Image image_;
@@ -281,6 +309,8 @@ private:
     TextureTileMode tile_mode_x_{TextureTileMode::Clamp};
     TextureTileMode tile_mode_y_{TextureTileMode::Clamp};
     TextureSampling sampling_{};
+    Transform2D transform_{Transform2D::identity()};
+    bool transform_valid_{true};
 };
 
 static_assert(std::is_nothrow_copy_constructible_v<ImageTexture>);
@@ -295,6 +325,9 @@ static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_y()));
 static_assert(noexcept(std::declval<ImageTexture&>().set_sampling(
     TextureSampling{})));
 static_assert(noexcept(std::declval<const ImageTexture&>().sampling()));
+static_assert(noexcept(std::declval<ImageTexture&>().set_transform(
+    Transform2D::identity())));
+static_assert(noexcept(std::declval<const ImageTexture&>().transform()));
 
 struct ImageLoadResult {
     Image image;

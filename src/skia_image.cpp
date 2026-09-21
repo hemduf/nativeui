@@ -91,6 +91,45 @@ ImageTextureMaterializationFailurePoint g_image_texture_failure{
         backend_mipmap(sampling.mipmap())};
 }
 
+[[nodiscard]] bool exact_identity(Transform2D transform) noexcept {
+    return transform.m00 == 1.0f &&
+           transform.m01 == 0.0f &&
+           transform.m02 == 0.0f &&
+           transform.m10 == 0.0f &&
+           transform.m11 == 1.0f &&
+           transform.m12 == 0.0f;
+}
+
+[[nodiscard]] bool compose_texture_local_matrix(
+    const SkMatrix& source_to_destination,
+    Transform2D texture_to_local,
+    SkMatrix& result) noexcept {
+    // Keep the identity path byte-for-byte equivalent to T083-T085.
+    if (exact_identity(texture_to_local)) {
+        result = source_to_destination;
+        return result.isFinite() && result.invert().has_value();
+    }
+
+    const Transform2D base{
+        source_to_destination.getScaleX(),
+        source_to_destination.getSkewX(),
+        source_to_destination.getTranslateX(),
+        source_to_destination.getSkewY(),
+        source_to_destination.getScaleY(),
+        source_to_destination.getTranslateY(),
+    };
+    const Transform2D composed = texture_to_local * base;
+    result = SkMatrix::MakeAll(
+        composed.m00, composed.m01, composed.m02,
+        composed.m10, composed.m11, composed.m12,
+        0.0f, 0.0f, 1.0f);
+
+    // ImageTexture::valid() already owns semantic transform validity through
+    // T098. This check is only the existing backend representability boundary
+    // for the complete source -> destination -> texture_to_local mapping.
+    return result.isFinite() && result.invert().has_value();
+}
+
 [[nodiscard]] bool is_full_source(Rect source, const ImageData& data) noexcept {
     return source.x == 0.0f && source.y == 0.0f &&
            source.w == data.size.w && source.h == data.size.h;
@@ -308,10 +347,13 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     const SkRect destination_rect =
         SkRect::MakeXYWH(destination.x, destination.y,
                          destination.w, destination.h);
-    const auto local_matrix =
+    const auto source_to_destination =
         SkMatrix::Rect2Rect(subset, destination_rect);
-    if (!local_matrix || !local_matrix->isFinite() ||
-        !local_matrix->invert().has_value()) {
+    if (!source_to_destination) return {};
+
+    SkMatrix local_matrix;
+    if (!compose_texture_local_matrix(
+            *source_to_destination, texture.transform(), local_matrix)) {
         return {};
     }
 
@@ -323,10 +365,13 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
             *data, source, public_sampling.filter());
         if (!mip_source.image) return {};
 
-        const auto mip_local_matrix =
+        const auto mip_source_to_destination =
             SkMatrix::Rect2Rect(mip_source.source, destination_rect);
-        if (!mip_local_matrix || !mip_local_matrix->isFinite() ||
-            !mip_local_matrix->invert().has_value()) {
+        if (!mip_source_to_destination) return {};
+
+        SkMatrix mip_local_matrix;
+        if (!compose_texture_local_matrix(
+                *mip_source_to_destination, texture.transform(), mip_local_matrix)) {
             return {};
         }
 
@@ -334,10 +379,32 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
             backend_tile_mode(texture.tile_mode_x()),
             backend_tile_mode(texture.tile_mode_y()),
             backend_sampling(public_sampling),
-            *mip_local_matrix);
+            mip_local_matrix);
     }
 
     const SkSamplingOptions sampling{filter};
+
+    // A full selected image needs no T084 subrect-isolation picture for
+    // Clamp/Repeat/Mirror. Keeping full-source periodic level-0 sampling on the
+    // image shader means enabling mipmaps cannot change magnified Linear output
+    // merely by switching backend materialization families.
+    //
+    // Decal remains on the T084 picture path even for a full image: that path
+    // owns the exact destination-bounded transparent domain, including mixed
+    // Decal/Clamp axes.
+    const bool uses_decal =
+        texture.tile_mode_x() == TextureTileMode::Decal ||
+        texture.tile_mode_y() == TextureTileMode::Decal;
+    if (!uses_decal &&
+        is_full_source(source, *data) &&
+        (texture.tile_mode_x() != TextureTileMode::Clamp ||
+         texture.tile_mode_y() != TextureTileMode::Clamp)) {
+        return data->image->makeShader(
+            backend_tile_mode(texture.tile_mode_x()),
+            backend_tile_mode(texture.tile_mode_y()),
+            sampling,
+            local_matrix);
+    }
 
     if (texture.tile_mode_x() == TextureTileMode::Clamp &&
         texture.tile_mode_y() == TextureTileMode::Clamp) {
@@ -364,7 +431,7 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
         if (!shader) return {};
 
-        return shader->makeWithLocalMatrix(*local_matrix);
+        return shader->makeWithLocalMatrix(local_matrix);
     }
 
     // Repeat/Mirror/Decal must tile exactly the selected (possibly fractional)
@@ -394,10 +461,13 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     // source origin. Map that tile-local rectangle to the public destination;
     // mapping the original subset here would leak its source offset into Decal
     // and periodic boundary decisions.
-    const auto tile_local_matrix = SkMatrix::Rect2Rect(
+    const auto tile_to_destination = SkMatrix::Rect2Rect(
         SkRect::MakeWH(subset.width(), subset.height()), destination_rect);
-    if (!tile_local_matrix || !tile_local_matrix->isFinite() ||
-        !tile_local_matrix->invert().has_value()) {
+    if (!tile_to_destination) return {};
+
+    SkMatrix tile_local_matrix;
+    if (!compose_texture_local_matrix(
+            *tile_to_destination, texture.transform(), tile_local_matrix)) {
         return {};
     }
 
@@ -405,7 +475,7 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         backend_tile_mode(texture.tile_mode_x()),
         backend_tile_mode(texture.tile_mode_y()),
         filter,
-        &*tile_local_matrix,
+        &tile_local_matrix,
         &subset);
 }
 
