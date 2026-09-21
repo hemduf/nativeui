@@ -477,6 +477,15 @@
             }
 
             if (event.type == InputType::PointerDown) {
+                if (pointer_capture_barrier_) {
+                    // cancel_pointer() is a teardown barrier. A cancellation
+                    // callback may re-enter dispatch, but a nested PointerDown
+                    // must not recursively cancel the capture currently being
+                    // torn down or publish a new interaction.
+                    end_pointer_interaction(event.pointer.id);
+                    pointer_route_committed = true;
+                    return finish(EventResult::Ignored);
+                }
                 if (pointer_capture_owner(event.pointer.id)) {
                     // If stale-capture cancellation throws, that helper has
                     // already restored its own state and must not be followed
