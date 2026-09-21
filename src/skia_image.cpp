@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -63,9 +64,124 @@ ImageTextureMaterializationFailurePoint g_image_texture_failure{
         case TextureTileMode::Mirror: return SkTileMode::kMirror;
         case TextureTileMode::Decal: return SkTileMode::kDecal;
     }
-    // A forged enum value is not part of the public contract. Keep the backend
-    // deterministic rather than depending on an invalid Skia enum.
+    // Forged public enum values are outside the contract. Fail deterministic.
     return SkTileMode::kClamp;
+}
+
+[[nodiscard]] SkFilterMode backend_filter(TextureFilter filter) noexcept {
+    switch (filter) {
+        case TextureFilter::Nearest: return SkFilterMode::kNearest;
+        case TextureFilter::Linear: return SkFilterMode::kLinear;
+    }
+    return SkFilterMode::kLinear;
+}
+
+[[nodiscard]] SkMipmapMode backend_mipmap(TextureMipmap mipmap) noexcept {
+    switch (mipmap) {
+        case TextureMipmap::None: return SkMipmapMode::kNone;
+        case TextureMipmap::Nearest: return SkMipmapMode::kNearest;
+        case TextureMipmap::Linear: return SkMipmapMode::kLinear;
+    }
+    return SkMipmapMode::kNone;
+}
+
+[[nodiscard]] SkSamplingOptions backend_sampling(TextureSampling sampling) noexcept {
+    return SkSamplingOptions{
+        backend_filter(sampling.filter()),
+        backend_mipmap(sampling.mipmap())};
+}
+
+[[nodiscard]] bool is_full_source(Rect source, const ImageData& data) noexcept {
+    return source.x == 0.0f && source.y == 0.0f &&
+           source.w == data.size.w && source.h == data.size.h;
+}
+
+[[nodiscard]] bool integral_source(Rect source) noexcept {
+    return std::floor(source.x) == source.x &&
+           std::floor(source.y) == source.y &&
+           std::floor(source.w) == source.w &&
+           std::floor(source.h) == source.h;
+}
+
+struct MipSource {
+    sk_sp<SkImage> image;
+    SkRect source{};
+};
+
+[[nodiscard]] MipSource make_isolated_mip_source(
+    const ImageData& data,
+    Rect source,
+    TextureFilter filter) {
+    if (!data.image || !drawable_rect(source)) return {};
+
+    // A full-image pyramid cannot observe pixels outside the selected source.
+    if (is_full_source(source, data)) {
+        auto image = data.image->withDefaultMipmaps();
+        if (!image) return {};
+        return {std::move(image),
+                SkRect::MakeWH(static_cast<float>(data.image->width()),
+                               static_cast<float>(data.image->height()))};
+    }
+
+    // Preserve exact texels for integral subsets. Request mipmaps on the subset
+    // itself, never on the parent image, so lower levels cannot blend neighboring
+    // parent pixels into the public selected-source contract.
+    if (integral_source(source) &&
+        source.x <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.y <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.w <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.h <= static_cast<float>(std::numeric_limits<int>::max())) {
+        const auto subset = SkIRect::MakeXYWH(
+            static_cast<int>(source.x), static_cast<int>(source.y),
+            static_cast<int>(source.w), static_cast<int>(source.h));
+        auto image = data.image->makeSubset(
+            nullptr, subset, SkImage::RequiredProperties{true});
+        if (image && !image->hasMipmaps()) image = image->withDefaultMipmaps();
+        if (!image) return {};
+        return {std::move(image),
+                SkRect::MakeWH(source.w, source.h)};
+    }
+
+    // Fractional T083 source rectangles cannot be represented by SkImage's
+    // integer subset API. Rasterize exactly that selected region into a private
+    // picture-backed image before generating its pyramid. The strict source
+    // constraint ensures parent pixels outside `source` never enter any level.
+    const float width_f = std::ceil(source.w);
+    const float height_f = std::ceil(source.h);
+    if (!std::isfinite(width_f) || !std::isfinite(height_f) ||
+        width_f < 1.0f || height_f < 1.0f ||
+        width_f > static_cast<float>(std::numeric_limits<int>::max()) ||
+        height_f > static_cast<float>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+
+    const int width = static_cast<int>(width_f);
+    const int height = static_cast<int>(height_f);
+    const SkRect tile = SkRect::MakeWH(
+        static_cast<float>(width), static_cast<float>(height));
+    const SkRect subset =
+        SkRect::MakeXYWH(source.x, source.y, source.w, source.h);
+
+    SkPictureRecorder recorder;
+    SkCanvas* recording = recorder.beginRecording(tile);
+    if (!recording) return {};
+    recording->drawImageRect(
+        data.image.get(), subset, tile,
+        SkSamplingOptions(backend_filter(filter)),
+        nullptr, SkCanvas::kStrict_SrcRectConstraint);
+
+    auto picture = recorder.finishRecordingAsPicture();
+    if (!picture) return {};
+
+    auto isolated = SkImages::DeferredFromPicture(
+        std::move(picture), SkISize::Make(width, height),
+        nullptr, nullptr, SkImages::BitDepth::kU8,
+        data.image->refColorSpace());
+    if (!isolated) return {};
+
+    auto image = isolated->withDefaultMipmaps();
+    if (!image) return {};
+    return {std::move(image), tile};
 }
 
 [[nodiscard]] Rect contained_destination(Rect source, Rect destination) noexcept {
@@ -199,13 +315,34 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         return {};
     }
 
-    const SkSamplingOptions sampling{SkFilterMode::kLinear};
+    const auto public_sampling = texture.sampling();
+    const SkFilterMode filter = backend_filter(public_sampling.filter());
+
+    if (public_sampling.mipmap() != TextureMipmap::None) {
+        auto mip_source = make_isolated_mip_source(
+            *data, source, public_sampling.filter());
+        if (!mip_source.image) return {};
+
+        const auto mip_local_matrix =
+            SkMatrix::Rect2Rect(mip_source.source, destination_rect);
+        if (!mip_local_matrix || !mip_local_matrix->isFinite() ||
+            !mip_local_matrix->invert().has_value()) {
+            return {};
+        }
+
+        return mip_source.image->makeShader(
+            backend_tile_mode(texture.tile_mode_x()),
+            backend_tile_mode(texture.tile_mode_y()),
+            backend_sampling(public_sampling),
+            *mip_local_matrix);
+    }
+
+    const SkSamplingOptions sampling{filter};
 
     if (texture.tile_mode_x() == TextureTileMode::Clamp &&
         texture.tile_mode_y() == TextureTileMode::Clamp) {
-        // Preserve the exact T083 Clamp/Clamp path. In particular, keep the
-        // fractional selected-source filtering behavior byte-for-byte compatible
-        // with the pre-tiling implementation.
+        // Preserve the exact T083 Clamp/Clamp path for the default Linear/None
+        // sampling policy. Other filters use the same crop isolation/mapping.
         auto shader = data->image->makeShader(
             SkTileMode::kClamp,
             SkTileMode::kClamp,
@@ -213,9 +350,9 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         if (!shader) return {};
 
         // CoordClamp bounds coordinates, while the image shader still owns the
-        // linear filter footprint. Clamp to the centers of the first/last texels
-        // intersected by the selected source rectangle so bilinear sampling cannot
-        // pull a neighboring texel from outside that selection.
+        // filter footprint. Clamp to the centers of the first/last texels
+        // intersected by the selected source rectangle so filtering cannot pull
+        // a neighboring texel from outside that selection.
         const float source_right = source.x + source.w;
         const float source_bottom = source.y + source.h;
         const SkRect sampling_domain = SkRect::MakeLTRB(
@@ -267,7 +404,7 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     return picture->makeShader(
         backend_tile_mode(texture.tile_mode_x()),
         backend_tile_mode(texture.tile_mode_y()),
-        SkFilterMode::kLinear,
+        filter,
         &*tile_local_matrix,
         &subset);
 }
