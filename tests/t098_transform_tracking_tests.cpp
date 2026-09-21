@@ -306,9 +306,20 @@ void device_scale_exclusion_contract() {
     NUI_CHECK(same(painter_1x.current_transform(),
                    painter_2x.current_transform(), 0.0f));
 
+    const auto map_affine = [](const SkMatrix& matrix, SkPoint point) noexcept {
+        return SkPoint{
+            matrix.getScaleX() * point.x() +
+                matrix.getSkewX() * point.y() +
+                matrix.getTranslateX(),
+            matrix.getSkewY() * point.x() +
+                matrix.getScaleY() * point.y() +
+                matrix.getTranslateY()};
+    };
     const SkPoint sample{3.0f, -2.0f};
-    const SkPoint physical_1x = canvas_1x->getLocalToDeviceAs3x3().mapXY(sample.x(), sample.y());
-    const SkPoint physical_2x = canvas_2x->getLocalToDeviceAs3x3().mapXY(sample.x(), sample.y());
+    const SkPoint physical_1x =
+        map_affine(canvas_1x->getLocalToDeviceAs3x3(), sample);
+    const SkPoint physical_2x =
+        map_affine(canvas_2x->getLocalToDeviceAs3x3(), sample);
     NUI_CHECK(near(physical_2x.x(), physical_1x.x() * 2.0f, 1.0e-4f));
     NUI_CHECK(near(physical_2x.y(), physical_1x.y() * 2.0f, 1.0e-4f));
 }
@@ -449,7 +460,14 @@ void invalid_painter_mutations_are_atomic() {
     painter.concat(ui::Transform2D{
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0e-9f, 0.0f});
-    NUI_CHECK(!painter.current_transform().inverse().has_value());
+    const auto near_singular = painter.current_transform();
+    NUI_CHECK(!near_singular.inverse().has_value());
+    NUI_CHECK(backend_matches(
+        canvas->getLocalToDeviceAs3x3(), near_singular, 4.0e-5f));
+    painter.fill_rounded_rect(
+        {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+    NUI_CHECK(backend_matches(
+        canvas->getLocalToDeviceAs3x3(), near_singular, 4.0e-5f));
     painter.restore();
 }
 
