@@ -69,7 +69,7 @@ Exact-head normal/path qualification is green for CI `35343703682`, T050 `353437
 
 **T073 / issue #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.**
 
-Frozen exact head `63bc82c6e2fd39760f5703748c10440f8fb0efa` introduces backend-neutral `ui::Brush` values for solid colors, linear gradients and radial gradients, with one shared Painter fill-materialization seam and Canvas/Painter Brush fill overloads.
+Frozen exact head `63bc82c6e2fd3db0aa6aae06456e51c36da33bfc` introduces backend-neutral `ui::Brush` values for solid colors, linear gradients and radial gradients, with one shared Painter fill-materialization seam and Canvas/Painter Brush fill overloads.
 
 Delivered contract includes:
 
