@@ -5,6 +5,8 @@
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkPicture.h"
+#include "include/core/SkPictureRecorder.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkShader.h"
@@ -52,6 +54,18 @@ ImageTextureMaterializationFailurePoint g_image_texture_failure{
 
 [[nodiscard]] Rect full_source(const ImageData& data) noexcept {
     return Rect{0.0f, 0.0f, data.size.w, data.size.h};
+}
+
+[[nodiscard]] SkTileMode backend_tile_mode(TextureTileMode mode) noexcept {
+    switch (mode) {
+        case TextureTileMode::Clamp: return SkTileMode::kClamp;
+        case TextureTileMode::Repeat: return SkTileMode::kRepeat;
+        case TextureTileMode::Mirror: return SkTileMode::kMirror;
+        case TextureTileMode::Decal: return SkTileMode::kDecal;
+    }
+    // A forged enum value is not part of the public contract. Keep the backend
+    // deterministic rather than depending on an invalid Skia enum.
+    return SkTileMode::kClamp;
 }
 
 [[nodiscard]] Rect contained_destination(Rect source, Rect destination) noexcept {
@@ -185,30 +199,77 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         return {};
     }
 
-    auto shader = data->image->makeShader(
-        SkTileMode::kClamp,
-        SkTileMode::kClamp,
-        SkSamplingOptions(SkFilterMode::kLinear));
-    if (!shader) return {};
+    const SkSamplingOptions sampling{SkFilterMode::kLinear};
 
-    // CoordClamp bounds coordinates, while the image shader still owns the
-    // linear filter footprint. Clamp to the centers of the first/last texels
-    // intersected by the selected source rectangle so bilinear sampling cannot
-    // pull a neighboring texel from outside that selection. This reproduces
-    // strict source-subrect isolation without depending on Skia's private
-    // SkImageShader::MakeSubset API.
-    const float source_right = source.x + source.w;
-    const float source_bottom = source.y + source.h;
-    const SkRect sampling_domain = SkRect::MakeLTRB(
-        std::floor(source.x) + 0.5f,
-        std::floor(source.y) + 0.5f,
-        std::ceil(source_right) - 0.5f,
-        std::ceil(source_bottom) - 0.5f);
+    if (texture.tile_mode_x() == TextureTileMode::Clamp &&
+        texture.tile_mode_y() == TextureTileMode::Clamp) {
+        // Preserve the exact T083 Clamp/Clamp path. In particular, keep the
+        // fractional selected-source filtering behavior byte-for-byte compatible
+        // with the pre-tiling implementation.
+        auto shader = data->image->makeShader(
+            SkTileMode::kClamp,
+            SkTileMode::kClamp,
+            sampling);
+        if (!shader) return {};
 
-    shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
-    if (!shader) return {};
+        // CoordClamp bounds coordinates, while the image shader still owns the
+        // linear filter footprint. Clamp to the centers of the first/last texels
+        // intersected by the selected source rectangle so bilinear sampling cannot
+        // pull a neighboring texel from outside that selection.
+        const float source_right = source.x + source.w;
+        const float source_bottom = source.y + source.h;
+        const SkRect sampling_domain = SkRect::MakeLTRB(
+            std::floor(source.x) + 0.5f,
+            std::floor(source.y) + 0.5f,
+            std::ceil(source_right) - 0.5f,
+            std::ceil(source_bottom) - 0.5f);
 
-    return shader->makeWithLocalMatrix(*local_matrix);
+        shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
+        if (!shader) return {};
+
+        return shader->makeWithLocalMatrix(*local_matrix);
+    }
+
+    // Repeat/Mirror/Decal must tile exactly the selected (possibly fractional)
+    // T083 source rectangle without ever exposing neighboring image pixels.
+    // SkImage::makeSubset only accepts integer bounds, while the public T083
+    // contract permits fractional source rectangles. Record only the selected
+    // rectangle into a picture, then tile that picture using the exact source
+    // rectangle as its tileRect. The recorded draw keeps Skia's strict source
+    // constraint, so pixels outside the selected source are never part of the
+    // repeatable pattern.
+    SkPictureRecorder recorder;
+    SkCanvas* recording = recorder.beginRecording(subset);
+    if (!recording) return {};
+    recording->drawImageRect(
+        data->image.get(),
+        subset,
+        subset,
+        sampling,
+        nullptr,
+        SkCanvas::kStrict_SrcRectConstraint);
+
+    auto picture = recorder.finishRecordingAsPicture();
+    if (!picture) return {};
+
+    // SkPictureShader rasterizes tileRect into an intermediate tile image whose
+    // coordinate origin is (0, 0), even when tileRect itself has a non-zero
+    // source origin. Map that tile-local rectangle to the public destination;
+    // mapping the original subset here would leak its source offset into Decal
+    // and periodic boundary decisions.
+    const auto tile_local_matrix = SkMatrix::Rect2Rect(
+        SkRect::MakeWH(subset.width(), subset.height()), destination_rect);
+    if (!tile_local_matrix || !tile_local_matrix->isFinite() ||
+        !tile_local_matrix->invert().has_value()) {
+        return {};
+    }
+
+    return picture->makeShader(
+        backend_tile_mode(texture.tile_mode_x()),
+        backend_tile_mode(texture.tile_mode_y()),
+        SkFilterMode::kLinear,
+        &*tile_local_matrix,
+        &subset);
 }
 
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {

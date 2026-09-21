@@ -204,11 +204,30 @@ void value_operations_allocate_nothing() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     check(image.valid(), "allocation test image did not decode");
 
+    const auto decode_before =
+        ui::detail::image_decode_call_count_for_test();
+    const auto materialization_before =
+        ui::detail::image_texture_materialization_call_count_for_test();
     const auto before = allocation_probe::allocation_count;
+    bool modes_ok = true;
     {
         allocation_probe::ScopedFailure fail;
 
         ui::ImageTexture texture{image, {0.0f, 0.0f, 8.0f, 8.0f}};
+        for (int i = 0; i < 1024; ++i) {
+            const auto x = (i & 1) == 0
+                ? ui::TextureTileMode::Repeat
+                : ui::TextureTileMode::Mirror;
+            const auto y = (i & 2) == 0
+                ? ui::TextureTileMode::Decal
+                : ui::TextureTileMode::Clamp;
+            auto* returned = &texture.set_tile_mode(x, y);
+            modes_ok = modes_ok &&
+                returned == &texture &&
+                texture.tile_mode_x() == x &&
+                texture.tile_mode_y() == y;
+        }
+
         ui::ImageTexture copied_texture{texture};
         ui::ImageTexture copy_assigned_texture;
         copy_assigned_texture = texture;
@@ -225,14 +244,24 @@ void value_operations_allocate_nothing() {
         move_assigned_brush = std::move(copy_assigned_brush);
         ui::Brush invalid{ui::ImageTexture{}};
 
-        (void)moved_texture;
-        (void)move_assigned_texture;
+        modes_ok = modes_ok &&
+            moved_texture.tile_mode_x() == texture.tile_mode_x() &&
+            moved_texture.tile_mode_y() == texture.tile_mode_y() &&
+            move_assigned_texture.tile_mode_x() == texture.tile_mode_x() &&
+            move_assigned_texture.tile_mode_y() == texture.tile_mode_y();
+
         (void)moved_brush;
         (void)move_assigned_brush;
         (void)invalid;
     }
+    check(modes_ok, "ImageTexture tile-mode value state was not stable");
     check(allocation_probe::allocation_count == before,
           "ImageTexture/Brush value operation allocated");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before,
+          "ImageTexture tile-mode mutation decoded image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              materialization_before,
+          "ImageTexture tile-mode mutation materialized backend resources");
 }
 
 void nonrepresentable_mapping_fails_visibly_and_recovers() {
