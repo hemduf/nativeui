@@ -1,4 +1,5 @@
 #include "test_support.hpp"
+#include "golden_test.hpp"
 
 #include "include/core/SkColor.h"
 #include "include/core/SkImageInfo.h"
@@ -102,14 +103,6 @@ static_assert(std::is_same_v<
 
 [[nodiscard]] bool green(ui::Rgba8 p) noexcept {
     return p.g > 180 && p.r < 70 && p.b < 70;
-}
-
-[[nodiscard]] bool blue(ui::Rgba8 p) noexcept {
-    return p.b > 180 && p.r < 70 && p.g < 70;
-}
-
-[[nodiscard]] bool white(ui::Rgba8 p) noexcept {
-    return p.r > 220 && p.g > 220 && p.b > 220;
 }
 
 [[nodiscard]] bool black(ui::Rgba8 p) noexcept {
@@ -432,26 +425,31 @@ void invalid_transform_is_transparent_and_recovers() {
     const auto sampling_before = texture.sampling();
 
     const float inf = std::numeric_limits<float>::infinity();
-    const ui::Transform2D invalid{
-        1.0f, 0.0f, inf,
-        0.0f, 1.0f, 0.0f};
-    texture.set_transform(invalid);
-    NUI_CHECK(!texture.valid());
-    NUI_CHECK(same_transform(texture.transform(), invalid));
-    NUI_CHECK(texture.image() == image_before);
-    NUI_CHECK(texture.source().x == source_before.x &&
-              texture.source().y == source_before.y &&
-              texture.source().w == source_before.w &&
-              texture.source().h == source_before.h);
-    NUI_CHECK(texture.destination().x == destination_before.x &&
-              texture.destination().y == destination_before.y &&
-              texture.destination().w == destination_before.w &&
-              texture.destination().h == destination_before.h);
-    NUI_CHECK(texture.sampling().filter() == sampling_before.filter());
-    NUI_CHECK(texture.sampling().mipmap() == sampling_before.mipmap());
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const std::array<ui::Transform2D, 3> invalid_transforms{{
+        {1.0f, 0.0f, nan, 0.0f, 1.0f, 0.0f},
+        {1.0f, 0.0f, inf, 0.0f, 1.0f, 0.0f},
+        {1.0f, 0.0f, -inf, 0.0f, 1.0f, 0.0f},
+    }};
+    for (const auto& invalid : invalid_transforms) {
+        texture.set_transform(invalid);
+        NUI_CHECK(!texture.valid());
+        NUI_CHECK(same_transform(texture.transform(), invalid));
+        NUI_CHECK(texture.image() == image_before);
+        NUI_CHECK(texture.source().x == source_before.x &&
+                  texture.source().y == source_before.y &&
+                  texture.source().w == source_before.w &&
+                  texture.source().h == source_before.h);
+        NUI_CHECK(texture.destination().x == destination_before.x &&
+                  texture.destination().y == destination_before.y &&
+                  texture.destination().w == destination_before.w &&
+                  texture.destination().h == destination_before.h);
+        NUI_CHECK(texture.sampling().filter() == sampling_before.filter());
+        NUI_CHECK(texture.sampling().mipmap() == sampling_before.mipmap());
 
-    const auto transparent = render_texture(texture, 32, 32);
-    NUI_CHECK(black(transparent.at(4, 4)));
+        const auto transparent = render_texture(texture, 32, 32);
+        NUI_CHECK(black(transparent.at(4, 4)));
+    }
 
     texture.set_transform(ui::Transform2D::identity());
     NUI_CHECK(texture.valid());
@@ -543,31 +541,62 @@ void transformed_sampling_participates_in_lod() {
     const auto image = ui::Image::decode(kLodPng);
     NUI_CHECK(image.valid());
 
-    const auto make = [&](ui::TextureMipmap mipmap,
+    const auto make = [&](ui::TextureFilter filter,
+                          ui::TextureMipmap mipmap,
                           ui::Transform2D transform) {
         ui::ImageTexture texture{
             image, {0.0f, 0.0f, 16.0f, 16.0f}, {0.0f, 0.0f, 16.0f, 16.0f}};
         texture.set_tile_mode(
             ui::TextureTileMode::Repeat, ui::TextureTileMode::Repeat);
         ui::TextureSampling sampling;
-        sampling.set_filter(ui::TextureFilter::Linear).set_mipmap(mipmap);
+        sampling.set_filter(filter).set_mipmap(mipmap);
         texture.set_sampling(sampling);
         texture.set_transform(transform);
         return render_texture(texture, 24, 24);
     };
 
-    const auto identity_none =
-        make(ui::TextureMipmap::None, ui::Transform2D::identity());
-    const auto identity_linear =
-        make(ui::TextureMipmap::Linear, ui::Transform2D::identity());
+    const auto identity_none = make(
+        ui::TextureFilter::Linear,
+        ui::TextureMipmap::None,
+        ui::Transform2D::identity());
+    const auto identity_linear = make(
+        ui::TextureFilter::Linear,
+        ui::TextureMipmap::Linear,
+        ui::Transform2D::identity());
     NUI_CHECK(!pixels_differ(identity_none, identity_linear));
 
     const auto shrink = ui::Transform2D::scaling(0.375f, 0.375f);
-    const auto none = make(ui::TextureMipmap::None, shrink);
-    const auto nearest = make(ui::TextureMipmap::Nearest, shrink);
-    const auto linear = make(ui::TextureMipmap::Linear, shrink);
+    const auto none = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::None, shrink);
+    const auto nearest = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::Nearest, shrink);
+    const auto linear = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::Linear, shrink);
     NUI_CHECK(pixels_differ(none, nearest));
     NUI_CHECK(pixels_differ(nearest, linear));
+
+    // Magnification must stay on level 0 for every mip policy. The transform
+    // still participates in the sampling geometry, while intra-level Nearest
+    // versus Linear remains observable.
+    const auto magnify = ui::Transform2D::scaling(2.0f, 2.0f);
+    const auto nearest_none = make(
+        ui::TextureFilter::Nearest, ui::TextureMipmap::None, magnify);
+    const auto nearest_level = make(
+        ui::TextureFilter::Nearest, ui::TextureMipmap::Nearest, magnify);
+    const auto nearest_linear_mip = make(
+        ui::TextureFilter::Nearest, ui::TextureMipmap::Linear, magnify);
+    NUI_CHECK(!pixels_differ(nearest_none, nearest_level));
+    NUI_CHECK(!pixels_differ(nearest_none, nearest_linear_mip));
+
+    const auto linear_none = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::None, magnify);
+    const auto linear_level = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::Nearest, magnify);
+    const auto linear_linear_mip = make(
+        ui::TextureFilter::Linear, ui::TextureMipmap::Linear, magnify);
+    NUI_CHECK(!pixels_differ(linear_none, linear_level));
+    NUI_CHECK(!pixels_differ(linear_none, linear_linear_mip));
+    NUI_CHECK(pixels_differ(nearest_none, linear_none));
 }
 
 void transformed_fractional_source_mips_stay_isolated() {
