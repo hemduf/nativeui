@@ -439,6 +439,28 @@ void decode_materialization_and_failure_recovery() {
     check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
           "mipmapped painting unexpectedly called Image::decode");
 
+    // Recover the same logical ImageTexture from semantic transform invalidity
+    // without touching the immutable decoded Image backing.
+    invalid_transform_texture.set_transform(ui::Transform2D::identity());
+    check(invalid_transform_texture.valid(),
+          "valid transform did not restore ImageTexture validity");
+    const ui::Brush recovered_transform{invalid_transform_texture};
+    const auto recovery_materialization_before =
+        ui::detail::image_texture_materialization_call_count_for_test();
+    canvas->clear(SK_ColorBLACK);
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, recovered_transform);
+    }
+    check(red(pixel(surface, 1, 1)),
+          "valid transform did not restore texture rendering");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              recovery_materialization_before + 1U,
+          "recovered transformed texture did not use normal materialization");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
+          "invalid-to-valid transform recovery re-decoded Image data");
+
     canvas->clear(SK_ColorBLACK);
     ui::detail::set_image_texture_materialization_failure_for_test(
         ui::detail::ImageTextureMaterializationFailurePoint::BeforeShader);
