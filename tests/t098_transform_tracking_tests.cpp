@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 
 #include <cmath>
@@ -279,6 +280,54 @@ void painter_concat_order_contract() {
               !near(expected_point.y, opposite_point.y));
 }
 
+void painter_concat_render_order_contract() {
+    auto surface = make_surface();
+    NUI_CHECK(surface != nullptr);
+    auto* canvas = surface->getCanvas();
+    NUI_CHECK(canvas != nullptr);
+    canvas->clear(SK_ColorBLACK);
+
+    ui::Painter painter{*canvas};
+    const auto translation = ui::Transform2D::translation(20.0f, 10.0f);
+    const ui::Transform2D shear{
+        1.0f, 1.5f, 0.0f,
+        0.0f, 1.0f, 0.0f};
+
+    painter.translate(20.0f, 10.0f);
+    painter.concat(shear);
+
+    const auto expected = translation * shear;
+    const auto opposite = shear * translation;
+    const ui::Point local_center{10.0f, 10.0f};
+    const auto expected_center = expected.map_point(local_center);
+    const auto opposite_center = opposite.map_point(local_center);
+
+    NUI_CHECK(near(expected_center.x, 45.0f));
+    NUI_CHECK(near(expected_center.y, 20.0f));
+    NUI_CHECK(near(opposite_center.x, 60.0f));
+    NUI_CHECK(near(opposite_center.y, 20.0f));
+    NUI_CHECK(backend_matches(canvas->getLocalToDeviceAs3x3(), expected));
+
+    painter.fill_rounded_rect(
+        {8.0f, 8.0f, 4.0f, 4.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f});
+
+    SkPixmap pixmap;
+    NUI_CHECK(surface->peekPixels(&pixmap));
+    const SkColor expected_pixel = pixmap.getColor(
+        static_cast<int>(expected_center.x),
+        static_cast<int>(expected_center.y));
+    const SkColor opposite_pixel = pixmap.getColor(
+        static_cast<int>(opposite_center.x),
+        static_cast<int>(opposite_center.y));
+
+    NUI_CHECK(SkColorGetR(expected_pixel) > 240);
+    NUI_CHECK(SkColorGetG(expected_pixel) > 240);
+    NUI_CHECK(SkColorGetB(expected_pixel) > 240);
+    NUI_CHECK(SkColorGetR(opposite_pixel) < 8);
+    NUI_CHECK(SkColorGetG(opposite_pixel) < 8);
+    NUI_CHECK(SkColorGetB(opposite_pixel) < 8);
+}
+
 void device_scale_exclusion_contract() {
     auto surface_1x = make_surface();
     auto surface_2x = make_surface();
@@ -476,6 +525,7 @@ void suite() {
     inverse_contract();
     painter_tracking_contract();
     painter_concat_order_contract();
+    painter_concat_render_order_contract();
     device_scale_exclusion_contract();
     mixed_scope_restore_contract();
     transform_history_failure_is_transactional();
