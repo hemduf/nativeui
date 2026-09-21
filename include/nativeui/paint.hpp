@@ -24,6 +24,7 @@
 #include "include/effects/SkImageFilters.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -114,7 +115,7 @@ public:
 
         struct AdoptFrameTag {};
 
-        explicit StateGuard(Painter& painter) noexcept
+        explicit StateGuard(Painter& painter)
             : painter_(&painter), frame_(painter.begin_scope()) {}
 
         StateGuard(Painter& painter, ScopeFrame frame, AdoptFrameTag) noexcept
@@ -140,8 +141,11 @@ public:
     }
 
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
-    [[nodiscard]] StateGuard scoped_state() noexcept { return StateGuard{*this}; }
+    [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    [[nodiscard]] Transform2D current_transform() const noexcept {
+        return current_transform_;
+    }
 
     [[nodiscard]] StateGuard scoped_clip(Rect rect) {
         const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
@@ -226,14 +230,14 @@ public:
         // The saveLayer bounds remain only a backend sizing hint.
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         try {
-            canvas_.save();
-            ++save_depth_;
+            push_backend_frame([&] { canvas_.save(); });
             canvas_.clipRect(layer_bounds, SkClipOp::kIntersect, false);
             maybe_fail_layer(LayerFaultPoint::AfterHardClip);
 
-            [[maybe_unused]] const int previous_save_count =
-                canvas_.saveLayer(layer_bounds, &layer_paint);
-            ++save_depth_;
+            push_backend_frame([&] {
+                [[maybe_unused]] const int previous_save_count =
+                    canvas_.saveLayer(layer_bounds, &layer_paint);
+            });
             maybe_fail_layer(LayerFaultPoint::AfterSaveLayer);
 
             frame.guard_depth = save_depth_;
@@ -299,8 +303,7 @@ public:
         const auto entry_matrix = canvas_.getLocalToDevice();
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         try {
-            canvas_.save();
-            ++save_depth_;
+            push_backend_frame([&] { canvas_.save(); });
 
             // The support clip is an axis-aligned conservative device-space
             // envelope. Existing parent clips already live in device space and
@@ -314,9 +317,10 @@ public:
             // saveLayer bounds are only a sizing hint in pinned Skia.
             // The real finite device clip above already bounds output/allocation,
             // so omit the optional hint and keep correctness independent of it.
-            [[maybe_unused]] const int previous_save_count =
-                canvas_.saveLayer(nullptr, &layer_paint);
-            ++save_depth_;
+            push_backend_frame([&] {
+                [[maybe_unused]] const int previous_save_count =
+                    canvas_.saveLayer(nullptr, &layer_paint);
+            });
             maybe_fail_layer(LayerFaultPoint::AfterEffectSaveLayer);
 
             canvas_.clipRect(source_bounds, SkClipOp::kIntersect, false);
@@ -333,8 +337,7 @@ public:
     }
 
     void save() {
-        canvas_.save();
-        ++save_depth_;
+        push_backend_frame([&] { canvas_.save(); });
     }
 
     void restore() {
@@ -343,16 +346,33 @@ public:
         restore_unchecked();
     }
 
-    void translate(float x, float y) { canvas_.translate(x, y); }
+    void translate(float x, float y) {
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        const Transform2D operation = Transform2D::translation(x, y);
+        apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
+    }
     void translate(Point offset) { translate(offset.x, offset.y); }
-    void scale(float x, float y) { canvas_.scale(x, y); }
+    void scale(float x, float y) {
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        const Transform2D operation = Transform2D::scaling(x, y);
+        apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
+    }
     void scale(float uniform) { scale(uniform, uniform); }
-    void rotate(float radians) { canvas_.rotate(radians * (180.0f / kPi)); }
+    void rotate(float radians) {
+        if (!std::isfinite(radians)) return;
+        constexpr float rad_to_deg = 180.0f / kPi;
+        const float degrees = radians * rad_to_deg;
+        if (!std::isfinite(degrees)) return;
+        const Transform2D operation = Transform2D::rotation(radians);
+        apply_logical_transform(operation, [&] { canvas_.rotate(degrees); });
+    }
     void concat(const Transform2D& transform) {
-        canvas_.concat(SkMatrix::MakeAll(
-            transform.m00, transform.m01, transform.m02,
-            transform.m10, transform.m11, transform.m12,
-            0.0f, 0.0f, 1.0f));
+        apply_logical_transform(transform, [&] {
+            canvas_.concat(SkMatrix::MakeAll(
+                transform.m00, transform.m01, transform.m02,
+                transform.m10, transform.m11, transform.m12,
+                0.0f, 0.0f, 1.0f));
+        });
     }
 
     void fill_rounded_rect(Rect rect, float radius, Color color) {
@@ -491,6 +511,8 @@ public:
     }
 
 private:
+    static constexpr int kInlineTransformSaveDepth = 32;
+
     [[nodiscard]] StateGuard scoped_empty_device_output() {
         const auto entry_matrix = canvas_.getLocalToDevice();
         const ScopeFrame frame = begin_scope();
@@ -505,10 +527,9 @@ private:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
-    [[nodiscard]] ScopeFrame begin_scope() noexcept {
+    [[nodiscard]] ScopeFrame begin_scope() {
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
-        canvas_.save();
-        ++save_depth_;
+        push_backend_frame([&] { canvas_.save(); });
         frame.guard_depth = save_depth_;
         restore_floor_ = frame.guard_depth;
         return frame;
@@ -524,6 +545,72 @@ private:
     void rollback_scope(ScopeFrame frame) noexcept {
         while (save_depth_ > frame.entry_depth) restore_unchecked();
         restore_floor_ = frame.previous_floor;
+    }
+
+    template <class SaveOperation>
+    void push_backend_frame(SaveOperation&& save_operation) {
+        prepare_transform_snapshot();
+        try {
+            std::forward<SaveOperation>(save_operation)();
+        } catch (...) {
+            discard_prepared_transform_snapshot();
+            throw;
+        }
+        ++save_depth_;
+    }
+
+    void prepare_transform_snapshot() {
+        if (save_depth_ < kInlineTransformSaveDepth) {
+            transform_history_inline_[static_cast<std::size_t>(save_depth_)] =
+                current_transform_;
+            return;
+        }
+
+        // Deep nesting is rare. The ordinary path above is allocation-free;
+        // if this fallback needs to grow, allocation completes before the
+        // backend save so failure cannot desynchronize the two stacks.
+        transform_history_overflow_.push_back(current_transform_);
+    }
+
+    void discard_prepared_transform_snapshot() noexcept {
+        if (save_depth_ >= kInlineTransformSaveDepth) {
+            assert(!transform_history_overflow_.empty());
+            transform_history_overflow_.pop_back();
+        }
+    }
+
+    [[nodiscard]] Transform2D transform_snapshot(int depth) const noexcept {
+        assert(depth >= 0);
+        if (depth < kInlineTransformSaveDepth) {
+            return transform_history_inline_[static_cast<std::size_t>(depth)];
+        }
+        const auto overflow_index =
+            static_cast<std::size_t>(depth - kInlineTransformSaveDepth);
+        assert(overflow_index < transform_history_overflow_.size());
+        return transform_history_overflow_[overflow_index];
+    }
+
+    [[nodiscard]] static bool finite_transform(const Transform2D& transform) noexcept {
+        return std::isfinite(transform.m00) &&
+               std::isfinite(transform.m01) &&
+               std::isfinite(transform.m02) &&
+               std::isfinite(transform.m10) &&
+               std::isfinite(transform.m11) &&
+               std::isfinite(transform.m12);
+    }
+
+    template <class BackendMutation>
+    void apply_logical_transform(const Transform2D& operation,
+                                 BackendMutation&& backend_mutation) {
+        if (!finite_transform(operation)) return;
+        const Transform2D composed = current_transform_ * operation;
+        if (!finite_transform(composed)) return;
+
+        // Publish NativeUI state only after the backend mutation completed.
+        // If a backend ever reports failure by throwing, both sides therefore
+        // remain at the previous logical transform.
+        std::forward<BackendMutation>(backend_mutation)();
+        current_transform_ = composed;
     }
 
     void maybe_fail_layer(LayerFaultPoint point) {
@@ -933,11 +1020,24 @@ private:
 
     void restore_unchecked() {
         assert(save_depth_ > 0);
+        assert(static_cast<std::size_t>(save_depth_ > kInlineTransformSaveDepth
+                                           ? save_depth_ - kInlineTransformSaveDepth
+                                           : 0) == transform_history_overflow_.size());
+
+        const int snapshot_depth = save_depth_ - 1;
+        const Transform2D restored_transform = transform_snapshot(snapshot_depth);
         canvas_.restore();
         --save_depth_;
+        current_transform_ = restored_transform;
+        if (snapshot_depth >= kInlineTransformSaveDepth) {
+            transform_history_overflow_.pop_back();
+        }
     }
 
     SkCanvas& canvas_;
+    Transform2D current_transform_{};
+    std::array<Transform2D, kInlineTransformSaveDepth> transform_history_inline_{};
+    std::vector<Transform2D> transform_history_overflow_;
     int save_depth_{};
     int restore_floor_{};
     LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};

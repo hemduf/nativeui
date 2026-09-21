@@ -1,5 +1,8 @@
 #include "test_support.hpp"
 
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
+
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -23,11 +26,28 @@ namespace {
            near(a.m12, b.m12, epsilon);
 }
 
+[[nodiscard]] bool same_backend_affine(const SkMatrix& a,
+                                       const SkMatrix& b) noexcept {
+    return a.getScaleX() == b.getScaleX() &&
+           a.getSkewX() == b.getSkewX() &&
+           a.getTranslateX() == b.getTranslateX() &&
+           a.getSkewY() == b.getSkewY() &&
+           a.getScaleY() == b.getScaleY() &&
+           a.getTranslateY() == b.getTranslateY();
+}
+
+[[nodiscard]] sk_sp<SkSurface> make_surface() {
+    const auto info = SkImageInfo::Make(
+        96, 96, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    return SkSurfaces::Raster(info);
+}
+
 static_assert(noexcept(ui::Transform2D::rotation(0.0f)));
 static_assert(noexcept(std::declval<const ui::Transform2D&>().map_point(ui::Point{})));
 static_assert(noexcept(std::declval<const ui::Transform2D&>().inverse()));
 static_assert(noexcept(std::declval<const ui::Transform2D&>() *
                        std::declval<const ui::Transform2D&>()));
+static_assert(noexcept(std::declval<const ui::Painter&>().current_transform()));
 
 void transform_value_contract() {
     const auto identity = ui::Transform2D::identity();
@@ -134,9 +154,131 @@ void inverse_contract() {
     NUI_CHECK(!unrepresentable_inverse.inverse().has_value());
 }
 
+void painter_tracking_contract() {
+    auto surface = make_surface();
+    NUI_CHECK(surface != nullptr);
+    auto* canvas = surface->getCanvas();
+    NUI_CHECK(canvas != nullptr);
+
+    // A backend/device transform may already exist before Painter begins. It
+    // must never leak into the public logical local-to-scene transform.
+    canvas->scale(2.0f, 2.0f);
+    ui::Painter painter{*canvas};
+    NUI_CHECK(same(painter.current_transform(), ui::Transform2D::identity(), 0.0f));
+
+    painter.translate(10.0f, -4.0f);
+    painter.rotate(0.25f);
+    painter.scale(2.0f, 3.0f);
+    const auto expected =
+        ui::Transform2D::translation(10.0f, -4.0f) *
+        ui::Transform2D::rotation(0.25f) *
+        ui::Transform2D::scaling(2.0f, 3.0f);
+    NUI_CHECK(same(painter.current_transform(), expected, 2.0e-5f));
+
+    const auto before_manual = painter.current_transform();
+    painter.save();
+    painter.translate(7.0f, 9.0f);
+    NUI_CHECK(!same(painter.current_transform(), before_manual));
+    painter.restore();
+    NUI_CHECK(same(painter.current_transform(), before_manual, 0.0f));
+
+    {
+        auto state = painter.scoped_state();
+        painter.concat(ui::Transform2D{
+            1.0f, 0.2f, 3.0f,
+            -0.3f, 1.0f, 5.0f});
+        NUI_CHECK(!same(painter.current_transform(), before_manual));
+        {
+            auto clip = painter.scoped_clip({0.0f, 0.0f, 24.0f, 24.0f});
+            const auto before_layer = painter.current_transform();
+            {
+                auto layer = painter.scoped_layer({0.0f, 0.0f, 24.0f, 24.0f});
+                painter.translate(2.0f, 1.0f);
+            }
+            NUI_CHECK(same(painter.current_transform(), before_layer, 0.0f));
+
+            // Filtered layers temporarily reset/set the backend matrix in
+            // device space. That private renderer work must not affect the
+            // NativeUI logical transform tracker.
+            {
+                auto effect_layer = painter.scoped_layer(
+                    {0.0f, 0.0f, 24.0f, 24.0f},
+                    ui::Effect::gaussian_blur(1.5f, 1.5f));
+                NUI_CHECK(same(painter.current_transform(), before_layer, 0.0f));
+                painter.scale(0.75f, 1.25f);
+            }
+            NUI_CHECK(same(painter.current_transform(), before_layer, 0.0f));
+        }
+    }
+    NUI_CHECK(same(painter.current_transform(), before_manual, 0.0f));
+    NUI_CHECK(painter.save_depth() == 0);
+
+    // Exercise the deep overflow history path as well as the inline common
+    // path. Restoring every frame must recover the exact original value.
+    constexpr int deep_save_count = 40;
+    for (int i = 0; i < deep_save_count; ++i) {
+        painter.save();
+        painter.translate(0.25f, -0.125f);
+    }
+    for (int i = 0; i < deep_save_count; ++i) painter.restore();
+    NUI_CHECK(painter.save_depth() == 0);
+    NUI_CHECK(same(painter.current_transform(), before_manual, 0.0f));
+}
+
+void invalid_painter_mutations_are_atomic() {
+    auto surface = make_surface();
+    NUI_CHECK(surface != nullptr);
+    auto* canvas = surface->getCanvas();
+    NUI_CHECK(canvas != nullptr);
+    ui::Painter painter{*canvas};
+
+    painter.translate(8.0f, 6.0f);
+    painter.rotate(0.2f);
+
+    const auto check_noop = [&](auto&& mutation) {
+        const auto logical_before = painter.current_transform();
+        const auto backend_before = canvas->getLocalToDeviceAs3x3();
+        mutation();
+        NUI_CHECK(same(painter.current_transform(), logical_before, 0.0f));
+        NUI_CHECK(same_backend_affine(
+            canvas->getLocalToDeviceAs3x3(), backend_before));
+    };
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    check_noop([&] { painter.translate(nan, 0.0f); });
+    check_noop([&] { painter.translate(0.0f, inf); });
+    check_noop([&] { painter.scale(inf, 1.0f); });
+    check_noop([&] { painter.rotate(nan); });
+    check_noop([&] { painter.rotate((std::numeric_limits<float>::max)()); });
+    check_noop([&] {
+        painter.concat(ui::Transform2D{
+            1.0f, nan, 0.0f,
+            0.0f, 1.0f, 0.0f});
+    });
+
+    // A finite operation whose NativeUI composition overflows is also an exact
+    // no-op on both logical and backend state.
+    painter.save();
+    painter.scale(1.0e30f, 1.0f);
+    check_noop([&] { painter.scale(1.0e20f, 1.0f); });
+    painter.restore();
+
+    // Finite near-singular transforms remain drawable/tracked; only inverse()
+    // rejects them according to the shared T098 numerical contract.
+    painter.save();
+    painter.concat(ui::Transform2D{
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0e-9f, 0.0f});
+    NUI_CHECK(!painter.current_transform().inverse().has_value());
+    painter.restore();
+}
+
 void suite() {
     transform_value_contract();
     inverse_contract();
+    painter_tracking_contract();
+    invalid_painter_mutations_are_atomic();
 }
 
 } // namespace
