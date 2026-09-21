@@ -30,6 +30,58 @@ enum class TextureTileMode {
     Decal,  ///< Return transparent black outside the base period.
 };
 
+/// Filtering used inside one selected image level.
+enum class TextureFilter {
+    Nearest,
+    Linear,
+};
+
+/// Selection/interpolation policy for lower-resolution image levels.
+enum class TextureMipmap {
+    None,
+    Nearest,
+    Linear,
+};
+
+/// Small backend-neutral ImageTexture sampling description.
+///
+/// Mutation is value-only and never allocates, decodes Image data, generates
+/// mipmaps, creates backend resources, invokes callbacks, or touches a cache.
+class TextureSampling {
+public:
+    constexpr TextureSampling() noexcept = default;
+
+    constexpr TextureSampling& set_filter(TextureFilter filter) noexcept {
+        filter_ = filter;
+        return *this;
+    }
+
+    constexpr TextureSampling& set_mipmap(TextureMipmap mipmap) noexcept {
+        mipmap_ = mipmap;
+        return *this;
+    }
+
+    [[nodiscard]] constexpr TextureFilter filter() const noexcept {
+        return filter_;
+    }
+
+    [[nodiscard]] constexpr TextureMipmap mipmap() const noexcept {
+        return mipmap_;
+    }
+
+private:
+    TextureFilter filter_{TextureFilter::Linear};
+    TextureMipmap mipmap_{TextureMipmap::None};
+};
+
+static_assert(std::is_trivially_copyable_v<TextureSampling>);
+static_assert(noexcept(std::declval<TextureSampling&>().set_filter(
+    TextureFilter::Nearest)));
+static_assert(noexcept(std::declval<TextureSampling&>().set_mipmap(
+    TextureMipmap::Linear)));
+static_assert(noexcept(std::declval<const TextureSampling&>().filter()));
+static_assert(noexcept(std::declval<const TextureSampling&>().mipmap()));
+
 enum class ImageLoadError {
     None,
     NotFound,
@@ -93,11 +145,16 @@ private:
 /// paint time rather than silently substituting a different mapping.
 ///
 /// The destination rectangle defines one complete texture period. Tiling is
-/// independent per axis and defaults to Clamp/Clamp. Tile-mode mutation changes
-/// only this value description: it does not allocate, decode/copy Image data,
-/// create backend resources, invoke callbacks, or mutate process-global caches.
+/// independent per axis and defaults to Clamp/Clamp. Sampling defaults to Linear
+/// filtering with no mipmaps, preserving the T083 behavior. Tile/sampling
+/// mutation changes only this value description: it does not allocate,
+/// decode/copy Image data, generate mipmaps, create backend resources, invoke
+/// callbacks, or mutate process-global caches. Mipmap/backend materialization is
+/// renderer-owned and never stored by the public ImageTexture value.
+///
 /// ImageTexture itself is not a synchronization primitive; mutate an instance
-/// only from the owning UI/resource-preparation domain.
+/// only from the owning UI/resource-preparation domain. Texture materialization
+/// is not real-time-audio-safe.
 class ImageTexture {
 public:
     ImageTexture() = default;
@@ -125,7 +182,8 @@ public:
           source_(other.source_),
           destination_(other.destination_),
           tile_mode_x_(other.tile_mode_x_),
-          tile_mode_y_(other.tile_mode_y_) {
+          tile_mode_y_(other.tile_mode_y_),
+          sampling_(other.sampling_) {
         other.reset();
     }
 
@@ -139,6 +197,7 @@ public:
         destination_ = other.destination_;
         tile_mode_x_ = other.tile_mode_x_;
         tile_mode_y_ = other.tile_mode_y_;
+        sampling_ = other.sampling_;
         other.reset();
         return *this;
     }
@@ -164,6 +223,16 @@ public:
 
     [[nodiscard]] TextureTileMode tile_mode_y() const noexcept {
         return tile_mode_y_;
+    }
+
+    /// Change filtering/mipmap policy without touching shared Image/backend state.
+    ImageTexture& set_sampling(TextureSampling sampling) noexcept {
+        sampling_ = sampling;
+        return *this;
+    }
+
+    [[nodiscard]] TextureSampling sampling() const noexcept {
+        return sampling_;
     }
 
 private:
@@ -203,6 +272,7 @@ private:
         destination_ = {};
         tile_mode_x_ = TextureTileMode::Clamp;
         tile_mode_y_ = TextureTileMode::Clamp;
+        sampling_ = {};
     }
 
     Image image_;
@@ -210,6 +280,7 @@ private:
     Rect destination_{};
     TextureTileMode tile_mode_x_{TextureTileMode::Clamp};
     TextureTileMode tile_mode_y_{TextureTileMode::Clamp};
+    TextureSampling sampling_{};
 };
 
 static_assert(std::is_nothrow_copy_constructible_v<ImageTexture>);
@@ -221,6 +292,9 @@ static_assert(noexcept(std::declval<ImageTexture&>().set_tile_mode(
     TextureTileMode::Clamp, TextureTileMode::Clamp)));
 static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_x()));
 static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_y()));
+static_assert(noexcept(std::declval<ImageTexture&>().set_sampling(
+    TextureSampling{})));
+static_assert(noexcept(std::declval<const ImageTexture&>().sampling()));
 
 struct ImageLoadResult {
     Image image;
