@@ -360,6 +360,7 @@
                 InputEvent cancel{};
                 cancel.pointer.id = *pointer;
                 (void)cancel_pointer_capture(*active_platform_, cancel);
+                if (structural_epoch_ != teardown_epoch) break;
             }
 
             if (auto* focused = current_focus_node();
