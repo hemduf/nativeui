@@ -275,7 +275,9 @@ void suite() {
 
         bool threw = false;
         try {
-            (void)tree.cancel_pointer(platform);
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerCancel, 7U, 25.0f, 50.0f),
+                platform);
         } catch (const std::runtime_error&) {
             threw = true;
         }
