@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -121,6 +122,27 @@ ui::InputEvent pointer(ui::InputType type,
 }
 
 void suite() {
+    {
+        const ui::InputEvent legacy{};
+        NUI_CHECK(legacy.pointer.id == 0U);
+        NUI_CHECK(legacy.pointer.type == ui::PointerType::Unknown);
+        NUI_CHECK(!legacy.pointer.tracked());
+        NUI_CHECK(legacy.pointer.hover_capable());
+        NUI_CHECK(std::isnan(legacy.pointer.pressure));
+        NUI_CHECK(std::isnan(legacy.pointer.contact_size.w));
+        NUI_CHECK(std::isnan(legacy.pointer.contact_size.h));
+
+        ui::PointerContact touch_contact{};
+        touch_contact.id = 9U;
+        touch_contact.type = ui::PointerType::Touch;
+        NUI_CHECK(touch_contact.tracked());
+        NUI_CHECK(!touch_contact.hover_capable());
+
+        ui::PointerContact mouse_contact{};
+        mouse_contact.type = ui::PointerType::Mouse;
+        NUI_CHECK(mouse_contact.hover_capable());
+    }
+
     {
         auto left = std::make_shared<ContactState>();
         auto right = std::make_shared<ContactState>();
@@ -287,6 +309,43 @@ void suite() {
         (void)tree.dispatch(pointer(ui::InputType::PointerMove, 7U, 25.0f, 50.0f), platform);
         NUI_CHECK(right->move.size() == 1U && right->move.back() == 7U);
         (void)tree.dispatch(pointer(ui::InputType::PointerUp, 7U, 25.0f, 50.0f), platform);
+    }
+
+    // cancel_pointer() is a global teardown barrier: callbacks may re-enter,
+    // but they cannot publish a fresh capture that keeps the teardown loop
+    // alive. The barrier must also restore after a throwing cancellation.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 8U, 25.0f, 50.0f), platform);
+        left->on_cancel = [&] {
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 8U, 175.0f, 50.0f), platform);
+        };
+        left->throw_on_cancel = true;
+
+        bool threw = false;
+        try {
+            (void)tree.cancel_pointer(platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        left->on_cancel = {};
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 8U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->move.size() == 1U);
+        NUI_CHECK(right->move.empty());
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 9U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 9U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 9U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 9U, 25.0f, 50.0f), platform);
     }
 
     {
