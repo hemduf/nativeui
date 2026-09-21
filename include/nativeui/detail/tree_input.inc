@@ -15,6 +15,11 @@
         std::uint64_t dispatch_token{};
     };
 
+    struct PointerInteractionState {
+        PointerId pointer{};
+        std::uint64_t dispatch_token{};
+    };
+
     [[nodiscard]] std::size_t pointer_capture_index(PointerId pointer) const noexcept {
         for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
             if (pointer_captures_[i].pointer == pointer) return i;
@@ -528,7 +533,7 @@
     std::size_t pointer_capture_count_{};
     Node* pointer_hover_target_{};
     detail::OverlayService* overlay_service_{};
-    std::array<PointerId, kMaxTrackedPointers> active_pointer_interactions_{};
+    std::array<PointerInteractionState, kMaxTrackedPointers> active_pointer_interactions_{};
     std::size_t active_pointer_interaction_count_{};
     bool pointer_interaction_active_{};
     std::uint64_t next_input_dispatch_token_{1U};
