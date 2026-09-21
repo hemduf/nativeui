@@ -384,11 +384,19 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
 
     const SkSamplingOptions sampling{filter};
 
-    // A full selected image needs no T084 subrect-isolation picture. Keeping
-    // periodic/Decal level-0 sampling on the image shader also means enabling a
-    // mipmap policy cannot change magnified Linear output merely by switching
-    // backend materialization families; mip policy remains inactive at LOD 0.
-    if (is_full_source(source, *data) &&
+    // A full selected image needs no T084 subrect-isolation picture for
+    // Clamp/Repeat/Mirror. Keeping full-source periodic level-0 sampling on the
+    // image shader means enabling mipmaps cannot change magnified Linear output
+    // merely by switching backend materialization families.
+    //
+    // Decal remains on the T084 picture path even for a full image: that path
+    // owns the exact destination-bounded transparent domain, including mixed
+    // Decal/Clamp axes.
+    const bool uses_decal =
+        texture.tile_mode_x() == TextureTileMode::Decal ||
+        texture.tile_mode_y() == TextureTileMode::Decal;
+    if (!uses_decal &&
+        is_full_source(source, *data) &&
         (texture.tile_mode_x() != TextureTileMode::Clamp ||
          texture.tile_mode_y() != TextureTileMode::Clamp)) {
         return data->image->makeShader(
