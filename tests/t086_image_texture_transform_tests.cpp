@@ -242,6 +242,13 @@ void api_value_and_validity_contract() {
     NUI_CHECK(texture.tile_mode_x() == ui::TextureTileMode::Repeat);
     NUI_CHECK(texture.sampling().mipmap() == ui::TextureMipmap::Linear);
 
+    const ui::Transform2D negative_inf{
+        1.0f, 0.0f, -std::numeric_limits<float>::infinity(),
+        0.0f, 1.0f, 0.0f};
+    texture.set_transform(negative_inf);
+    NUI_CHECK(!texture.valid());
+    NUI_CHECK(same_transform(texture.transform(), negative_inf));
+
     texture.set_transform(ui::Transform2D::identity());
     NUI_CHECK(texture.valid());
 
@@ -249,6 +256,19 @@ void api_value_and_validity_contract() {
     copied.set_transform(transform);
     NUI_CHECK(same_transform(copied.transform(), transform));
     NUI_CHECK(same_transform(texture.transform(), ui::Transform2D::identity()));
+
+    ui::ImageTexture copy_assigned;
+    copy_assigned = copied;
+    NUI_CHECK(copy_assigned.valid());
+    NUI_CHECK(same_transform(copy_assigned.transform(), transform));
+
+    ui::ImageTexture move_assigned;
+    move_assigned = std::move(copy_assigned);
+    NUI_CHECK(move_assigned.valid());
+    NUI_CHECK(same_transform(move_assigned.transform(), transform));
+    NUI_CHECK(!copy_assigned.valid());
+    NUI_CHECK(same_transform(
+        copy_assigned.transform(), ui::Transform2D::identity()));
 
     ui::ImageTexture moved{std::move(copied)};
     NUI_CHECK(moved.valid());
@@ -265,6 +285,15 @@ void api_value_and_validity_contract() {
     invalid_base.set_transform(transform);
     NUI_CHECK(!invalid_base.valid());
     NUI_CHECK(same_transform(invalid_base.transform(), transform));
+
+    ui::ImageTexture first{
+        image, {0.0f, 0.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 16.0f, 16.0f}};
+    ui::ImageTexture second = first;
+    first.set_transform(ui::Transform2D::translation(3.0f, 4.0f));
+    second.set_transform(ui::Transform2D::scaling(2.0f, 3.0f));
+    NUI_CHECK(first.image() == second.image());
+    NUI_CHECK(first.transform().m02 == 3.0f && first.transform().m12 == 4.0f);
+    NUI_CHECK(second.transform().m00 == 2.0f && second.transform().m11 == 3.0f);
 }
 
 void transform_golden(const ui::Image& image,
