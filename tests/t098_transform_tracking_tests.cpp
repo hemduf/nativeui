@@ -63,6 +63,13 @@ void transform_value_contract() {
     const auto pa = non_commuting_a.map_point({3.0f, -2.0f});
     const auto pb = non_commuting_b.map_point({3.0f, -2.0f});
     NUI_CHECK(!near(pa.x, pb.x) || !near(pa.y, pb.y));
+
+    const ui::Transform2D shear_and_scale{
+        2.0f, 0.5f, 3.0f,
+        -0.25f, 4.0f, -2.0f};
+    const auto shear_mapped = shear_and_scale.map_point({2.0f, -3.0f});
+    NUI_CHECK(near(shear_mapped.x, 5.5f));
+    NUI_CHECK(near(shear_mapped.y, -14.5f));
 }
 
 void inverse_contract() {
@@ -84,10 +91,10 @@ void inverse_contract() {
         0.0f, 1.0f, 0.0f};
     NUI_CHECK(!non_finite.inverse().has_value());
 
-    NUI_CHECK(!ui::Transform2D{0.0f, 0.0f, 0.0f,
-                              0.0f, 0.0f, 0.0f}
-                   .inverse()
-                   .has_value());
+    const ui::Transform2D zero_linear{
+        0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f};
+    NUI_CHECK(!zero_linear.inverse().has_value());
 
     // Normalized determinant threshold: exactly 1e-8 is rejected.
     const auto at_threshold =
@@ -102,6 +109,10 @@ void inverse_contract() {
         ui::Transform2D{1.0f, 0.0f, 0.0f, 0.0f, -0.9e-8f, 0.0f};
     NUI_CHECK(!below_negative_threshold.inverse().has_value());
 
+    const auto at_negative_threshold =
+        ui::Transform2D{1.0f, 0.0f, 0.0f, 0.0f, -1.0e-8f, 0.0f};
+    NUI_CHECK(!at_negative_threshold.inverse().has_value());
+
     const auto above_negative_threshold =
         ui::Transform2D{1.0f, 0.0f, 0.0f, 0.0f, -1.1e-8f, 0.0f};
     NUI_CHECK(above_negative_threshold.inverse().has_value());
@@ -114,6 +125,13 @@ void inverse_contract() {
     const auto huge =
         ui::Transform2D{1.0e20f, 0.0f, 0.0f, 0.0f, 2.0e20f, 0.0f};
     NUI_CHECK(huge.inverse().has_value());
+
+    // A mathematically invertible matrix is still rejected when its public
+    // binary32 inverse translation cannot be represented finitely.
+    const auto unrepresentable_inverse =
+        ui::Transform2D{1.0e-20f, 0.0f, 1.0e20f,
+                        0.0f, 1.0e-20f, -1.0e20f};
+    NUI_CHECK(!unrepresentable_inverse.inverse().has_value());
 }
 
 void suite() {
