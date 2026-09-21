@@ -77,7 +77,7 @@
     }
 
     void set_pointer_capture(Node& node, PointerId pointer) noexcept {
-        if (dynamic_teardown_quarantines(&node)) return;
+        if (pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) return;
         const auto index = pointer_capture_index(pointer);
         if (index != pointer_capture_count_) {
             auto& capture = pointer_captures_[index];
@@ -503,6 +503,9 @@
     }
 
     [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
+        const bool previous_barrier = pointer_capture_barrier_;
+        pointer_capture_barrier_ = true;
+
         EventResult result = EventResult::Ignored;
         std::exception_ptr first_error;
         while (const auto pointer = first_pointer_capture_id()) {
@@ -515,7 +518,9 @@
                 if (!first_error) first_error = std::current_exception();
             }
         }
+
         clear_pointer_interactions();
+        pointer_capture_barrier_ = previous_barrier;
         if (first_error) std::rethrow_exception(first_error);
         return result;
     }
@@ -538,6 +543,7 @@
     bool pointer_interaction_active_{};
     std::uint64_t next_input_dispatch_token_{1U};
     std::uint64_t active_input_dispatch_token_{};
+    bool pointer_capture_barrier_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};
