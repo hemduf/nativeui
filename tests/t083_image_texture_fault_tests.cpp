@@ -292,10 +292,14 @@ void nonrepresentable_mapping_fails_visibly_and_recovers() {
     const float min_normal = std::numeric_limits<float>::min();
     const float huge_origin = std::numeric_limits<float>::max() * 0.5f;
     const std::array<ui::ImageTexture, 2> mappings{
+        // Finite logical inputs whose scale overflows float.
         ui::ImageTexture{
             image,
             {0.0f, 0.0f, min_normal, 1.0f},
             {0.0f, 0.0f, 8.0f, 8.0f}},
+        // Finite positive destination dimensions whose x + width rounds back to
+        // x at this magnitude, producing a finite but non-invertible backend
+        // matrix. The logical value remains valid and must fail visibly at paint.
         ui::ImageTexture{
             image,
             {0.0f, 0.0f, 1.0f, 1.0f},
@@ -349,7 +353,9 @@ void decode_materialization_and_failure_recovery() {
     check(!ui::detail::image_backing_is_lazy_for_test(image),
           "Image::decode published a lazy backing that can decode during paint");
 
-    ui::ImageTexture mip_texture{image, {0.0f, 0.0f, 1.0f, 1.0f}};
+    // Keep the legacy 8x8 recovery geometry while enabling mip materialization.
+    // This isolates the new no-redecode assertion from the existing pixel oracle.
+    ui::ImageTexture mip_texture{image, {0.0f, 0.0f, 8.0f, 8.0f}};
     ui::TextureSampling mip_sampling;
     mip_sampling.set_filter(ui::TextureFilter::Linear)
         .set_mipmap(ui::TextureMipmap::Linear);
