@@ -44,6 +44,7 @@ namespace detail {
 
 struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
+struct PainterTransformHistoryFaultAccess;
 struct ShaderBrushSnapshot;
 
 [[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
@@ -97,6 +98,7 @@ class Painter {
 
     friend struct detail::PainterLayerFaultAccess;
     friend struct detail::PainterEffectFaultAccess;
+    friend struct detail::PainterTransformHistoryFaultAccess;
 
 public:
     class StateGuard {
@@ -360,11 +362,13 @@ public:
     void scale(float uniform) { scale(uniform, uniform); }
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
-        constexpr float rad_to_deg = 180.0f / kPi;
-        const float degrees = radians * rad_to_deg;
-        if (!std::isfinite(degrees)) return;
         const Transform2D operation = Transform2D::rotation(radians);
-        apply_logical_transform(operation, [&] { canvas_.rotate(degrees); });
+        apply_logical_transform(operation, [&] {
+            canvas_.concat(SkMatrix::MakeAll(
+                operation.m00, operation.m01, operation.m02,
+                operation.m10, operation.m11, operation.m12,
+                0.0f, 0.0f, 1.0f));
+        });
     }
     void concat(const Transform2D& transform) {
         apply_logical_transform(transform, [&] {
@@ -569,6 +573,10 @@ private:
         // Deep nesting is rare. The ordinary path above is allocation-free;
         // if this fallback needs to grow, allocation completes before the
         // backend save so failure cannot desynchronize the two stacks.
+        if (fail_transform_history_overflow_) {
+            fail_transform_history_overflow_ = false;
+            throw std::bad_alloc{};
+        }
         transform_history_overflow_.push_back(current_transform_);
     }
 
@@ -1041,6 +1049,7 @@ private:
     int save_depth_{};
     int restore_floor_{};
     LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};
+    bool fail_transform_history_overflow_{};
 };
 
 class PlatformServices {

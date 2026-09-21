@@ -6,6 +6,21 @@
 
 namespace {
 
+[[nodiscard]] bool near(float a, float b, float epsilon = 1.0e-4f) noexcept {
+    return std::abs(a - b) <= epsilon;
+}
+
+[[nodiscard]] bool same_transform(const ui::Transform2D& a,
+                                  const ui::Transform2D& b,
+                                  float epsilon = 1.0e-4f) noexcept {
+    return near(a.m00, b.m00, epsilon) &&
+           near(a.m01, b.m01, epsilon) &&
+           near(a.m02, b.m02, epsilon) &&
+           near(a.m10, b.m10, epsilon) &&
+           near(a.m11, b.m11, epsilon) &&
+           near(a.m12, b.m12, epsilon);
+}
+
 class TransformTrackingDemoComponent final : public ui::Component {
 public:
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
@@ -16,6 +31,7 @@ public:
         auto& painter = context.painter();
         painter.fill_rounded_rect(context.bounds(), 12.0f, ui::colors::panel);
 
+        const auto entry_transform = painter.current_transform();
         {
             auto state = painter.scoped_state();
             painter.translate(92.0f, 78.0f);
@@ -23,9 +39,12 @@ public:
             painter.scale(1.3f, 0.8f);
 
             const auto tracked = painter.current_transform();
-            const auto origin = tracked.map_point({0.0f, 0.0f});
-            const bool tracker_ok = std::abs(origin.x - 92.0f) < 1.0e-4f &&
-                                    std::abs(origin.y - 78.0f) < 1.0e-4f &&
+            const auto expected =
+                entry_transform *
+                ui::Transform2D::translation(92.0f, 78.0f) *
+                ui::Transform2D::rotation(0.24f) *
+                ui::Transform2D::scaling(1.3f, 0.8f);
+            const bool tracker_ok = same_transform(tracked, expected) &&
                                     tracked.inverse().has_value();
 
             painter.fill_rounded_rect(
@@ -34,12 +53,10 @@ public:
                 tracker_ok ? ui::colors::accent : ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
         }
 
-        // Leaving the scope must restore exact logical identity for the next
-        // independent draw.
-        const auto restored = painter.current_transform();
-        const auto restored_origin = restored.map_point({0.0f, 0.0f});
-        const bool restored_ok = std::abs(restored_origin.x) < 1.0e-6f &&
-                                 std::abs(restored_origin.y) < 1.0e-6f;
+        // Leaving the scope restores the exact transform that was active when
+        // this component entered, including any parent/component transform.
+        const bool restored_ok = same_transform(
+            painter.current_transform(), entry_transform, 1.0e-6f);
         painter.fill_rounded_rect(
             {250.0f, 58.0f, 64.0f, 40.0f},
             8.0f,
@@ -81,7 +98,7 @@ int main(int argc, char** argv) {
             return example::fail("tracked transformed shape did not render at scene origin");
         }
         if (!accent_like(renderer.pixel(282, 78))) {
-            return example::fail("scope restore did not recover logical identity");
+            return example::fail("scope restore did not recover entry transform");
         }
         return 0;
     }
