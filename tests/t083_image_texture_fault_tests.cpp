@@ -239,10 +239,25 @@ void value_operations_allocate_nothing() {
             sample.set_filter(filter).set_mipmap(mipmap);
             returned = &texture.set_sampling(sample);
             const auto roundtrip = texture.sampling();
+
+            const ui::Transform2D transform{
+                1.0f, (i & 8) == 0 ? 0.125f : -0.125f,
+                static_cast<float>(i & 3),
+                0.0f, 1.0f, static_cast<float>((i >> 2) & 3)};
+            returned = &texture.set_transform(transform);
+            const auto transform_roundtrip = texture.transform();
+
             state_ok = state_ok &&
                 returned == &texture &&
                 roundtrip.filter() == filter &&
-                roundtrip.mipmap() == mipmap;
+                roundtrip.mipmap() == mipmap &&
+                transform_roundtrip.m00 == transform.m00 &&
+                transform_roundtrip.m01 == transform.m01 &&
+                transform_roundtrip.m02 == transform.m02 &&
+                transform_roundtrip.m10 == transform.m10 &&
+                transform_roundtrip.m11 == transform.m11 &&
+                transform_roundtrip.m12 == transform.m12 &&
+                texture.valid();
         }
 
         ui::ImageTexture copied_texture{texture};
@@ -266,14 +281,30 @@ void value_operations_allocate_nothing() {
             moved_texture.tile_mode_y() == texture.tile_mode_y() &&
             moved_texture.sampling().filter() == texture.sampling().filter() &&
             moved_texture.sampling().mipmap() == texture.sampling().mipmap() &&
+            moved_texture.transform().m01 == texture.transform().m01 &&
+            moved_texture.transform().m02 == texture.transform().m02 &&
             move_assigned_texture.tile_mode_x() == texture.tile_mode_x() &&
             move_assigned_texture.tile_mode_y() == texture.tile_mode_y() &&
             move_assigned_texture.sampling().filter() == texture.sampling().filter() &&
-            move_assigned_texture.sampling().mipmap() == texture.sampling().mipmap();
+            move_assigned_texture.sampling().mipmap() == texture.sampling().mipmap() &&
+            move_assigned_texture.transform().m01 == texture.transform().m01 &&
+            move_assigned_texture.transform().m12 == texture.transform().m12;
+
+        ui::ImageTexture invalid_transform_texture = texture;
+        invalid_transform_texture.set_transform(ui::Transform2D{
+            1.0f, 0.0f, std::numeric_limits<float>::infinity(),
+            0.0f, 1.0f, 0.0f});
+        ui::Brush invalid_transform_brush{invalid_transform_texture};
+        state_ok = state_ok &&
+            !invalid_transform_texture.valid() &&
+            invalid_transform_texture.image() == image &&
+            invalid_transform_texture.transform().m02 ==
+                std::numeric_limits<float>::infinity();
 
         (void)moved_brush;
         (void)move_assigned_brush;
         (void)invalid;
+        (void)invalid_transform_brush;
     }
     check(state_ok, "ImageTexture value state was not stable");
     check(allocation_probe::allocation_count == before,
@@ -360,6 +391,10 @@ void decode_materialization_and_failure_recovery() {
     mip_sampling.set_filter(ui::TextureFilter::Linear)
         .set_mipmap(ui::TextureMipmap::Linear);
     mip_texture.set_sampling(mip_sampling);
+    mip_texture.set_transform(
+        ui::Transform2D::translation(1.0f, 0.0f) *
+        ui::Transform2D::scaling(0.75f, 1.0f));
+    check(mip_texture.valid(), "valid transformed mip texture became invalid");
     const ui::Brush brush{mip_texture};
 
     const auto info = SkImageInfo::MakeN32Premul(8, 8);
@@ -380,11 +415,23 @@ void decode_materialization_and_failure_recovery() {
           "pre-T097 draws did not materialize independently");
 
     const ui::Brush invalid{ui::ImageTexture{}};
+
+    ui::ImageTexture invalid_transform_texture{
+        image, {0.0f, 0.0f, 8.0f, 8.0f}};
+    invalid_transform_texture.set_transform(ui::Transform2D{
+        1.0f, 0.0f, std::numeric_limits<float>::infinity(),
+        0.0f, 1.0f, 0.0f});
+    check(!invalid_transform_texture.valid(),
+          "non-finite transformed texture remained valid");
+    const ui::Brush invalid_transform{invalid_transform_texture};
+
     const auto invalid_before =
         ui::detail::image_texture_materialization_call_count_for_test();
     {
         ui::Painter painter{*canvas};
         painter.fill_rounded_rect({0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, invalid);
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, invalid_transform);
     }
     check(ui::detail::image_texture_materialization_call_count_for_test() ==
               invalid_before,
