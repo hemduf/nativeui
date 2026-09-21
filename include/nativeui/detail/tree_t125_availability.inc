@@ -73,7 +73,10 @@
                     InputEvent cancel{};
                     cancel.pointer.id = *pointer;
                     (void)cancel_pointer_capture(platform, cancel);
+                    if (availability_structure_dirty_) break;
                 }
+
+                if (availability_structure_dirty_) continue;
 
                 if (pointer_hover_target_ &&
                     !pending_availability_for(pending, pointer_hover_target_).interactive()) {
