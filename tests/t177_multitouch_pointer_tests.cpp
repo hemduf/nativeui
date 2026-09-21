@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -11,6 +12,9 @@ struct ContactState {
     std::vector<ui::PointerId> move;
     std::vector<ui::PointerId> up;
     std::vector<ui::PointerId> cancel;
+    std::function<void()> on_up;
+    std::function<void()> on_cancel;
+    bool throw_on_up{};
     bool throw_on_cancel{};
 };
 
@@ -32,9 +36,15 @@ public:
             return ui::EventResult::Handled;
         case ui::InputType::PointerUp:
             state_->up.push_back(event.pointer.id);
+            if (state_->on_up) state_->on_up();
+            if (state_->throw_on_up) {
+                state_->throw_on_up = false;
+                throw std::runtime_error("contact up fault");
+            }
             return ui::EventResult::Handled;
         case ui::InputType::PointerCancel:
             state_->cancel.push_back(event.pointer.id);
+            if (state_->on_cancel) state_->on_cancel();
             if (state_->throw_on_cancel) {
                 state_->throw_on_cancel = false;
                 throw std::runtime_error("contact cancel fault");
@@ -185,6 +195,96 @@ void suite() {
         (void)tree.dispatch(pointer(ui::InputType::PointerMove, 4U, 25.0f, 50.0f), platform);
         NUI_CHECK(right->move.size() == 1U && right->move.back() == 4U);
         (void)tree.dispatch(pointer(ui::InputType::PointerUp, 4U, 25.0f, 50.0f), platform);
+    }
+
+    // A terminal callback may synchronously start a newer interaction that
+    // reuses the same platform pointer ID. Cleanup for the older PointerUp must
+    // only retire the capture/interaction it observed on entry.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 5U, 25.0f, 50.0f), platform);
+        left->on_up = [&] {
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 5U, 175.0f, 50.0f), platform);
+        };
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 5U, 25.0f, 50.0f), platform);
+        left->on_up = {};
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 5U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 5U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 5U, 25.0f, 50.0f), platform);
+    }
+
+    // The same newer interaction must survive when the older PointerUp throws
+    // after recursively starting it.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 6U, 25.0f, 50.0f), platform);
+        left->on_up = [&] {
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 6U, 175.0f, 50.0f), platform);
+        };
+        left->throw_on_up = true;
+
+        bool threw = false;
+        try {
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerUp, 6U, 25.0f, 50.0f), platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        left->on_up = {};
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 6U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 6U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 6U, 25.0f, 50.0f), platform);
+    }
+
+    // Cancellation uses the same token-matched cleanup. A nested Down with the
+    // same stable ID remains authoritative even if the older cancel then throws.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 7U, 25.0f, 50.0f), platform);
+        bool reenter_once = true;
+        left->on_cancel = [&] {
+            if (!reenter_once) return;
+            reenter_once = false;
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 7U, 175.0f, 50.0f), platform);
+            left->throw_on_cancel = true;
+        };
+
+        bool threw = false;
+        try {
+            (void)tree.cancel_pointer(platform);
+        } catch (const std::runtime_error&) {
+            threw = true;
+        }
+        NUI_CHECK(threw);
+        left->on_cancel = {};
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 7U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 7U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 7U, 25.0f, 50.0f), platform);
     }
 
     {
