@@ -209,7 +209,7 @@ void value_operations_allocate_nothing() {
     const auto materialization_before =
         ui::detail::image_texture_materialization_call_count_for_test();
     const auto before = allocation_probe::allocation_count;
-    bool modes_ok = true;
+    bool state_ok = true;
     {
         allocation_probe::ScopedFailure fail;
 
@@ -222,10 +222,27 @@ void value_operations_allocate_nothing() {
                 ? ui::TextureTileMode::Decal
                 : ui::TextureTileMode::Clamp;
             auto* returned = &texture.set_tile_mode(x, y);
-            modes_ok = modes_ok &&
+            state_ok = state_ok &&
                 returned == &texture &&
                 texture.tile_mode_x() == x &&
                 texture.tile_mode_y() == y;
+
+            ui::TextureSampling sample;
+            const auto filter = (i & 4) == 0
+                ? ui::TextureFilter::Nearest
+                : ui::TextureFilter::Linear;
+            const auto mipmap = (i % 3) == 0
+                ? ui::TextureMipmap::None
+                : ((i % 3) == 1
+                    ? ui::TextureMipmap::Nearest
+                    : ui::TextureMipmap::Linear);
+            sample.set_filter(filter).set_mipmap(mipmap);
+            returned = &texture.set_sampling(sample);
+            const auto roundtrip = texture.sampling();
+            state_ok = state_ok &&
+                returned == &texture &&
+                roundtrip.filter() == filter &&
+                roundtrip.mipmap() == mipmap;
         }
 
         ui::ImageTexture copied_texture{texture};
@@ -244,24 +261,28 @@ void value_operations_allocate_nothing() {
         move_assigned_brush = std::move(copy_assigned_brush);
         ui::Brush invalid{ui::ImageTexture{}};
 
-        modes_ok = modes_ok &&
+        state_ok = state_ok &&
             moved_texture.tile_mode_x() == texture.tile_mode_x() &&
             moved_texture.tile_mode_y() == texture.tile_mode_y() &&
+            moved_texture.sampling().filter() == texture.sampling().filter() &&
+            moved_texture.sampling().mipmap() == texture.sampling().mipmap() &&
             move_assigned_texture.tile_mode_x() == texture.tile_mode_x() &&
-            move_assigned_texture.tile_mode_y() == texture.tile_mode_y();
+            move_assigned_texture.tile_mode_y() == texture.tile_mode_y() &&
+            move_assigned_texture.sampling().filter() == texture.sampling().filter() &&
+            move_assigned_texture.sampling().mipmap() == texture.sampling().mipmap();
 
         (void)moved_brush;
         (void)move_assigned_brush;
         (void)invalid;
     }
-    check(modes_ok, "ImageTexture tile-mode value state was not stable");
+    check(state_ok, "ImageTexture value state was not stable");
     check(allocation_probe::allocation_count == before,
           "ImageTexture/Brush value operation allocated");
     check(ui::detail::image_decode_call_count_for_test() == decode_before,
-          "ImageTexture tile-mode mutation decoded image data");
+          "ImageTexture value mutation decoded image data");
     check(ui::detail::image_texture_materialization_call_count_for_test() ==
               materialization_before,
-          "ImageTexture tile-mode mutation materialized backend resources");
+          "ImageTexture value mutation materialized backend resources");
 }
 
 void nonrepresentable_mapping_fails_visibly_and_recovers() {
@@ -332,8 +353,14 @@ void decode_materialization_and_failure_recovery() {
     check(!ui::detail::image_backing_is_lazy_for_test(image),
           "Image::decode published a lazy backing that can decode during paint");
 
-    const ui::Brush brush{
-        ui::ImageTexture{image, {0.0f, 0.0f, 8.0f, 8.0f}}};
+    // Keep the legacy 8x8 recovery geometry while enabling mip materialization.
+    // This isolates the new no-redecode assertion from the existing pixel oracle.
+    ui::ImageTexture mip_texture{image, {0.0f, 0.0f, 8.0f, 8.0f}};
+    ui::TextureSampling mip_sampling;
+    mip_sampling.set_filter(ui::TextureFilter::Linear)
+        .set_mipmap(ui::TextureMipmap::Linear);
+    mip_texture.set_sampling(mip_sampling);
+    const ui::Brush brush{mip_texture};
 
     const auto info = SkImageInfo::MakeN32Premul(8, 8);
     auto surface = SkSurfaces::Raster(info);
@@ -363,7 +390,7 @@ void decode_materialization_and_failure_recovery() {
               invalid_before,
           "invalid ImageTexture Brush attempted backend materialization");
     check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
-          "painting unexpectedly called Image::decode");
+          "mipmapped painting unexpectedly called Image::decode");
 
     canvas->clear(SK_ColorBLACK);
     ui::detail::set_image_texture_materialization_failure_for_test(
@@ -411,7 +438,7 @@ void decode_materialization_and_failure_recovery() {
     check(red(pixel(surface, 1, 1)),
           "normal image paint did not recover after null materialization");
     check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
-          "failure recovery unexpectedly re-decoded image bytes");
+          "mipmapped failure recovery unexpectedly re-decoded image bytes");
 }
 
 } // namespace
