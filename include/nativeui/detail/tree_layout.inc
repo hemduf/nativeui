@@ -221,7 +221,10 @@
                 InputEvent cancel{};
                 cancel.pointer.id = *pointer;
                 (void)cancel_pointer_capture(platform, cancel);
+                if (availability_structure_dirty_) break;
             }
+
+            if (availability_structure_dirty_) continue;
 
             // A hover route whose target becomes Hidden/Collapsed/Disabled is no
             // longer an eligible interaction. Retained hover presentation must
