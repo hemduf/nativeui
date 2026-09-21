@@ -4,141 +4,13 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <exception>
-#include <limits>
 #include <memory>
-#include <new>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-namespace allocation_probe {
-
-std::size_t allocation_count = 0;
-
-[[nodiscard]] void* allocate_unaligned(std::size_t size) noexcept {
-    return std::malloc(size == 0 ? 1U : size);
-}
-
-[[nodiscard]] void* allocate_aligned(std::size_t size,
-                                     std::size_t alignment) noexcept {
-    if (alignment == 0 || (alignment & (alignment - 1U)) != 0U) return nullptr;
-
-    constexpr std::size_t pointer_bytes = sizeof(void*);
-    const auto max_size = (std::numeric_limits<std::size_t>::max)();
-    if (alignment - 1U > max_size - pointer_bytes) return nullptr;
-    const std::size_t overhead = pointer_bytes + alignment - 1U;
-    const std::size_t payload_size = size == 0 ? 1U : size;
-    if (payload_size > max_size - overhead) return nullptr;
-
-    void* raw = std::malloc(payload_size + overhead);
-    if (!raw) return nullptr;
-    const auto raw_address = reinterpret_cast<std::uintptr_t>(raw);
-    const auto candidate = raw_address + pointer_bytes;
-    const auto aligned_address =
-        (candidate + alignment - 1U) &
-        ~static_cast<std::uintptr_t>(alignment - 1U);
-    auto* aligned = reinterpret_cast<std::byte*>(aligned_address);
-    std::memcpy(aligned - pointer_bytes, &raw, pointer_bytes);
-    return aligned;
-}
-
-void deallocate_aligned(void* pointer) noexcept {
-    if (!pointer) return;
-    void* raw = nullptr;
-    auto* aligned = static_cast<std::byte*>(pointer);
-    std::memcpy(&raw, aligned - sizeof(void*), sizeof(raw));
-    std::free(raw);
-}
-
-} // namespace allocation_probe
-
-void* operator new(std::size_t size) {
-    ++allocation_probe::allocation_count;
-    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
-    throw std::bad_alloc{};
-}
-
-void* operator new[](std::size_t size) {
-    ++allocation_probe::allocation_count;
-    if (void* pointer = allocation_probe::allocate_unaligned(size)) return pointer;
-    throw std::bad_alloc{};
-}
-
-void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
-    ++allocation_probe::allocation_count;
-    return allocation_probe::allocate_unaligned(size);
-}
-
-void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
-    ++allocation_probe::allocation_count;
-    return allocation_probe::allocate_unaligned(size);
-}
-
-void operator delete(void* pointer) noexcept { std::free(pointer); }
-void operator delete[](void* pointer) noexcept { std::free(pointer); }
-void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); }
-void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
-void operator delete(void* pointer, const std::nothrow_t&) noexcept { std::free(pointer); }
-void operator delete[](void* pointer, const std::nothrow_t&) noexcept { std::free(pointer); }
-
-void* operator new(std::size_t size, std::align_val_t alignment) {
-    ++allocation_probe::allocation_count;
-    if (void* pointer = allocation_probe::allocate_aligned(
-            size, static_cast<std::size_t>(alignment))) {
-        return pointer;
-    }
-    throw std::bad_alloc{};
-}
-
-void* operator new[](std::size_t size, std::align_val_t alignment) {
-    ++allocation_probe::allocation_count;
-    if (void* pointer = allocation_probe::allocate_aligned(
-            size, static_cast<std::size_t>(alignment))) {
-        return pointer;
-    }
-    throw std::bad_alloc{};
-}
-
-void* operator new(std::size_t size,
-                   std::align_val_t alignment,
-                   const std::nothrow_t&) noexcept {
-    ++allocation_probe::allocation_count;
-    return allocation_probe::allocate_aligned(
-        size, static_cast<std::size_t>(alignment));
-}
-
-void* operator new[](std::size_t size,
-                     std::align_val_t alignment,
-                     const std::nothrow_t&) noexcept {
-    ++allocation_probe::allocation_count;
-    return allocation_probe::allocate_aligned(
-        size, static_cast<std::size_t>(alignment));
-}
-
-void operator delete(void* pointer, std::align_val_t) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
-void operator delete[](void* pointer, std::align_val_t) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
-void operator delete(void* pointer, std::size_t, std::align_val_t) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
-void operator delete[](void* pointer, std::size_t, std::align_val_t) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
-void operator delete(void* pointer, std::align_val_t, const std::nothrow_t&) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
-void operator delete[](void* pointer, std::align_val_t, const std::nothrow_t&) noexcept {
-    allocation_probe::deallocate_aligned(pointer);
-}
 
 namespace {
 
@@ -350,9 +222,8 @@ int self_test() {
         return example::fail("T085 ImageTexture defaults changed T083 behavior");
     }
 
-    // Mutation is a pure value operation: repeat it under a process-wide
-    // allocation counter after decode and before any render/backend work.
-    const auto allocations_before = allocation_probe::allocation_count;
+    // Repeated mutation must preserve a stable backend-neutral value. Heap,
+    // decode and backend-materialization guards live in the dedicated fault test.
     for (int i = 0; i < 1024; ++i) {
         const auto filter = (i & 1) == 0
             ? ui::TextureFilter::Nearest
@@ -367,9 +238,6 @@ int self_test() {
         if (roundtrip.filter() != filter || roundtrip.mipmap() != mipmap) {
             return example::fail("T085 sampling roundtrip changed value state");
         }
-    }
-    if (allocation_probe::allocation_count != allocations_before) {
-        return example::fail("T085 sampling value mutation allocated heap memory");
     }
 
     // Two texture values sharing one immutable Image must keep independent
@@ -392,7 +260,7 @@ int self_test() {
         image, {0.0f, 0.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 32.0f, 32.0f}};
     nearest_texture.set_sampling(
         sampling(ui::TextureFilter::Nearest, ui::TextureMipmap::None));
-    auto nearest_pixels = render_texture(nearest_texture, 32, 32);
+    const auto nearest_pixels = render_texture(nearest_texture, 32, 32);
     if (nearest_pixels.pixels.empty() ||
         !red(nearest_pixels.at(4, 4)) || !green(nearest_pixels.at(27, 4))) {
         return example::fail("T085 nearest magnification samples are incorrect");
@@ -404,6 +272,26 @@ int self_test() {
     const auto linear_pixels = render_texture(linear_texture, 32, 32);
     if (linear_pixels.pixels.empty() || !pixels_differ(nearest_pixels, linear_pixels)) {
         return example::fail("T085 nearest and linear magnification are indistinguishable");
+    }
+
+    constexpr std::array<ui::TextureFilter, 2> filters{
+        ui::TextureFilter::Nearest,
+        ui::TextureFilter::Linear,
+    };
+    for (const auto filter : filters) {
+        ui::ImageTexture base{
+            image, {0.0f, 0.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 32.0f, 32.0f}};
+        base.set_sampling(sampling(filter, ui::TextureMipmap::None));
+        const auto no_mip = render_texture(base, 32, 32);
+        base.set_sampling(sampling(filter, ui::TextureMipmap::Nearest));
+        const auto nearest_mip = render_texture(base, 32, 32);
+        base.set_sampling(sampling(filter, ui::TextureMipmap::Linear));
+        const auto linear_mip = render_texture(base, 32, 32);
+        if (no_mip.pixels.empty() || nearest_mip.pixels.empty() ||
+            linear_mip.pixels.empty() || pixels_differ(no_mip, nearest_mip) ||
+            pixels_differ(no_mip, linear_mip)) {
+            return example::fail("T085 magnification did not stay on mip level 0");
+        }
     }
 
     // Mipmap policy: controlled non-integral minification must exercise base
@@ -441,10 +329,6 @@ int self_test() {
         ui::TextureTileMode::Repeat,
         ui::TextureTileMode::Mirror,
         ui::TextureTileMode::Decal,
-    };
-    constexpr std::array<ui::TextureFilter, 2> filters{
-        ui::TextureFilter::Nearest,
-        ui::TextureFilter::Linear,
     };
     constexpr std::array<ui::TextureMipmap, 2> mipmaps{
         ui::TextureMipmap::Nearest,
