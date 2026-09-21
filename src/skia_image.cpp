@@ -252,11 +252,23 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     auto picture = recorder.finishRecordingAsPicture();
     if (!picture) return {};
 
+    // SkPictureShader rasterizes tileRect into an intermediate tile image whose
+    // coordinate origin is (0, 0), even when tileRect itself has a non-zero
+    // source origin. Map that tile-local rectangle to the public destination;
+    // mapping the original subset here would leak its source offset into Decal
+    // and periodic boundary decisions.
+    const auto tile_local_matrix = SkMatrix::Rect2Rect(
+        SkRect::MakeWH(subset.width(), subset.height()), destination_rect);
+    if (!tile_local_matrix || !tile_local_matrix->isFinite() ||
+        !tile_local_matrix->invert().has_value()) {
+        return {};
+    }
+
     return picture->makeShader(
         backend_tile_mode(texture.tile_mode_x()),
         backend_tile_mode(texture.tile_mode_y()),
         SkFilterMode::kLinear,
-        &*local_matrix,
+        &*tile_local_matrix,
         &subset);
 }
 
