@@ -235,7 +235,12 @@ public:
         return *this;
     }
 
-    Brush(Brush&& other) noexcept : value_(std::move(other.value_)) {
+    Brush(Brush&& other) noexcept : value_(transparent()) {
+        // Construct the variant in a known active alternative before moving the
+        // payload. Besides preserving the zero-allocation move contract, this
+        // avoids GCC's false-positive maybe-uninitialized diagnostic when a
+        // Brush is moved into a closure at -O3/-Werror.
+        value_ = std::move(other.value_);
         other.reset_to_transparent();
     }
 
