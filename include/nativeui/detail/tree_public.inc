@@ -75,7 +75,6 @@
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
-        mark_paint_culling_dirty();
         auto transaction = begin_layout_publication(viewport);
         try {
             layout_node(*root_, viewport_rect());
