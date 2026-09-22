@@ -154,6 +154,14 @@ void reset(const std::shared_ptr<PaintProbeState>& state) {
     state->paints = 0;
 }
 
+void paint_region(ui::Tree& tree,
+                  SkCanvas& canvas,
+                  test::MockPlatform& platform,
+                  ui::Rect region) {
+    ui::Painter painter{canvas};
+    tree.paint_region(painter, platform, region);
+}
+
 void full_and_selective_order_contract() {
     std::vector<int> order;
     auto root = std::make_shared<PaintProbeState>();
@@ -184,14 +192,14 @@ void full_and_selective_order_contract() {
     reset(root);
     reset(left);
     reset(right);
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 200.0f, 100.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 200.0f, 100.0f});
     NUI_CHECK((order == std::vector<int>{0, 1, 2}));
 
     order.clear();
     reset(root);
     reset(left);
     reset(right);
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 80.0f, 100.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 80.0f, 100.0f});
     NUI_CHECK((order == std::vector<int>{0, 1}));
     NUI_CHECK(right->paints == 0);
 }
@@ -215,22 +223,23 @@ void invalid_region_falls_back_conservatively() {
     tree.paint(canvas, platform);
 
     order.clear();
-    tree.paint_region(
+    paint_region(
+        tree,
         canvas,
         platform,
         {std::numeric_limits<float>::quiet_NaN(), 0.0f, 10.0f, 10.0f});
     NUI_CHECK((order == std::vector<int>{0, 1}));
 
     order.clear();
-    tree.paint_region(canvas, platform, {10.0f, 10.0f, -1.0f, 10.0f});
+    paint_region(tree, canvas, platform, {10.0f, 10.0f, -1.0f, 10.0f});
     NUI_CHECK((order == std::vector<int>{0, 1}));
 
     order.clear();
-    tree.paint_region(canvas, platform, {10.0f, 10.0f, 0.0f, 10.0f});
+    paint_region(tree, canvas, platform, {10.0f, 10.0f, 0.0f, 10.0f});
     NUI_CHECK(order.empty());
 
     order.clear();
-    tree.paint_region(canvas, platform, {200.0f, 200.0f, 10.0f, 10.0f});
+    paint_region(tree, canvas, platform, {200.0f, 200.0f, 10.0f, 10.0f});
     NUI_CHECK(order.empty());
 }
 
@@ -253,7 +262,7 @@ void descendant_outside_parent_bounds_contract() {
     reset(parent);
     reset(child);
 
-    tree.paint_region(canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
+    paint_region(tree, canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
     NUI_CHECK(parent->paints == 0);
     NUI_CHECK(child->paints == 1);
 
@@ -273,7 +282,7 @@ void descendant_outside_parent_bounds_contract() {
     reset(clipped_parent);
     reset(clipped_child);
 
-    clipped_tree.paint_region(canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
+    clipped_paint_region(tree, canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
     NUI_CHECK(clipped_parent->paints == 0);
     NUI_CHECK(clipped_child->paints == 0);
 }
@@ -292,19 +301,19 @@ void visual_outset_publication_contract() {
     tree.paint(canvas, platform);
 
     reset(child);
-    tree.paint_region(canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
+    paint_region(tree, canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
     NUI_CHECK(child->paints == 0);
 
     child->outset.left = 30.0f;
     child->invalidate_paint();
     reset(child);
-    tree.paint_region(canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
+    paint_region(tree, canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
     NUI_CHECK(child->paints == 1);
 
     child->outset.left = 0.0f;
     child->invalidate_paint();
     reset(child);
-    tree.paint_region(canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
+    paint_region(tree, canvas, platform, {75.0f, 20.0f, 10.0f, 20.0f});
     NUI_CHECK(child->paints == 0);
 }
 
@@ -326,13 +335,13 @@ void availability_republishes_visual_bounds() {
     child->availability.visibility = ui::VisibilityMode::Visible;
     child->invalidate_availability();
     reset(child);
-    tree.paint_region(canvas, platform, {125.0f, 25.0f, 10.0f, 10.0f});
+    paint_region(tree, canvas, platform, {125.0f, 25.0f, 10.0f, 10.0f});
     NUI_CHECK(child->paints == 1);
 
     child->availability.visibility = ui::VisibilityMode::Hidden;
     child->invalidate_availability();
     reset(child);
-    tree.paint_region(canvas, platform, {125.0f, 25.0f, 10.0f, 10.0f});
+    paint_region(tree, canvas, platform, {125.0f, 25.0f, 10.0f, 10.0f});
     NUI_CHECK(child->paints == 0);
 }
 
@@ -354,13 +363,13 @@ void unknown_cache_falls_back_conservatively() {
 
     // Build a valid selective cache first, then simulate storage becoming
     // unavailable without changing retained publication state.
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
     ui::TreeTestAccess::make_cache_unavailable(tree);
 
     reset(root);
     reset(left);
     reset(right);
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
 
     // Missing cache entries are uncertainty: traversal becomes conservative
     // instead of incorrectly skipping the distant subtree.
@@ -384,7 +393,7 @@ void pending_dirty_does_not_rebuild_cache() {
     tree.mount();
     tree.layout({120.0f, 60.0f});
     tree.paint(canvas, platform);
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
 
     ui::TreeTestAccess::mark_cached_own_bounds_unknown(tree);
     NUI_CHECK(ui::TreeTestAccess::all_cached_own_bounds_unknown(tree));
@@ -393,7 +402,7 @@ void pending_dirty_does_not_rebuild_cache() {
     // Damage awaiting consumption is independent from published visual state.
     tree.invalidate({0.0f, 0.0f, 4.0f, 4.0f});
     NUI_CHECK(tree.paint_dirty());
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
 
     // A cache rebuild here would overwrite the injected unknown-own markers.
     NUI_CHECK(ui::TreeTestAccess::all_cached_own_bounds_unknown(tree));
@@ -412,7 +421,7 @@ void layout_publication_and_rollback_contract() {
     tree.mount();
     tree.layout({160.0f, 80.0f});
     tree.paint(canvas, platform);
-    tree.paint_region(canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
+    paint_region(tree, canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
 
     const auto old_bounds = ui::TreeTestAccess::first_child_bounds(tree);
     const auto old_published = ui::TreeTestAccess::first_child_published_bounds(tree);
@@ -444,9 +453,9 @@ void layout_publication_and_rollback_contract() {
     NUI_CHECK_NEAR(committed.x, 100.0f, 0.0001f);
 
     reset(child);
-    tree.paint_region(canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
+    paint_region(tree, canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
     NUI_CHECK(child->paints == 0);
-    tree.paint_region(canvas, platform, {100.0f, 10.0f, 20.0f, 20.0f});
+    paint_region(tree, canvas, platform, {100.0f, 10.0f, 20.0f, 20.0f});
     NUI_CHECK(child->paints == 1);
 }
 
@@ -543,8 +552,8 @@ void two_tree_cache_isolation_contract() {
     reset(left_b);
     reset(right_b);
 
-    a.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
-    b.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(a, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
     NUI_CHECK(left_a->paints == 1 && right_a->paints == 0);
     NUI_CHECK(left_b->paints == 1 && right_b->paints == 0);
 
@@ -553,7 +562,7 @@ void two_tree_cache_isolation_contract() {
 
     reset(left_b);
     reset(right_b);
-    b.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
     NUI_CHECK(left_b->paints == 1 && right_b->paints == 0);
 }
 

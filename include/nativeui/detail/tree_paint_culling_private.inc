@@ -186,7 +186,7 @@
         }
     }
 
-    void paint_cull_paint_region(SkCanvas& canvas,
+    void paint_cull_paint_region(Painter& painter,
                                  PlatformServices& platform,
                                  Rect requested_region) {
         if (lifecycle_transition_active()) return;
@@ -201,7 +201,6 @@
         const auto canonical = paint_cull_canonical_repaint_region(requested_region);
         if (!root_) return;
 
-        Painter painter{canvas};
         const Rect viewport = viewport_rect();
 
         // Invalid/unrepresentable traversal geometry is uncertainty, not an empty
