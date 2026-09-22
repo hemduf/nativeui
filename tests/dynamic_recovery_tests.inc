@@ -15,7 +15,7 @@ struct DynamicFaultAccess {
 
 } // namespace ui::detail
 
-namespace t125_dynamic_recovery {
+namespace dynamic_recovery {
 
 struct LifeState {
     int mounts{};
@@ -79,7 +79,7 @@ public:
                 ++*attempts;
                 if (*attempts == 1) {
                     reentrant_visible->set(false);
-                    throw std::runtime_error("t125 dynamic factory failure");
+                    throw std::runtime_error("dynamic factory failure");
                 }
                 return std::make_unique<LifeProbeComponent>(state);
             },
@@ -122,7 +122,7 @@ public:
         if (state_->on_blur) state_->on_blur();
         if (state_->throw_blur_once) {
             state_->throw_blur_once = false;
-            throw std::runtime_error("t125 dynamic blur failure");
+            throw std::runtime_error("dynamic blur failure");
         }
     }
 
@@ -251,7 +251,7 @@ void factory_failure_preserves_captured_and_reentrant_work() {
     tree.unmount();
 }
 
-void quarantine_reuses_t130_desired_key_snapshot() {
+void quarantine_reuses_desired_key_snapshot() {
     struct KeyedItem {
         int id{};
         bool operator==(const KeyedItem&) const = default;
@@ -346,8 +346,8 @@ void teardown_quarantine_rejects_reentrant_pointer_publication() {
 inline void run() {
     enqueue_failure_preserves_all_dirty_owners();
     factory_failure_preserves_captured_and_reentrant_work();
-    quarantine_reuses_t130_desired_key_snapshot();
+    quarantine_reuses_desired_key_snapshot();
     teardown_quarantine_rejects_reentrant_pointer_publication();
 }
 
-} // namespace t125_dynamic_recovery
+} // namespace dynamic_recovery
