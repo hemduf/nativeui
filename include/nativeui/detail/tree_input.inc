@@ -56,7 +56,7 @@
 
             const auto index = pointer_capture_index(pointer);
             if (index != pointer_capture_count_ &&
-                !pointer_captures_[index].cancelling) {
+                (pointer == 0U || !pointer_captures_[index].cancelling)) {
                 return pointer;
             }
             ++i;
@@ -528,8 +528,10 @@
         }
 
         const auto index = pointer_capture_index(pointer);
-        if (index == pointer_capture_count_ ||
-            pointer_captures_[index].cancelling) {
+        if (index == pointer_capture_count_) return EventResult::Ignored;
+        // Preserve the legacy id=0 nested-cancel contract while making raw
+        // tracked contacts idempotent under cancellation re-entry.
+        if (pointer != 0U && pointer_captures_[index].cancelling) {
             return EventResult::Ignored;
         }
         pointer_captures_[index].cancelling = true;
@@ -548,12 +550,11 @@
     }
 
     [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
-        // The active pass owns the complete cancel-all transaction. A callback
-        // may call cancel_pointer() recursively, but redispatching the capture
-        // currently being cancelled would duplicate PointerCancel delivery.
-        // Treat nested cancel-all as an idempotent no-op while the outer pass
-        // continues draining every capture and preserves the first exception.
-        if (pointer_capture_barrier_) return EventResult::Ignored;
+        // Keep the historical id=0 nested-cancellation behavior: legacy mouse
+        // callbacks may explicitly request another observable cancel. Tracked
+        // raw contacts mark their in-flight capture as cancelling, so a nested
+        // global pass skips only that contact while still draining siblings.
+        const bool previous_barrier = pointer_capture_barrier_;
         pointer_capture_barrier_ = true;
 
         EventResult result = EventResult::Ignored;
@@ -570,7 +571,7 @@
         }
 
         clear_pointer_interactions();
-        pointer_capture_barrier_ = false;
+        pointer_capture_barrier_ = previous_barrier;
         if (first_error) std::rethrow_exception(first_error);
         return result;
     }
