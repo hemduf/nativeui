@@ -39,7 +39,7 @@ ui::InputEvent touch(ui::InputType type, ui::PointerId id, float x, float y) {
 std::unique_ptr<ui::UI> make_ui(Model& model) {
     return std::make_unique<ui::UI>(
         ui::Column{
-            ui::Header{"T177 / RAW MULTI-TOUCH POINTERS"},
+            ui::Header{"RAW MULTI-TOUCH POINTERS"},
             ui::Canvas{520.0f, 240.0f, [&](ui::CanvasContext2D& g) {
                 g.fill_rounded_rect({0.0f, 0.0f, g.width(), g.height()},
                                     12.0f,
@@ -144,5 +144,5 @@ int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return run_self_test();
     Model model;
     auto tree = make_ui(model);
-    return example::run_window(*tree, "NativeUI T177 - Multi-touch pointers", {580.0f, 360.0f});
+    return example::run_window(*tree, "NativeUI - Multi-touch pointers", {580.0f, 360.0f});
 }

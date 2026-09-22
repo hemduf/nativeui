@@ -479,5 +479,5 @@ void suite() {
 } // namespace
 
 int main() {
-    return test::run("t177 multitouch pointer routing", suite);
+    return test::run("multitouch pointer routing", suite);
 }

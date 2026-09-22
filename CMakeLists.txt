@@ -499,7 +499,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t175_pugl_button_tests tests/t175_pugl_button_tests.cpp)
   target_include_directories(nativeui_t175_pugl_button_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   nativeui_add_core_test(nativeui_pointer_capture_tests tests/pointer_capture_tests.cpp)
-  nativeui_add_core_test(nativeui_t177_multitouch_pointer_tests tests/t177_multitouch_pointer_tests.cpp)
+  nativeui_add_core_test(nativeui_multitouch_pointer_tests tests/multitouch_pointer_tests.cpp)
   nativeui_add_core_test(nativeui_gesture_tests tests/gesture_tests.cpp)
   nativeui_add_core_test(nativeui_command_tests tests/command_tests.cpp)
   nativeui_add_core_test(nativeui_drop_tests tests/drop_tests.cpp)
@@ -639,10 +639,10 @@ if(NATIVEUI_BUILD_TESTS)
 
   if(NATIVEUI_BUILD_PLATFORM)
     nativeui_add_core_test(
-      nativeui_t177_pugl_pointer_tests
-      tests/t177_pugl_pointer_tests.cpp
+      nativeui_pugl_pointer_tests
+      tests/pugl_pointer_tests.cpp
     )
-    target_include_directories(nativeui_t177_pugl_pointer_tests PRIVATE
+    target_include_directories(nativeui_pugl_pointer_tests PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${NATIVEUI_PUGL_SOURCE_DIR}/include
     )
