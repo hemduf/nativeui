@@ -528,9 +528,28 @@
         }
         ensure_layout();
 
-        LifecycleTransitionScope paint_scope{
-            *this, LifecycleTransition::Paint, true};
-        Painter painter{canvas};
-        paint_node(*root_, painter, platform, viewport_rect());
+        // A successful full paint consumes only damage that existed before the
+        // first paint callback. Invalidation raised reentrantly by application
+        // paint code belongs to the next frame and must survive this traversal.
+        Rect pending_dirty[DirtyRegion::kMaxRects]{};
+        const auto pending_dirty_count = paint_dirty_.rects().size();
+        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+            pending_dirty[index] = paint_dirty_.rects()[index];
+        }
         paint_dirty_.clear();
+
+        try {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            Painter painter{canvas};
+            paint_node(*root_, painter, platform, viewport_rect());
+        } catch (...) {
+            // Failed paint consumes nothing. Merge the pre-existing damage back
+            // into any new invalidation raised before the failure without
+            // re-notifying already exposed regions.
+            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+                (void)retain_dirty(pending_dirty[index]);
+            }
+            throw;
+        }
     }

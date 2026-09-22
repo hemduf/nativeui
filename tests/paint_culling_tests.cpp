@@ -347,8 +347,9 @@ void reentrant_structural_mutation_is_deferred() {
         tree.layout({120.0f, 60.0f});
     };
 
-    tree.paint_region(canvas, platform, {0.0f, 0.0f, 120.0f, 60.0f});
+    tree.paint(canvas, platform);
     NUI_CHECK(child->unmounts == 0);
+    NUI_CHECK(tree.paint_dirty());
 
     tree.layout({120.0f, 60.0f});
     NUI_CHECK(child->unmounts == 1);
