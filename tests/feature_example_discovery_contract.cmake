@@ -16,15 +16,15 @@ nativeui_discover_feature_examples(_discovered_examples "${SOURCE_DIR}")
 
 file(GLOB _canonical_sources
   RELATIVE "${_features_dir}"
-  "${_features_dir}/t[0-9][0-9][0-9]_*.cpp"
+  "${_features_dir}/*.cpp"
 )
 list(SORT _canonical_sources)
 
 set(_expected_examples)
 foreach(_source IN LISTS _canonical_sources)
-  if(NOT _source MATCHES "^t[0-9][0-9][0-9]_[A-Za-z0-9_]+[.]cpp$")
+  if(NOT _source MATCHES "^[A-Za-z][A-Za-z0-9_]*[.]cpp$")
     message(FATAL_ERROR
-      "Feature example discovery contract: canonical glob matched invalid filename ${_source}")
+      "Feature example discovery contract: invalid feature example filename ${_source}")
   endif()
   get_filename_component(_name "${_source}" NAME_WE)
   list(APPEND _expected_examples "${_name}")

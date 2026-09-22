@@ -528,6 +528,8 @@
         }
         ensure_layout();
 
+        LifecycleTransitionScope paint_scope{
+            *this, LifecycleTransition::Paint, true};
         Painter painter{canvas};
         paint_node(*root_, painter, platform, viewport_rect());
         paint_dirty_.clear();

@@ -530,6 +530,7 @@ if(NATIVEUI_BUILD_TESTS)
     COMMENT "Explicitly update NativeUI golden image baselines"
   )
   nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
+  nativeui_add_core_test(nativeui_paint_culling_tests tests/paint_culling_tests.cpp)
   nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
   nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_t062_tooltip_tests tests/t062_tooltip_tests.cpp)

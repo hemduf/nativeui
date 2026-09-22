@@ -17,7 +17,7 @@
             if (layout_changed) {
                 invalidate_layout_from(*root_);
             } else if (paint_changed) {
-                invalidate_paint(viewport_rect());
+                publish_all_visual_bounds_then_invalidate();
             }
         } catch (...) {
             availability_structure_dirty_ = true;

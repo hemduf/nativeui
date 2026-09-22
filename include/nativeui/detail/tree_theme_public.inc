@@ -15,6 +15,6 @@
         if (invalidation == ThemeInvalidation::Layout) {
             invalidate_layout_from(*root_);
         } else {
-            invalidate_paint(viewport_rect());
+            publish_all_visual_bounds_then_invalidate();
         }
     }

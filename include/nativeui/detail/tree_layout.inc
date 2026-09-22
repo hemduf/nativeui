@@ -397,11 +397,10 @@
         if (node.component->clips_children()) {
             const Rect child_clip = intersect(inherited_clip, node.bounds);
             if (child_clip.empty()) return;
-            painter.push_clip(node.bounds);
+            auto clip_scope = painter.scoped_clip(node.bounds);
             for (const auto& child : node.children) {
                 paint_node(*child, painter, platform, child_clip);
             }
-            painter.pop_clip();
             return;
         }
 

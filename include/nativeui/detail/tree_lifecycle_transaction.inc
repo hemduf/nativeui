@@ -12,6 +12,7 @@
         Activate,
         Deactivate,
         Unmount,
+        Paint,
     };
 
     class LifecycleTransitionScope {

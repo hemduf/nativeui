@@ -11,6 +11,11 @@
         bool valid{};
     };
 
+    struct PaintCullRegion final {
+        Rect bounds{};
+        bool valid{};
+    };
+
     void mark_paint_culling_dirty() noexcept { paint_cull_cache_dirty_ = true; }
 
     // Long-lived retained invalidators enter through the wrappers compiled in
@@ -31,12 +36,14 @@
         return a.w == b.w && a.h == b.h;
     }
 
-    [[nodiscard]] Rect paint_cull_canonical_repaint_region(Rect region) const noexcept {
+    [[nodiscard]] PaintCullRegion paint_cull_canonical_repaint_region(
+        Rect region) const noexcept {
         if (!std::isfinite(region.x) || !std::isfinite(region.y) ||
             !std::isfinite(region.w) || !std::isfinite(region.h) ||
-            !(region.w > 0.0f) || !(region.h > 0.0f)) {
-            return {};
+            region.w < 0.0f || region.h < 0.0f) {
+            return {{}, false};
         }
+        if (region.w == 0.0f || region.h == 0.0f) return {{}, true};
 
         const Rect viewport = viewport_rect();
         const double left = (std::max)(static_cast<double>(viewport.x),
@@ -50,15 +57,17 @@
             static_cast<double>(viewport.y) + static_cast<double>(viewport.h),
             static_cast<double>(region.y) + static_cast<double>(region.h));
         if (!std::isfinite(left) || !std::isfinite(top) ||
-            !std::isfinite(right) || !std::isfinite(bottom) ||
-            !(left < right) || !(top < bottom)) {
-            return {};
+            !std::isfinite(right) || !std::isfinite(bottom)) {
+            return {{}, false};
         }
+        if (!(left < right) || !(top < bottom)) return {{}, true};
 
-        return {static_cast<float>(left),
-                static_cast<float>(top),
-                static_cast<float>(right - left),
-                static_cast<float>(bottom - top)};
+        return {{
+                    static_cast<float>(left),
+                    static_cast<float>(top),
+                    static_cast<float>(right - left),
+                    static_cast<float>(bottom - top)},
+                true};
     }
 
     [[nodiscard]] static std::size_t paint_cull_node_count(const Node& node) noexcept {
@@ -117,7 +126,7 @@
     }
 
     void paint_cull_prepare_cache() noexcept {
-        if (!paint_cull_same_size(paint_cull_cached_viewport_, viewport_) || !paint_dirty_.empty()) {
+        if (!paint_cull_same_size(paint_cull_cached_viewport_, viewport_)) {
             paint_cull_cache_dirty_ = true;
         }
         if (paint_cull_cache_dirty_) paint_cull_rebuild_cache();
@@ -178,8 +187,8 @@
     }
 
     void paint_cull_paint_region(SkCanvas& canvas,
-                           PlatformServices& platform,
-                           Rect requested_region) {
+                                 PlatformServices& platform,
+                                 Rect requested_region) {
         if (lifecycle_transition_active()) return;
 
         flush_dynamic_mutations();
@@ -189,20 +198,37 @@
         }
         ensure_layout();
 
-        const Rect region = paint_cull_canonical_repaint_region(requested_region);
-        if (region.empty() || !root_) return;
+        const auto canonical = paint_cull_canonical_repaint_region(requested_region);
+        if (!root_) return;
 
-        paint_cull_prepare_cache();
         Painter painter{canvas};
         const Rect viewport = viewport_rect();
 
-        // A full-root request remains the existing reference traversal,
-        // including callback order for zero-area/unknown visual metadata.
-        if (paint_cull_same_rect(region, viewport)) {
+        // Invalid/unrepresentable traversal geometry is uncertainty, not an empty
+        // repaint. Fail conservatively to the reference full retained traversal.
+        if (!canonical.valid) {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
             paint_node(*root_, painter, platform, viewport);
             return;
         }
 
+        const Rect region = canonical.bounds;
+        if (region.empty()) return;
+
+        // Full-root traversal does not need the culling cache at all. Besides
+        // preserving the exact reference path, this keeps cache allocation/failure
+        // out of a request that cannot benefit from selective traversal.
+        if (paint_cull_same_rect(region, viewport)) {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            paint_node(*root_, painter, platform, viewport);
+            return;
+        }
+
+        paint_cull_prepare_cache();
+        LifecycleTransitionScope paint_scope{
+            *this, LifecycleTransition::Paint, true};
         paint_cull_paint_node(*root_, painter, platform, viewport, region);
     }
 
