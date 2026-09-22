@@ -11,7 +11,7 @@
 
 namespace ui {
 
-struct PaintCullTestAccess {
+struct TreeTestAccess {
     static void make_cache_unavailable(Tree& tree) noexcept {
         tree.paint_cull_cache_.clear();
         tree.paint_cull_cache_dirty_ = false;
@@ -355,7 +355,7 @@ void unknown_cache_falls_back_conservatively() {
     // Build a valid selective cache first, then simulate storage becoming
     // unavailable without changing retained publication state.
     tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
-    ui::PaintCullTestAccess::make_cache_unavailable(tree);
+    ui::TreeTestAccess::make_cache_unavailable(tree);
 
     reset(root);
     reset(left);
@@ -386,9 +386,9 @@ void pending_dirty_does_not_rebuild_cache() {
     tree.paint(canvas, platform);
     tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
 
-    ui::PaintCullTestAccess::mark_cached_own_bounds_unknown(tree);
-    NUI_CHECK(ui::PaintCullTestAccess::all_cached_own_bounds_unknown(tree));
-    NUI_CHECK(!ui::PaintCullTestAccess::cache_dirty(tree));
+    ui::TreeTestAccess::mark_cached_own_bounds_unknown(tree);
+    NUI_CHECK(ui::TreeTestAccess::all_cached_own_bounds_unknown(tree));
+    NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
 
     // Damage awaiting consumption is independent from published visual state.
     tree.invalidate({0.0f, 0.0f, 4.0f, 4.0f});
@@ -396,8 +396,8 @@ void pending_dirty_does_not_rebuild_cache() {
     tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
 
     // A cache rebuild here would overwrite the injected unknown-own markers.
-    NUI_CHECK(ui::PaintCullTestAccess::all_cached_own_bounds_unknown(tree));
-    NUI_CHECK(!ui::PaintCullTestAccess::cache_dirty(tree));
+    NUI_CHECK(ui::TreeTestAccess::all_cached_own_bounds_unknown(tree));
+    NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
 }
 
 void layout_publication_and_rollback_contract() {
@@ -414,8 +414,8 @@ void layout_publication_and_rollback_contract() {
     tree.paint(canvas, platform);
     tree.paint_region(canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
 
-    const auto old_bounds = ui::PaintCullTestAccess::first_child_bounds(tree);
-    const auto old_published = ui::PaintCullTestAccess::first_child_published_bounds(tree);
+    const auto old_bounds = ui::TreeTestAccess::first_child_bounds(tree);
+    const auto old_published = ui::TreeTestAccess::first_child_published_bounds(tree);
     NUI_CHECK_NEAR(old_bounds.x, 10.0f, 0.0001f);
     NUI_CHECK_NEAR(old_published.x, 10.0f, 0.0001f);
 
@@ -430,17 +430,17 @@ void layout_publication_and_rollback_contract() {
         threw = true;
     }
     NUI_CHECK(threw);
-    NUI_CHECK(ui::PaintCullTestAccess::cache_dirty(tree));
+    NUI_CHECK(ui::TreeTestAccess::cache_dirty(tree));
 
-    const auto rolled_back = ui::PaintCullTestAccess::first_child_bounds(tree);
+    const auto rolled_back = ui::TreeTestAccess::first_child_bounds(tree);
     const auto rolled_back_published =
-        ui::PaintCullTestAccess::first_child_published_bounds(tree);
+        ui::TreeTestAccess::first_child_published_bounds(tree);
     NUI_CHECK_NEAR(rolled_back.x, old_bounds.x, 0.0001f);
     NUI_CHECK_NEAR(rolled_back_published.x, old_published.x, 0.0001f);
 
     root->throw_on_layout = false;
     tree.layout({160.0f, 80.0f});
-    const auto committed = ui::PaintCullTestAccess::first_child_published_bounds(tree);
+    const auto committed = ui::TreeTestAccess::first_child_published_bounds(tree);
     NUI_CHECK_NEAR(committed.x, 100.0f, 0.0001f);
 
     reset(child);
