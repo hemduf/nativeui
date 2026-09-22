@@ -333,6 +333,20 @@ function(nativeui_add_application)
       target_sources("${target}" PRIVATE
         "${_nativeui_application_rc}")
     endif()
+  elseif(EMSCRIPTEN)
+    # The browser owns the event loop, so the executable is an HTML page plus
+    # its wasm runtime. The app runs until the page is closed; runtime exit is
+    # therefore disabled and the heap is allowed to grow with the document.
+    # NativeUI owns the page shell: the stock Emscripten shell keeps its status
+    # badges and a fixed-size centered canvas behind the application, while a
+    # browser app owns the whole viewport.
+    add_executable("${target}"
+      ${_nativeui_application_SOURCES})
+    set_target_properties("${target}" PROPERTIES
+      SUFFIX ".html"
+      LINK_FLAGS "-sEXIT_RUNTIME=0 -sALLOW_MEMORY_GROWTH=1")
+    target_link_options("${target}" PRIVATE
+      "--shell-file=${CMAKE_CURRENT_FUNCTION_LIST_DIR}/NativeUIWebShell.html")
   else()
     add_executable("${target}"
       ${_nativeui_application_SOURCES})

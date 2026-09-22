@@ -27,6 +27,8 @@
 
 namespace ui::detail {
 
+[[nodiscard]] sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture);
+
 struct ShaderUniformSlot final {
     ShaderUniformType type{};
     std::size_t offset{};
@@ -583,6 +585,8 @@ struct ShaderBrushMaterializer final {
                             return SkShaders::RadialGradient(
                                 sk_center, source.radius(), gradient);
                         });
+                } else if constexpr (std::is_same_v<Source, ImageTexture>) {
+                    return materialize_image_texture(source);
                 } else {
                     return materialize_shader_snapshot(source);
                 }

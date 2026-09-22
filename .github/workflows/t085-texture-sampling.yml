@@ -1,0 +1,167 @@
+name: T085 Texture Sampling
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/nativeui/image.hpp'
+      - 'include/nativeui/paint_style.hpp'
+      - 'src/skia_image.cpp'
+      - 'examples/features/t085_texture_sampling.cpp'
+      - '.github/workflows/t085-texture-sampling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  SCCACHE_GHA_ENABLED: 'true'
+  CMAKE_BUILD_PARALLEL_LEVEL: '4'
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJC_COMPILER_LAUNCHER: sccache
+  CMAKE_OBJCXX_COMPILER_LAUNCHER: sccache
+
+jobs:
+  platform-smoke:
+    name: ${{ matrix.name }} native smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15-intel
+            cmake_args: -DNATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE=ON
+          - name: Windows
+            os: windows-latest
+            cmake_args: ''
+          - name: Linux X11
+            os: ubuntu-latest
+            cmake_args: ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Set up MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+          ${{ matrix.cmake_args }}
+
+      - name: Configure Windows MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+
+      - name: Build T085 example
+        run: >-
+          cmake --build build --config Release
+          --target nativeui_example_t085_texture_sampling --parallel
+
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName 'build/opengl32.dll' -Force
+          Copy-Item $gallium.FullName 'build/libgallium_wgl.dll' -Force
+
+      - name: Deterministic self-test — Linux
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ./build/nativeui_example_t085_texture_sampling --self-test
+
+      - name: Native platform smoke — Linux
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          sh -c 'glxinfo -B && ./build/nativeui_example_t085_texture_sampling --platform-smoke'
+
+      - name: Deterministic self-test and native smoke — macOS
+        if: runner.os == 'macOS'
+        run: |
+          ./build/nativeui_example_t085_texture_sampling --self-test
+          ./build/nativeui_example_t085_texture_sampling --platform-smoke
+
+      - name: Deterministic self-test and native smoke — Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          ./build/nativeui_example_t085_texture_sampling.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./build/nativeui_example_t085_texture_sampling.exe --platform-smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

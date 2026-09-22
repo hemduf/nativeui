@@ -149,8 +149,8 @@ def main() -> None:
         "- name: Linux ARM64",
         "os: ubuntu-24.04-arm",
         "skia-build-linux-arm64-gpu-release.zip",
-        "https://github.com/hemduf/skia-builder/releases/download/chrome/m149/",
-        "0c5b366864d2ecec9b3de87b100ccea038f6289e6fccf279031bf7501b332ef1",
+        "https://github.com/hemduf/skia-builder/releases/download/chrome/m153/",
+        "b45e8e40f3d8e29176ea5fc6e3ecafdbc87ac0a58469f649058fbc8ac0831687",
         "Machine:.*AArch64",
         "nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-",
     ):

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/image.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +19,7 @@ class ShaderInstance;
 namespace detail {
 struct EffectTestAccess;
 struct ShaderBrushAccess;
+struct ImageTextureBrushAccess;
 struct ShaderBrushMaterializer;
 struct ShaderBrushSnapshot;
 }
@@ -219,6 +221,10 @@ public:
     Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
     Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
     explicit Brush(const ShaderInstance& shader);
+    explicit Brush(ImageTexture texture) noexcept
+        : value_(texture.valid()
+            ? Storage{std::move(texture)}
+            : Storage{transparent()}) {}
 
     Brush(const Brush&) = default;
 
@@ -229,7 +235,12 @@ public:
         return *this;
     }
 
-    Brush(Brush&& other) noexcept : value_(std::move(other.value_)) {
+    Brush(Brush&& other) noexcept : value_(transparent()) {
+        // Construct the variant in a known active alternative before moving the
+        // payload. Besides preserving the zero-allocation move contract, this
+        // avoids GCC's false-positive maybe-uninitialized diagnostic when a
+        // Brush is moved into a closure at -O3/-Werror.
+        value_ = std::move(other.value_);
         other.reset_to_transparent();
     }
 
@@ -250,6 +261,7 @@ private:
         Color,
         LinearGradient,
         RadialGradient,
+        ImageTexture,
         std::shared_ptr<const detail::ShaderBrushSnapshot>>;
 
     static_assert(std::is_nothrow_constructible_v<Storage, Color>);
@@ -273,6 +285,7 @@ private:
 
     friend class Painter;
     friend struct detail::ShaderBrushAccess;
+    friend struct detail::ImageTextureBrushAccess;
     friend struct detail::ShaderBrushMaterializer;
     Storage value_;
 };

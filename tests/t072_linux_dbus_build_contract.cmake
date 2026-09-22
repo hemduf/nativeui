@@ -168,10 +168,10 @@ if(NOT _object_path_noexcept)
 endif()
 
 # Installed/build-tree Linux consumers must invoke the same private transport
-# module after their platform target exists. macOS/Windows remain outside the
-# UNIX-and-not-APPLE branch and therefore never discover libdbus.
+# module after their platform target exists. macOS/Windows/WebAssembly remain
+# outside the Linux branch and therefore never discover libdbus.
 foreach(_needle IN ITEMS
-    "if(UNIX AND NOT APPLE)"
+    "if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN)"
     "NativeUILinuxDbus.cmake"
     "nativeui_add_linux_dbus_transport()")
   string(FIND "${_attach_module_text}" "${_needle}" _found)

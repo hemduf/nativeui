@@ -12,6 +12,8 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#elif defined(__EMSCRIPTEN__)
+#  include <emscripten.h>
 #elif defined(__linux__)
 #  include <X11/Xlib.h>
 #  include <poll.h>
@@ -23,6 +25,7 @@
 #include <cerrno>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <mutex>
 #include <vector>
 
