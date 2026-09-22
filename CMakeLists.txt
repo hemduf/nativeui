@@ -542,6 +542,8 @@ if(NATIVEUI_BUILD_TESTS)
     tests/t084_image_texture_tiling_tests.cpp)
   nativeui_add_core_test(nativeui_t086_image_texture_transform_tests
     tests/t086_image_texture_transform_tests.cpp)
+  nativeui_add_core_test(nativeui_t087_texture_interpretation_tests
+    tests/t087_texture_interpretation_tests.cpp)
 
   # T083 value/materialization fault seams are compiled only into this isolated
   # executable. NativeUI::Core contains no mutable test instrumentation.

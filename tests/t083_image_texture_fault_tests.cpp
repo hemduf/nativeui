@@ -247,6 +247,11 @@ void value_operations_allocate_nothing() {
             returned = &texture.set_transform(transform);
             const auto transform_roundtrip = texture.transform();
 
+            const auto interpretation = (i & 16) == 0
+                ? ui::TextureInterpretation::Color
+                : ui::TextureInterpretation::Data;
+            returned = &texture.set_interpretation(interpretation);
+
             state_ok = state_ok &&
                 returned == &texture &&
                 roundtrip.filter() == filter &&
@@ -257,6 +262,7 @@ void value_operations_allocate_nothing() {
                 transform_roundtrip.m10 == transform.m10 &&
                 transform_roundtrip.m11 == transform.m11 &&
                 transform_roundtrip.m12 == transform.m12 &&
+                texture.interpretation() == interpretation &&
                 texture.valid();
         }
 
@@ -281,12 +287,14 @@ void value_operations_allocate_nothing() {
             moved_texture.tile_mode_y() == texture.tile_mode_y() &&
             moved_texture.sampling().filter() == texture.sampling().filter() &&
             moved_texture.sampling().mipmap() == texture.sampling().mipmap() &&
+            moved_texture.interpretation() == texture.interpretation() &&
             moved_texture.transform().m01 == texture.transform().m01 &&
             moved_texture.transform().m02 == texture.transform().m02 &&
             move_assigned_texture.tile_mode_x() == texture.tile_mode_x() &&
             move_assigned_texture.tile_mode_y() == texture.tile_mode_y() &&
             move_assigned_texture.sampling().filter() == texture.sampling().filter() &&
             move_assigned_texture.sampling().mipmap() == texture.sampling().mipmap() &&
+            move_assigned_texture.interpretation() == texture.interpretation() &&
             move_assigned_texture.transform().m01 == texture.transform().m01 &&
             move_assigned_texture.transform().m12 == texture.transform().m12;
 
@@ -383,6 +391,8 @@ void decode_materialization_and_failure_recovery() {
           "decode instrumentation did not observe Image::decode");
     check(!ui::detail::image_backing_is_lazy_for_test(image),
           "Image::decode published a lazy backing that can decode during paint");
+    check(ui::detail::image_backing_is_unpremul_for_test(image),
+          "Image::decode did not preserve unpremultiplied RGB payload");
 
     // Keep the legacy 8x8 recovery geometry while enabling mip materialization.
     // This isolates the new no-redecode assertion from the existing pixel oracle.
@@ -413,6 +423,26 @@ void decode_materialization_and_failure_recovery() {
     check(ui::detail::image_texture_materialization_call_count_for_test() ==
               materialization_before + 2U,
           "pre-T097 draws did not materialize independently");
+
+    const auto color_materializations =
+        ui::detail::image_texture_color_materialization_call_count_for_test();
+    const auto data_materializations_before =
+        ui::detail::image_texture_data_materialization_call_count_for_test();
+    auto data_texture = mip_texture;
+    data_texture.set_interpretation(ui::TextureInterpretation::Data);
+    {
+        ui::Painter painter{*canvas};
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 8.0f, 8.0f}, 0.0f, ui::Brush{data_texture});
+    }
+    check(ui::detail::image_texture_color_materialization_call_count_for_test() ==
+              color_materializations,
+          "Data interpretation reused the Color materialization path");
+    check(ui::detail::image_texture_data_materialization_call_count_for_test() ==
+              data_materializations_before + 1U,
+          "Data interpretation did not materialize through its distinct path");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before + 1U,
+          "interpretation change re-decoded shared Image data");
 
     const ui::Brush invalid{ui::ImageTexture{}};
 
