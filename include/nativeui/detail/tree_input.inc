@@ -530,10 +530,12 @@
     }
 
     [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
-        // Keep cancellation callbacks observable under re-entry (T125 legacy
-        // contract). The barrier prevents nested PointerDown/capture
-        // publication, but does not suppress an explicit nested cancel.
-        const bool previous_barrier = pointer_capture_barrier_;
+        // The active pass owns the complete cancel-all transaction. A callback
+        // may call cancel_pointer() recursively, but redispatching the capture
+        // currently being cancelled would duplicate PointerCancel delivery.
+        // Treat nested cancel-all as an idempotent no-op while the outer pass
+        // continues draining every capture and preserves the first exception.
+        if (pointer_capture_barrier_) return EventResult::Ignored;
         pointer_capture_barrier_ = true;
 
         EventResult result = EventResult::Ignored;
@@ -550,7 +552,7 @@
         }
 
         clear_pointer_interactions();
-        pointer_capture_barrier_ = previous_barrier;
+        pointer_capture_barrier_ = false;
         if (first_error) std::rethrow_exception(first_error);
         return result;
     }
