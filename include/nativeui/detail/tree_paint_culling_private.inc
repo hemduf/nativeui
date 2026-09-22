@@ -1,4 +1,4 @@
-    struct T094CullEntry final {
+    struct PaintCullEntry final {
         NodeId id{kInvalidNodeId};
         Rect own_visual_bounds{};
         Rect subtree_visual_bounds{};
@@ -6,56 +6,56 @@
         bool subtree_valid{};
     };
 
-    struct T094BoundsResult final {
+    struct PaintCullBoundsResult final {
         Rect bounds{};
         bool valid{};
     };
 
-    void t094_mark_cache_dirty() noexcept { t094_cache_dirty_ = true; }
+    void paint_cull_mark_cache_dirty() noexcept { paint_cull_cache_dirty_ = true; }
 
     // Long-lived retained invalidators enter through the wrappers compiled in
     // tree_retained_invalidation.inc. Mark uncertainty before any publication,
     // callback or structural work can run so a re-entrant paint traversal can
     // only lose culling, never under-cull with stale bounds.
-    void t094_invalidate_node_paint(Node& node) {
-        t094_mark_cache_dirty();
+    void paint_cull_invalidate_node_paint(Node& node) {
+        paint_cull_mark_cache_dirty();
         invalidate_node_paint(node);
     }
 
-    void t094_invalidate_layout_from(Node& node) {
-        t094_mark_cache_dirty();
+    void paint_cull_invalidate_layout_from(Node& node) {
+        paint_cull_mark_cache_dirty();
         invalidate_layout_from(node);
     }
 
-    void t094_queue_dynamic_mutation(NodeId owner) {
-        t094_mark_cache_dirty();
+    void paint_cull_queue_dynamic_mutation(NodeId owner) {
+        paint_cull_mark_cache_dirty();
         queue_dynamic_mutation(owner);
     }
 
-    void t094_apply_scoped_theme_change(NodeId id, ThemeInvalidation invalidation) {
-        t094_mark_cache_dirty();
+    void paint_cull_apply_scoped_theme_change(NodeId id, ThemeInvalidation invalidation) {
+        paint_cull_mark_cache_dirty();
         apply_scoped_theme_change(id, invalidation);
     }
 
-    void t094_sync_availability_inactive() {
-        t094_mark_cache_dirty();
+    void paint_cull_sync_availability_inactive() {
+        paint_cull_mark_cache_dirty();
         sync_availability_inactive();
     }
 
-    void t094_sync_availability_structure(PlatformServices& platform) {
-        t094_mark_cache_dirty();
+    void paint_cull_sync_availability_structure(PlatformServices& platform) {
+        paint_cull_mark_cache_dirty();
         sync_availability_structure(platform);
     }
 
-    [[nodiscard]] static bool t094_same_rect(Rect a, Rect b) noexcept {
+    [[nodiscard]] static bool paint_cull_same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
     }
 
-    [[nodiscard]] static bool t094_same_size(Size a, Size b) noexcept {
+    [[nodiscard]] static bool paint_cull_same_size(Size a, Size b) noexcept {
         return a.w == b.w && a.h == b.h;
     }
 
-    [[nodiscard]] Rect t094_canonical_repaint_region(Rect region) const noexcept {
+    [[nodiscard]] Rect paint_cull_canonical_repaint_region(Rect region) const noexcept {
         if (!std::isfinite(region.x) || !std::isfinite(region.y) ||
             !std::isfinite(region.w) || !std::isfinite(region.h) ||
             !(region.w > 0.0f) || !(region.h > 0.0f)) {
@@ -85,17 +85,17 @@
                 static_cast<float>(bottom - top)};
     }
 
-    [[nodiscard]] static std::size_t t094_node_count(const Node& node) noexcept {
+    [[nodiscard]] static std::size_t paint_cull_node_count(const Node& node) noexcept {
         std::size_t count = 1;
-        for (const auto& child : node.children) count += t094_node_count(*child);
+        for (const auto& child : node.children) count += paint_cull_node_count(*child);
         return count;
     }
 
-    [[nodiscard]] T094BoundsResult t094_collect_cache(const Node& node) {
-        T094BoundsResult subtree{node.published_visual_bounds, node.visual_bounds_published};
+    [[nodiscard]] PaintCullBoundsResult paint_cull_collect_cache(const Node& node) {
+        PaintCullBoundsResult subtree{node.published_visual_bounds, node.visual_bounds_published};
 
         for (const auto& child : node.children) {
-            const auto child_result = t094_collect_cache(*child);
+            const auto child_result = paint_cull_collect_cache(*child);
             if (!child_result.valid) {
                 subtree.valid = false;
             } else if (subtree.valid) {
@@ -103,7 +103,7 @@
             }
         }
 
-        t094_cull_cache_.push_back(T094CullEntry{
+        paint_cull_cull_cache_.push_back(PaintCullEntry{
             node.id,
             node.published_visual_bounds,
             subtree.bounds,
@@ -112,54 +112,54 @@
         return subtree;
     }
 
-    void t094_rebuild_cache() noexcept {
+    void paint_cull_rebuild_cache() noexcept {
         if (!root_) {
-            t094_cull_cache_.clear();
-            t094_cache_dirty_ = false;
-            t094_cached_viewport_ = viewport_;
+            paint_cull_cull_cache_.clear();
+            paint_cull_cache_dirty_ = false;
+            paint_cull_cached_viewport_ = viewport_;
             return;
         }
 
         try {
-            t094_cull_cache_.clear();
-            t094_cull_cache_.reserve(t094_node_count(*root_));
-            (void)t094_collect_cache(*root_);
+            paint_cull_cull_cache_.clear();
+            paint_cull_cull_cache_.reserve(paint_cull_node_count(*root_));
+            (void)paint_cull_collect_cache(*root_);
             std::sort(
-                t094_cull_cache_.begin(),
-                t094_cull_cache_.end(),
-                [](const T094CullEntry& a, const T094CullEntry& b) {
+                paint_cull_cull_cache_.begin(),
+                paint_cull_cull_cache_.end(),
+                [](const PaintCullEntry& a, const PaintCullEntry& b) {
                     return a.id < b.id;
                 });
-            t094_cached_viewport_ = viewport_;
-            t094_cache_dirty_ = false;
+            paint_cull_cached_viewport_ = viewport_;
+            paint_cull_cache_dirty_ = false;
         } catch (...) {
-            // T094 is an optimization cache. Allocation/storage failure is a
+            // Paint culling is an optimization cache. Allocation/storage failure is a
             // correctness-neutral fallback to ordinary full retained traversal.
-            t094_cull_cache_.clear();
-            t094_cache_dirty_ = true;
+            paint_cull_cull_cache_.clear();
+            paint_cull_cache_dirty_ = true;
         }
     }
 
-    void t094_prepare_cache() noexcept {
-        if (!t094_same_size(t094_cached_viewport_, viewport_) || !paint_dirty_.empty()) {
-            t094_cache_dirty_ = true;
+    void paint_cull_prepare_cache() noexcept {
+        if (!paint_cull_same_size(paint_cull_cached_viewport_, viewport_) || !paint_dirty_.empty()) {
+            paint_cull_cache_dirty_ = true;
         }
-        if (t094_cache_dirty_) t094_rebuild_cache();
+        if (paint_cull_cache_dirty_) paint_cull_rebuild_cache();
     }
 
-    [[nodiscard]] const T094CullEntry* t094_cache_entry(NodeId id) const noexcept {
-        if (t094_cache_dirty_) return nullptr;
+    [[nodiscard]] const PaintCullEntry* paint_cull_cache_entry(NodeId id) const noexcept {
+        if (paint_cull_cache_dirty_) return nullptr;
         const auto it = std::lower_bound(
-            t094_cull_cache_.begin(),
-            t094_cull_cache_.end(),
+            paint_cull_cull_cache_.begin(),
+            paint_cull_cull_cache_.end(),
             id,
-            [](const T094CullEntry& entry, NodeId value) {
+            [](const PaintCullEntry& entry, NodeId value) {
                 return entry.id < value;
             });
-        return it != t094_cull_cache_.end() && it->id == id ? &*it : nullptr;
+        return it != paint_cull_cull_cache_.end() && it->id == id ? &*it : nullptr;
     }
 
-    void t094_paint_node(const Node& node,
+    void paint_cull_paint_node(const Node& node,
                          Painter& painter,
                          PlatformServices& platform,
                          Rect inherited_clip,
@@ -170,7 +170,7 @@
             return;
         }
 
-        const auto* entry = t094_cache_entry(node.id);
+        const auto* entry = paint_cull_cache_entry(node.id);
         if (entry && entry->subtree_valid &&
             intersect(entry->subtree_visual_bounds, repaint_region).empty()) {
             return;
@@ -191,17 +191,17 @@
             if (child_clip.empty() || intersect(child_clip, repaint_region).empty()) return;
             auto clip_scope = painter.scoped_clip(node.bounds);
             for (const auto& child : node.children) {
-                t094_paint_node(*child, painter, platform, child_clip, repaint_region);
+                paint_cull_paint_node(*child, painter, platform, child_clip, repaint_region);
             }
             return;
         }
 
         for (const auto& child : node.children) {
-            t094_paint_node(*child, painter, platform, inherited_clip, repaint_region);
+            paint_cull_paint_node(*child, painter, platform, inherited_clip, repaint_region);
         }
     }
 
-    void t094_paint_region(SkCanvas& canvas,
+    void paint_cull_paint_region(SkCanvas& canvas,
                            PlatformServices& platform,
                            Rect requested_region) {
         if (lifecycle_transition_active()) return;
@@ -213,23 +213,23 @@
         }
         ensure_layout();
 
-        const Rect region = t094_canonical_repaint_region(requested_region);
+        const Rect region = paint_cull_canonical_repaint_region(requested_region);
         if (region.empty() || !root_) return;
 
-        t094_prepare_cache();
+        paint_cull_prepare_cache();
         Painter painter{canvas};
         const Rect viewport = viewport_rect();
 
-        // A full-root request remains the exact pre-T094 reference traversal,
+        // A full-root request remains the existing reference traversal,
         // including callback order for zero-area/unknown visual metadata.
-        if (t094_same_rect(region, viewport)) {
+        if (paint_cull_same_rect(region, viewport)) {
             paint_node(*root_, painter, platform, viewport);
             return;
         }
 
-        t094_paint_node(*root_, painter, platform, viewport, region);
+        paint_cull_paint_node(*root_, painter, platform, viewport, region);
     }
 
-    std::vector<T094CullEntry> t094_cull_cache_;
-    Size t094_cached_viewport_{-1.0f, -1.0f};
-    bool t094_cache_dirty_{true};
+    std::vector<PaintCullEntry> paint_cull_cull_cache_;
+    Size paint_cull_cached_viewport_{-1.0f, -1.0f};
+    bool paint_cull_cache_dirty_{true};

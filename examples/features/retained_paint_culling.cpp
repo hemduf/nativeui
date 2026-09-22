@@ -51,7 +51,7 @@ ui::Spec probe(std::shared_ptr<PaintProbeState> state) {
         {}};
 }
 
-void red_dirty_traversal_contract() {
+void dirty_traversal_contract() {
     auto left = std::make_shared<PaintProbeState>();
     auto right = std::make_shared<PaintProbeState>();
 
@@ -70,7 +70,7 @@ void red_dirty_traversal_contract() {
     left->paints = 0;
     right->paints = 0;
 
-    // RED before T094: there is no retained traversal entry point capable of
+    // Without retained paint culling there is no traversal entry point capable of
     // restricting callbacks to a canonical root-logical repaint region.
     tree.paint_region(canvas, platform, {0.0f, 0.0f, 80.0f, 100.0f});
 
@@ -81,5 +81,5 @@ void red_dirty_traversal_contract() {
 } // namespace
 
 int main() {
-    return test::run("T094 dirty retained traversal RED", red_dirty_traversal_contract);
+    return test::run("retained paint culling", dirty_traversal_contract);
 }
