@@ -11,41 +11,17 @@
         bool valid{};
     };
 
-    void paint_cull_mark_cache_dirty() noexcept { paint_cull_cache_dirty_ = true; }
+    void mark_paint_culling_dirty() noexcept { paint_cull_cache_dirty_ = true; }
 
     // Long-lived retained invalidators enter through the wrappers compiled in
     // tree_retained_invalidation.inc. Mark uncertainty before any publication,
     // callback or structural work can run so a re-entrant paint traversal can
     // only lose culling, never under-cull with stale bounds.
-    void paint_cull_invalidate_node_paint(Node& node) {
-        paint_cull_mark_cache_dirty();
-        invalidate_node_paint(node);
-    }
 
-    void paint_cull_invalidate_layout_from(Node& node) {
-        paint_cull_mark_cache_dirty();
-        invalidate_layout_from(node);
-    }
 
-    void paint_cull_queue_dynamic_mutation(NodeId owner) {
-        paint_cull_mark_cache_dirty();
-        queue_dynamic_mutation(owner);
-    }
 
-    void paint_cull_apply_scoped_theme_change(NodeId id, ThemeInvalidation invalidation) {
-        paint_cull_mark_cache_dirty();
-        apply_scoped_theme_change(id, invalidation);
-    }
 
-    void paint_cull_sync_availability_inactive() {
-        paint_cull_mark_cache_dirty();
-        sync_availability_inactive();
-    }
 
-    void paint_cull_sync_availability_structure(PlatformServices& platform) {
-        paint_cull_mark_cache_dirty();
-        sync_availability_structure(platform);
-    }
 
     [[nodiscard]] static bool paint_cull_same_rect(Rect a, Rect b) noexcept {
         return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
@@ -103,7 +79,7 @@
             }
         }
 
-        paint_cull_cull_cache_.push_back(PaintCullEntry{
+        paint_cull_cache_.push_back(PaintCullEntry{
             node.id,
             node.published_visual_bounds,
             subtree.bounds,
@@ -114,19 +90,19 @@
 
     void paint_cull_rebuild_cache() noexcept {
         if (!root_) {
-            paint_cull_cull_cache_.clear();
+            paint_cull_cache_.clear();
             paint_cull_cache_dirty_ = false;
             paint_cull_cached_viewport_ = viewport_;
             return;
         }
 
         try {
-            paint_cull_cull_cache_.clear();
-            paint_cull_cull_cache_.reserve(paint_cull_node_count(*root_));
+            paint_cull_cache_.clear();
+            paint_cull_cache_.reserve(paint_cull_node_count(*root_));
             (void)paint_cull_collect_cache(*root_);
             std::sort(
-                paint_cull_cull_cache_.begin(),
-                paint_cull_cull_cache_.end(),
+                paint_cull_cache_.begin(),
+                paint_cull_cache_.end(),
                 [](const PaintCullEntry& a, const PaintCullEntry& b) {
                     return a.id < b.id;
                 });
@@ -135,7 +111,7 @@
         } catch (...) {
             // Paint culling is an optimization cache. Allocation/storage failure is a
             // correctness-neutral fallback to ordinary full retained traversal.
-            paint_cull_cull_cache_.clear();
+            paint_cull_cache_.clear();
             paint_cull_cache_dirty_ = true;
         }
     }
@@ -150,13 +126,13 @@
     [[nodiscard]] const PaintCullEntry* paint_cull_cache_entry(NodeId id) const noexcept {
         if (paint_cull_cache_dirty_) return nullptr;
         const auto it = std::lower_bound(
-            paint_cull_cull_cache_.begin(),
-            paint_cull_cull_cache_.end(),
+            paint_cull_cache_.begin(),
+            paint_cull_cache_.end(),
             id,
             [](const PaintCullEntry& entry, NodeId value) {
                 return entry.id < value;
             });
-        return it != paint_cull_cull_cache_.end() && it->id == id ? &*it : nullptr;
+        return it != paint_cull_cache_.end() && it->id == id ? &*it : nullptr;
     }
 
     void paint_cull_paint_node(const Node& node,
@@ -230,6 +206,6 @@
         paint_cull_paint_node(*root_, painter, platform, viewport, region);
     }
 
-    std::vector<PaintCullEntry> paint_cull_cull_cache_;
+    std::vector<PaintCullEntry> paint_cull_cache_;
     Size paint_cull_cached_viewport_{-1.0f, -1.0f};
     bool paint_cull_cache_dirty_{true};

@@ -1,13 +1,7 @@
     // Stack-confined lifecycle/focus call sites keep the immediate invalidator
-    // contract from tree_layout.inc while T129 retained callbacks use the NodeId
+    // contract from tree_layout.inc while retained retained callbacks use the NodeId
     // overloads/factories from tree_retained_invalidation.inc.
-    [[nodiscard]] std::function<void()> paint_invalidator(Node& node) {
-        return unsafe_paint_invalidator(node);
-    }
 
-    [[nodiscard]] std::function<void()> layout_invalidator(Node& node) {
-        return unsafe_layout_invalidator(node);
-    }
 
     // Lifecycle callbacks are arbitrary application code. Keep one per-Tree
     // transition token so a callback cannot start an incompatible lifecycle
@@ -59,7 +53,7 @@
         return lifecycle_transition_ != LifecycleTransition::None;
     }
 
-    // T130 transactions are short-lived and usually small. Keep the common
+    // retained transactions are short-lived and usually small. Keep the common
     // retained-tree journal on the caller stack so a fresh UI does not pay heap
     // allocation merely to make rollback possible. Larger/dynamic trees spill
     // into one pre-reserved vector before lifecycle publication.
@@ -209,8 +203,8 @@
                     LifecycleContext context{
                         node.id,
                         node.bounds,
-                        unsafe_paint_invalidator(node),
-                        unsafe_layout_invalidator(node)};
+                        paint_invalidator(node),
+                        layout_invalidator(node)};
                     node.component->unmount(context);
                 } catch (...) {
                     // The original mount exception owns propagation. Rollback
@@ -272,8 +266,8 @@
         LifecycleContext context{
             node.id,
             node.bounds,
-            unsafe_paint_invalidator(node),
-            unsafe_layout_invalidator(node)};
+            paint_invalidator(node),
+            layout_invalidator(node)};
         node.component->activate(context);
         for (auto& child : node.children) activate_node_recorded(*child, journal);
     }
@@ -286,8 +280,8 @@
                 LifecycleContext context{
                     node->id,
                     node->bounds,
-                    unsafe_paint_invalidator(*node),
-                    unsafe_layout_invalidator(*node)};
+                    paint_invalidator(*node),
+                    layout_invalidator(*node)};
                 node->component->deactivate(context);
             } catch (...) {
                 // Preserve the original activate exception while completing the
@@ -330,9 +324,9 @@
             return;
         }
 
-        // T129 retained callbacks become inert before arbitrary teardown code.
+        // retained retained callbacks become inert before arbitrary teardown code.
         // Whole-Tree unmount rotates the generation; dynamic subtree removal only
-        // retires identities within that subtree. The T130 untracked helper then
+        // retires identities within that subtree. The retained untracked helper then
         // preserves best-effort reverse traversal and first-error propagation.
         if (!node.parent) retire_retained_invalidation_generation();
         retire_subtree_identities(node);

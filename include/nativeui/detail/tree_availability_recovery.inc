@@ -1,5 +1,6 @@
     void sync_availability_inactive() {
         if (!availability_structure_dirty_ || !root_) return;
+        mark_paint_culling_dirty();
 
         try {
             std::vector<PendingAvailability> pending;
@@ -28,6 +29,7 @@
 
     void sync_availability_structure(PlatformServices& platform) {
         if (!availability_structure_dirty_ || syncing_availability_ || !root_) return;
+        mark_paint_culling_dirty();
 
         const bool previous_syncing = syncing_availability_;
         syncing_availability_ = true;

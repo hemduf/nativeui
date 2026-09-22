@@ -7,7 +7,7 @@
 
 namespace ui::detail {
 
-struct T125DynamicFaultAccess {
+struct DynamicFaultAccess {
     static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
         tree.fail_next_dynamic_enqueue_for_testing_ = true;
     }
@@ -177,7 +177,7 @@ void enqueue_failure_preserves_all_dirty_owners() {
     NUI_CHECK(second->mounts == 1 && second->activates == 1);
 
     first_visible.set(false);
-    ui::detail::T125DynamicFaultAccess::fail_next_dynamic_enqueue(tree);
+    ui::detail::DynamicFaultAccess::fail_next_dynamic_enqueue(tree);
     bool threw = false;
     try {
         second_visible.set(false);

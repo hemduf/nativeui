@@ -36,6 +36,7 @@
 
     void apply_scoped_theme_change(NodeId id, ThemeInvalidation invalidation) {
         if (!root_ || invalidation == ThemeInvalidation::None) return;
+        mark_paint_culling_dirty();
         auto* node = find_theme_node(*root_, id);
         if (!node) return;
 

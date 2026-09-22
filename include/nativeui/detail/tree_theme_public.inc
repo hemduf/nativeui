@@ -7,6 +7,7 @@
             return;
         }
 
+        mark_paint_culling_dirty();
         theme_ = std::move(value);
         if (root_) bind_theme(*root_);
         if (!mounted_ || !root_) return;

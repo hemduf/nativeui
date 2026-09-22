@@ -15,7 +15,7 @@
 
     void mount() {
         if (mounted_) return;
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Mount, true};
 
         std::vector<Node*> staged_focusables;
@@ -55,7 +55,7 @@
             availability_structure_dirty_ = false;
             focus_structure_dirty_ = true;
             mounted_ = false;
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             throw;
         }
 
@@ -75,6 +75,7 @@
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
 
+        mark_paint_culling_dirty();
         auto transaction = begin_layout_publication(viewport);
         try {
             layout_node(*root_, viewport_rect());
@@ -163,7 +164,7 @@
         };
 
         if (!active_) {
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             return;
         }
         capture_error([&] { sync_availability_structure(platform); });
@@ -195,7 +196,7 @@
             capture_error([&] { sync_availability_inactive(); });
         }
         capture_error([&] { invalidate_paint(viewport_rect()); });
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
 
         if (first_error) std::rethrow_exception(first_error);
     }
@@ -203,7 +204,7 @@
     void unmount() {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) {
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             return;
         }
 
@@ -229,7 +230,7 @@
         capture_error([&] { unmount_node(*root_); });
         focusables_.clear();
         mounted_ = false;
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
 
         if (first_error) std::rethrow_exception(first_error);
     }

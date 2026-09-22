@@ -59,34 +59,6 @@
         return false;
     }
 
-    void register_dynamic_node(Node& node) {
-        auto* source = dynamic_source(node);
-        if (!source) return;
-
-        source->set_structure_invalidator([this, owner = node.id] {
-            queue_dynamic_mutation(owner);
-        });
-
-        auto keys = source->desired_keys();
-        if (has_duplicate_dynamic_keys(keys)) {
-            structural_diagnostic_ = "duplicate dynamic key";
-            keys.clear();
-        }
-        if (keys.size() != node.children.size()) {
-            structural_diagnostic_ = "dynamic initial child/key count mismatch";
-            keys.clear();
-            keys.reserve(node.children.size());
-            for (std::size_t i = 0; i < node.children.size(); ++i) {
-                keys.push_back("initial:" + std::to_string(i));
-            }
-        }
-
-        if (auto* existing = dynamic_record(node.id)) {
-            existing->keys = std::move(keys);
-        } else {
-            dynamic_records_.push_back(DynamicRecord{node.id, std::move(keys)});
-        }
-    }
 
     void unregister_dynamic_node(NodeId owner) noexcept {
         std::erase_if(dynamic_records_, [owner](const DynamicRecord& record) {
@@ -100,8 +72,32 @@
         }
     }
 
+    [[nodiscard]] bool dynamic_teardown_quarantines(const Node* candidate) const noexcept {
+        if (!candidate || dynamic_teardown_quarantine_ids_.empty() ||
+            dynamic_teardown_quarantine_epoch_ != structural_epoch_) {
+            return false;
+        }
+        for (auto* current = candidate; current; current = current->parent) {
+            for (const auto root_id : dynamic_teardown_quarantine_ids_) {
+                if (root_id != kInvalidNodeId && current->id == root_id) return true;
+            }
+        }
+        return false;
+    }
+
     void queue_dynamic_mutation(NodeId owner) {
         if (!root_ || owner == kInvalidNodeId) return;
+
+        mark_paint_culling_dirty();
+        if (fail_next_dynamic_enqueue_for_testing_ &&
+            std::find(dirty_dynamic_nodes_.begin(), dirty_dynamic_nodes_.end(), owner) ==
+                dirty_dynamic_nodes_.end()) {
+            fail_next_dynamic_enqueue_for_testing_ = false;
+            ensure_runtime_node_ids();
+            ++structural_epoch_;
+            dynamic_reconcile_retry_all_ = true;
+            throw std::bad_alloc{};
+        }
 
         // Capture the initial retained-tree high-water mark before the first
         // dynamic removal can destroy a node. Runtime NodeIds are monotonic for
@@ -715,9 +711,20 @@
             return;
         }
 
-        // This guard is part of the authoritative reconciliation state and must
-        // never survive an exception. Recovery below performs only scalar stores;
-        // it does not allocate or invoke application code.
+        // Structural removal must not invalidate a durable semantic cursor while
+        // its application callback is still on the stack. Once callbacks settle,
+        // finish only the unstarted suffix before consuming structural work.
+        if (pointer_hover_transition_running_ != 0 ||
+            focus_transition_running_ != 0 ||
+            focus_semantic_running_ != 0) {
+            return;
+        }
+        if (active_platform_) {
+            resume_pointer_hover_transitions(*active_platform_);
+            resume_focus_transitions(*active_platform_);
+        }
+
+        const bool previous_reconciling = reconciling_dynamic_;
         reconciling_dynamic_ = true;
         constexpr std::size_t kMaxStructuralPasses = 32;
         std::size_t pass = 0;
@@ -726,18 +733,9 @@
             while ((!dirty_dynamic_nodes_.empty() || dynamic_reconcile_retry_all_) &&
                    pass < kMaxStructuralPasses) {
                 std::vector<NodeId> captured;
-
                 if (dynamic_reconcile_retry_all_) {
-                    // A previous throw may have occurred after the exact dirty
-                    // list was moved/cleared, or before an owner could reserve
-                    // its individual retry marker. Rebuild conservatively from
-                    // live dynamic records. Keep the coarse marker set until the
-                    // complete snapshot exists so allocation failure cannot lose
-                    // the recovery state itself.
                     captured.reserve(dynamic_records_.size());
-                    for (const auto& record : dynamic_records_) {
-                        captured.push_back(record.owner);
-                    }
+                    for (const auto& record : dynamic_records_) captured.push_back(record.owner);
                     dynamic_reconcile_retry_all_ = false;
                     dirty_dynamic_nodes_.clear();
                 } else {
@@ -748,26 +746,21 @@
                 std::vector<NodeId> ordered;
                 ordered.reserve(captured.size());
                 collect_dirty_dynamic_nodes(*root_, captured, ordered);
-
-                for (const auto owner : ordered) {
-                    if (auto* node = find_node_mutable(*root_, owner)) {
+                for (const auto owner_id : ordered) {
+                    if (auto* node = find_node_mutable(*root_, owner_id)) {
                         (void)reconcile_dynamic_node(*node);
                     }
                 }
                 ++pass;
             }
+            reconciling_dynamic_ = previous_reconciling;
         } catch (...) {
-            // Exact captured/unprocessed/reentrant owner bookkeeping may no
-            // longer be reconstructible without allocation. Preserve a
-            // conservative per-Tree retry checkpoint and restore the guard
-            // before the original exception crosses this boundary.
             dynamic_reconcile_retry_all_ = true;
-            reconciling_dynamic_ = false;
+            reconciling_dynamic_ = previous_reconciling;
             throw;
         }
 
-        reconciling_dynamic_ = false;
-        if (!dirty_dynamic_nodes_.empty() || dynamic_reconcile_retry_all_) {
+        if (dynamic_reconcile_retry_all_ || !dirty_dynamic_nodes_.empty()) {
             structural_diagnostic_ = "structural reconciliation pass limit exceeded";
             invalidate_paint(viewport_rect());
         }
@@ -779,6 +772,7 @@
     NodeId dynamic_focus_restore_{kInvalidNodeId};
     std::uint64_t structural_epoch_{};
     int dynamic_reconcile_fault_stage_{};
+    bool fail_next_dynamic_enqueue_for_testing_{};
     bool runtime_node_ids_initialized_{};
     bool reconciling_dynamic_{};
     bool dynamic_reconcile_retry_all_{};
