@@ -76,8 +76,17 @@
         return false;
     }
 
-    void set_pointer_capture(Node& node, PointerId pointer) noexcept {
-        if (pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) return;
+    void set_pointer_capture(
+        Node& node,
+        PointerId pointer,
+        std::uint64_t interaction_generation) noexcept {
+        // InputContext can outlive a nested dispatch on the same callback stack.
+        // Never let an older frame overwrite capture owned by a newer contact
+        // generation that reused the same pointer ID.
+        if (pointer_interaction_dispatch_token(pointer) != interaction_generation ||
+            pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) {
+            return;
+        }
         const auto index = pointer_capture_index(pointer);
         if (index != pointer_capture_count_) {
             auto& capture = pointer_captures_[index];
@@ -93,7 +102,15 @@
         if (pointer == 0U && active_platform_) active_platform_->begin_pointer_capture();
     }
 
-    void release_pointer_capture(Node& node, PointerId pointer) noexcept {
+    void release_pointer_capture(
+        Node& node,
+        PointerId pointer,
+        std::uint64_t interaction_generation) noexcept {
+        // Symmetric with set_pointer_capture(): a stale outer callback must not
+        // release a newer capture created reentrantly with the same pointer ID.
+        if (pointer_interaction_dispatch_token(pointer) != interaction_generation) {
+            return;
+        }
         const auto index = pointer_capture_index(pointer);
         if (index != pointer_capture_count_ &&
             pointer_captures_[index].node == &node &&
@@ -168,16 +185,26 @@
             event.type != InputType::PointerUp &&
             event.type != InputType::PointerCancel &&
             event.type != InputType::ContextMenu;
+        const auto interaction_generation =
+            dispatch_depth_ != 0U && event.pointer.id == active_input_pointer_id_
+                ? active_input_pointer_generation_
+                : pointer_interaction_dispatch_token(event.pointer.id);
         return InputContext{
             node.bounds,
             platform,
             unsafe_paint_invalidator(node),
             unsafe_layout_invalidator(node),
-            [this, &node, pointer = event.pointer.id, capture_allowed] {
-                if (capture_allowed) set_pointer_capture(node, pointer);
+            [this,
+             &node,
+             pointer = event.pointer.id,
+             capture_allowed,
+             interaction_generation] {
+                if (capture_allowed) {
+                    set_pointer_capture(node, pointer, interaction_generation);
+                }
             },
-            [this, &node, pointer = event.pointer.id] {
-                release_pointer_capture(node, pointer);
+            [this, &node, pointer = event.pointer.id, interaction_generation] {
+                release_pointer_capture(node, pointer, interaction_generation);
             }};
     }
 
@@ -503,6 +530,11 @@
     }
 
     [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
+        // A PointerCancel callback may call cancel_pointer() recursively. The
+        // outer pass already owns complete teardown, so a nested pass must not
+        // redispatch cancellation to the same contacts.
+        if (pointer_capture_barrier_) return EventResult::Ignored;
+
         const bool previous_barrier = pointer_capture_barrier_;
         pointer_capture_barrier_ = true;
 
@@ -543,6 +575,8 @@
     bool pointer_interaction_active_{};
     std::uint64_t next_input_dispatch_token_{1U};
     std::uint64_t active_input_dispatch_token_{};
+    PointerId active_input_pointer_id_{};
+    std::uint64_t active_input_pointer_generation_{};
     bool pointer_capture_barrier_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
