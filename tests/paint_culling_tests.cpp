@@ -387,6 +387,39 @@ void availability_republishes_visual_bounds() {
     NUI_CHECK(child->paints == 0);
 }
 
+void active_availability_republishes_visual_bounds() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto child = std::make_shared<PaintProbeState>();
+    root->child_bounds = {{120.0f, 20.0f, 30.0f, 30.0f}};
+    child->availability.visibility = ui::VisibilityMode::Hidden;
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(child)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({180.0f, 80.0f});
+    tree.paint(canvas, platform);
+    tree.activate_focus(platform);
+    NUI_CHECK(child->paints == 0);
+    NUI_CHECK(ui::TreeTestAccess::first_child_published_bounds(tree).empty());
+
+    child->availability.visibility = ui::VisibilityMode::Visible;
+    child->invalidate_availability();
+
+    const auto published = ui::TreeTestAccess::first_child_published_bounds(tree);
+    NUI_CHECK_NEAR(published.x, 120.0f, 0.0001f);
+    NUI_CHECK_NEAR(published.y, 20.0f, 0.0001f);
+    NUI_CHECK_NEAR(published.w, 30.0f, 0.0001f);
+    NUI_CHECK_NEAR(published.h, 30.0f, 0.0001f);
+
+    reset(child);
+    paint_region(tree, canvas, platform, {125.0f, 25.0f, 10.0f, 10.0f});
+    NUI_CHECK(child->paints == 1);
+
+    tree.deactivate_focus(platform);
+}
+
 void unknown_cache_falls_back_conservatively() {
     auto root = std::make_shared<PaintProbeState>();
     auto left = std::make_shared<PaintProbeState>();
@@ -721,6 +754,7 @@ void suite() {
     descendant_outside_parent_bounds_contract();
     visual_outset_publication_contract();
     availability_republishes_visual_bounds();
+    active_availability_republishes_visual_bounds();
     unknown_cache_falls_back_conservatively();
     pending_dirty_does_not_rebuild_cache();
     layout_publication_and_rollback_contract();

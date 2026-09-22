@@ -101,7 +101,10 @@
                 if (layout_changed) {
                     invalidate_layout_from(*root_);
                 } else if (paint_changed) {
-                    invalidate_paint(viewport_rect());
+                    // The effective paint-participation state is now committed.
+                    // Republish authoritative visual bounds before a later
+                    // selective traversal is allowed to rebuild its cache.
+                    publish_all_visual_bounds_then_invalidate();
                 }
 
                 if (focus_changed && active_) sync_focus_structure(platform);
