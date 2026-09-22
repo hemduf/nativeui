@@ -1,13 +1,36 @@
 #include "test_support.hpp"
 
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
 
+#include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+namespace allocation_probe {
+std::size_t allocation_count{};
+
+void* allocate(std::size_t size) {
+    ++allocation_count;
+    if (void* pointer = std::malloc(size == 0 ? 1 : size)) return pointer;
+    throw std::bad_alloc{};
+}
+} // namespace allocation_probe
+
+void* operator new(std::size_t size) { return allocation_probe::allocate(size); }
+void* operator new[](std::size_t size) { return allocation_probe::allocate(size); }
+void operator delete(void* pointer) noexcept { std::free(pointer); }
+void operator delete[](void* pointer) noexcept { std::free(pointer); }
+void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); }
+void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
 
 namespace ui {
 
@@ -32,6 +55,20 @@ struct TreeTestAccess {
 
     [[nodiscard]] static bool cache_dirty(const Tree& tree) noexcept {
         return tree.paint_cull_cache_dirty_;
+    }
+
+    [[nodiscard]] static std::size_t exercise_warm_culling_decisions(
+        const Tree& tree,
+        Rect region) noexcept {
+        std::size_t hits = 0;
+        for (const auto& cached : tree.paint_cull_cache_) {
+            const auto* entry = tree.paint_cull_cache_entry(cached.id);
+            if (entry && entry->subtree_valid &&
+                !intersect(entry->subtree_visual_bounds, region).empty()) {
+                ++hits;
+            }
+        }
+        return hits;
     }
 
     [[nodiscard]] static Rect first_child_bounds(const Tree& tree) noexcept {
@@ -59,6 +96,8 @@ struct PaintProbeState {
     bool throw_on_paint{};
     bool throw_on_layout{};
     bool trigger_reentrant_mutation{};
+    bool draws{};
+    ui::Color color{};
     ui::Size measured{40.0f, 40.0f};
     ui::VisualOutset outset{};
     ui::ComponentAvailability availability{};
@@ -117,8 +156,11 @@ public:
         ++state_->unmounts;
     }
 
-    void paint(ui::PaintContext&) const override {
+    void paint(ui::PaintContext& context) const override {
         ++state_->paints;
+        if (state_->draws) {
+            context.painter().fill_rounded_rect(context.bounds(), 0.0f, state_->color);
+        }
         if (state_->order) state_->order->push_back(state_->tag);
         if (state_->on_paint) state_->on_paint();
         if (state_->throw_on_paint) throw std::runtime_error("paint probe failure");
@@ -522,6 +564,113 @@ void reentrant_structural_mutation_is_deferred() {
     NUI_CHECK(child->unmounts == 1);
 }
 
+void widened_region_preserves_neighbor_contributor() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto child = std::make_shared<PaintProbeState>();
+    root->child_bounds = {{100.0f, 20.0f, 20.0f, 20.0f}};
+    child->outset.left = 12.0f;
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(child)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+
+    reset(child);
+    paint_region(tree, canvas, platform, {80.0f, 20.0f, 5.0f, 20.0f});
+    NUI_CHECK(child->paints == 0);
+
+    reset(child);
+    paint_region(tree, canvas, platform, {80.0f, 20.0f, 12.0f, 20.0f});
+    NUI_CHECK(child->paints == 1);
+}
+
+void overlapping_translucent_pixel_parity() {
+    constexpr int width = 180;
+    constexpr int height = 100;
+    const auto info = SkImageInfo::Make(
+        width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto full_surface = SkSurfaces::Raster(info);
+    auto partial_surface = SkSurfaces::Raster(info);
+    NUI_CHECK(full_surface != nullptr);
+    NUI_CHECK(partial_surface != nullptr);
+
+    auto root = std::make_shared<PaintProbeState>();
+    auto first = std::make_shared<PaintProbeState>();
+    auto second = std::make_shared<PaintProbeState>();
+    root->child_bounds = {
+        {20.0f, 20.0f, 90.0f, 60.0f},
+        {60.0f, 20.0f, 90.0f, 60.0f}};
+    first->draws = true;
+    first->color = {1.0f, 0.1f, 0.1f, 0.6f};
+    second->draws = true;
+    second->color = {0.1f, 0.2f, 1.0f, 0.5f};
+
+    ui::Tree tree{ui::compile(probe_spec(
+        root,
+        {probe_spec(first), probe_spec(second)}))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({static_cast<float>(width), static_cast<float>(height)});
+
+    auto* full_canvas = full_surface->getCanvas();
+    auto* partial_canvas = partial_surface->getCanvas();
+    NUI_CHECK(full_canvas != nullptr);
+    NUI_CHECK(partial_canvas != nullptr);
+    full_canvas->clear(SK_ColorTRANSPARENT);
+    partial_canvas->clear(SK_ColorTRANSPARENT);
+
+    tree.paint(*full_canvas, platform);
+    {
+        ui::Painter painter{*partial_canvas};
+        tree.paint_region(painter, platform, {70.0f, 30.0f, 20.0f, 20.0f});
+    }
+
+    std::vector<std::uint32_t> full_pixels(static_cast<std::size_t>(width * height));
+    std::vector<std::uint32_t> partial_pixels(static_cast<std::size_t>(width * height));
+    NUI_CHECK(full_surface->readPixels(
+        info, full_pixels.data(), static_cast<std::size_t>(width) * sizeof(std::uint32_t), 0, 0));
+    NUI_CHECK(partial_surface->readPixels(
+        info, partial_pixels.data(), static_cast<std::size_t>(width) * sizeof(std::uint32_t), 0, 0));
+
+    for (int y = 30; y < 50; ++y) {
+        for (int x = 70; x < 90; ++x) {
+            const auto index = static_cast<std::size_t>(y * width + x);
+            NUI_CHECK(full_pixels[index] == partial_pixels[index]);
+        }
+    }
+}
+
+void warm_culling_decisions_allocate_zero() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto left = std::make_shared<PaintProbeState>();
+    auto right = std::make_shared<PaintProbeState>();
+    root->child_bounds = {
+        {0.0f, 0.0f, 40.0f, 60.0f},
+        {80.0f, 0.0f, 40.0f, 60.0f}};
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(left), probe_spec(right)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({120.0f, 60.0f});
+    tree.paint(canvas, platform);
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
+
+    const auto before = allocation_probe::allocation_count;
+    std::size_t hits = 0;
+    for (int pass = 0; pass < 1024; ++pass) {
+        hits += ui::TreeTestAccess::exercise_warm_culling_decisions(
+            tree, {0.0f, 0.0f, 40.0f, 60.0f});
+    }
+    NUI_CHECK(hits != 0);
+    NUI_CHECK(allocation_probe::allocation_count == before);
+}
+
 void two_tree_cache_isolation_contract() {
     auto root_a = std::make_shared<PaintProbeState>();
     auto left_a = std::make_shared<PaintProbeState>();
@@ -577,6 +726,9 @@ void suite() {
     layout_publication_and_rollback_contract();
     throwing_paint_restores_clip_state();
     reentrant_structural_mutation_is_deferred();
+    widened_region_preserves_neighbor_contributor();
+    overlapping_translucent_pixel_parity();
+    warm_culling_decisions_allocate_zero();
     two_tree_cache_isolation_contract();
 }
 
