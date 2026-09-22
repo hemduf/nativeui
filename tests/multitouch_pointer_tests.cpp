@@ -316,6 +316,42 @@ void suite() {
         (void)tree.dispatch(pointer(ui::InputType::PointerUp, 7U, 25.0f, 50.0f), platform);
     }
 
+    // A per-contact cancellation may request global pointer teardown. The
+    // contact whose callback is already running must not receive a duplicate
+    // PointerCancel, while sibling captures are still cancelled exactly once.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 15U, 25.0f, 50.0f), platform);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 16U, 175.0f, 50.0f), platform);
+
+        left->on_cancel = [&] {
+            (void)tree.cancel_pointer(platform);
+        };
+
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerCancel, 15U, 25.0f, 50.0f), platform);
+        left->on_cancel = {};
+
+        NUI_CHECK(left->cancel.size() == 1U && left->cancel.back() == 15U);
+        NUI_CHECK(right->cancel.size() == 1U && right->cancel.back() == 16U);
+
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 17U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerMove, 17U, 25.0f, 50.0f), platform);
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 17U);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerUp, 17U, 25.0f, 50.0f), platform);
+    }
+
     // An older PointerDown frame must not capture after a nested newer Down
     // reused the same platform ID. The newer contact owns the generation.
     {
