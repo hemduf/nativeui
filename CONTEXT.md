@@ -1,6 +1,6 @@
 # NativeUI compact recovery context
 
-**Updated:** 2026-09-21
+**Updated:** 2026-09-22
 
 ## Mission and invariants
 
@@ -209,7 +209,7 @@ T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
 T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
-T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> NativeUI 1.1 shaders
+T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(review/#451) -> NativeUI 1.1 shaders
 T098(done) ---------------------------------------------------------------> T086(done)
 ```
 
@@ -248,6 +248,8 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 - **T085 / #169 / PR #446:** ImageTexture filtering/mipmap policy is complete, squash-merged as `64744044eefc4225607339890ff221756379e366` from frozen executable head `2172372e73a8edecb1dc6832dc00b4e2f815188f`. NativeUI now exposes backend-neutral Nearest/Linear filtering plus None/Nearest/Linear mipmap policy with Linear/None defaults, zero-allocation/noexcept sampling mutation, level-0 magnification, nearest-level/trilinear minification, strict selected-source isolation across T084 tile modes, shared-Image sampling isolation, repeated-draw no-redecode behavior and draw-local backend lifetime pending T097 caching. Exact-head CI #2007 and dedicated T085 Texture Sampling #4 are green; final T042 Lifecycle Stress #854 and T052 v0.1 Release Gate #578 are green. Seven review passes and the mandatory record report zero remaining Blocking/Important findings.
 - **T098 / #183 / PR #447:** shared affine transform tracking is complete, squash-merged as `abdce33618e6c3e61dde41e36e668213c7bbc635` from frozen executable head `8db9edd05cc9014698cb48cd0c715527a6a2cd98`. `Transform2D` now has deterministic rotation/map/composition and the shared normalized double-precision inverse contract; Painter tracks logical local-to-scene transforms across save/restore, StateGuard, clip/layer and private effect matrix work while excluding device scale. Invalid mutations are atomic no-ops, finite near-singular transforms remain drawable, and deep history allocation/failure ordering is deterministic. CI #2051, T050 #309, Package Contracts #427, T072 #473, T042 #856 and T052 #580 are green; the final exact-head review record has zero Blocking/Important findings.
 - **T086 / #170 / PR #449:** ImageTexture local affine transforms are complete, squash-merged as `79e48ae7812290d8ebb1be8df80e6a93c701207f` from frozen executable head `b07d516e65dbbf81ee07c5e3776753df4da6e40a`. Exact raw transform values and T098 semantic validity are stored per ImageTexture with zero-allocation/noexcept mutation; invalid transforms preserve logical texture state and render transparently, while valid Brush snapshots remain value-stable. Backend sampling composes `texture_to_local * (source -> destination)`, transformed Clamp/Repeat/Mirror/Decal domains preserve T084 source isolation, and T085 filtering/mipmap semantics observe the transformed sampling geometry. The final regression correction keeps full-source Repeat/Mirror level-0 sampling on the direct image path while excluding Decal so destination-bounded transparency remains intact. CI #2061, Package Contracts #434, T050 #319, T072 #479, T085 Texture Sampling #10, T086 Texture Transform #6, T042 #857 and T052 #581 are green; twelve review passes plus the final mandatory record report zero Blocking/Important findings.
+
+- **T087 / #171 / PR #451 — active review candidate:** `TextureInterpretation::{Color,Data}` is stored per ImageTexture and defaults to Color. One eager encoded decode creates the unpremultiplied numeric raster used by Data; Color gets a premultiplied immutable sibling derived from those decoded pixels, avoiding a second encoded decode while retaining premultiplied filtering/compositing. Data uses `SkImage::makeRawShader()` so embedded RGB transfer/gamut metadata is ignored and unpremultiplied RGB/alpha remain numeric; selected-source tiling/mipmap paths never pass through `SkPictureShader`, whose pinned-Skia implementation rasterizes to premultiplied sRGB. Interpretation changes do not mutate the shared Image, re-decode, or change T084/T085/T086 state. The candidate includes tagged/untagged, alpha payload, premultiplied-filter, normal-like data, shared-Image, transform, tile/filter/mipmap, fault/materialization and feature-example coverage. Retained backend caching remains deferred to T097.
 
 ## Validation policy
 
@@ -296,5 +298,5 @@ Recovery sequence:
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
 4. T078 / #161 is Done; T094 / #178 remains blocked on T071 before dirty-region retained traversal can start.
-5. T084 / #168, T085 / #169, T098 / #183 and T086 / #170 are Done for the ImageTexture affine-transform line.
+5. T084 / #168, T085 / #169, T098 / #183 and T086 / #170 are Done for the ImageTexture affine-transform line; T087 / #171 / PR #451 is the active Color/Data interpretation review candidate.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
