@@ -42,12 +42,16 @@ namespace ui::detail {
     contact.predicted = (event.pointerFlags & PUGL_POINTER_IS_PREDICTED) != 0U;
     contact.pressure = static_cast<float>(event.pressure);
 
-    if (std::isfinite(event.width) && std::isfinite(event.height) &&
-        std::isfinite(physical_to_logical_scale) &&
+    if (std::isfinite(physical_to_logical_scale) &&
         physical_to_logical_scale > 0.0f) {
-        contact.contact_size = {
-            static_cast<float>(event.width) / physical_to_logical_scale,
-            static_cast<float>(event.height) / physical_to_logical_scale};
+        if (std::isfinite(event.width)) {
+            contact.contact_size.w =
+                static_cast<float>(event.width) / physical_to_logical_scale;
+        }
+        if (std::isfinite(event.height)) {
+            contact.contact_size.h =
+                static_cast<float>(event.height) / physical_to_logical_scale;
+        }
     }
 
     return contact;
