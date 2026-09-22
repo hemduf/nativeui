@@ -49,6 +49,6 @@
         if (invalidation == ThemeInvalidation::Layout) {
             invalidate_layout_from(*node);
         } else {
-            publish_all_visual_bounds_then_invalidate();
+            publish_subtree_visual_bounds_then_invalidate(*node);
         }
     }

@@ -228,6 +228,24 @@
         for (auto& child : node.children) publish_visual_bounds(*child);
     }
 
+    [[nodiscard]] static Rect published_subtree_visual_bounds(
+        const Node& node) noexcept {
+        Rect bounds = node.visual_bounds_published ? node.published_visual_bounds : Rect{};
+        for (const auto& child : node.children) {
+            bounds = unite(bounds, published_subtree_visual_bounds(*child));
+        }
+        return bounds;
+    }
+
+    void publish_subtree_visual_bounds_then_invalidate(Node& node) {
+        const Rect old_bounds = published_subtree_visual_bounds(node);
+        publish_visual_bounds(node);
+        const Rect new_bounds = published_subtree_visual_bounds(node);
+        if (const auto exposed = retain_dirty(unite(old_bounds, new_bounds))) {
+            notify_invalidation(*exposed);
+        }
+    }
+
     [[nodiscard]] std::optional<Rect> retain_dirty(Rect rect) noexcept {
         return paint_dirty_.add(rect, viewport_rect());
     }
