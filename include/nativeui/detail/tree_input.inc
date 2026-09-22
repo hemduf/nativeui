@@ -13,6 +13,7 @@
         Node* node{};
         NodeId owner{kInvalidNodeId};
         std::uint64_t dispatch_token{};
+        bool cancelling{};
     };
 
     struct PointerInteractionState {
@@ -48,9 +49,17 @@
     }
 
     [[nodiscard]] std::optional<PointerId> first_pointer_capture_id() noexcept {
-        while (pointer_capture_count_ != 0U) {
-            const auto pointer = pointer_captures_[0].pointer;
-            if (pointer_capture_owner(pointer)) return pointer;
+        std::size_t i = 0U;
+        while (i < pointer_capture_count_) {
+            const auto pointer = pointer_captures_[i].pointer;
+            if (!pointer_capture_owner(pointer)) continue;
+
+            const auto index = pointer_capture_index(pointer);
+            if (index != pointer_capture_count_ &&
+                !pointer_captures_[index].cancelling) {
+                return pointer;
+            }
+            ++i;
         }
         return std::nullopt;
     }
@@ -90,7 +99,9 @@
         const auto index = pointer_capture_index(pointer);
         if (index != pointer_capture_count_) {
             auto& capture = pointer_captures_[index];
-            if (capture.node == &node && capture.owner == node.id) {
+            if (!capture.cancelling &&
+                capture.node == &node &&
+                capture.owner == node.id) {
                 capture.dispatch_token = active_input_dispatch_token_;
                 return;
             }
@@ -515,6 +526,13 @@
             end_pointer_interaction_if_token(pointer, interaction_token);
             return EventResult::Ignored;
         }
+
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_ ||
+            pointer_captures_[index].cancelling) {
+            return EventResult::Ignored;
+        }
+        pointer_captures_[index].cancelling = true;
 
         event.type = InputType::PointerCancel;
         try {

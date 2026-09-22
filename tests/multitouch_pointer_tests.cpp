@@ -309,6 +309,7 @@ void suite() {
         }
         NUI_CHECK(threw);
         left->on_cancel = {};
+        NUI_CHECK(left->cancel.size() == 1U && left->cancel.back() == 7U);
 
         (void)tree.dispatch(pointer(ui::InputType::PointerMove, 7U, 25.0f, 50.0f), platform);
         NUI_CHECK(right->move.size() == 1U && right->move.back() == 7U);
