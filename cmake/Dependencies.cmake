@@ -6,8 +6,10 @@ if(NATIVEUI_BUILD_PLATFORM)
   # -----------------------------------------------------------------------------
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
+  # cde238e carries the Emscripten input/context-menu support plus the
+  # multi-view focus isolation fix validated in hemduf/pugl#47.
   set(NATIVEUI_PUGL_COMMIT
-      "723474fa43a5d1b08be2446966a4db9007b749c6"
+      "cde238e51fe79500e0289fa81220c6f1c5d7043c"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
@@ -29,18 +31,24 @@ if(NATIVEUI_BUILD_PLATFORM)
   # same resolved pinned source root. This is build/configure data only.
   set(NATIVEUI_PUGL_SOURCE_DIR "${pugl_src_SOURCE_DIR}")
 
-  find_package(OpenGL REQUIRED)
   add_library(nativeui_opengl INTERFACE)
   add_library(NativeUI::OpenGL ALIAS nativeui_opengl)
-  if(TARGET OpenGL::GL)
-    target_link_libraries(nativeui_opengl INTERFACE OpenGL::GL)
-  elseif(TARGET OpenGL::OpenGL)
-    target_link_libraries(nativeui_opengl INTERFACE OpenGL::OpenGL)
-    if(TARGET OpenGL::GLX)
-      target_link_libraries(nativeui_opengl INTERFACE OpenGL::GLX)
-    endif()
+  if(EMSCRIPTEN)
+    # The browser provides OpenGL ES through WebGL2; no link library exists.
+    # Pugl's Emscripten GL backend maps the requested 3.0 context to WebGL2.
+    target_link_options(nativeui_opengl INTERFACE "-sMAX_WEBGL_VERSION=2")
   else()
-    message(FATAL_ERROR "CMake FindOpenGL did not provide a usable OpenGL target")
+    find_package(OpenGL REQUIRED)
+    if(TARGET OpenGL::GL)
+      target_link_libraries(nativeui_opengl INTERFACE OpenGL::GL)
+    elseif(TARGET OpenGL::OpenGL)
+      target_link_libraries(nativeui_opengl INTERFACE OpenGL::OpenGL)
+      if(TARGET OpenGL::GLX)
+        target_link_libraries(nativeui_opengl INTERFACE OpenGL::GLX)
+      endif()
+    else()
+      message(FATAL_ERROR "CMake FindOpenGL did not provide a usable OpenGL target")
+    endif()
   endif()
 
   if(APPLE)
@@ -66,6 +74,16 @@ if(NATIVEUI_BUILD_PLATFORM)
         "${pugl_src_SOURCE_DIR}/src/win_gl.c"
         "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_windows.c"
       )
+    elseif(EMSCRIPTEN)
+      # Pugl's browser backend owns the DOM canvas, WebGL context, DOM input
+      # listeners and browser timers; NativeUI's IME bridge is a no-op stub
+      # because committed text arrives as PUGL_TEXT events.
+      list(APPEND _pugl_sources
+        "${pugl_src_SOURCE_DIR}/src/emscripten.c"
+        "${pugl_src_SOURCE_DIR}/src/emscripten_events.c"
+        "${pugl_src_SOURCE_DIR}/src/emscripten_gl.c"
+        "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_emscripten.c"
+      )
     elseif(UNIX)
       list(APPEND _pugl_sources
         "${pugl_src_SOURCE_DIR}/src/x11.c"
@@ -73,7 +91,7 @@ if(NATIVEUI_BUILD_PLATFORM)
         "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_ime_x11.c"
       )
     else()
-      message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows and Linux/X11")
+      message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows, Linux/X11 and WebAssembly")
     endif()
 
     add_library(nativeui_pugl STATIC ${_pugl_sources})
@@ -98,6 +116,9 @@ if(NATIVEUI_BUILD_PLATFORM)
       target_link_libraries(nativeui_pugl PUBLIC
         dwmapi gdi32 imm32 shell32 shlwapi user32
       )
+    elseif(EMSCRIPTEN)
+      # Emscripten's GL/HTML5 runtime is provided by the toolchain itself.
+      target_compile_definitions(nativeui_pugl PRIVATE _POSIX_C_SOURCE=200809L)
     else()
       find_package(X11 REQUIRED)
       target_compile_definitions(nativeui_pugl PRIVATE
@@ -137,7 +158,13 @@ endif()
 if(NOT NATIVEUI_SKIA_ROOT)
   string(TOLOWER "${NATIVEUI_SKIA_CONFIG}" _skia_cfg)
 
-  if(APPLE)
+  if(EMSCRIPTEN)
+    if(NOT NATIVEUI_SKIA_CONFIG STREQUAL "Release")
+      message(FATAL_ERROR "skia-builder ${NATIVEUI_SKIA_TAG} publishes the wasm32 artifact as Release")
+    endif()
+    set(_skia_asset "skia-build-wasm-wasm32-gpu-release.zip")
+    set(_skia_hash "SHA256=e40f67d7fe7ecaf9ee860b5d2782f573a7209e15c923ba8cc9598ffe8b630b9c")
+  elseif(APPLE)
     if(NOT NATIVEUI_SKIA_CONFIG STREQUAL "Release")
       message(FATAL_ERROR "skia-builder ${NATIVEUI_SKIA_TAG} publishes the macOS universal artifact as Release")
     endif()
@@ -217,7 +244,13 @@ endif()
 # `#include "src/..."` resolve correctly.
 set(_skia_include "${_skia_package_root}/include")
 
-if(APPLE)
+if(EMSCRIPTEN)
+  set(_skia_lib_dir "${_skia_package_root}/wasm-gpu/lib/Release")
+  set(_skia_lib_candidates
+    "${_skia_lib_dir}/libSkia.a"
+    "${_skia_lib_dir}/libskia.a"
+  )
+elseif(APPLE)
   set(_skia_lib_dir "${_skia_package_root}/mac-gpu/lib/Release")
   # Some skia-builder paths contain the original libskia.a while combined
   # Apple packages may additionally contain libSkia.a. Prefer the combined
@@ -271,7 +304,15 @@ set_target_properties(SkiaBuilder::skia PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_skia_include}"
 )
 
-if(APPLE)
+if(EMSCRIPTEN)
+  # The wasm32 package bundles FreeType, HarfBuzz and ICU and consumes the
+  # browser's WebGL/WebGPU through Skia, so no system library is added here.
+  # skia-builder builds it with is_trivial_abi=true, so every consumer
+  # translation unit must agree on the sk_sp/sk_refptr ABI attribute or
+  # wasm-ld reports function signature mismatches.
+  target_compile_definitions(SkiaBuilder::skia INTERFACE
+    "SK_TRIVIAL_ABI=[[clang::trivial_abi]]")
+elseif(APPLE)
   find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
   find_library(CORETEXT_FRAMEWORK CoreText REQUIRED)
   find_library(COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)

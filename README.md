@@ -124,7 +124,7 @@ Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)`
 
 The project bootstraps CPM.cmake, then:
 
-1. fetches Pugl source at the pinned commit `b7637149ebe53124e5be90559e02a0185bbcbd73`; Windows/Linux compile the normal generic platform sources, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
+1. fetches Pugl source at the pinned commit `cde238e51fe79500e0289fa81220c6f1c5d7043c`; Windows/Linux/WebAssembly compile the generic platform sources for their backend, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
 2. downloads the pinned `skia-builder` `chrome/m153` release ZIP for the current platform and imports its static `skia` library.
 
 The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/Ninja Skia build is part of NativeUI.
@@ -144,6 +144,7 @@ The installed/public low-level `nativeui_attach_platform(TARGET ... CONSUMER_ID 
 - macOS: `skia-build-mac-universal-gpu-release.zip`
 - Linux x64: `skia-build-linux-x64-gpu-release.zip`
 - Windows x64: `/MD` Release by default; `/MT` selectable.
+- WebAssembly: `skia-build-wasm-wasm32-gpu-release.zip` with Emscripten 4.0.7.
 
 ### Focus scopes
 
@@ -301,6 +302,7 @@ CPM manages the source/binary dependencies, but the native SDK development packa
 - **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks). Consumer-scoped Objective-C runtime naming is handled by NativeUI's T053 target machinery rather than a global cache variable.
 - **Windows**: Windows SDK + OpenGL + DirectWrite; select the Skia `/MD` or `/MT` package with `NATIVEUI_SKIA_WINDOWS_CRT`.
 - **Linux/X11**: X11, OpenGL/GLX and Fontconfig development packages. On Debian/Ubuntu this is typically `libx11-dev libgl1-mesa-dev libfontconfig1-dev`.
+- **WebAssembly**: Emscripten 4.0.7. Rendering uses WebGL2; browser builds do not discover X11, Fontconfig, D-Bus or desktop OpenGL libraries. For `EmbeddedView`, the `NativeParentHandle` is the numeric browser-host token used by Pugl; the corresponding DOM host element carries `data-pugl-native-view="<token>"`.
 
 NativeUI deliberately disables optional Pugl Xcursor/XRandR/XSync integration in this POC to keep the baseline dependency set small.
 
@@ -331,6 +333,7 @@ Advanced IME pre-edit/candidate positioning remains a later platform extension b
 - macOS / Cocoa through Pugl
 - Windows / Win32 through Pugl
 - Linux / X11 through Pugl
+- WebAssembly / Emscripten through Pugl + WebGL2
 - Wayland is not part of this POC
 
 

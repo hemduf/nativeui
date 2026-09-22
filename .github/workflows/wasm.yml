@@ -1,0 +1,161 @@
+name: WebAssembly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'examples/standalone.cpp'
+      - 'wasm_spike/**'
+      - 'tests/resources/NativeUITestLatin.ttf'
+      - 'tests/wasm_package_consumer/**'
+      - 'scripts/run_nativeui_wasm_browser_test.py'
+      - '.github/workflows/wasm.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'examples/standalone.cpp'
+      - 'wasm_spike/**'
+      - 'tests/resources/NativeUITestLatin.ttf'
+      - 'tests/wasm_package_consumer/**'
+      - 'scripts/run_nativeui_wasm_browser_test.py'
+      - '.github/workflows/wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  PYTHON_VERSION: '3.13'
+  PLAYWRIGHT_VERSION: '1.62.0'
+
+jobs:
+  wasm:
+    name: Emscripten 4.0.7
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-wasm-cpm-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-wasm-cpm-
+
+      # Skia chrome/m153 pins Emscripten 4.0.7 in bin/activate-emsdk.
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '4.0.7'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: >-
+          emcmake cmake -S . -B build-wasm -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_BUILD_WASM_SPIKE=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Build headless and browser targets
+        run: >-
+          cmake --build build-wasm
+          --target nativeui_wasm_spike
+          nativeui_wasm_main_loop_smoke
+          nativeui_wasm_lifecycle_smoke
+          nativeui_wasm_embedded_smoke
+          nativeui_wasm_app
+          --parallel 2
+
+      - name: Run headless Node smoke
+        run: |
+          cd build-wasm
+          node nativeui_wasm_spike.js
+          node nativeui_wasm_main_loop_smoke.js
+
+      - name: Install WebAssembly package
+        run: cmake --install build-wasm --prefix "${{ github.workspace }}/build-wasm/install"
+
+      - name: Build external consumer from build-tree package
+        run: |
+          emcmake cmake \
+            -S tests/wasm_package_consumer \
+            -B build-wasm-consumer-buildtree \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNativeUI_DIR="${{ github.workspace }}/build-wasm/nativeui-package"
+          cmake --build build-wasm-consumer-buildtree --parallel 2
+          test -f build-wasm-consumer-buildtree/NativeUIWasmPackageConsumer.html
+
+      - name: Build external consumer from installed package
+        run: |
+          nativeui_dir="$(dirname "$(find "${{ github.workspace }}/build-wasm/install" \
+            -type f -name NativeUIConfig.cmake -print -quit)")"
+          test -n "$nativeui_dir"
+          emcmake cmake \
+            -S tests/wasm_package_consumer \
+            -B build-wasm-consumer-installed \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNativeUI_DIR="$nativeui_dir"
+          cmake --build build-wasm-consumer-installed --parallel 2
+          test -f build-wasm-consumer-installed/NativeUIWasmPackageConsumer.html
+
+      - name: Install Chromium browser test runtime
+        run: |
+          python -m pip install "playwright==${PLAYWRIGHT_VERSION}"
+          python -m playwright install --with-deps chromium
+
+      - name: Run NativeUI multi-window browser lifecycle smoke
+        run: >-
+          python scripts/run_nativeui_wasm_browser_test.py
+          build-wasm/nativeui_wasm_lifecycle_smoke.html
+          --diagnostics-dir build-wasm/browser-diagnostics/lifecycle
+
+      - name: Run NativeUI embedded multi-instance browser smoke
+        run: >-
+          python scripts/run_nativeui_wasm_browser_test.py
+          build-wasm/nativeui_wasm_embedded_smoke.html
+          --embedded
+          --diagnostics-dir build-wasm/browser-diagnostics/embedded
+
+      - name: Validate browser artifact
+        run: |
+          test -f build-wasm/nativeui_wasm_app.html
+          grep -Eq 'touch-action:[[:space:]]*none' build-wasm/nativeui_wasm_app.html
+          grep -Fq 'nativeui-primary-surface' build-wasm/nativeui_wasm_app.html
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nativeui-wasm-browser-diagnostics
+          path: build-wasm/browser-diagnostics
+          if-no-files-found: ignore

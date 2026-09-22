@@ -77,7 +77,7 @@ def main() -> int:
     require_all(
         dependencies,
         (
-            "NativeUI/Pugl supports macOS, Windows and Linux/X11",
+            "NativeUI/Pugl supports macOS, Windows, Linux/X11 and WebAssembly",
             "The pinned skia-builder release currently provides Linux x64 only",
             "NATIVEUI_SKIA_WINDOWS_CRT must be MD or MT",
             "publishes the macOS universal artifact as Release",
@@ -186,6 +186,8 @@ def main() -> int:
             "macOS",
             "Windows",
             "Linux/X11",
+            "WebAssembly",
+            "Emscripten 4.0.7",
             "find_package(NativeUI CONFIG REQUIRED)",
             "NativeUI::Core",
             "nativeui_attach_platform(",

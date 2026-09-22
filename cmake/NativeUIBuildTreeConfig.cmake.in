@@ -41,7 +41,13 @@ if(NOT TARGET SkiaBuilder::skia)
     IMPORTED_LOCATION "${_nativeui_skia_lib}"
     INTERFACE_INCLUDE_DIRECTORIES "${_nativeui_skia_include}"
   )
-  if(APPLE)
+  if(EMSCRIPTEN)
+    # The pinned wasm Skia archive is built with is_trivial_abi=true. Consumers
+    # that compile NativeUI's package-owned platform sources must use the same
+    # sk_sp/sk_refptr ABI and must not discover desktop UNIX dependencies.
+    set_property(TARGET SkiaBuilder::skia APPEND PROPERTY
+      INTERFACE_COMPILE_DEFINITIONS "SK_TRIVIAL_ABI=[[clang::trivial_abi]]")
+  elseif(APPLE)
     find_library(_nativeui_corefoundation CoreFoundation REQUIRED)
     find_library(_nativeui_coretext CoreText REQUIRED)
     find_library(_nativeui_coregraphics CoreGraphics REQUIRED)

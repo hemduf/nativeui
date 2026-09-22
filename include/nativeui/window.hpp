@@ -58,6 +58,10 @@ public:
     [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
 
+    /// Runs the standalone application loop. On Emscripten exactly one
+    /// Application::run() may own the module's browser main-loop slot at a time;
+    /// additional/external instances remain supported through non-blocking
+    /// poll().
     int run();
     bool poll(double timeout_seconds = 0.0);
 

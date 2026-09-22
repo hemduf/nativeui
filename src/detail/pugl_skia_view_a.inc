@@ -96,11 +96,20 @@ public:
                         to_pugl_span(initial_physical->w),
                         to_pugl_span(initial_physical->h));
         puglSetViewHint(view_, PUGL_RESIZABLE, desc.resizable ? PUGL_TRUE : PUGL_FALSE);
+#if defined(__EMSCRIPTEN__)
+        // Pugl's browser backend maps a 3.0 GLES request to WebGL2, which is
+        // what Skia's WebGL interface requires. Desktop core profiles and
+        // minor versions do not exist in the browser.
+        puglSetViewHint(view_, PUGL_CONTEXT_API, PUGL_OPENGL_ES_API);
+        puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MAJOR, 3);
+        puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MINOR, 0);
+#else
         // Request a portable modern baseline. On macOS this maps to the native
         // 3.2 Core profile instead of Pugl's legacy 2.0 default.
         puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MAJOR, 3);
         puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MINOR, 2);
         puglSetViewHint(view_, PUGL_CONTEXT_PROFILE, PUGL_OPENGL_CORE_PROFILE);
+#endif
         puglSetViewHint(view_, PUGL_DOUBLE_BUFFER, PUGL_TRUE);
         puglSetViewHint(view_, PUGL_STENCIL_BITS, 8);
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
