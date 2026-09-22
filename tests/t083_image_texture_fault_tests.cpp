@@ -391,8 +391,10 @@ void decode_materialization_and_failure_recovery() {
           "decode instrumentation did not observe Image::decode");
     check(!ui::detail::image_backing_is_lazy_for_test(image),
           "Image::decode published a lazy backing that can decode during paint");
-    check(ui::detail::image_backing_is_unpremul_for_test(image),
-          "Image::decode did not preserve unpremultiplied RGB payload");
+    check(ui::detail::image_color_backing_is_premul_for_test(image),
+          "Image::decode did not preserve premultiplied Color backing");
+    check(ui::detail::image_data_backing_is_unpremul_for_test(image),
+          "Image::decode did not preserve unpremultiplied Data backing");
 
     // Keep the legacy 8x8 recovery geometry while enabling mip materialization.
     // This isolates the new no-redecode assertion from the existing pixel oracle.

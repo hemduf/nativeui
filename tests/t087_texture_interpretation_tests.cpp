@@ -59,6 +59,18 @@ constexpr std::array<std::byte, 70> kAlphaPayloadPng{
     std::byte{78},std::byte{68},std::byte{174},std::byte{66},std::byte{96},std::byte{130},
 };
 
+constexpr std::array<std::byte, 72> kPremultipliedFilterPng{
+    std::byte{137},std::byte{80},std::byte{78},std::byte{71},std::byte{13},std::byte{10},std::byte{26},std::byte{10},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{72},std::byte{68},std::byte{82},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{2},std::byte{0},std::byte{0},std::byte{0},std::byte{1},
+    std::byte{8},std::byte{6},std::byte{0},std::byte{0},std::byte{0},std::byte{244},std::byte{34},std::byte{127},
+    std::byte{138},std::byte{0},std::byte{0},std::byte{0},std::byte{15},std::byte{73},std::byte{68},std::byte{65},
+    std::byte{84},std::byte{120},std::byte{218},std::byte{99},std::byte{248},std::byte{207},std::byte{0},std::byte{2},
+    std::byte{255},std::byte{255},std::byte{3},std::byte{0},std::byte{10},std::byte{254},std::byte{2},std::byte{254},
+    std::byte{230},std::byte{86},std::byte{62},std::byte{114},std::byte{0},std::byte{0},std::byte{0},std::byte{0},
+    std::byte{73},std::byte{69},std::byte{78},std::byte{68},std::byte{174},std::byte{66},std::byte{96},std::byte{130},
+};
+
 constexpr std::array<std::byte, 74> kNormalLikePng{
     std::byte{137},std::byte{80},std::byte{78},std::byte{71},std::byte{13},std::byte{10},std::byte{26},std::byte{10},
     std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{72},std::byte{68},std::byte{82},
@@ -257,6 +269,24 @@ void data_preserves_rgb_and_alpha_payload() {
     NUI_CHECK(color_rgb.g < raw_rgb.g - 35);
 }
 
+void color_filtering_stays_premultiplied() {
+    const auto image = ui::Image::decode(kPremultipliedFilterPng);
+    NUI_CHECK(image.valid());
+
+    ui::ImageTexture color{
+        image, {0.0f, 0.0f, 2.0f, 1.0f}, {0.0f, 0.0f, 16.0f, 16.0f}};
+    ui::TextureSampling sampling;
+    sampling.set_filter(ui::TextureFilter::Linear);
+    color.set_sampling(sampling);
+
+    // Midpoint between fully transparent red and opaque blue. Correct
+    // premultiplied filtering contributes no red coverage; filtering an
+    // unpremultiplied Color backing would leak roughly 64 red here.
+    const auto midpoint = render_brush(ui::Brush{color}, 8, 8);
+    NUI_CHECK(midpoint.r <= 4);
+    NUI_CHECK(near_channel(midpoint.b, 128, 6));
+}
+
 void normals_and_shared_image_are_independent() {
     const auto image = ui::Image::decode(kNormalLikePng);
     NUI_CHECK(image.valid());
@@ -345,6 +375,7 @@ void suite() {
     tagged_color_and_data_diverge();
     untagged_color_defaults_to_srgb();
     data_preserves_rgb_and_alpha_payload();
+    color_filtering_stays_premultiplied();
     normals_and_shared_image_are_independent();
     brush_snapshot_and_transform_state_are_stable();
     data_tiling_filtering_and_mipmaps_stay_raw();
