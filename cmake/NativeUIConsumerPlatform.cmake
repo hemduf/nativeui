@@ -112,6 +112,13 @@ function(_nativeui_platform_opengl_target out_var)
     return()
   endif()
 
+  if(EMSCRIPTEN)
+    add_library(_nativeui_package_opengl INTERFACE)
+    target_link_options(_nativeui_package_opengl INTERFACE "-sMAX_WEBGL_VERSION=2")
+    set(${out_var} _nativeui_package_opengl PARENT_SCOPE)
+    return()
+  endif()
+
   find_package(OpenGL REQUIRED)
   add_library(_nativeui_package_opengl INTERFACE)
   if(TARGET OpenGL::GL)
@@ -255,6 +262,13 @@ function(_nativeui_prepare_package_platform out_var)
           "${_pugl_root}/src/win_gl.c"
           "${_nativeui_root}/src/detail/native_ime_windows.c"
         )
+      elseif(EMSCRIPTEN)
+        list(APPEND _nativeui_pugl_sources
+          "${_pugl_root}/src/emscripten.c"
+          "${_pugl_root}/src/emscripten_events.c"
+          "${_pugl_root}/src/emscripten_gl.c"
+          "${_nativeui_root}/src/detail/native_ime_emscripten.c"
+        )
       elseif(UNIX)
         list(APPEND _nativeui_pugl_sources
           "${_pugl_root}/src/x11.c"
@@ -263,7 +277,7 @@ function(_nativeui_prepare_package_platform out_var)
         )
       else()
         message(FATAL_ERROR
-          "NativeUI package platform attachment supports macOS, Windows and Linux/X11")
+          "NativeUI package platform attachment supports macOS, Windows, Linux/X11 and WebAssembly")
       endif()
 
       add_library(_nativeui_package_pugl STATIC ${_nativeui_pugl_sources})
@@ -289,6 +303,10 @@ function(_nativeui_prepare_package_platform out_var)
         )
         target_link_libraries(_nativeui_package_pugl PUBLIC
           dwmapi gdi32 imm32 shell32 shlwapi user32
+        )
+      elseif(EMSCRIPTEN)
+        target_compile_definitions(_nativeui_package_pugl PRIVATE
+          _POSIX_C_SOURCE=200809L
         )
       else()
         find_package(X11 REQUIRED)
@@ -316,7 +334,11 @@ function(_nativeui_prepare_package_platform out_var)
   )
   target_compile_features(_nativeui_package_platform PUBLIC cxx_std_20)
   target_compile_definitions(_nativeui_package_platform PRIVATE SK_GL)
-  if(WIN32)
+  if(EMSCRIPTEN)
+    target_compile_definitions(_nativeui_package_platform PRIVATE
+      "SK_TRIVIAL_ABI=[[clang::trivial_abi]]"
+    )
+  elseif(WIN32)
     target_compile_definitions(_nativeui_package_platform PRIVATE NOMINMAX)
   elseif(APPLE)
     target_compile_definitions(_nativeui_package_platform PRIVATE GL_SILENCE_DEPRECATION)

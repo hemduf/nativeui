@@ -31,28 +31,34 @@ include(cmake/NativeUIFeatureExamples.cmake)
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
 # skshaper in turn references the packaged SkUnicode ICU implementation. Keep
 # the Unix static-link dependency order from users toward providers.
+# Emscripten's platform module sets CMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY, so
+# explicit package paths must opt out of the cross-compilation root re-writing.
 find_library(NATIVEUI_SKIA_SVG_LIBRARY
   NAMES svg
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_SHAPER_LIBRARY
   NAMES skshaper
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_UNICODE_ICU_LIBRARY
   NAMES skunicode_icu
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_UNICODE_CORE_LIBRARY
   NAMES skunicode_core
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 add_library(SkiaBuilder::svg STATIC IMPORTED GLOBAL)
@@ -216,6 +222,7 @@ install(FILES
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
   cmake/NativeUIApplication.cmake
+  cmake/NativeUIWebShell.html
   cmake/NativeUIBinaryData.cmake
   cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
@@ -284,6 +291,10 @@ configure_file(cmake/NativeUIAttachPlatform.cmake
 )
 configure_file(cmake/NativeUIApplication.cmake
   "${_nativeui_build_package_dir}/NativeUIApplication.cmake"
+  COPYONLY
+)
+configure_file(cmake/NativeUIWebShell.html
+  "${_nativeui_build_package_dir}/NativeUIWebShell.html"
   COPYONLY
 )
 configure_file(cmake/NativeUIBinaryData.cmake
@@ -732,7 +743,71 @@ endif()
 
 # T072 is Linux/X11-only infrastructure. macOS and Windows never discover or
 # link libdbus-1; Linux platform builds require the system development package.
-if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE)
+if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
   include(cmake/NativeUILinuxDbus.cmake)
   nativeui_add_linux_dbus_transport()
+endif()
+
+# Throwaway WebAssembly spike target: validates that the pinned wasm32 Skia
+# package and the headless core compile, link and render under Emscripten.
+option(NATIVEUI_BUILD_WASM_SPIKE "Build the WebAssembly headless spike executable" OFF)
+if(EMSCRIPTEN AND NATIVEUI_BUILD_WASM_SPIKE)
+  add_executable(nativeui_wasm_spike wasm_spike/main.cpp)
+  target_link_libraries(nativeui_wasm_spike PRIVATE NativeUI::Core)
+  # Browser-consumer packaging spike: the font reaches the wasm heap through
+  # Emscripten's preload file system exactly like the demo assets would.
+  target_link_options(nativeui_wasm_spike PRIVATE
+    "--preload-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/resources/NativeUITestLatin.ttf@/nativeui/fonts/NativeUITestLatin.ttf")
+  nativeui_enable_project_warnings(nativeui_wasm_spike)
+
+  # Platform-level wasm qualification: one Node test owns/releases the single
+  # Emscripten main-loop slot, and one Chromium test exercises simultaneous
+  # NativeUI windows plus survivor teardown on real WebGL/DOM views.
+  if(NATIVEUI_BUILD_PLATFORM)
+    add_executable(nativeui_wasm_main_loop_smoke wasm_spike/main_loop.cpp)
+    target_link_libraries(nativeui_wasm_main_loop_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_main_loop_smoke PRIVATE "-sEXIT_RUNTIME=1")
+    nativeui_enable_project_warnings(nativeui_wasm_main_loop_smoke)
+
+    add_executable(nativeui_wasm_lifecycle_smoke wasm_spike/lifecycle.cpp)
+    target_link_libraries(nativeui_wasm_lifecycle_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_lifecycle_smoke PRIVATE
+      "-sEXIT_RUNTIME=0"
+      "-sALLOW_MEMORY_GROWTH=1"
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    set_target_properties(nativeui_wasm_lifecycle_smoke PROPERTIES SUFFIX ".html")
+    nativeui_enable_project_warnings(nativeui_wasm_lifecycle_smoke)
+
+    add_executable(nativeui_wasm_embedded_smoke wasm_spike/embedded.cpp)
+    target_link_libraries(nativeui_wasm_embedded_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_embedded_smoke PRIVATE
+      "-sEXIT_RUNTIME=0"
+      "-sALLOW_MEMORY_GROWTH=1"
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    set_target_properties(nativeui_wasm_embedded_smoke PROPERTIES SUFFIX ".html")
+    nativeui_enable_project_warnings(nativeui_wasm_embedded_smoke)
+
+    # First real browser window: the interactive standalone example proves the
+    # WebGL surface, DOM input translation and browser main loop end to end.
+    add_executable(nativeui_wasm_app examples/standalone.cpp)
+    target_link_libraries(nativeui_wasm_app PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_app PRIVATE
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    # Browser builds have no system fonts: the platform registers every face
+    # preloaded into /nativeui/fonts automatically. Keep the repository build
+    # deterministic by defaulting to NativeUI's bundled Latin test face; a
+    # consumer/demo can override NATIVEUI_WASM_APP_FONT with its production face.
+    set(NATIVEUI_WASM_APP_FONT
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/resources/NativeUITestLatin.ttf"
+        CACHE FILEPATH "Font preloaded for the WebAssembly example")
+    if(EXISTS "${NATIVEUI_WASM_APP_FONT}")
+      get_filename_component(_nativeui_wasm_app_font_name "${NATIVEUI_WASM_APP_FONT}" NAME)
+      target_link_options(nativeui_wasm_app PRIVATE
+        "--preload-file=${NATIVEUI_WASM_APP_FONT}@/nativeui/fonts/${_nativeui_wasm_app_font_name}")
+    endif()
+    set_target_properties(nativeui_wasm_app PROPERTIES
+      SUFFIX ".html"
+      LINK_FLAGS "-sEXIT_RUNTIME=0 -sALLOW_MEMORY_GROWTH=1")
+    nativeui_enable_project_warnings(nativeui_wasm_app)
+  endif()
 endif()

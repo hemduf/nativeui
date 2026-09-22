@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -23,6 +25,9 @@
 #  include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
 #  include "include/ports/SkTypeface_win.h"
+#elif defined(__EMSCRIPTEN__)
+#  include "include/ports/SkFontMgr_data.h"
+#  include "include/ports/SkFontMgr_empty.h"
 #else
 #  include "include/ports/SkFontMgr_fontconfig.h"
 #  include "include/ports/SkFontScanner_FreeType.h"
@@ -94,7 +99,131 @@ bool same_font_bytes(const EmbeddedFace& face, std::span<const std::byte> data) 
            std::equal(data.begin(), data.end(), face.source.begin());
 }
 
+bool register_embedded_font_with_manager(std::string_view family_alias,
+                                         std::span<const std::byte> data,
+                                         const sk_sp<SkFontMgr>& manager) {
+    if (family_alias.empty() || data.empty() || !manager) return false;
+
+    const std::string alias{family_alias};
+    {
+        std::lock_guard lock(embedded_faces_mutex());
+        const auto current = embedded_faces_snapshot();
+        const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
+            return face.alias == alias;
+        });
+        if (found != current->end()) {
+            return same_font_bytes(*found, data);
+        }
+    }
+
+    auto bytes = SkData::MakeWithCopy(data.data(), data.size());
+    if (!bytes) return false;
+    auto typeface = manager->makeFromData(std::move(bytes), 0);
+    if (!typeface) return false;
+
+    std::vector<std::byte> source{data.begin(), data.end()};
+
+    std::lock_guard lock(embedded_faces_mutex());
+    const auto current = embedded_faces_snapshot();
+    const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
+        return face.alias == alias;
+    });
+    if (found != current->end()) {
+        // Another instance may have won the registration race while this
+        // instance decoded the font. Equal content is idempotent; conflicting
+        // content must never replace the already-published resource.
+        return same_font_bytes(*found, data);
+    }
+
+    auto updated = std::make_shared<EmbeddedFaces>(*current);
+    updated->push_back({alias, std::move(source), std::move(typeface)});
+    std::shared_ptr<const EmbeddedFaces> published = std::move(updated);
+    publish_embedded_faces(std::move(published));
+    return true;
+}
+
+#if defined(__EMSCRIPTEN__)
+// A browser build has no system fonts, so a consumer that preloads faces into
+// this conventional MEMFS directory gets them registered automatically under
+// their filename stem (for example `Geist-Regular.ttf` -> "Geist-Regular").
+void register_preloaded_wasm_fonts() {
+    static std::once_flag scan_once;
+    std::call_once(scan_once, [] {
+        // Use a parser-only manager here instead of FontManager's public entry
+        // point. That avoids recursively re-entering platform_font_manager()
+        // while the one-time preload scan is still in progress.
+        const auto parser = SkFontMgr_New_Custom_Empty();
+        if (!parser) return;
+
+        std::error_code error;
+        const std::filesystem::path root{"/nativeui/fonts"};
+        if (!std::filesystem::is_directory(root, error)) return;
+
+        std::vector<std::filesystem::path> font_paths;
+        for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
+            if (error) break;
+            std::error_code entry_error;
+            if (!entry.is_regular_file(entry_error)) continue;
+            const auto extension = entry.path().extension().string();
+            if (extension == ".ttf" || extension == ".otf" || extension == ".ttc") {
+                font_paths.push_back(entry.path());
+            }
+        }
+
+        // directory_iterator order is unspecified. Stable ordering keeps the
+        // default fallback face deterministic when several fonts are preloaded.
+        std::sort(font_paths.begin(), font_paths.end());
+        for (const auto& path : font_paths) {
+            std::ifstream file{path, std::ios::binary | std::ios::ate};
+            if (!file) continue;
+            const auto size = file.tellg();
+            if (size <= 0) continue;
+            std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+            file.seekg(0);
+            if (!file.read(reinterpret_cast<char*>(bytes.data()),
+                           static_cast<std::streamsize>(bytes.size()))) {
+                continue;
+            }
+            (void)register_embedded_font_with_manager(
+                path.stem().string(), bytes, parser);
+        }
+    });
+}
+
+// Data-backed fallback manager rebuilt whenever the embedded face registry
+// changes. It lets default/unknown families resolve to a registered face
+// (including per-codepoint fallback) instead of painting no text at all.
+sk_sp<SkFontMgr> wasm_platform_font_manager() {
+    static std::mutex cache_mutex;
+    static std::shared_ptr<const EmbeddedFaces> cached_snapshot;
+    static sk_sp<SkFontMgr> cached;
+
+    std::lock_guard lock{cache_mutex};
+    const auto snapshot = embedded_faces_snapshot();
+    if (cached && cached_snapshot == snapshot) return cached;
+
+    std::vector<sk_sp<SkData>> fonts;
+    fonts.reserve(snapshot->size());
+    for (const auto& face : *snapshot) {
+        if (face.source.empty()) continue;
+        if (auto data = SkData::MakeWithCopy(face.source.data(), face.source.size())) {
+            fonts.push_back(std::move(data));
+        }
+    }
+
+    cached = fonts.empty()
+        ? SkFontMgr_New_Custom_Empty()
+        : SkFontMgr_New_Custom_Data(SkSpan<sk_sp<SkData>>{fonts.data(), fonts.size()});
+    cached_snapshot = snapshot;
+    return cached;
+}
+#endif
+
 sk_sp<SkFontMgr> platform_font_manager() {
+#if defined(__EMSCRIPTEN__)
+    register_preloaded_wasm_fonts();
+    return wasm_platform_font_manager();
+#else
     // Immutable process-wide platform service. It contains no NativeUI
     // instance state and is safe to share by contract.
     static const sk_sp<SkFontMgr> manager = [] {
@@ -107,6 +236,7 @@ sk_sp<SkFontMgr> platform_font_manager() {
 #endif
     }();
     return manager;
+#endif
 }
 
 SkFontStyle::Slant to_sk_slant(FontSlant slant) {
@@ -238,6 +368,24 @@ ResolvedFace resolve_face(const TextStyle& style,
         if (face.typeface && face.glyph_available) return face;
     }
 
+#if defined(__EMSCRIPTEN__)
+    // Registered embedded faces are the last text source when the platform
+    // manager has none (browser builds ship no system fonts) or cannot cover
+    // the code point. Prefer a face that actually has the glyph, then the
+    // first registered face so default styles still paint something.
+    if (codepoint != U'\0') {
+        for (const auto& candidate : embedded) {
+            if (has_glyph(candidate.typeface, codepoint)) {
+                return {candidate.typeface, candidate.alias, true, true, priority};
+            }
+        }
+    }
+    if (!embedded.empty() && embedded.front().typeface) {
+        const bool glyph = has_glyph(embedded.front().typeface, codepoint);
+        return {embedded.front().typeface, embedded.front().alias, true, glyph, priority};
+    }
+#endif
+
     // A final face is still useful for the font's .notdef glyph when no font
     // on the platform can represent the requested code point.
     priority = 0;
@@ -353,6 +501,12 @@ ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& s
         layout.repaired_text.append(text.substr(copied_until));
         text = layout.text_bytes(text);
     }
+#if defined(__EMSCRIPTEN__)
+    // The wasm manager performs the one-time MEMFS preload scan. Trigger only
+    // that platform-specific side effect before the snapshot; desktop keeps
+    // its original snapshot-before-manager initialization order.
+    (void)platform_font_manager();
+#endif
     const auto embedded = embedded_faces_snapshot();
     const auto manager = platform_font_manager();
 
@@ -424,51 +578,32 @@ std::optional<std::string_view> text::utf8_prefix(
 
 bool FontManager::register_embedded_font(std::string_view family_alias,
                                          std::span<const std::byte> data) {
+    // Preserve the public API's cheap/idempotent fast paths before platform
+    // font-manager setup. On WebAssembly that setup performs the one-time MEMFS
+    // preload scan, which must not be triggered by invalid or already-resolved
+    // registration requests.
     if (family_alias.empty() || data.empty()) return false;
-
-    const std::string alias{family_alias};
     {
         std::lock_guard lock(detail::embedded_faces_mutex());
         const auto current = detail::embedded_faces_snapshot();
         const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
-            return face.alias == alias;
+            return face.alias == family_alias;
         });
         if (found != current->end()) {
             return detail::same_font_bytes(*found, data);
         }
     }
 
-    auto manager = detail::platform_font_manager();
-    if (!manager) return false;
-
-    auto bytes = SkData::MakeWithCopy(data.data(), data.size());
-    if (!bytes) return false;
-    auto typeface = manager->makeFromData(std::move(bytes), 0);
-    if (!typeface) return false;
-
-    std::vector<std::byte> source{data.begin(), data.end()};
-
-    std::lock_guard lock(detail::embedded_faces_mutex());
-    const auto current = detail::embedded_faces_snapshot();
-    const auto found = std::find_if(current->begin(), current->end(), [&](const auto& face) {
-        return face.alias == alias;
-    });
-    if (found != current->end()) {
-        // Another instance may have won the registration race while this
-        // instance decoded the font. Equal content is idempotent; conflicting
-        // content must never replace the already-published resource.
-        return detail::same_font_bytes(*found, data);
-    }
-
-    auto updated = std::make_shared<detail::EmbeddedFaces>(*current);
-    updated->push_back({alias, std::move(source), std::move(typeface)});
-    std::shared_ptr<const detail::EmbeddedFaces> published = std::move(updated);
-    detail::publish_embedded_faces(std::move(published));
-    return true;
+    return detail::register_embedded_font_with_manager(
+        family_alias, data, detail::platform_font_manager());
 }
 
 bool FontManager::has_family(std::string_view family) {
     if (family.empty()) return false;
+#if defined(__EMSCRIPTEN__)
+    // Preloaded browser fonts are registered lazily by the wasm manager.
+    (void)detail::platform_font_manager();
+#endif
     const auto embedded = detail::embedded_faces_snapshot();
     for (const auto& candidate : *embedded) {
         if (candidate.alias == family) return true;
@@ -480,6 +615,9 @@ bool FontManager::has_family(std::string_view family) {
 }
 
 FontMatch FontManager::match(const TextStyle& style, char32_t codepoint) {
+#if defined(__EMSCRIPTEN__)
+    (void)detail::platform_font_manager();
+#endif
     const auto embedded = detail::embedded_faces_snapshot();
     const auto face = detail::resolve_face(
         style, codepoint, *embedded, detail::platform_font_manager());

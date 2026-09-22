@@ -14,6 +14,9 @@
 #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
+#if defined(__EMSCRIPTEN__)
+#  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
+#endif
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -52,7 +55,12 @@ PuglSpan to_pugl_span(float physical) {
 }
 
 sk_sp<const GrGLInterface> make_skia_gl_interface() {
-#if defined(__linux__)
+#if defined(__EMSCRIPTEN__)
+    // Skia's WebGL interface binds the emscripten_gl* entry points of the
+    // WebGL2 context Pugl created; the generic assembled path would have to
+    // resolve them through emscripten_webgl_get_proc_address instead.
+    return GrGLInterfaces::MakeWebGL();
+#elif defined(__linux__)
     // On GLX, Skia's native interface is built against the same current
     // context and system GL implementation as the pinned desktop package.
     // The generic assembled path has been observed to hand GrGLExtensions an
