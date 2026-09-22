@@ -530,11 +530,9 @@
     }
 
     [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
-        // A PointerCancel callback may call cancel_pointer() recursively. The
-        // outer pass already owns complete teardown, so a nested pass must not
-        // redispatch cancellation to the same contacts.
-        if (pointer_capture_barrier_) return EventResult::Ignored;
-
+        // Keep cancellation callbacks observable under re-entry (T125 legacy
+        // contract). The barrier prevents nested PointerDown/capture
+        // publication, but does not suppress an explicit nested cancel.
         const bool previous_barrier = pointer_capture_barrier_;
         pointer_capture_barrier_ = true;
 
