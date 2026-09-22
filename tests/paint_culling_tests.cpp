@@ -282,7 +282,7 @@ void descendant_outside_parent_bounds_contract() {
     reset(clipped_parent);
     reset(clipped_child);
 
-    clipped_paint_region(tree, canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
+    paint_region(clipped_tree, canvas, platform, {145.0f, 5.0f, 5.0f, 5.0f});
     NUI_CHECK(clipped_parent->paints == 0);
     NUI_CHECK(clipped_child->paints == 0);
 }
