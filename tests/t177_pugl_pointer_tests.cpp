@@ -67,5 +67,23 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    source.width = 20.0;
+    source.height = std::numeric_limits<double>::quiet_NaN();
+    const auto width_only =
+        ui::detail::translate_pugl_pointer_contact(source, 2.0f);
+    if (!near(width_only.contact_size.w, 10.0f) ||
+        !std::isnan(width_only.contact_size.h)) {
+        return EXIT_FAILURE;
+    }
+
+    source.width = std::numeric_limits<double>::quiet_NaN();
+    source.height = 18.0;
+    const auto height_only =
+        ui::detail::translate_pugl_pointer_contact(source, 2.0f);
+    if (!std::isnan(height_only.contact_size.w) ||
+        !near(height_only.contact_size.h, 9.0f)) {
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
