@@ -33,6 +33,7 @@ struct DynamicFaultAccess;
 class Dialog;
 class UI;
 struct TreeTestAccess;
+struct PaintCullTestAccess;
 
 class Tree {
 public:
@@ -46,6 +47,7 @@ private:
     friend class Dialog;
     friend class UI;
     friend struct TreeTestAccess;
+    friend struct PaintCullTestAccess;
     friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
 #include <nativeui/detail/tree_theme_private.inc>

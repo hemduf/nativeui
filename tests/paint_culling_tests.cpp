@@ -9,6 +9,46 @@
 #include <utility>
 #include <vector>
 
+namespace ui {
+
+struct PaintCullTestAccess {
+    static void make_cache_unavailable(Tree& tree) noexcept {
+        tree.paint_cull_cache_.clear();
+        tree.paint_cull_cache_dirty_ = false;
+        tree.paint_cull_cached_viewport_ = tree.viewport_;
+    }
+
+    static void mark_cached_own_bounds_unknown(Tree& tree) noexcept {
+        for (auto& entry : tree.paint_cull_cache_) entry.own_valid = false;
+    }
+
+    [[nodiscard]] static bool all_cached_own_bounds_unknown(const Tree& tree) noexcept {
+        if (tree.paint_cull_cache_.empty()) return false;
+        for (const auto& entry : tree.paint_cull_cache_) {
+            if (entry.own_valid) return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] static bool cache_dirty(const Tree& tree) noexcept {
+        return tree.paint_cull_cache_dirty_;
+    }
+
+    [[nodiscard]] static Rect first_child_bounds(const Tree& tree) noexcept {
+        return tree.root_ && !tree.root_->children.empty()
+            ? tree.root_->children.front()->bounds
+            : Rect{};
+    }
+
+    [[nodiscard]] static Rect first_child_published_bounds(const Tree& tree) noexcept {
+        return tree.root_ && !tree.root_->children.empty()
+            ? tree.root_->children.front()->published_visual_bounds
+            : Rect{};
+    }
+};
+
+} // namespace ui
+
 namespace {
 
 struct PaintProbeState {
@@ -17,6 +57,7 @@ struct PaintProbeState {
     int tag{};
     bool clips_children{};
     bool throw_on_paint{};
+    bool throw_on_layout{};
     bool trigger_reentrant_mutation{};
     ui::Size measured{40.0f, 40.0f};
     ui::VisualOutset outset{};
@@ -52,6 +93,9 @@ public:
     void layout_children(ui::Rect bounds,
                          const std::vector<ui::ChildMetrics>&,
                          std::vector<ui::ChildPlacement>& placements) const override {
+        if (state_->throw_on_layout) {
+            throw std::runtime_error("layout probe failure");
+        }
         for (std::size_t index = 0;
              index < placements.size() && index < state_->child_bounds.size();
              ++index) {
@@ -292,6 +336,120 @@ void availability_republishes_visual_bounds() {
     NUI_CHECK(child->paints == 0);
 }
 
+void unknown_cache_falls_back_conservatively() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto left = std::make_shared<PaintProbeState>();
+    auto right = std::make_shared<PaintProbeState>();
+    root->child_bounds = {
+        {0.0f, 0.0f, 40.0f, 60.0f},
+        {80.0f, 0.0f, 40.0f, 60.0f}};
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(left), probe_spec(right)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({120.0f, 60.0f});
+    tree.paint(canvas, platform);
+
+    // Build a valid selective cache first, then simulate storage becoming
+    // unavailable without changing retained publication state.
+    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    ui::PaintCullTestAccess::make_cache_unavailable(tree);
+
+    reset(root);
+    reset(left);
+    reset(right);
+    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+
+    // Missing cache entries are uncertainty: traversal becomes conservative
+    // instead of incorrectly skipping the distant subtree.
+    NUI_CHECK(root->paints == 1);
+    NUI_CHECK(left->paints == 1);
+    NUI_CHECK(right->paints == 1);
+}
+
+void pending_dirty_does_not_rebuild_cache() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto left = std::make_shared<PaintProbeState>();
+    auto right = std::make_shared<PaintProbeState>();
+    root->child_bounds = {
+        {0.0f, 0.0f, 40.0f, 60.0f},
+        {80.0f, 0.0f, 40.0f, 60.0f}};
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(left), probe_spec(right)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({120.0f, 60.0f});
+    tree.paint(canvas, platform);
+    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+
+    ui::PaintCullTestAccess::mark_cached_own_bounds_unknown(tree);
+    NUI_CHECK(ui::PaintCullTestAccess::all_cached_own_bounds_unknown(tree));
+    NUI_CHECK(!ui::PaintCullTestAccess::cache_dirty(tree));
+
+    // Damage awaiting consumption is independent from published visual state.
+    tree.invalidate({0.0f, 0.0f, 4.0f, 4.0f});
+    NUI_CHECK(tree.paint_dirty());
+    tree.paint_region(canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+
+    // A cache rebuild here would overwrite the injected unknown-own markers.
+    NUI_CHECK(ui::PaintCullTestAccess::all_cached_own_bounds_unknown(tree));
+    NUI_CHECK(!ui::PaintCullTestAccess::cache_dirty(tree));
+}
+
+void layout_publication_and_rollback_contract() {
+    auto root = std::make_shared<PaintProbeState>();
+    auto child = std::make_shared<PaintProbeState>();
+    root->child_bounds = {{10.0f, 10.0f, 20.0f, 20.0f}};
+
+    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(child)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({160.0f, 80.0f});
+    tree.paint(canvas, platform);
+    tree.paint_region(canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
+
+    const auto old_bounds = ui::PaintCullTestAccess::first_child_bounds(tree);
+    const auto old_published = ui::PaintCullTestAccess::first_child_published_bounds(tree);
+    NUI_CHECK_NEAR(old_bounds.x, 10.0f, 0.0001f);
+    NUI_CHECK_NEAR(old_published.x, 10.0f, 0.0001f);
+
+    root->child_bounds[0].x = 100.0f;
+    root->throw_on_layout = true;
+    tree.invalidate_layout();
+
+    bool threw = false;
+    try {
+        tree.layout({160.0f, 80.0f});
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(ui::PaintCullTestAccess::cache_dirty(tree));
+
+    const auto rolled_back = ui::PaintCullTestAccess::first_child_bounds(tree);
+    const auto rolled_back_published =
+        ui::PaintCullTestAccess::first_child_published_bounds(tree);
+    NUI_CHECK_NEAR(rolled_back.x, old_bounds.x, 0.0001f);
+    NUI_CHECK_NEAR(rolled_back_published.x, old_published.x, 0.0001f);
+
+    root->throw_on_layout = false;
+    tree.layout({160.0f, 80.0f});
+    const auto committed = ui::PaintCullTestAccess::first_child_published_bounds(tree);
+    NUI_CHECK_NEAR(committed.x, 100.0f, 0.0001f);
+
+    reset(child);
+    tree.paint_region(canvas, platform, {10.0f, 10.0f, 20.0f, 20.0f});
+    NUI_CHECK(child->paints == 0);
+    tree.paint_region(canvas, platform, {100.0f, 10.0f, 20.0f, 20.0f});
+    NUI_CHECK(child->paints == 1);
+}
+
 void throwing_paint_restores_clip_state() {
     auto root = std::make_shared<PaintProbeState>();
     auto child = std::make_shared<PaintProbeState>();
@@ -405,6 +563,9 @@ void suite() {
     descendant_outside_parent_bounds_contract();
     visual_outset_publication_contract();
     availability_republishes_visual_bounds();
+    unknown_cache_falls_back_conservatively();
+    pending_dirty_does_not_rebuild_cache();
+    layout_publication_and_rollback_contract();
     throwing_paint_restores_clip_state();
     reentrant_structural_mutation_is_deferred();
     two_tree_cache_isolation_contract();
