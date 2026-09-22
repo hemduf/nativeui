@@ -36,11 +36,16 @@ struct TreeTestAccess;
 
 class Tree {
 public:
+#define layout layout_t094_impl
 #include <nativeui/detail/tree_public.inc>
+#undef layout
+#include <nativeui/detail/tree_t094_public.inc>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
 #include <nativeui/detail/tree_inspector_public.inc>
 #endif
+#define set_theme set_theme_t094_impl
 #include <nativeui/detail/tree_theme_public.inc>
+#undef set_theme
 private:
     friend class Dialog;
     friend class UI;
@@ -90,9 +95,22 @@ private:
 #include <nativeui/detail/tree_t125_dynamic.inc>
 #define mount_node retained_mount_node_legacy
 #define unmount_node retained_unmount_node_legacy
+#define invalidate_node_paint t094_invalidate_node_paint
+#define invalidate_layout_from t094_invalidate_layout_from
+#define queue_dynamic_mutation t094_queue_dynamic_mutation
+#define apply_scoped_theme_change t094_apply_scoped_theme_change
+#define sync_availability_inactive t094_sync_availability_inactive
+#define sync_availability_structure t094_sync_availability_structure
 #include <nativeui/detail/tree_retained_invalidation.inc>
+#undef sync_availability_structure
+#undef sync_availability_inactive
+#undef apply_scoped_theme_change
+#undef queue_dynamic_mutation
+#undef invalidate_layout_from
+#undef invalidate_node_paint
 #undef unmount_node
 #undef mount_node
+#include <nativeui/detail/tree_t094_private.inc>
 #include <nativeui/detail/tree_lifecycle_transaction.inc>
 #include <nativeui/detail/tree_layout_transaction.inc>
 
