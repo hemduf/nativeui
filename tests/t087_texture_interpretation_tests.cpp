@@ -71,6 +71,19 @@ constexpr std::array<std::byte, 72> kPremultipliedFilterPng{
     std::byte{73},std::byte{69},std::byte{78},std::byte{68},std::byte{174},std::byte{66},std::byte{96},std::byte{130},
 };
 
+constexpr std::array<std::byte, 74> kRawMipmapPng{
+    std::byte{137},std::byte{80},std::byte{78},std::byte{71},std::byte{13},std::byte{10},std::byte{26},std::byte{10},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{72},std::byte{68},std::byte{82},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{2},std::byte{0},std::byte{0},std::byte{0},std::byte{2},
+    std::byte{8},std::byte{6},std::byte{0},std::byte{0},std::byte{0},std::byte{114},std::byte{182},std::byte{13},
+    std::byte{36},std::byte{0},std::byte{0},std::byte{0},std::byte{17},std::byte{73},std::byte{68},std::byte{65},
+    std::byte{84},std::byte{120},std::byte{218},std::byte{99},std::byte{248},std::byte{207},std::byte{0},std::byte{2},
+    std::byte{255},std::byte{255},std::byte{51},std::byte{192},std::byte{24},std::byte{0},std::byte{48},std::byte{225},
+    std::byte{5},std::byte{251},std::byte{119},std::byte{59},std::byte{120},std::byte{154},std::byte{0},std::byte{0},
+    std::byte{0},std::byte{0},std::byte{73},std::byte{69},std::byte{78},std::byte{68},std::byte{174},std::byte{66},
+    std::byte{96},std::byte{130},
+};
+
 constexpr std::array<std::byte, 74> kNormalLikePng{
     std::byte{137},std::byte{80},std::byte{78},std::byte{71},std::byte{13},std::byte{10},std::byte{26},std::byte{10},
     std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{72},std::byte{68},std::byte{82},
@@ -338,6 +351,36 @@ void brush_snapshot_and_transform_state_are_stable() {
     NUI_CHECK(color_pixel.r > data_pixel.r + 35);
 }
 
+void data_mipmaps_average_numeric_channels() {
+    const auto image = ui::Image::decode(kRawMipmapPng);
+    NUI_CHECK(image.valid());
+
+    for (const auto mipmap :
+         {ui::TextureMipmap::Nearest, ui::TextureMipmap::Linear}) {
+        ui::ImageTexture data{
+            image, {0.0f, 0.0f, 2.0f, 2.0f}, {0.0f, 0.0f, 1.0f, 1.0f}};
+        data.set_interpretation(ui::TextureInterpretation::Data)
+            .set_tile_mode(ui::TextureTileMode::Repeat, ui::TextureTileMode::Repeat);
+
+        ui::TextureSampling sampling;
+        sampling.set_filter(ui::TextureFilter::Linear).set_mipmap(mipmap);
+        data.set_sampling(sampling);
+
+        // The 2x2 source has transparent red and opaque blue columns. A raw
+        // numeric 1x1 mip averages R/B/A independently to ~127. A
+        // premultiplied mip would instead erase red and unpremultiply blue.
+        const auto rgb = render_brush(opaque_sample(data));
+        NUI_CHECK(near_channel(rgb.r, 127, 4));
+        NUI_CHECK(rgb.g <= 4);
+        NUI_CHECK(near_channel(rgb.b, 127, 4));
+
+        const auto alpha = render_brush(alpha_as_rgb(data));
+        NUI_CHECK(near_channel(alpha.r, 127, 4));
+        NUI_CHECK(near_channel(alpha.g, 127, 4));
+        NUI_CHECK(near_channel(alpha.b, 127, 4));
+    }
+}
+
 void data_tiling_filtering_and_mipmaps_stay_raw() {
     const auto image = ui::Image::decode(kMipTaggedPng);
     NUI_CHECK(image.valid());
@@ -378,6 +421,7 @@ void suite() {
     color_filtering_stays_premultiplied();
     normals_and_shared_image_are_independent();
     brush_snapshot_and_transform_state_are_stable();
+    data_mipmaps_average_numeric_channels();
     data_tiling_filtering_and_mipmaps_stay_raw();
 }
 
