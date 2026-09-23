@@ -1,7 +1,13 @@
 #include "example_support.hpp"
 
+#include <nativeui/headless.hpp>
+
 #include <array>
 #include <cstddef>
+#include <exception>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -26,12 +32,61 @@ constexpr std::array<std::byte, 130> kTaggedPng{
     std::byte{96},std::byte{130},
 };
 
+[[nodiscard]] ui::Brush make_mixed_brush(
+    const ui::ImageTexture& color,
+    const ui::ImageTexture& data) {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform shader color_source;
+        uniform shader data_source;
+        half4 main(float2 p) {
+            half4 c = color_source.eval(p);
+            half4 d = data_source.eval(p);
+            return half4(c.r * 0.5, d.g, d.b, 1.0);
+        }
+    )");
+    if (!compiled.ok()) return ui::Brush{ui::Color{0.0f, 0.0f, 0.0f, 0.0f}};
+
+    ui::ShaderInstance instance{compiled.program};
+    if (instance.set_child("color_source", ui::Brush{color}) !=
+            ui::ShaderSetResult::Ok ||
+        instance.set_child("data_source", ui::Brush{data}) !=
+            ui::ShaderSetResult::Ok) {
+        return ui::Brush{ui::Color{0.0f, 0.0f, 0.0f, 0.0f}};
+    }
+    return ui::Brush{instance};
+}
+
+[[nodiscard]] std::unique_ptr<ui::UI> make_demo_ui() {
+    const auto image = ui::Image::decode(kTaggedPng);
+    if (!image.valid()) return {};
+
+    ui::ImageTexture color{
+        image, {0.0f, 0.0f, 1.0f, 1.0f}, {20.0f, 20.0f, 160.0f, 160.0f}};
+    ui::ImageTexture data{
+        image, {0.0f, 0.0f, 1.0f, 1.0f}, {200.0f, 20.0f, 160.0f, 160.0f}};
+    data.set_interpretation(ui::TextureInterpretation::Data);
+
+    const ui::Brush color_brush{color};
+    const ui::Brush data_brush{data};
+    const auto mixed_brush = make_mixed_brush(color, data);
+
+    return std::make_unique<ui::UI>(ui::Canvas{
+        560.0f,
+        200.0f,
+        [color_brush, data_brush, mixed_brush](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 560.0f, 200.0f}, ui::colors::panel);
+            g.fill_rect({20.0f, 20.0f, 160.0f, 160.0f}, color_brush);
+            g.fill_rect({200.0f, 20.0f, 160.0f, 160.0f}, data_brush);
+            g.fill_rect({380.0f, 20.0f, 160.0f, 160.0f}, mixed_brush);
+        }});
+}
+
 int self_test() {
     const auto image = ui::Image::decode(kTaggedPng);
     if (!image.valid()) return example::fail("tagged image did not decode");
 
     ui::ImageTexture color{
-        image, {0.0f, 0.0f, 1.0f, 1.0f}, {20.0f, 20.0f, 260.0f, 240.0f}};
+        image, {0.0f, 0.0f, 1.0f, 1.0f}, {20.0f, 20.0f, 160.0f, 160.0f}};
     auto data = color;
     data.set_interpretation(ui::TextureInterpretation::Data);
 
@@ -44,33 +99,90 @@ int self_test() {
     if (color.image() != data.image()) {
         return example::fail("interpretation unexpectedly replaced shared Image");
     }
+
+    const auto mixed = make_mixed_brush(color, data);
+    ui::UI tree{ui::Canvas{
+        32.0f, 32.0f, [mixed](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 32.0f, 32.0f}, mixed);
+        }}};
+    ui::HeadlessRenderer renderer{{32.0f, 32.0f}, 1.0f};
+    if (!renderer.render(tree)) {
+        return example::fail("mixed Color/Data headless render failed");
+    }
     return 0;
+}
+
+int platform_smoke() {
+    const char* stage = "application";
+    try {
+        ui::Application application;
+        if (!application.valid()) {
+            return example::fail(
+                application.last_error().empty()
+                    ? "T087 platform application is invalid"
+                    : application.last_error());
+        }
+
+        stage = "standalone";
+        auto standalone_ui = make_demo_ui();
+        if (!standalone_ui) return example::fail("T087 smoke image did not decode");
+        ui::StandaloneWindow standalone{
+            application,
+            *standalone_ui,
+            ui::WindowDesc{
+                .title = "NativeUI T087 platform smoke",
+                .size = {600.0f, 240.0f},
+                .resizable = true}};
+        if (!standalone.valid() || !standalone.native_handle()) {
+            return example::fail(
+                standalone.last_error().empty()
+                    ? "T087 standalone window is invalid"
+                    : standalone.last_error());
+        }
+
+        stage = "embedded";
+        auto embedded_ui = make_demo_ui();
+        if (!embedded_ui) return example::fail("T087 embedded smoke image did not decode");
+        ui::EmbeddedView embedded{
+            *embedded_ui, standalone.native_handle(), {560.0f, 200.0f}};
+        if (!embedded.native_handle()) {
+            return example::fail(
+                embedded.last_error().empty()
+                    ? "T087 embedded view is invalid"
+                    : embedded.last_error());
+        }
+
+        // Exercise ordinary color management, raw Data sampling, and the
+        // mixed Color/Data linear-sRGB runtime-effect path through two
+        // independent Ganesh/OpenGL renderer contexts.
+        stage = "native-paint";
+        for (int i = 0; i < 12; ++i) {
+            (void)application.poll(0.0);
+            (void)embedded.poll();
+        }
+        if (!standalone.last_error().empty()) {
+            return example::fail(standalone.last_error());
+        }
+        if (!embedded.last_error().empty()) {
+            return example::fail(embedded.last_error());
+        }
+        return 0;
+    } catch (const std::exception& error) {
+        return example::fail(
+            std::string{"T087 platform smoke "} + stage + ": " + error.what());
+    }
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
+    if (argc == 2 && std::string_view{argv[1]} == "--platform-smoke") {
+        return platform_smoke();
+    }
 
-    const auto image = ui::Image::decode(kTaggedPng);
-    if (!image.valid()) return example::fail("tagged image did not decode");
-
-    ui::ImageTexture color{
-        image, {0.0f, 0.0f, 1.0f, 1.0f}, {20.0f, 20.0f, 260.0f, 240.0f}};
-    ui::ImageTexture data{
-        image, {0.0f, 0.0f, 1.0f, 1.0f}, {300.0f, 20.0f, 240.0f, 240.0f}};
-    data.set_interpretation(ui::TextureInterpretation::Data);
-    const ui::Brush color_brush{color};
-    const ui::Brush data_brush{data};
-
-    ui::UI tree{ui::Canvas{
-        560.0f,
-        280.0f,
-        [color_brush, data_brush](ui::CanvasContext2D& g) {
-            g.fill_rect({0.0f, 0.0f, 560.0f, 280.0f}, ui::colors::panel);
-            g.fill_rect({20.0f, 20.0f, 260.0f, 240.0f}, color_brush);
-            g.fill_rect({300.0f, 20.0f, 240.0f, 240.0f}, data_brush);
-        }}};
+    auto tree = make_demo_ui();
+    if (!tree) return 1;
     return example::run_window(
-        tree, "ImageTexture Color vs Data", {560.0f, 280.0f});
+        *tree, "ImageTexture Color vs Data", {600.0f, 240.0f});
 }
