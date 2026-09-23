@@ -6,10 +6,10 @@ if(NATIVEUI_BUILD_PLATFORM)
   # -----------------------------------------------------------------------------
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
-  # cde238e carries the Emscripten input/context-menu support plus the
-  # multi-view focus isolation fix validated in hemduf/pugl#47.
+  # 9498280 retains the Emscripten input/context-menu and multi-view focus
+  # fixes while adding the reviewed iOS/iPadOS raw multi-pointer API.
   set(NATIVEUI_PUGL_COMMIT
-      "cde238e51fe79500e0289fa81220c6f1c5d7043c"
+      "94982803985eefcbaeb0a1c8d0136ec862d7cb59"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
