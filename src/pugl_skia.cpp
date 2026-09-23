@@ -30,6 +30,9 @@
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+#  include "detail/platform_test_access.hpp"
+#endif
 #if defined(__APPLE__)
 #  include "detail/macos_desktop_services.hpp"
 #elif defined(_WIN32)

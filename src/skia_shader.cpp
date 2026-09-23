@@ -5,6 +5,7 @@
 #include "detail/shader_instance_access.hpp"
 #include "detail/shader_test_seams.hpp"
 
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkString.h"
@@ -557,6 +558,33 @@ struct ShaderBrushMaterializer final {
         return ShaderBrushAccess::depth(brush);
     }
 
+    [[nodiscard]] static bool requires_linear_color_working_space(
+        const Brush& brush) noexcept {
+        return std::visit(
+            [](const auto& source) noexcept -> bool {
+                using Source = std::decay_t<decltype(source)>;
+                if constexpr (std::is_same_v<Source, ImageTexture>) {
+                    return source.interpretation() == TextureInterpretation::Color;
+                } else if constexpr (
+                    std::is_same_v<
+                        Source,
+                        std::shared_ptr<const ShaderBrushSnapshot>>) {
+                    if (!source) return false;
+                    for (const auto& child : source->children) {
+                        if (child &&
+                            ShaderBrushMaterializer::
+                                requires_linear_color_working_space(*child)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                } else {
+                    return false;
+                }
+            },
+            brush.value_);
+    }
+
     [[nodiscard]] static sk_sp<SkShader> materialize(const Brush& brush) {
         return std::visit(
             [](const auto& source) -> sk_sp<SkShader> {
@@ -645,11 +673,15 @@ namespace {
 
     std::vector<SkRuntimeEffect::ChildPtr> backend_children;
     backend_children.reserve(snapshot->children.size());
+    bool requires_linear_color_working_space = false;
     for (const auto& slot : snapshot->children) {
         if (!slot) {
             backend_children.emplace_back();
             continue;
         }
+        requires_linear_color_working_space =
+            requires_linear_color_working_space ||
+            ShaderBrushMaterializer::requires_linear_color_working_space(*slot);
         auto child_shader = ShaderBrushMaterializer::materialize(*slot);
         if (!child_shader) {
             throw std::runtime_error(
@@ -680,6 +712,21 @@ namespace {
     if (!shader) {
         throw std::runtime_error(
             "NativeUI runtime shader materialization returned no shader");
+    }
+
+    // A runtime effect that consumes a Color ImageTexture performs its
+    // arithmetic in NativeUI's fixed linear-sRGB material working space.
+    // Skia converts ordinary color children into that space and converts the
+    // effect result back to the destination color space. Raw image shaders
+    // deliberately ignore the working color space, so Data children retain
+    // their codec-decoded numeric channels even in a mixed Color/Data effect.
+    if (requires_linear_color_working_space) {
+        shader = shader->makeWithWorkingColorSpace(
+            SkColorSpace::MakeSRGBLinear());
+        if (!shader) {
+            throw std::runtime_error(
+                "NativeUI linear-sRGB shader materialization returned no shader");
+        }
     }
     return shader;
 }

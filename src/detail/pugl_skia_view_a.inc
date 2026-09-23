@@ -204,6 +204,30 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept {
         return view_ ? static_cast<NativeViewHandle>(puglGetNativeView(view_)) : 0;
     }
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    [[nodiscard]] bool request_gpu_readback(Point logical_point) noexcept {
+        if (!view_ ||
+            !std::isfinite(logical_point.x) ||
+            !std::isfinite(logical_point.y)) {
+            return false;
+        }
+        const float scale = geometry_.last_valid_scale();
+        const auto logical = geometry_.logical_size();
+        const float x_logical = std::clamp(logical_point.x, 0.0f, logical.w);
+        const float y_logical = std::clamp(logical_point.y, 0.0f, logical.h);
+        const int x = static_cast<int>(std::lround(x_logical * scale));
+        const int y = static_cast<int>(std::lround(y_logical * scale));
+        renderer_.request_readback(x, y);
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackPixel>
+    take_gpu_readback() noexcept {
+        return renderer_.take_readback();
+    }
+#endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
     bool set_title(std::string_view title) {
