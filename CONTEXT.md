@@ -4,8 +4,8 @@
 
 ## Current session handoff
 
-- T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T177's local 173/173 macOS validation is recorded below; T096 waits for T095.
-- Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds.
+- T095 / #179 / PR #453 is Done for the NativeUI 1.1 effects line. Frozen implementation head `7b0d7786c216e9aca589a32cd39c017c3a136ccb` retains one per-view GPU scene, separates it from the borrowed Pugl framebuffer, checks scene/presentation submission, and recovers allocation, paint, context and deferred-redraw failures. The integrated macOS Release build passed serially with Pugl pin `9498280` from T177 and 174/174 CTests. The pre-integration candidate passed normal/path CI, T042 Lifecycle Stress #867 and T052 v0.1 Release Gate #591; final integrated exact-head qualification is recorded in PR #453. The current review record is in PR #453 with no Blocking/Important findings. A reported 2–10 second demo input delay did not recur in two fresh launches; mouse and keyboard responded immediately.
+- Next recommended ticket: T096 / #180 (P0, Ready), whose T078/T094/T095 dependencies are now Done. T088 / #172 is already Doing independently. Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1`, without local `-j`/`--parallel` or simultaneous builds.
 
 ## Mission and invariants
 
@@ -193,9 +193,9 @@ Delivered contract:
 
 Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 are green. Final T042 Lifecycle Stress #845 is green on Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #569 is green for the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark.
 
-T094 / #178 / PR #450 is Done: retained dirty-region traversal consumes published visual bounds and conservatively falls back when culling is uncertain. Exact frozen source head `43cee6a785662a7577c5cbb85b40c662553ca2bb` passed CI #2179, WebAssembly #97, Package #529, T050 #436, T072 #571, T042 #864 and T052 #588. Final review found no Blocking/Important issue. T095 is independently Ready; T096 awaits T095.
+T094 / #178 / PR #450 is Done: retained dirty-region traversal consumes published visual bounds and conservatively falls back when culling is uncertain. Exact frozen source head `43cee6a785662a7577c5cbb85b40c662553ca2bb` passed CI #2179, WebAssembly #97, Package #529, T050 #436, T072 #571, T042 #864 and T052 #588. Final review found no Blocking/Important issue. T095 is now Done and unblocks T096.
 
-T177 / #442 / PR #443 delivers raw touch/pen contact metadata and Pugl translation with bounded per-Tree capture and per-view positions. The T177 feature example is `nativeui_example_t177_multitouch_pointer`. Reentrant `InputContext` actions keep their original contact/generation, and terminal/throwing cleanup retires the complete old interaction without erasing a newer same-ID contact. After merging T094, the local macOS Release build passed serially with the exact Pugl pin and no warnings; 168/173 CTests passed in the sandbox, and the five known AppKit window tests passed in the graphical session (effective 173/173). Exact-head CI/review evidence is tracked in PR #443. The next independent Ready ticket on the effects line is T095; T096 awaits it.
+T177 / #442 / PR #443 delivers raw touch/pen contact metadata and Pugl translation with bounded per-Tree capture and per-view positions. The T177 feature example is `nativeui_example_t177_multitouch_pointer`. Reentrant `InputContext` actions keep their original contact/generation, and terminal/throwing cleanup retires the complete old interaction without erasing a newer same-ID contact. After merging T094, the local macOS Release build passed serially with the exact Pugl pin and no warnings; 168/173 CTests passed in the sandbox, and the five known AppKit window tests passed in the graphical session (effective 173/173). Exact-head CI/review evidence is tracked in PR #443. T095 has since merged on the effects line and makes T096 Ready.
 
 ### Remaining v1 work
 
@@ -216,7 +216,7 @@ T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
 T076(done) -> T077(done) -> T078(done) -> T094(done) --+
-T095(ready) ---------------------------------------------------+-> T096(blocked on T095) -> NativeUI 1.1 effects
+T095(done) ----------------------------------------------------+-> T096(ready) -> NativeUI 1.1 effects
 T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
 T098(done) ---------------------------------------------------------------> T086(done)
 ```
@@ -307,6 +307,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T094 / #178 / PR #450 and T177 / #442 / PR #443 are complete; T095 / #179 is independently Ready and T096 / #180 remains blocked on T095.
+4. T094 / #178 / PR #450 and T177 / #442 / PR #443 are complete; T095 / #179 / PR #453 is Done and T096 / #180 is Ready as the next P0 effects ticket. T088 / #172 is already Doing independently.
 5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line; retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
