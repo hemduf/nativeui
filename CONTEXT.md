@@ -2,6 +2,11 @@
 
 **Updated:** 2026-09-23
 
+## Current session handoff
+
+- T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T096 waits for T095.
+- Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds. This two-file documentation change has no new product build or test result.
+
 ## Mission and invariants
 
 NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, state, widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio and host parameter semantics remain out of scope.
@@ -27,7 +32,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `723474fa43a5d1b08be2446966a4db9007b749c6`.
+- Pugl: `hemduf/pugl` commit `cde238e51fe79500e0289fa81220c6f1c5d7043c` from `cmake/Dependencies.cmake`; existing build caches may still hold an older pin.
 - Skia: `hemduf/skia-builder` `chrome/m153`, rebuilt from commit `f21749b18c14976415ec30d068c3a13e8456c3a1` with PartitionAlloc disabled for self-contained static consumers; forked from `olilarkin/skia-builder`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -258,7 +263,7 @@ Normal source-tree Release validation:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
