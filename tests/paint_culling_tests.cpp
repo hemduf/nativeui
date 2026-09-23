@@ -57,6 +57,15 @@ struct TreeTestAccess {
         return tree.paint_cull_cache_dirty_;
     }
 
+    static void fail_next_dynamic_enqueue(Tree& tree) noexcept {
+        tree.fail_next_dynamic_enqueue_for_testing_ = true;
+    }
+
+    [[nodiscard]] static bool cache_lookup_available(const Tree& tree) noexcept {
+        if (tree.paint_cull_cache_.empty()) return false;
+        return tree.paint_cull_cache_entry(tree.paint_cull_cache_.front().id) != nullptr;
+    }
+
     [[nodiscard]] static std::size_t exercise_warm_culling_decisions(
         const Tree& tree,
         Rect region) noexcept {
@@ -534,6 +543,44 @@ void layout_publication_and_rollback_contract() {
     NUI_CHECK(child->paints == 1);
 }
 
+void structural_enqueue_failure_disables_stale_cache() {
+    ui::State<bool> visible{false};
+    auto child = std::make_shared<PaintProbeState>();
+
+    ui::Tree tree{ui::compile(ui::make_spec(ui::If{visible, PaintProbe{child}}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({120.0f, 60.0f});
+    tree.paint(canvas, platform);
+
+    // Warm a selective cache for the pre-mutation retained structure.
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 30.0f, 30.0f});
+    NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
+    NUI_CHECK(ui::TreeTestAccess::cache_lookup_available(tree));
+
+    ui::TreeTestAccess::fail_next_dynamic_enqueue(tree);
+    bool threw = false;
+    try {
+        visible.set(true);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+
+    // The enqueue failure happens before structural reconciliation. The old
+    // cache must already be unusable so it cannot justify a stale subtree skip.
+    NUI_CHECK(threw);
+    NUI_CHECK(ui::TreeTestAccess::cache_dirty(tree));
+    NUI_CHECK(!ui::TreeTestAccess::cache_lookup_available(tree));
+
+    reset(child);
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 30.0f, 30.0f});
+    NUI_CHECK(child->paints == 1);
+    NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
+}
+
+
 void throwing_paint_restores_clip_state() {
     auto root = std::make_shared<PaintProbeState>();
     auto child = std::make_shared<PaintProbeState>();
@@ -620,7 +667,7 @@ void widened_region_preserves_neighbor_contributor() {
     NUI_CHECK(child->paints == 1);
 }
 
-void overlapping_translucent_pixel_parity() {
+void overlapping_pixel_parity_case(float first_alpha, float second_alpha) {
     constexpr int width = 180;
     constexpr int height = 100;
     const auto info = SkImageInfo::Make(
@@ -637,9 +684,9 @@ void overlapping_translucent_pixel_parity() {
         {20.0f, 20.0f, 90.0f, 60.0f},
         {60.0f, 20.0f, 90.0f, 60.0f}};
     first->draws = true;
-    first->color = {1.0f, 0.1f, 0.1f, 0.6f};
+    first->color = {1.0f, 0.1f, 0.1f, first_alpha};
     second->draws = true;
-    second->color = {0.1f, 0.2f, 1.0f, 0.5f};
+    second->color = {0.1f, 0.2f, 1.0f, second_alpha};
 
     ui::Tree tree{ui::compile(probe_spec(
         root,
@@ -676,29 +723,50 @@ void overlapping_translucent_pixel_parity() {
     }
 }
 
-void warm_culling_decisions_allocate_zero() {
-    auto root = std::make_shared<PaintProbeState>();
-    auto left = std::make_shared<PaintProbeState>();
-    auto right = std::make_shared<PaintProbeState>();
-    root->child_bounds = {
-        {0.0f, 0.0f, 40.0f, 60.0f},
-        {80.0f, 0.0f, 40.0f, 60.0f}};
+void overlapping_pixel_parity() {
+    overlapping_pixel_parity_case(1.0f, 1.0f);
+    overlapping_pixel_parity_case(0.6f, 0.5f);
+}
 
-    ui::Tree tree{ui::compile(probe_spec(root, {probe_spec(left), probe_spec(right)}))};
+void warm_culling_decisions_allocate_zero() {
+    constexpr int columns = 32;
+    constexpr int rows = 16;
+    constexpr float stride = 10.0f;
+    constexpr int child_count = columns * rows;
+
+    auto root = std::make_shared<PaintProbeState>();
+    std::vector<ui::Spec> children;
+    children.reserve(child_count);
+    root->child_bounds.reserve(child_count);
+
+    for (int index = 0; index < child_count; ++index) {
+        const int x = index % columns;
+        const int y = index / columns;
+        root->child_bounds.push_back({
+            static_cast<float>(x) * stride,
+            static_cast<float>(y) * stride,
+            8.0f,
+            8.0f});
+        children.push_back(probe_spec(std::make_shared<PaintProbeState>()));
+    }
+
+    ui::Tree tree{ui::compile(probe_spec(root, std::move(children)))};
     test::MockPlatform platform;
     SkCanvas canvas;
 
     tree.mount();
-    tree.layout({120.0f, 60.0f});
+    tree.layout({
+        static_cast<float>(columns) * stride,
+        static_cast<float>(rows) * stride});
     tree.paint(canvas, platform);
-    paint_region(tree, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+    paint_region(tree, canvas, platform, {0.0f, 0.0f, 8.0f, 8.0f});
     NUI_CHECK(!ui::TreeTestAccess::cache_dirty(tree));
 
     const auto before = allocation_probe::allocation_count;
     std::size_t hits = 0;
-    for (int pass = 0; pass < 1024; ++pass) {
+    for (int pass = 0; pass < 128; ++pass) {
         hits += ui::TreeTestAccess::exercise_warm_culling_decisions(
-            tree, {0.0f, 0.0f, 40.0f, 60.0f});
+            tree, {0.0f, 0.0f, 8.0f, 8.0f});
     }
     NUI_CHECK(hits != 0);
     NUI_CHECK(allocation_probe::allocation_count == before);
@@ -717,31 +785,42 @@ void two_tree_cache_isolation_contract() {
     auto right_b = std::make_shared<PaintProbeState>();
     root_b->child_bounds = root_a->child_bounds;
 
-    ui::Tree a{ui::compile(probe_spec(root_a, {probe_spec(left_a), probe_spec(right_a)}))};
-    ui::Tree b{ui::compile(probe_spec(root_b, {probe_spec(left_b), probe_spec(right_b)}))};
     test::MockPlatform platform;
     SkCanvas canvas;
-
-    a.mount();
+    ui::Tree b{ui::compile(probe_spec(root_b, {probe_spec(left_b), probe_spec(right_b)}))};
     b.mount();
-    a.layout({120.0f, 60.0f});
     b.layout({120.0f, 60.0f});
-    a.paint(canvas, platform);
     b.paint(canvas, platform);
 
-    reset(left_a);
-    reset(right_a);
-    reset(left_b);
-    reset(right_b);
+    {
+        ui::Tree a{
+            ui::compile(probe_spec(root_a, {probe_spec(left_a), probe_spec(right_a)}))};
+        a.mount();
+        a.layout({120.0f, 60.0f});
+        a.paint(canvas, platform);
 
-    paint_region(a, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
-    paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
-    NUI_CHECK(left_a->paints == 1 && right_a->paints == 0);
-    NUI_CHECK(left_b->paints == 1 && right_b->paints == 0);
+        reset(left_a);
+        reset(right_a);
+        reset(left_b);
+        reset(right_b);
 
-    left_a->outset.right = 20.0f;
+        paint_region(a, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+        paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+        NUI_CHECK(left_a->paints == 1 && right_a->paints == 0);
+        NUI_CHECK(left_b->paints == 1 && right_b->paints == 0);
+
+        left_a->outset.right = 20.0f;
+        left_a->invalidate_paint();
+
+        reset(left_b);
+        reset(right_b);
+        paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
+        NUI_CHECK(left_b->paints == 1 && right_b->paints == 0);
+    }
+
+    // A is destroyed. Its retained invalidator must be harmless and B must keep
+    // its own cache/lifetime state fully operational.
     left_a->invalidate_paint();
-
     reset(left_b);
     reset(right_b);
     paint_region(b, canvas, platform, {0.0f, 0.0f, 40.0f, 60.0f});
@@ -758,10 +837,11 @@ void suite() {
     unknown_cache_falls_back_conservatively();
     pending_dirty_does_not_rebuild_cache();
     layout_publication_and_rollback_contract();
+    structural_enqueue_failure_disables_stale_cache();
     throwing_paint_restores_clip_state();
     reentrant_structural_mutation_is_deferred();
     widened_region_preserves_neighbor_contributor();
-    overlapping_translucent_pixel_parity();
+    overlapping_pixel_parity();
     warm_culling_decisions_allocate_zero();
     two_tree_cache_isolation_contract();
 }
