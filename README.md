@@ -1,14 +1,14 @@
-# NativeUI POC — Pugl + Skia
+# NativeUI — C++20 retained-mode UI toolkit
 
-A C++20 UI-only framework proof of concept for standalone applications and embedded/plugin views.
+NativeUI builds standalone applications and native views embedded by an external host or plug-in adapter. It provides declarative composition, layout, input and focus routing, generic state, widgets, text editing, and headless rendering. Pugl handles native windows and events; Skia handles drawing.
 
 ## Architecture
 
 - **Pugl**: native windowing, parent/child embedding, input, clipboard and event pump.
 - **Skia Ganesh/OpenGL**: window rendering.
-- **Skia raster** can be used for future headless/golden tests.
+- **Skia raster**: headless rendering and golden tests without a display server.
 - **CMake + CPM.cmake**: all dependency acquisition.
-- **`olilarkin/skia-builder`**: prebuilt static Skia binaries. NativeUI never builds Skia.
+- **`hemduf/skia-builder`**: prebuilt static Skia binaries. NativeUI never builds Skia.
 - No CLAP/VST3/AU types, parameter IDs, automation or audio code.
 
 ## Declarative API
@@ -97,12 +97,14 @@ Transforms are local to the Canvas even when layout places it away from the wind
 ## Standalone
 
 ```cpp
+ui::Application application;
 ui::StandaloneWindow window{
-    ui,
-    {.title = "Demo", .size = {720, 560}, .resizable = true}
-};
-return window.run();
+    application, ui,
+    {.title = "Demo", .size = {720, 560}, .resizable = true}};
+return application.run();
 ```
+
+One `Application` owns the standalone event pump and can host multiple `StandaloneWindow` instances. It must outlive its windows. The older `StandaloneWindow(UI&, ...)` constructor is deprecated compatibility API.
 
 ## Embedded view
 
@@ -131,13 +133,13 @@ The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/N
 
 ### macOS consumer-scoped platform bridge
 
-The pinned Pugl macOS backend contains Objective-C runtime classes, whose names are process-global. T053 therefore does **not** build one generic Cocoa/OpenGL archive with a framework-level prefix. Instead, `NativeUI::Core` and Pugl's portable C core remain generic, while `mac.m`, `mac_gl.m` and NativeUI's Cocoa IME bridge are compiled into a small static bridge for each final consumer target.
+The pinned Pugl macOS backend contains Objective-C runtime classes, whose names are process-global. NativeUI therefore does **not** build one generic Cocoa/OpenGL archive with a framework-level prefix. Instead, `NativeUI::Core` and Pugl's portable C core remain generic, while `mac.m`, `mac_gl.m` and NativeUI's Cocoa IME bridge are compiled into a small static bridge for each final consumer target.
 
-Each final application/module/shared-library consumer supplies one stable `CONSUMER_ID`. NativeUI derives the Objective-C prefix in exactly one CMake function from the exact UTF-8 identity bytes using the frozen `NUI_<fragment>_<sha256-12>_` algorithm, then renames every Pugl runtime class in that consumer bridge. NativeUI's own source-tree examples and smoke tests register distinct identities internally, so a normal source checkout no longer needs a global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` cache variable.
+Each final application/module/shared-library consumer supplies one stable reverse-DNS `CONSUMER_ID` through `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)`. NativeUI derives the Objective-C prefix from that identity using the `NUI_<fragment>_<sha256-12>_` algorithm, then renames the Pugl runtime classes in that consumer bridge. NativeUI's own source-tree examples and smoke tests register identities internally; a source checkout needs no global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX` cache variable.
 
 CI builds two independently identified macOS consumers in one configure, audits both bridge archives for prefixed class **and metaclass** symbols, rejects every unprefixed `Pugl*` Objective-C runtime class/metaclass, and loads both final modules in one process to prove runtime coexistence.
 
-The installed/public low-level `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)` helper is owned by T047. Until that package ticket lands, source-tree application/test targets use NativeUI's internal consumer attachment primitive; do not copy the prefix derivation or restore a manual global prefix path.
+The same public attachment helper is available from the installed CMake package. Attach it once to each final executable, module or shared library that uses platform views.
 
 ### Default assets
 
@@ -196,7 +198,7 @@ auto viewport = scroll.viewport_size();
 auto maximum = scroll.max_offset();
 ```
 
-Use `Horizontal`, `Vertical`, or `Both`. Offsets are clamped whenever content or viewport metrics change. Interactive wheel/scrollbar behavior belongs to the future `ScrollView` widget.
+Use `Horizontal`, `Vertical`, or `Both`. Offsets are clamped whenever content or viewport metrics change. For wheel input, scrollbars and optional pointer panning, use `ui::ScrollView` with a `ScrollState`; see `examples/features/t034_scroll_view.cpp`.
 
 ### Clipping / overflow
 
@@ -223,7 +225,7 @@ Update baselines only when intentionally reviewing rendering changes:
 ```bash
 ./build/nativeui_golden_tests --update-goldens
 # or
-cmake --build build --target nativeui_update_goldens
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build --target nativeui_update_goldens
 ```
 
 On mismatch, NativeUI emits `actual.ppm` and `diff.ppm` artifacts plus pixel statistics. Text pixels are excluded from cross-platform golden regions unless a dedicated tolerance has been established.
@@ -231,12 +233,12 @@ On mismatch, NativeUI emits `actual.ppm` and `diff.ppm` artifacts plus pixel sta
 
 ## Platform lifecycle smoke tests
 
-T041 adds native standalone and embedded smoke executables. T053 assigns separate consumer identities to these targets automatically on macOS:
+Native standalone and embedded smoke executables use separate consumer identities on macOS:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
-cmake --build build
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build -L smoke --output-on-failure
 ```
 
@@ -251,16 +253,40 @@ The embedded smoke creates a `PUGL_PROGRAM` parent and a real `PUGL_MODULE` chil
 
 ## Build
 
-The normal source-tree build is the same on all supported platforms; macOS consumer identities for NativeUI-owned executable targets are registered internally:
+On desktop platforms, configure and build the source tree as follows. macOS consumer identities for NativeUI-owned executable targets are registered internally:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```
 
-Core-only builds use `-DNATIVEUI_BUILD_PLATFORM=OFF` and compile no consumer platform bridge.
+Local builds must be serial because parallel compilation can exhaust memory. Core-only builds use `-DNATIVEUI_BUILD_PLATFORM=OFF -DNATIVEUI_BUILD_EXAMPLES=OFF` and compile no consumer platform bridge.
+
+### Build options
+
+- `NATIVEUI_BUILD_TESTS=OFF` omits the source-tree test targets and CTest entries.
+- `NATIVEUI_BUILD_EXAMPLES=OFF` omits the demo and feature executables.
+- `NATIVEUI_BUILD_FEATURE_EXAMPLES=OFF` keeps the demo but omits feature executables; when tests are enabled, their sources still compile as API checks.
+- `NATIVEUI_BUILD_PACKAGE_TESTS=ON` registers installed-package consumer contracts for CTest.
+
+### Installed CMake package
+
+Install a configured build, then attach platform support to each final consumer target:
+
+```bash
+cmake --install build --prefix /path/to/nativeui-install
+```
+
+```cmake
+find_package(NativeUI CONFIG REQUIRED)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE NativeUI::Core)
+nativeui_attach_platform(TARGET my_app CONSUMER_ID com.example.my-app)
+```
+
+Point the consumer's `CMAKE_PREFIX_PATH` at the install prefix. Core-only consumers can link `NativeUI::Core` without calling `nativeui_attach_platform`.
 
 ### skia-builder archive layout
 
@@ -293,18 +319,18 @@ cmake -S . -B build \
   -DNATIVEUI_SKIA_ROOT=/path/to/extracted/skia-builder-archive
 ```
 
-These dependency overrides do not change the T053 consumer identity/prefix contract.
+These dependency overrides do not change the consumer identity/prefix contract.
 
 ## Platform build requirements
 
 CPM manages the source/binary dependencies, but the native SDK development packages still come from the platform:
 
-- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks). Consumer-scoped Objective-C runtime naming is handled by NativeUI's T053 target machinery rather than a global cache variable.
+- **macOS**: Xcode/Command Line Tools (Cocoa, OpenGL, CoreText/CoreGraphics are system frameworks). Consumer-scoped Objective-C runtime naming is handled by `nativeui_attach_platform` rather than a global cache variable.
 - **Windows**: Windows SDK + OpenGL + DirectWrite; select the Skia `/MD` or `/MT` package with `NATIVEUI_SKIA_WINDOWS_CRT`.
 - **Linux/X11**: X11, OpenGL/GLX and Fontconfig development packages. On Debian/Ubuntu this is typically `libx11-dev libgl1-mesa-dev libfontconfig1-dev`.
 - **WebAssembly**: Emscripten 4.0.7. Rendering uses WebGL2; browser builds do not discover X11, Fontconfig, D-Bus or desktop OpenGL libraries. For `EmbeddedView`, the `NativeParentHandle` is the numeric browser-host token used by Pugl; the corresponding DOM host element carries `data-pugl-native-view="<token>"`.
 
-NativeUI deliberately disables optional Pugl Xcursor/XRandR/XSync integration in this POC to keep the baseline dependency set small.
+NativeUI disables optional Pugl Xcursor/XRandR/XSync integration to keep the baseline dependency set small.
 
 ## High-DPI model
 
@@ -317,6 +343,7 @@ Pugl reports native geometry in physical pixels. NativeUI converts input and vie
 - knob arrow-key editing (Shift = fine)
 - toggle via Space/Enter/click
 - text input with UTF-8 committed text
+- IME composition with transient preedit and commit events
 - caret and selection
 - Home/End and word navigation
 - copy/cut/paste
@@ -326,7 +353,7 @@ Pugl reports native geometry in physical pixels. NativeUI converts input and vie
 - placeholder, max length, submit, Escape/revert
 - Pugl clipboard bridge
 
-Advanced IME pre-edit/candidate positioning remains a later platform extension because Pugl currently exposes committed text but not a complete composition/pre-edit API.
+Text is inserted through `TextInput` or composition commit events; `KeyDown` handles commands and navigation. The platform IME bridge keeps preedit separate from committed state.
 
 ## Current platform scope
 
@@ -334,7 +361,7 @@ Advanced IME pre-edit/candidate positioning remains a later platform extension b
 - Windows / Win32 through Pugl
 - Linux / X11 through Pugl
 - WebAssembly / Emscripten through Pugl + WebGL2
-- Wayland is not part of this POC
+- Wayland is not currently supported
 
 
 ## Git repository
@@ -363,7 +390,7 @@ the project.
 
 ## Project continuation / agent recovery
 
-The backlog is available as [52 GitHub issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue),
+The backlog is available in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue),
 organized by priority, status and [roadmap milestone](https://github.com/hemduf/nativeui/milestones?state=all).
 GitHub is the source of truth for ticket descriptions, status, dependencies and
 discussion. Local `TICKETS.md` and `tickets/` copies may exist for offline recovery,
@@ -373,34 +400,27 @@ The repository contains the continuation documentation:
 
 - `AGENTS.md` — mandatory development/TDD/review/recovery workflow;
 - `CODE_REVIEW.md` — mandatory plug-in-host-safe C++/platform/Objective-C review gate;
-- `CONTEXT.md` — compact current-state context for resuming without chat history;
-- `ROADMAP.md` — milestone roadmap from POC to reusable toolkit;
-- `PLAN.md` — implementation sequencing and rationale;
+- `THIRD_PARTY.md` — pinned dependency details and notices;
 - [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue) — actionable tickets with status, dependencies, acceptance criteria and tests.
 
-Any agent resuming the project should start with `AGENTS.md`, then `CODE_REVIEW.md`, then `CONTEXT.md`, and follow the dependency-driven ticket selection rules in `AGENTS.md`. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
+Any agent resuming the project should start with `AGENTS.md`, then `CODE_REVIEW.md`, and follow the dependency-driven ticket selection rules in `AGENTS.md`. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
 
 
 ## Feature examples
 
-Every feature ticket ships a dedicated executable, not only unit tests. Current examples:
+Every feature ticket ships a dedicated executable with `--self-test`, in addition to unit tests. CMake discovers the sources in `examples/features/` and registers their self-tests with CTest when platform examples are built. Examples include:
 
 ```text
-nativeui_example_t007_constraints
-nativeui_example_t008_alignment
-nativeui_example_t009_flex
-nativeui_example_t010_grid
-nativeui_example_t011_clipping
-nativeui_example_t012_scroll
-nativeui_example_t013_bubbling
-nativeui_example_t014_focus_scopes
-nativeui_example_t015_pointer_capture
+nativeui_example_t029_ime_composition
+nativeui_example_t034_scroll_view
+nativeui_example_t060_multi_window_application
+nativeui_example_t083_image_texture
 ```
 
 Run interactively on a desktop, or run the executable self-check without opening a window:
 
 ```bash
-./build/nativeui_example_t015_pointer_capture --self-test
+ctest --test-dir build -R '^nativeui_example_t034_scroll_view_self_test$' --output-on-failure
 ctest --test-dir build -R nativeui_example_ --output-on-failure
 ```
 

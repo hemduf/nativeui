@@ -1,5 +1,7 @@
 # Workflow ownership
 
-GitHub Actions cadence and authoring rules are defined in [`CI_POLICY.md`](../../CI_POLICY.md).
+- `ci.yml` builds supported desktop platforms and runs CTest checks except package contracts.
+- `package-contract.yml` builds an installable package and runs CTest package-consumer checks.
+- `wasm.yml` validates the WebAssembly build and browser integration.
 
-Key rule: normal CI is the broad integration safety net; dedicated workflows must stay path-scoped to the subsystem they own, while heavyweight lifecycle/release qualification runs only for a frozen final candidate.
+Register tests and their labels in CMake. Workflows select test groups through CTest, without naming individual tests.

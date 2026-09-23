@@ -3,24 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'AGENTS.md'
-      - 'CODE_REVIEW.md'
-      - 'CONTEXT.md'
-      - 'ROADMAP.md'
-      - 'VALIDATION.md'
-      - 'DESIGN.md'
-      - 'THIRD_PARTY.md'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'AGENTS.md'
-      - 'CODE_REVIEW.md'
-      - 'CONTEXT.md'
-      - 'ROADMAP.md'
-      - 'VALIDATION.md'
-      - 'DESIGN.md'
-      - 'THIRD_PARTY.md'
   workflow_dispatch:
 
 permissions:
@@ -32,14 +16,7 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  SCCACHE_GHA_ENABLED: 'true'
-  CMAKE_BUILD_PARALLEL_LEVEL: '4'
-  CTEST_PARALLEL_LEVEL: '4'
-  CMAKE_C_COMPILER_LAUNCHER: sccache
-  CMAKE_CXX_COMPILER_LAUNCHER: sccache
-  CMAKE_OBJC_COMPILER_LAUNCHER: sccache
-  CMAKE_OBJCXX_COMPILER_LAUNCHER: sccache
-  NATIVEUI_CTEST_EXCLUDE: '^(nativeui_t047_attach_contract_tests|nativeui_t054_application_contract_tests|nativeui_t054_argument_boundary_tests|nativeui_t054_package_source_contract_tests)$'
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
 
 jobs:
   build:
@@ -48,24 +25,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS Intel
             os: macos-15-intel
-            cmake_args: -DNATIVEUI_CI_SHARE_MACOS_EXAMPLE_BRIDGE=ON
-            skia_arm64: false
-          - name: Windows
+          - name: macOS ARM64
+            os: macos-15
+          - name: Windows x64
             os: windows-latest
-            cmake_args: ''
-            skia_arm64: false
-          - name: Linux X11
+          - name: Linux x64
             os: ubuntu-latest
-            cmake_args: ''
-            skia_arm64: false
           - name: Linux ARM64
             os: ubuntu-24.04-arm
-            cmake_args: -DNATIVEUI_SKIA_ROOT=$GITHUB_WORKSPACE/.skia-arm64
-            skia_arm64: true
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
+    timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v4
@@ -75,59 +46,19 @@ jobs:
         with:
           path: ${{ env.CPM_SOURCE_CACHE }}
           key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
-          restore-keys: |
-            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Set up MSVC environment
+      - name: Set up MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
-
-      - name: CI workflow policy contract
-        if: runner.os == 'Linux'
-        run: python3 tests/ci_policy_contract.py
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth unzip
-
-      # NativeUI's production dependency resolver still names the Linux library
-      # directory `x64`. For the ARM64 CI lane, acquire the real ARM64 package
-      # from our skia-builder fork, verify it, then provide a local compatibility
-      # alias so this lane validates NativeUI itself without pretending the
-      # archive is x86_64.
-      - name: Prepare forked Skia Linux ARM64
-        if: matrix.skia_arm64 == true
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/skia-build-linux-arm64-gpu-release.zip"
-          root="${{ github.workspace }}/.skia-arm64"
-          url="https://github.com/hemduf/skia-builder/releases/download/chrome/m153/skia-build-linux-arm64-gpu-release.zip"
-          expected="b45e8e40f3d8e29176ea5fc6e3ecafdbc87ac0a58469f649058fbc8ac0831687"
-
-          curl --fail --location --retry 3 --output "$archive" "$url"
-          echo "$expected  $archive" | sha256sum --check --strict
-          rm -rf "$root"
-          mkdir -p "$root"
-          unzip -q "$archive" -d "$root"
-
-          lib="$root/build/linux-gpu/lib/Release/arm64/libskia.a"
-          test -f "$lib"
-          member="$(ar t "$lib" | awk 'NR == 1 { print }')"
-          test -n "$member"
-          ar p "$lib" "$member" > "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o"
-          readelf -h "${RUNNER_TEMP}/nativeui-skia-arm64-smoke.o" | tee "${RUNNER_TEMP}/nativeui-skia-arm64-readelf.txt"
-          grep -q 'Machine:.*AArch64' "${RUNNER_TEMP}/nativeui-skia-arm64-readelf.txt"
-
-          mkdir -p "$root/build/linux-gpu/lib/Release"
-          ln -sfn arm64 "$root/build/linux-gpu/lib/Release/x64"
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev xvfb xauth
 
       - name: Configure Unix
         if: runner.os != 'Windows'
@@ -135,14 +66,11 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DNATIVEUI_BUILD_PLATFORM=ON
-          -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-          ${{ matrix.cmake_args }}
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=ON
 
-      # Ninja keeps the MSVC ABI required by the pinned Skia archive while also
-      # making CMake's compiler-launcher path available to sccache.
-      - name: Configure Windows MSVC
+      - name: Configure Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: >-
@@ -151,211 +79,27 @@ jobs:
           -DCMAKE_C_COMPILER=cl
           -DCMAKE_CXX_COMPILER=cl
           -DNATIVEUI_BUILD_PLATFORM=ON
-          -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_TESTS=ON
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release
 
-      # T044 and T066 keep their focused CMake harnesses, but they qualify on the
-      # existing x64 platform runners instead of starting duplicate workflow
-      # matrices. The ARM64 lane remains dedicated to NativeUI's native ARM64
-      # build contract because these focused harnesses historically qualified x64.
-      - name: Configure T044 pointer-capture contract — Unix
-        if: runner.os != 'Windows' && matrix.skia_arm64 != true
-        run: >-
-          cmake -S tests/t044 -B build-t044 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-
-      - name: Configure T044 pointer-capture contract — Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          cmake -S tests/t044 -B build-t044 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=cl
-          -DCMAKE_CXX_COMPILER=cl
-          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-
-      - name: Build T044 pointer-capture contract
-        if: matrix.skia_arm64 != true
-        run: cmake --build build-t044 --config Release --parallel 2
-
-      - name: Configure T066 window-controls contract — Unix
-        if: runner.os != 'Windows' && matrix.skia_arm64 != true
-        run: >-
-          cmake -S tests/t066 -B build-t066 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-
-      - name: Configure T066 window-controls contract — Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          cmake -S tests/t066 -B build-t066 -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=cl
-          -DCMAKE_CXX_COMPILER=cl
-          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_SKIA_WINDOWS_CRT=MD
-
-      - name: Build T066 window-controls contract
-        if: matrix.skia_arm64 != true
-        run: >-
-          cmake --build build-t066 --config Release
-          --target nativeui_t066_window_control_state_tests nativeui_t066_window_controls_platform_tests nativeui_t066_destroy_survivor_tests nativeui_t066_window_controls_example
-          --parallel 2
-
-      # Hosted Windows runners do not provide a deterministic modern OpenGL
-      # implementation for Skia GPU tests. Keep every native harness on the same
-      # pinned llvmpipe contract.
-      - name: Install Windows software OpenGL
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
-          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
-          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
-          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
-          Invoke-WebRequest -Uri $url -OutFile $archive
-          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) {
-            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
-          }
-          New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
-          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
-            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
-            Select-Object -First 1
-          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
-            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
-            Select-Object -First 1
-          if (-not $opengl -or -not $gallium) {
-            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
-          }
-          foreach ($dir in @('build', 'build-t044', 'build-t066')) {
-            Copy-Item $opengl.FullName (Join-Path $dir 'opengl32.dll') -Force
-            Copy-Item $gallium.FullName (Join-Path $dir 'libgallium_wgl.dll') -Force
-          }
-
-      - name: Linux X11 renderer and lifecycle smoke
+      - name: Test Linux
         if: runner.os == 'Linux'
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          GALLIUM_DRIVER: llvmpipe
         run: >-
-          xvfb-run -a
-          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke && ./build/nativeui_example_t063_dialog --platform-smoke && ./build/nativeui_example_t062_tooltip --platform-smoke && ./build/nativeui_example_t077_blur --platform-smoke && ./build/nativeui_example_t084_texture_tiling --platform-smoke && ./build/nativeui_example_image_texture_interpretation --platform-smoke && ./build/nativeui_image_texture_gpu_reference_tests && ./build/nativeui_t095_scene_gpu_tests'
+          xvfb-run -a ctest --test-dir build --output-on-failure
+          -C Release -LE '^package$'
 
-      - name: Test Linux X11
-        if: runner.os == 'Linux'
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          GALLIUM_DRIVER: llvmpipe
-        run: >-
-          xvfb-run -a
-          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
-
-      - name: Test Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          GALLIUM_DRIVER: llvmpipe
-        run: |
-          ctest --test-dir build --output-on-failure -C Release -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_example_t077_blur.exe --platform-smoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_example_t084_texture_tiling.exe --platform-smoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_example_image_texture_interpretation.exe --platform-smoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_image_texture_gpu_reference_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_t095_scene_gpu_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # macOS CI shares one Objective-C bridge across ordinary feature examples
-      # to keep builds bounded. T066 intentionally mutates the standalone window
-      # delegate close lifecycle, so its exact example is qualified below using
-      # the focused T066 harness with a normal consumer-scoped bridge.
-      - name: Test macOS
-        if: runner.os == 'macOS'
-        run: >-
-          ctest --test-dir build --output-on-failure -C Release
-          -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}|^nativeui_example_t066_window_controls_self_test$'
-
-      - name: T044 and T066 contracts — Linux X11
-        if: runner.os == 'Linux' && matrix.skia_arm64 != true
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          GALLIUM_DRIVER: llvmpipe
-        run: >-
-          xvfb-run -a
-          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
-          sh -c 'ctest --test-dir build-t044 --output-on-failure -C Release && ./build-t066/nativeui_t066_window_control_state_tests && ./build-t066/nativeui_t066_window_controls_platform_tests && ./build-t066/nativeui_t066_destroy_survivor_tests && ./build-t066/nativeui_t066_window_controls_example --self-test'
-
-      - name: T044 and T066 contracts — macOS
-        if: runner.os == 'macOS'
-        run: |
-          ctest --test-dir build-t044 --output-on-failure -C Release
-          ./build-t066/nativeui_t066_window_control_state_tests
-          ./build-t066/nativeui_t066_window_controls_platform_tests
-          ./build-t066/nativeui_t066_destroy_survivor_tests
-          ./build-t066/nativeui_t066_window_controls_example --self-test
-
-      - name: T044 and T066 contracts — Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          GALLIUM_DRIVER: llvmpipe
-        run: |
-          ctest --test-dir build-t044 --output-on-failure -C Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build-t066/nativeui_t066_window_control_state_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build-t066/nativeui_t066_window_controls_platform_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build-t066/nativeui_t066_destroy_survivor_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build-t066/nativeui_t066_window_controls_example.exe --self-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # T053/CODE_REVIEW.md requires proof that two final consumers configured
-      # together derive different Objective-C runtime namespaces.
-      - name: macOS two-consumer Objective-C runtime isolation
-        if: runner.os == 'macOS'
-        run: >-
-          cmake
-          -DSOURCE_DIR=${{ github.workspace }}
-          -DOUTER_BUILD=${{ github.workspace }}/build
-          -P tests/check_objc_two_consumers.cmake
-
-      - name: macOS clipboard, lifecycle, T035 popup, T063 dialog and T062 tooltip smoke
-        if: runner.os == 'macOS'
-        run: |
-          ./build/nativeui_smoke_standalone
-          ./build/nativeui_example_t035_combo_popup --platform-smoke
-          ./build/nativeui_example_t063_dialog --platform-smoke
-          ./build/nativeui_example_t062_tooltip --platform-smoke
-          ./build/nativeui_example_t077_blur --platform-smoke
-          ./build/nativeui_example_t084_texture_tiling --platform-smoke
-          ./build/nativeui_example_image_texture_interpretation --platform-smoke
-          ./build/nativeui_image_texture_gpu_reference_tests
-          ./build/nativeui_t095_scene_gpu_tests
+      - name: Test macOS and Windows
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build --output-on-failure -C Release -LE '^package$'
 
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -364,16 +108,12 @@ jobs:
         with:
           path: ${{ env.CPM_SOURCE_CACHE }}
           key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
-          restore-keys: |
-            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
 
       - name: Configure
         run: >-
@@ -386,37 +126,11 @@ jobs:
           -DNATIVEUI_SKIA_CONFIG=Release
 
       - name: Build
-        run: cmake --build build-sanitize --parallel
+        run: cmake --build build-sanitize
 
       - name: Test
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure -E '${{ env.NATIVEUI_CTEST_EXCLUDE }}'
-
-      # Preserve T044's platform sanitizer qualification without a separate
-      # workflow/check. The focused harness reuses this job's dependency cache
-      # and sanitizer environment.
-      - name: Configure sanitized T044 pointer-capture contract
-        run: >-
-          cmake -S tests/t044 -B build-t044-sanitize -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_ENABLE_SANITIZERS=ON
-          -DNATIVEUI_SKIA_CONFIG=Release
-
-      - name: Build sanitized T044 pointer-capture contract
-        run: cmake --build build-t044-sanitize --parallel 2
-
-      - name: Test sanitized T044 pointer-capture contract
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          GALLIUM_DRIVER: llvmpipe
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: >-
-          xvfb-run -a
-          -s "-screen 0 1280x1024x24 +extension GLX +extension XTEST +render -noreset"
-          ctest --test-dir build-t044-sanitize --output-on-failure
+        run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'

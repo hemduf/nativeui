@@ -354,7 +354,6 @@ function(nativeui_add_application)
 
   set_target_properties("${target}" PROPERTIES
     OUTPUT_NAME "${_nativeui_application_PRODUCT_NAME}")
-  target_link_libraries("${target}" PRIVATE NativeUI::Core)
 
   # T047's public attachment helper must execute at CMake file scope because it
   # may enable C and Objective-C on CMake 3.24-4.4. Generate a tiny per-target

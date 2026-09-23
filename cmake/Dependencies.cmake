@@ -155,6 +155,16 @@ if(WIN32 AND CMAKE_CONFIGURATION_TYPES)
     "Use a separate build tree with -DNATIVEUI_SKIA_CONFIG=Debug when a Debug Skia CRT is required.")
 endif()
 
+if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    set(_nativeui_linux_skia_arch "x64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    set(_nativeui_linux_skia_arch "arm64")
+  else()
+    message(FATAL_ERROR "The pinned skia-builder release supports Linux x64 and arm64 only")
+  endif()
+endif()
+
 if(NOT NATIVEUI_SKIA_ROOT)
   string(TOLOWER "${NATIVEUI_SKIA_CONFIG}" _skia_cfg)
 
@@ -191,14 +201,15 @@ if(NOT NATIVEUI_SKIA_ROOT)
     endif()
     set(_skia_asset "skia-build-win-x64-${_suffix}-${_skia_cfg}.zip")
   elseif(UNIX)
-    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-      message(FATAL_ERROR "The pinned skia-builder release currently provides Linux x64 only")
+    if(_nativeui_linux_skia_arch STREQUAL "x64")
+      set(_skia_hash "SHA256=8da94ec6532d2586fdd719859b8437da20b1b5fad30951703dd19fa4a679eca9")
+    else()
+      set(_skia_hash "SHA256=b45e8e40f3d8e29176ea5fc6e3ecafdbc87ac0a58469f649058fbc8ac0831687")
     endif()
     if(NOT NATIVEUI_SKIA_CONFIG STREQUAL "Release")
-      message(FATAL_ERROR "skia-builder ${NATIVEUI_SKIA_TAG} publishes the Linux x64 artifact as Release")
+      message(FATAL_ERROR "skia-builder ${NATIVEUI_SKIA_TAG} publishes Linux artifacts as Release")
     endif()
-    set(_skia_asset "skia-build-linux-x64-gpu-release.zip")
-    set(_skia_hash "SHA256=8da94ec6532d2586fdd719859b8437da20b1b5fad30951703dd19fa4a679eca9")
+    set(_skia_asset "skia-build-linux-${_nativeui_linux_skia_arch}-gpu-release.zip")
   endif()
 
   set(_skia_url
@@ -272,7 +283,7 @@ elseif(WIN32)
     "${_skia_lib_dir}/skia.lib"
   )
 else()
-  set(_skia_lib_dir "${_skia_package_root}/linux-gpu/lib/Release/x64")
+  set(_skia_lib_dir "${_skia_package_root}/linux-gpu/lib/Release/${_nativeui_linux_skia_arch}")
   set(_skia_lib_candidates
     "${_skia_lib_dir}/libSkia.a"
     "${_skia_lib_dir}/libskia.a"

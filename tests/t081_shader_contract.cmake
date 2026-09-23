@@ -69,13 +69,13 @@ foreach(_access_required IN ITEMS
   endif()
 endforeach()
 
-file(READ "${SOURCE_DIR}/CMakeLists.txt" _cmake)
+file(READ "${SOURCE_DIR}/tests/CMakeLists.txt" _cmake)
 foreach(_cmake_required IN ITEMS
     "nativeui_t081_shader_contract"
     "nativeui_t081_shader_brush_tests")
   string(FIND "${_cmake}" "${_cmake_required}" _pos)
   if(_pos EQUAL -1)
-    message(FATAL_ERROR "T081: root CMake misses '${_cmake_required}'")
+    message(FATAL_ERROR "T081: tests/CMakeLists.txt misses '${_cmake_required}'")
   endif()
 endforeach()
 
