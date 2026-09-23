@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
+#include "detail/platform_test_access.hpp"
 #if defined(__APPLE__)
 #  include "detail/macos_desktop_services.hpp"
 #elif defined(_WIN32)
