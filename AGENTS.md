@@ -54,7 +54,7 @@ Then run the current baseline tests before editing code:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
@@ -387,6 +387,15 @@ When that happens, implement the generic capability first, then the widget.
 ## 10. Build/dependency workflow
 
 CMake + CPM is mandatory.
+
+### 10.0 Local builds must be serial
+
+Parallel local compilation can exhaust memory. This is a mandatory local execution constraint:
+
+- never pass `-j`, `-jN`, `-j N` or `--parallel` to local build commands, including CMake, Make and Ninja;
+- use `CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build <build-directory>` for every local CMake build, including targeted builds, so generators such as Ninja cannot silently use their parallel default;
+- run only one local build at a time; do not start simultaneous builds in different terminals, worktrees or agent tasks;
+- do not copy CI parallel-build flags into local commands. Remote CI concurrency remains governed by `CI_POLICY.md` and the workflows.
 
 ### 10.1 Compiler warning policy
 
