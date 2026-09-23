@@ -28,10 +28,10 @@ function(nativeui_discover_feature_examples out_var source_dir)
 
   set(_feature_examples)
   foreach(_source IN LISTS _feature_sources)
-    if(NOT _source MATCHES "^[A-Za-z][A-Za-z0-9_]*[.]cpp$")
+    if(NOT _source MATCHES "^((t[0-9][0-9][0-9]_)?[a-z][a-z0-9_]*)[.]cpp$")
       message(FATAL_ERROR
         "NativeUI feature example discovery: invalid feature example filename '${_source}'. "
-        "Expected a semantic C++ identifier filename such as retained_paint_culling.cpp")
+        "Expected a semantic <feature>.cpp name or a legacy numbered <feature>.cpp name")
     endif()
 
     get_filename_component(_name "${_source}" NAME_WE)

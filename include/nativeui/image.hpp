@@ -43,6 +43,12 @@ enum class TextureMipmap {
     Linear,
 };
 
+/// Interpretation applied when an ImageTexture samples decoded image channels.
+enum class TextureInterpretation {
+    Color, ///< Color-managed RGB with normal alpha coverage semantics.
+    Data,  ///< Raw normalized channels with no RGB color conversion or implicit premultiplication.
+};
+
 /// Small backend-neutral ImageTexture sampling description.
 ///
 /// Mutation is value-only and never allocates, decodes Image data, generates
@@ -191,6 +197,7 @@ public:
           tile_mode_x_(other.tile_mode_x_),
           tile_mode_y_(other.tile_mode_y_),
           sampling_(other.sampling_),
+          interpretation_(other.interpretation_),
           transform_(other.transform_),
           transform_valid_(other.transform_valid_) {
         other.reset();
@@ -207,6 +214,7 @@ public:
         tile_mode_x_ = other.tile_mode_x_;
         tile_mode_y_ = other.tile_mode_y_;
         sampling_ = other.sampling_;
+        interpretation_ = other.interpretation_;
         transform_ = other.transform_;
         transform_valid_ = other.transform_valid_;
         other.reset();
@@ -246,6 +254,16 @@ public:
 
     [[nodiscard]] TextureSampling sampling() const noexcept {
         return sampling_;
+    }
+
+    /// Select color-managed or raw numeric sampling without mutating the shared Image.
+    ImageTexture& set_interpretation(TextureInterpretation interpretation) noexcept {
+        interpretation_ = interpretation;
+        return *this;
+    }
+
+    [[nodiscard]] TextureInterpretation interpretation() const noexcept {
+        return interpretation_;
     }
 
     /// Map T083 destination/pattern coordinates into Painter-local coordinates.
@@ -299,6 +317,7 @@ private:
         tile_mode_x_ = TextureTileMode::Clamp;
         tile_mode_y_ = TextureTileMode::Clamp;
         sampling_ = {};
+        interpretation_ = TextureInterpretation::Color;
         transform_ = Transform2D::identity();
         transform_valid_ = true;
     }
@@ -309,6 +328,7 @@ private:
     TextureTileMode tile_mode_x_{TextureTileMode::Clamp};
     TextureTileMode tile_mode_y_{TextureTileMode::Clamp};
     TextureSampling sampling_{};
+    TextureInterpretation interpretation_{TextureInterpretation::Color};
     Transform2D transform_{Transform2D::identity()};
     bool transform_valid_{true};
 };
@@ -325,6 +345,9 @@ static_assert(noexcept(std::declval<const ImageTexture&>().tile_mode_y()));
 static_assert(noexcept(std::declval<ImageTexture&>().set_sampling(
     TextureSampling{})));
 static_assert(noexcept(std::declval<const ImageTexture&>().sampling()));
+static_assert(noexcept(std::declval<ImageTexture&>().set_interpretation(
+    TextureInterpretation::Data)));
+static_assert(noexcept(std::declval<const ImageTexture&>().interpretation()));
 static_assert(noexcept(std::declval<ImageTexture&>().set_transform(
     Transform2D::identity())));
 static_assert(noexcept(std::declval<const ImageTexture&>().transform()));

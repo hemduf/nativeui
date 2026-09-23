@@ -1,11 +1,18 @@
 #include <nativeui/image.hpp>
 #include <nativeui/paint.hpp>
 
+#include "include/core/SkBitmap.h"
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkImageInfo.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkPicture.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkPictureRecorder.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
@@ -25,7 +32,11 @@
 namespace ui::detail {
 
 struct ImageData {
+    // Color sampling keeps the historical premultiplied representation so
+    // filtering/compositing remains coverage-correct. raw_image preserves the
+    // decoded unpremultiplied numeric channels for TextureInterpretation::Data.
     sk_sp<SkImage> image;
+    sk_sp<SkImage> raw_image;
     Size size{};
 };
 
@@ -40,6 +51,8 @@ namespace {
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
 std::size_t g_image_decode_calls{};
 std::size_t g_image_texture_materialization_calls{};
+std::size_t g_image_texture_color_materialization_calls{};
+std::size_t g_image_texture_data_materialization_calls{};
 ImageTextureMaterializationFailurePoint g_image_texture_failure{
     ImageTextureMaterializationFailurePoint::None};
 #endif
@@ -89,6 +102,37 @@ ImageTextureMaterializationFailurePoint g_image_texture_failure{
     return SkSamplingOptions{
         backend_filter(sampling.filter()),
         backend_mipmap(sampling.mipmap())};
+}
+
+
+[[nodiscard]] SkRect source_sampling_domain(Rect source) noexcept {
+    const float source_right = source.x + source.w;
+    const float source_bottom = source.y + source.h;
+    return SkRect::MakeLTRB(
+        std::floor(source.x) + 0.5f,
+        std::floor(source.y) + 0.5f,
+        std::ceil(source_right) - 0.5f,
+        std::ceil(source_bottom) - 0.5f);
+}
+
+[[nodiscard]] sk_sp<SkShader> raw_clamped_source_shader(
+    const sk_sp<SkImage>& image,
+    Rect source,
+    TextureFilter filter,
+    const SkMatrix& local_matrix) {
+    if (!image) return {};
+
+    auto shader = image->makeRawShader(
+        SkTileMode::kClamp,
+        SkTileMode::kClamp,
+        SkSamplingOptions{backend_filter(filter)});
+    if (!shader) return {};
+
+    shader = SkShaders::CoordClamp(
+        std::move(shader), source_sampling_domain(source));
+    if (!shader) return {};
+
+    return shader->makeWithLocalMatrix(local_matrix);
 }
 
 [[nodiscard]] bool exact_identity(Transform2D transform) noexcept {
@@ -146,6 +190,146 @@ struct MipSource {
     sk_sp<SkImage> image;
     SkRect source{};
 };
+
+
+struct DataSource {
+    sk_sp<SkImage> image;
+    SkRect source{};
+};
+
+[[nodiscard]] DataSource make_data_source(
+    const ImageData& data,
+    Rect source,
+    TextureFilter filter,
+    bool mipmapped) {
+    if (!data.raw_image || !drawable_rect(source)) return {};
+
+    const auto finish =
+        [mipmapped](sk_sp<SkImage> image, SkRect local_source) -> DataSource {
+        if (!image) return {};
+        if (mipmapped && !image->hasMipmaps()) {
+            image = image->withDefaultMipmaps();
+        }
+        if (!image) return {};
+        return {std::move(image), local_source};
+    };
+
+    if (is_full_source(source, data)) {
+        return finish(
+            data.raw_image,
+            SkRect::MakeWH(
+                static_cast<float>(data.raw_image->width()),
+                static_cast<float>(data.raw_image->height())));
+    }
+
+    if (integral_source(source) &&
+        source.x <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.y <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.w <= static_cast<float>(std::numeric_limits<int>::max()) &&
+        source.h <= static_cast<float>(std::numeric_limits<int>::max())) {
+        const auto subset = SkIRect::MakeXYWH(
+            static_cast<int>(source.x), static_cast<int>(source.y),
+            static_cast<int>(source.w), static_cast<int>(source.h));
+        auto image = data.raw_image->makeSubset(
+            nullptr, subset, SkImage::RequiredProperties{mipmapped});
+        return finish(
+            std::move(image),
+            SkRect::MakeWH(source.w, source.h));
+    }
+
+    // A fractional selected source cannot use SkImage::makeSubset. Materialize
+    // only that selection into an unpremultiplied, color-space-free raster
+    // image so subsequent tiling/mipmap generation never sees parent pixels,
+    // color conversion, or destructive alpha premultiplication.
+    const float width_f = std::ceil(source.w);
+    const float height_f = std::ceil(source.h);
+    if (!std::isfinite(width_f) || !std::isfinite(height_f) ||
+        width_f < 1.0f || height_f < 1.0f ||
+        width_f > static_cast<float>(std::numeric_limits<int>::max()) ||
+        height_f > static_cast<float>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+
+    const int width = static_cast<int>(width_f);
+    const int height = static_cast<int>(height_f);
+    const SkRect tile = SkRect::MakeWH(
+        static_cast<float>(width), static_cast<float>(height));
+
+    SkBitmap bitmap;
+    const auto info = SkImageInfo::Make(
+        width, height,
+        kRGBA_8888_SkColorType,
+        kUnpremul_SkAlphaType,
+        nullptr);
+    if (!bitmap.tryAllocPixels(info)) return {};
+
+    const auto source_rect =
+        SkRect::MakeXYWH(source.x, source.y, source.w, source.h);
+    const auto source_to_tile = SkMatrix::Rect2Rect(source_rect, tile);
+    if (!source_to_tile) return {};
+
+    auto shader = raw_clamped_source_shader(
+        data.raw_image, source, filter, *source_to_tile);
+    if (!shader) return {};
+
+    SkPaint paint;
+    paint.setBlendMode(SkBlendMode::kSrc);
+    paint.setShader(std::move(shader));
+
+    SkCanvas canvas{bitmap};
+    canvas.clear(SK_ColorTRANSPARENT);
+    canvas.drawRect(tile, paint);
+
+    bitmap.setImmutable();
+    return finish(SkImages::RasterFromBitmap(bitmap), tile);
+}
+
+[[nodiscard]] sk_sp<SkShader> materialize_data_texture(
+    const ImageTexture& texture,
+    const ImageData& data,
+    const SkMatrix& local_matrix) {
+    const auto source = texture.source();
+    const auto sampling = texture.sampling();
+
+    // Clamp/Clamp can operate directly on the decoded unpremultiplied backing.
+    // CoordClamp retains T083 strict selected-source filtering without an
+    // intermediate image.
+    if (sampling.mipmap() == TextureMipmap::None &&
+        texture.tile_mode_x() == TextureTileMode::Clamp &&
+        texture.tile_mode_y() == TextureTileMode::Clamp) {
+        return raw_clamped_source_shader(
+            data.raw_image, source, sampling.filter(), local_matrix);
+    }
+
+    const auto isolated = make_data_source(
+        data,
+        source,
+        sampling.filter(),
+        sampling.mipmap() != TextureMipmap::None);
+    if (!isolated.image) return {};
+
+    const auto destination = texture.destination();
+    const SkRect destination_rect =
+        SkRect::MakeXYWH(destination.x, destination.y,
+                         destination.w, destination.h);
+    const auto isolated_to_destination =
+        SkMatrix::Rect2Rect(isolated.source, destination_rect);
+    if (!isolated_to_destination) return {};
+
+    SkMatrix isolated_local_matrix;
+    if (!compose_texture_local_matrix(
+            *isolated_to_destination,
+            texture.transform(),
+            isolated_local_matrix)) {
+        return {};
+    }
+
+    return isolated.image->makeRawShader(
+        backend_tile_mode(texture.tile_mode_x()),
+        backend_tile_mode(texture.tile_mode_y()),
+        backend_sampling(sampling),
+        &isolated_local_matrix);
+}
 
 [[nodiscard]] MipSource make_isolated_mip_source(
     const ImageData& data,
@@ -309,7 +493,37 @@ void draw_resolved_image(Painter& painter,
 
 [[nodiscard]] bool image_backing_is_lazy_for_test(const Image& image) noexcept {
     const auto& data = ImageAccess::data(image);
-    return data && data->image && data->image->isLazyGenerated();
+    return data &&
+           ((data->image && data->image->isLazyGenerated()) ||
+            (data->raw_image && data->raw_image->isLazyGenerated()));
+}
+
+[[nodiscard]] bool image_color_backing_is_premul_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->image &&
+           data->image->alphaType() == kPremul_SkAlphaType;
+}
+
+[[nodiscard]] bool image_data_backing_is_unpremul_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->raw_image &&
+           data->raw_image->alphaType() == kUnpremul_SkAlphaType;
+}
+
+[[nodiscard]] bool image_color_backing_is_srgb_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->image && data->image->colorSpace() &&
+           data->image->colorSpace()->isSRGB();
+}
+
+[[nodiscard]] std::size_t
+image_texture_color_materialization_call_count_for_test() noexcept {
+    return g_image_texture_color_materialization_calls;
+}
+
+[[nodiscard]] std::size_t
+image_texture_data_materialization_call_count_for_test() noexcept {
+    return g_image_texture_data_materialization_calls;
 }
 
 void set_image_texture_materialization_failure_for_test(
@@ -337,8 +551,19 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
 
     if (!texture.valid()) return {};
 
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    switch (texture.interpretation()) {
+        case TextureInterpretation::Color:
+            ++g_image_texture_color_materialization_calls;
+            break;
+        case TextureInterpretation::Data:
+            ++g_image_texture_data_materialization_calls;
+            break;
+    }
+#endif
+
     const auto& data = ImageAccess::data(texture.image());
-    if (!data || !data->image) return {};
+    if (!data || !data->image || !data->raw_image) return {};
 
     const auto source = texture.source();
     const auto destination = texture.destination();
@@ -355,6 +580,15 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
     if (!compose_texture_local_matrix(
             *source_to_destination, texture.transform(), local_matrix)) {
         return {};
+    }
+
+    switch (texture.interpretation()) {
+        case TextureInterpretation::Data:
+            return materialize_data_texture(texture, *data, local_matrix);
+        case TextureInterpretation::Color:
+            break;
+        default:
+            return {};
     }
 
     const auto public_sampling = texture.sampling();
@@ -420,15 +654,8 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         // filter footprint. Clamp to the centers of the first/last texels
         // intersected by the selected source rectangle so filtering cannot pull
         // a neighboring texel from outside that selection.
-        const float source_right = source.x + source.w;
-        const float source_bottom = source.y + source.h;
-        const SkRect sampling_domain = SkRect::MakeLTRB(
-            std::floor(source.x) + 0.5f,
-            std::floor(source.y) + 0.5f,
-            std::ceil(source_right) - 0.5f,
-            std::ceil(source_bottom) - 0.5f);
-
-        shader = SkShaders::CoordClamp(std::move(shader), sampling_domain);
+        shader = SkShaders::CoordClamp(
+            std::move(shader), source_sampling_domain(source));
         if (!shader) return {};
 
         return shader->makeWithLocalMatrix(local_matrix);
@@ -508,20 +735,62 @@ Image Image::decode(std::span<const std::byte> encoded) {
     auto bytes = SkData::MakeWithCopy(encoded.data(), encoded.size());
     if (!bytes) return {};
 
-    auto deferred = SkImages::DeferredFromEncodedData(std::move(bytes));
+    // Decode the encoded bytes once into an eager unpremultiplied raster.
+    // That immutable representation is the numeric source for Data sampling.
+    auto deferred = SkImages::DeferredFromEncodedData(
+        std::move(bytes), kUnpremul_SkAlphaType);
     if (!deferred) return {};
 
-    // Publish only a realized raster image. DeferredFromEncodedData may parse
-    // metadata successfully while postponing pixel decode until first draw,
-    // which would violate Image's resource-preparation contract and T083's
-    // zero-decode paint path.
-    auto image = deferred->makeRasterImage(
+    // Publish only realized raster images. DeferredFromEncodedData may parse
+    // metadata successfully while postponing pixel decode until first draw.
+    auto raw_image = deferred->makeRasterImage(
         nullptr, SkImage::kDisallow_CachingHint);
-    if (!image) return {};
+    if (!raw_image) return {};
+
+    // Preserve the historical Color contract by deriving a color-managed
+    // premultiplied raster from the already-decoded pixels. This is a pixel
+    // conversion, not a second encoded decode. Untagged encoded images are
+    // explicitly interpreted as sRGB so Color participates in Skia's color
+    // transforms, while raw_image keeps the codec-decoded numeric payload for
+    // TextureInterpretation::Data.
+    sk_sp<SkImage> color_image = raw_image;
+    const bool needs_premultiplication =
+        raw_image->alphaType() == kUnpremul_SkAlphaType;
+    const bool needs_srgb_fallback = raw_image->colorSpace() == nullptr;
+    if (needs_premultiplication || needs_srgb_fallback) {
+        auto color_info = raw_image->imageInfo();
+        if (needs_premultiplication) {
+            color_info = color_info.makeAlphaType(kPremul_SkAlphaType);
+        }
+        if (needs_srgb_fallback) {
+            color_info = color_info.makeColorSpace(SkColorSpace::MakeSRGB());
+        }
+
+        SkBitmap color_bitmap;
+        if (!color_bitmap.tryAllocPixels(color_info)) return {};
+
+        SkPixmap color_pixels;
+        if (!color_bitmap.peekPixels(&color_pixels)) return {};
+        if (!raw_image->readPixels(
+                nullptr,
+                color_pixels,
+                0,
+                0,
+                SkImage::kDisallow_CachingHint)) {
+            return {};
+        }
+
+        color_bitmap.setImmutable();
+        color_image = SkImages::RasterFromBitmap(color_bitmap);
+        if (!color_image) return {};
+    }
 
     auto data = std::make_shared<detail::ImageData>();
-    data->size = Size{static_cast<float>(image->width()), static_cast<float>(image->height())};
-    data->image = std::move(image);
+    data->size = Size{
+        static_cast<float>(raw_image->width()),
+        static_cast<float>(raw_image->height())};
+    data->image = std::move(color_image);
+    data->raw_image = std::move(raw_image);
     return Image{std::move(data)};
 }
 
