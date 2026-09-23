@@ -648,6 +648,19 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_smoke_standalone)
     nativeui_enable_sanitizers(nativeui_smoke_standalone)
 
+    add_executable(nativeui_t087_gpu_reference_tests
+      tests/t087_gpu_reference_tests.cpp
+    )
+    target_include_directories(nativeui_t087_gpu_reference_tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_t087_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.t087-gpu-reference
+    )
+    nativeui_enable_project_warnings(nativeui_t087_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_t087_gpu_reference_tests)
+
     add_executable(nativeui_smoke_embedded tests/smoke_embedded.cpp)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_smoke_embedded
