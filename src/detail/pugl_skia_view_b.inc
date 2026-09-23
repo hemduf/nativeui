@@ -13,11 +13,15 @@
                 static_cast<float>(puglGetScaleFactor(view_)),
                 [this](Size viewport) { ui_.resize(viewport); });
             record_scale_observation(geometry_.last_scale_observation_valid());
-            if (!logical) return PUGL_SUCCESS;
+            if (!logical) {
+                renderer_.invalidate_content();
+                return PUGL_SUCCESS;
+            }
 
             if (geometry_.last_valid_scale() != previous_scale &&
                 !apply_size_constraints()) {
                 last_error_ = "Failed to refresh logical window size constraints";
+                scene_error_active_ = false;
             }
 
             ui_.refresh_focus(services_);
@@ -29,17 +33,60 @@
         case PUGL_UPDATE:
             nativeuiImeFlushPendingCancel(ime_bridge_);
             flush_preferred_size_notification();
+            if (deferred_scene_redraw_) {
+                deferred_scene_redraw_ = false;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++deferred_redraw_attempts_;
+                if (std::exchange(reject_deferred_redraw_once_, false)) {
+                    ++deferred_redraw_rejections_;
+                    return PUGL_SUCCESS;
+                }
+#endif
+                const auto logical = geometry_.logical_size();
+                request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+            }
             return PUGL_SUCCESS;
 
         case PUGL_EXPOSE:
             if (!geometry_.renderable()) return PUGL_SUCCESS;
-            if (!renderer_.render(ui_,
-                                  services_,
-                                  geometry_.physical_size(),
-                                  geometry_.last_valid_scale())) {
-                last_error_ = "Failed to initialize Skia Ganesh/OpenGL renderer";
-                should_close_ = true;
-                return PUGL_CREATE_CONTEXT_FAILED;
+            try {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                if (recreate_renderer_on_expose_) {
+                    recreate_renderer_on_expose_ = false;
+                    renderer_.reset();
+                }
+                const float render_scale = scene_scale_override_.value_or(
+                    geometry_.last_valid_scale());
+#else
+                const float render_scale = geometry_.last_valid_scale();
+#endif
+                if (!renderer_.render(ui_,
+                                      services_,
+                                      geometry_.physical_size(),
+                                      render_scale)) {
+                    deferred_scene_redraw_ |= renderer_.take_deferred_redraw();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                    ++failed_scene_exposes_;
+#endif
+                    record_scene_error("NativeUI scene build or presentation failed; waiting for a later expose");
+                    return PUGL_SUCCESS;
+                }
+                deferred_scene_redraw_ |= renderer_.take_deferred_redraw();
+                clear_scene_error();
+            } catch (const std::exception& error) {
+                renderer_.invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++failed_scene_exposes_;
+#endif
+                record_scene_error(error.what());
+                return PUGL_SUCCESS;
+            } catch (...) {
+                renderer_.invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++failed_scene_exposes_;
+#endif
+                record_scene_error("Unknown NativeUI scene paint failure");
+                return PUGL_SUCCESS;
             }
             return PUGL_SUCCESS;
 
@@ -350,6 +397,16 @@
     bool preferred_measure_dirty_{};
     bool should_close_{};
     bool visible_{};
+    bool deferred_scene_redraw_{};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t failed_scene_exposes_{};
+    std::uint64_t deferred_redraw_attempts_{};
+    std::uint64_t deferred_redraw_rejections_{};
+    std::uint64_t redraw_requests_during_render_{};
+    bool recreate_renderer_on_expose_{};
+    std::optional<float> scene_scale_override_;
+    bool reject_deferred_redraw_once_{};
+#endif
     bool text_input_active_{};
     Rect text_input_logical_area_{};
     float text_input_logical_cursor_offset_{};
@@ -365,6 +422,7 @@
     const PuglDataOfferEvent* active_drop_offer_{};
     bool drop_offer_decided_{};
     std::string last_error_;
+    bool scene_error_active_{};
     std::function<void()> close_callback_;
 };
 

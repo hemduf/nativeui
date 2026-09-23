@@ -1,12 +1,16 @@
 #include <nativeui/nativeui.hpp>
 
 #include "view_geometry.hpp"
+#include "scene_extent.hpp"
 
 #include <pugl/gl.h>
 #include <pugl/pugl.h>
 
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkSurface.h"
+#include "include/gpu/GpuTypes.h"
 #include "include/gpu/ganesh/GrBackendSurface.h"
 #include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
@@ -47,6 +51,19 @@ constexpr double kCaretBlinkSeconds = 0.5;
 constexpr double kMultiClickSeconds = 0.35;
 constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
+constexpr GrGLenum kGlFramebuffer = 0x8D40u;
+
+template <class Callback>
+class ScopeExit final {
+public:
+    explicit ScopeExit(Callback callback) : callback_(std::move(callback)) {}
+    ~ScopeExit() noexcept { callback_(); }
+    ScopeExit(const ScopeExit&) = delete;
+    ScopeExit& operator=(const ScopeExit&) = delete;
+
+private:
+    Callback callback_;
+};
 
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
@@ -86,22 +103,90 @@ namespace detail {
 
 class SkiaGlRenderer {
 public:
-    void reset() {
-        surface_.reset();
-        if (context_) {
-            context_->abandonContext();
-            context_.reset();
+    // PUGL_UNREALIZE enters the owning GL context before calling us. Release
+    // GPU objects there; if entering the context failed, abandon instead.
+    void reset() noexcept {
+        if (context_ && context_->abandoned()) {
+            abandon();
+            return;
         }
+        snapshot_.reset();
+        presentation_.reset();
+        scene_.reset();
+        context_.reset();
         interface_.reset();
-        width_ = 0;
-        height_ = 0;
+        clear_identity();
+    }
+
+    void abandon() noexcept {
+        if (context_) context_->abandonContext();
+        snapshot_.reset();
+        presentation_.reset();
+        scene_.reset();
+        context_.reset();
+        interface_.reset();
+        clear_identity();
+    }
+
+    void invalidate() noexcept {
+        full_repaint_required_ = true;
+        present_pending_ = true;
+    }
+
+    [[nodiscard]] bool invalidate_from_ui() noexcept {
+        invalidate();
+        if (rendering_) {
+            deferred_redraw_pending_ = true;
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool rendering() const noexcept { return rendering_; }
+
+    void invalidate_content() noexcept {
+        scene_valid_ = false;
+        invalidate();
+    }
+
+    [[nodiscard]] bool take_deferred_redraw() noexcept {
+        return std::exchange(deferred_redraw_pending_, false);
+    }
+
+private:
+    void clear_identity() noexcept {
+        width_ = height_ = 0;
+        scene_scale_ = 0.0f;
+        bind_framebuffer_ = nullptr;
+        presentation_framebuffer_ = 0;
+        presentation_samples_ = presentation_stencil_bits_ = 0;
+        scene_valid_ = false;
+        full_repaint_required_ = true;
+        present_pending_ = true;
+        rendering_ = false;
+        deferred_redraw_pending_ = false;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
         readback_result_.reset();
 #endif
     }
 
+public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    void inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
+
+    [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
+        return SceneDiagnostics{
+            .scene_allocations = scene_allocations_,
+            .scene_builds = scene_builds_,
+            .presentations = presentations_,
+            .failed_exposes = 0,
+            .scene_valid = scene_valid_,
+            .full_repaint_required = full_repaint_required_,
+            .present_pending = present_pending_,
+        };
+    }
+
     void request_readback(int x, int y) noexcept {
         readback_x_ = x;
         readback_y_ = y;
@@ -120,11 +205,57 @@ public:
                 PlatformServices& services,
                 Size physical_size,
                 float scale_factor) {
-        // Pugl geometry is expressed in physical pixels.  The toolkit itself
-        // uses logical coordinates, so the framebuffer keeps the Pugl size
-        // while the SkCanvas is scaled once for component painting.
-        const int physical_width = std::max(1, static_cast<int>(std::lround(physical_size.w)));
-        const int physical_height = std::max(1, static_cast<int>(std::lround(physical_size.h)));
+        if (rendering_) {
+            invalidate();
+            return false;
+        }
+        if (ui.scene_paint_blocked()) {
+            invalidate();
+            return false;
+        }
+        rendering_ = true;
+        const ScopeExit finish_render{[this]() noexcept { rendering_ = false; }};
+
+        // Validate before GL calls or narrowing; backend caps are checked once
+        // the context exists. The scene allocator also uses this exact extent.
+        const auto extent = validate_scene_extent(
+            physical_size, scale_factor, std::numeric_limits<int>::max());
+        if (!extent) {
+            invalidate_content();
+            return false;
+        }
+        const int physical_width = extent->width;
+        const int physical_height = extent->height;
+
+        // Capture Pugl's borrowed target before Skia binds its scene FBO. The
+        // restore guard also makes the next expose's entry binding authoritative.
+        constexpr GLenum kFramebufferBinding = 0x8CA6;
+        constexpr GLenum kStencilBits = 0x0D57;
+        constexpr GLenum kSamples = 0x80A9;
+        GLint framebuffer = 0;
+        GLint stencil_bits = 0;
+        GLint samples = 0;
+        glGetIntegerv(kFramebufferBinding, &framebuffer);
+        glGetIntegerv(kStencilBits, &stencil_bits);
+        glGetIntegerv(kSamples, &samples);
+        // Resolve through Pugl once per renderer/context lifetime. Resolving
+        // on every expose allocates a CFString on macOS; accessing the prebuilt
+        // Skia function table here fails in Linux sanitizer builds.
+        if (!bind_framebuffer_) {
+            bind_framebuffer_ = reinterpret_cast<GrGLBindFramebufferFn*>(
+                puglGetProcAddress("glBindFramebuffer"));
+        }
+        const auto bind_framebuffer = bind_framebuffer_;
+        if (!bind_framebuffer) {
+            invalidate_content();
+            return false;
+        }
+        const ScopeExit restore_binding{[this, framebuffer, bind_framebuffer]() noexcept {
+            if (interface_ && (!context_ || !context_->abandoned())) {
+                bind_framebuffer(kGlFramebuffer, static_cast<GrGLuint>(framebuffer));
+                if (context_) context_->resetContext(kRenderTarget_GrGLBackendState);
+            }
+        }};
 
         glViewport(0, 0, physical_width, physical_height);
 
@@ -134,52 +265,167 @@ public:
             context_ = GrDirectContexts::MakeGL(interface_);
             if (!context_) return false;
         }
+        if (context_->abandoned()) {
+            abandon();
+            return false;
+        }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (fail_at(SceneFaultStage::ConfirmedContextLoss)) {
+            abandon();
+            return false;
+        }
+#endif
+        if (physical_width > context_->maxRenderTargetSize() ||
+            physical_height > context_->maxRenderTargetSize()) {
+            invalidate_content();
+            return false;
+        }
 
-        if (!surface_ || width_ != physical_width || height_ != physical_height) {
-            // Query the Pugl-owned default framebuffer instead of assuming FBO 0.
-            // Numeric constants keep this code compatible with the conservative
-            // system GL headers used by Windows.
-            constexpr GLenum kFramebufferBinding = 0x8CA6;
-            constexpr GLenum kStencilBits = 0x0D57;
-            constexpr GLenum kSamples = 0x80A9;
-            GLint framebuffer = 0;
-            GLint stencil_bits = 0;
-            GLint samples = 0;
-            glGetIntegerv(kFramebufferBinding, &framebuffer);
-            glGetIntegerv(kStencilBits, &stencil_bits);
-            glGetIntegerv(kSamples, &samples);
+        if (!scene_ || width_ != physical_width || height_ != physical_height) {
+            invalidate_content();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (fail_at(SceneFaultStage::BeforeSceneAllocation)) return false;
+#endif
+            const auto info = SkImageInfo::Make(
+                physical_width, physical_height, kRGBA_8888_SkColorType,
+                kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+            auto replacement = SkSurfaces::RenderTarget(
+                context_.get(), skgpu::Budgeted::kYes, info, 0,
+                kBottomLeft_GrSurfaceOrigin, nullptr);
+            if (!replacement) {
+                invalidate();
+                return false;
+            }
+            snapshot_.reset();
+            scene_ = std::move(replacement);
+            presentation_.reset();
+            width_ = physical_width;
+            height_ = physical_height;
+            scene_valid_ = false;
+            invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            ++scene_allocations_;
+#endif
+        }
 
+        if (scene_scale_ != scale_factor) {
+            scene_valid_ = false;
+            invalidate();
+        }
+        if (ui.dirty()) invalidate();
+
+        if (!scene_valid_ || full_repaint_required_) {
+            scene_valid_ = false; // in-place pixels are invalid from the first mutation
+            full_repaint_required_ = true;
+            snapshot_.reset(); // avoid snapshot-triggered copy-on-write on rebuild
+            auto* canvas = scene_->getCanvas();
+            canvas->restoreToCount(1);
+            canvas->resetMatrix();
+            canvas->clear(SK_ColorBLACK); // canonical opaque native background
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (fail_at(SceneFaultStage::AfterSceneReset)) return false;
+#endif
+            full_repaint_required_ = false;
+            try {
+                const SkAutoCanvasRestore restore_canvas{canvas, true};
+                canvas->scale(scale_factor, scale_factor);
+                ui.paint(*canvas, services);
+            } catch (...) {
+                full_repaint_required_ = true;
+                throw;
+            }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (fail_at(SceneFaultStage::AfterRetainedPaint)) {
+                invalidate();
+                return false;
+            }
+#endif
+            const auto scene_submission = context_->flushAndSubmit(scene_.get());
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            const bool scene_submission_failed =
+                fail_at(SceneFaultStage::SceneSubmission);
+#else
+            constexpr bool scene_submission_failed = false;
+#endif
+            if (!scene_submission.fSuccess || scene_submission_failed) {
+                invalidate();
+                return false;
+            }
+            scene_scale_ = scale_factor;
+            scene_valid_ = true;
+            if (ui.dirty()) full_repaint_required_ = true;
+            deferred_redraw_pending_ = full_repaint_required_;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            ++scene_builds_;
+#endif
+        }
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (fail_at(SceneFaultStage::Snapshot)) {
+            present_pending_ = true;
+            return false;
+        }
+#endif
+        if (!snapshot_) snapshot_ = scene_->makeImageSnapshot();
+        if (!snapshot_) {
+            present_pending_ = true;
+            return false;
+        }
+
+        if (!presentation_ || presentation_framebuffer_ != framebuffer ||
+            presentation_samples_ != samples ||
+            presentation_stencil_bits_ != stencil_bits) {
             GrGLFramebufferInfo framebuffer_info{};
             framebuffer_info.fFBOID = static_cast<GrGLuint>(framebuffer);
             framebuffer_info.fFormat = kGlRgba8;
-
-            auto backend = GrBackendRenderTargets::MakeGL(
-                physical_width,
-                physical_height,
+            const auto backend = GrBackendRenderTargets::MakeGL(
+                physical_width, physical_height,
                 std::max(0, static_cast<int>(samples)),
-                std::max(0, static_cast<int>(stencil_bits)),
-                framebuffer_info);
-
-            surface_ = SkSurfaces::WrapBackendRenderTarget(
-                context_.get(),
-                backend,
-                kBottomLeft_GrSurfaceOrigin,
-                kRGBA_8888_SkColorType,
-                SkColorSpace::MakeSRGB(),
-                nullptr);
-
-            if (!surface_) return false;
-            width_ = physical_width;
-            height_ = physical_height;
+                std::max(0, static_cast<int>(stencil_bits)), framebuffer_info);
+            auto replacement = SkSurfaces::WrapBackendRenderTarget(
+                context_.get(), backend, kBottomLeft_GrSurfaceOrigin,
+                kRGBA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr);
+            if (!replacement) {
+                present_pending_ = true;
+                return false;
+            }
+            presentation_ = std::move(replacement);
+            presentation_framebuffer_ = framebuffer;
+            presentation_samples_ = samples;
+            presentation_stencil_bits_ = stencil_bits;
         }
 
-        auto* canvas = surface_->getCanvas();
-        canvas->clear(SK_ColorBLACK);
-        canvas->save();
-        canvas->scale(scale_factor, scale_factor);
-        ui.paint(*canvas, services);
-        canvas->restore();
-        context_->flushAndSubmit(surface_.get());
+        auto* target = presentation_->getCanvas();
+        target->restoreToCount(1);
+        target->resetMatrix();
+        const SkAutoCanvasRestore restore_target{target, true};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (fail_at(SceneFaultStage::PresentationCopy)) {
+            present_pending_ = true;
+            return false;
+        }
+#endif
+        SkPaint copy;
+        copy.setBlendMode(SkBlendMode::kSrc);
+        target->drawImageRect(snapshot_.get(),
+                              SkRect::MakeWH(static_cast<SkScalar>(width_),
+                                             static_cast<SkScalar>(height_)),
+                              SkSamplingOptions{SkFilterMode::kNearest}, &copy);
+        const auto presentation_submission = context_->flushAndSubmit(presentation_.get());
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        const bool presentation_submission_failed =
+            fail_at(SceneFaultStage::PresentationSubmission);
+#else
+        constexpr bool presentation_submission_failed = false;
+#endif
+        if (!presentation_submission.fSuccess || presentation_submission_failed) {
+            present_pending_ = true;
+            return false;
+        }
+        present_pending_ = false;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        ++presentations_;
+#endif
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         if (readback_pending_) {
@@ -193,7 +439,7 @@ public:
                 kRGBA_8888_SkColorType,
                 kPremul_SkAlphaType,
                 SkColorSpace::MakeSRGB());
-            if (surface_->readPixels(
+            if (presentation_->readPixels(
                     readback_info,
                     rgba.data(),
                     rgba.size(),
@@ -208,12 +454,35 @@ public:
     }
 
 private:
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    bool fail_at(SceneFaultStage stage) noexcept {
+        if (fault_stage_ != stage) return false;
+        fault_stage_ = SceneFaultStage::None;
+        return true;
+    }
+#endif
     sk_sp<const GrGLInterface> interface_;
     sk_sp<GrDirectContext> context_;
-    sk_sp<SkSurface> surface_;
+    GrGLBindFramebufferFn* bind_framebuffer_{};
+    sk_sp<SkSurface> scene_;
+    sk_sp<SkImage> snapshot_;
+    sk_sp<SkSurface> presentation_; // borrowed Pugl framebuffer, never owned
     int width_{};
     int height_{};
+    float scene_scale_{};
+    GLint presentation_framebuffer_{};
+    GLint presentation_samples_{};
+    GLint presentation_stencil_bits_{};
+    bool scene_valid_{};
+    bool full_repaint_required_{true};
+    bool present_pending_{true};
+    bool rendering_{};
+    bool deferred_redraw_pending_{};
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    SceneFaultStage fault_stage_{SceneFaultStage::None};
+    std::uint64_t scene_allocations_{};
+    std::uint64_t scene_builds_{};
+    std::uint64_t presentations_{};
     int readback_x_{};
     int readback_y_{};
     bool readback_pending_{};

@@ -264,7 +264,10 @@ current OpenGL context
 Skia Ganesh / OpenGL
       |
       v
-SkSurface / SkCanvas
+per-view persistent scene SkSurface / SkCanvas
+      |
+      v
+cached scene snapshot -> borrowed Pugl framebuffer SkSurface
 ```
 
 This avoids custom platform presenters such as:
@@ -274,7 +277,13 @@ This avoids custom platform presenters such as:
 - X11 `XImage` / MIT-SHM presentation;
 - NativeUI-owned platform OpenGL context creation.
 
-The Pugl expose callback is the normal render entry point. NativeUI renders into the current view framebuffer through Skia Ganesh and lets Pugl own platform context enter/leave/swap behavior.
+The Pugl expose callback is the normal render entry point. NativeUI owns one optional RGBA8888/sRGB scene target per view and wraps Pugl's current framebuffer only as a borrowed presentation target. Pugl still owns context enter/leave and platform swap. A clean expose copies the last complete scene to the current framebuffer without walking the retained tree. A UI, size or scale invalidation rebuilds the complete scene; partial repaint belongs to T096.
+
+Every rebuild resets the offscreen scene to opaque black, restores the framework canvas state, scales logical geometry once, paints the retained tree and checks Ganesh scene submission before marking the scene complete. The snapshot used for presentation is cached across clean exposes and released before the next paint to avoid retaining a copy-on-write reference. Skia may still materialize transient GPU storage internally. Presentation uses a full physical-pixel copy with source blending and nearest sampling. The renderer restores the borrowed framebuffer binding before Pugl leaves the expose callback.
+
+An allocation or paint/submission failure keeps full repaint pending; a failure after a valid scene commit but within the observable copy/submission path keeps presentation pending and can retry without retained painting. The view remains open and waits for a later expose. Invalidation raised during successful paint gets one coalesced redraw request at the next Pugl update checkpoint. No timer or failure retry loop runs at idle. Pugl may swap even after an expose callback reports an error, and an unreported OS swap failure cannot be detected by this renderer.
+
+Scene validation rejects zero, non-finite, unrepresentable or over-budget physical extents before narrowing or allocation. One RGBA8 scene is capped at 128 MiB; a replacement transaction may temporarily hold two scenes (256 MiB total scene storage), excluding Skia's internal cache and Pugl's owned buffers. A live context releases owned GPU resources at `PUGL_UNREALIZE`; a confirmed lost context is abandoned without calling stale GL resources.
 
 ### 6.2 Headless renderer
 

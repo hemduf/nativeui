@@ -213,6 +213,7 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    friend struct detail::PlatformTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;
