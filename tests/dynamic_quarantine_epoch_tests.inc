@@ -1,17 +1,17 @@
 #pragma once
 
-namespace t125_quarantine_epoch {
+namespace dynamic_quarantine_epoch {
 
 inline void run() {
     ui::State<bool> visible{true};
     ui::State<bool> survivor_value{false};
-    auto retained = std::make_shared<t125_dynamic_recovery::QuarantineState>();
+    auto retained = std::make_shared<dynamic_recovery::QuarantineState>();
     retained->throw_blur_once = false;
     test::MockPlatform platform;
 
     ui::UI tree{
         ui::Row{
-            ui::If{visible, t125_dynamic_recovery::QuarantineProbe{retained}},
+            ui::If{visible, dynamic_recovery::QuarantineProbe{retained}},
             ui::Toggle{"Survivor", survivor_value}}
             .gap(8.0f)};
     tree.resize({220.0f, 64.0f});
@@ -21,8 +21,8 @@ inline void run() {
     ui::EventResult nested_result = ui::EventResult::Ignored;
     retained->on_blur = [&] {
         // Reverse the structural mutation before re-entering input. The epoch
-        // change makes the provisional quarantine non-authoritative, and T130
-        // aborts this stale removal pass at its existing epoch checkpoint.
+        // change makes the provisional quarantine non-authoritative and
+        // aborts this stale removal pass at the existing epoch checkpoint.
         visible.set(true);
         nested_result = tree.dispatch(
             test::pointer(ui::InputType::PointerDown, 20.0f, 16.0f), platform);
@@ -48,4 +48,4 @@ inline void run() {
     tree.deactivate(platform);
 }
 
-} // namespace t125_quarantine_epoch
+} // namespace dynamic_quarantine_epoch

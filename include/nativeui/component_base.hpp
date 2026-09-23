@@ -260,13 +260,6 @@ private:
 
 class InputContext {
 public:
-    struct PointerAction {
-        PointerId id{};
-        std::uint64_t interaction_token{};
-        std::uint64_t dispatch_token{};
-        bool capture_allowed{};
-    };
-
     InputContext(
         Rect bounds,
         PlatformServices& platform,
@@ -280,22 +273,6 @@ public:
           invalidate_layout_(std::move(invalidate_layout)),
           legacy_capture_(std::move(capture)),
           legacy_release_(std::move(release)) {}
-
-    InputContext(
-        Rect bounds,
-        PlatformServices& platform,
-        std::function<void()> invalidate,
-        std::function<void()> invalidate_layout,
-        PointerAction pointer_action,
-        std::function<void(const PointerAction&)> capture,
-        std::function<void(const PointerAction&)> release)
-        : bounds_(bounds),
-          platform_(platform),
-          invalidate_(std::move(invalidate)),
-          invalidate_layout_(std::move(invalidate_layout)),
-          pointer_action_(pointer_action),
-          capture_(std::move(capture)),
-          release_(std::move(release)) {}
 
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
@@ -330,6 +307,30 @@ public:
     }
 
 private:
+    friend class Tree;
+
+    struct PointerAction {
+        PointerId id{};
+        std::uint64_t interaction_token{};
+        bool capture_allowed{};
+    };
+
+    InputContext(
+        Rect bounds,
+        PlatformServices& platform,
+        std::function<void()> invalidate,
+        std::function<void()> invalidate_layout,
+        PointerAction pointer_action,
+        std::function<void(const PointerAction&)> capture,
+        std::function<void(const PointerAction&)> release)
+        : bounds_(bounds),
+          platform_(platform),
+          invalidate_(std::move(invalidate)),
+          invalidate_layout_(std::move(invalidate_layout)),
+          pointer_action_(pointer_action),
+          capture_(std::move(capture)),
+          release_(std::move(release)) {}
+
     Rect bounds_{};
     PlatformServices& platform_;
     std::function<void()> invalidate_;

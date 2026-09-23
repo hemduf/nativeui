@@ -93,8 +93,8 @@
                     FocusContext context{
                         old->bounds,
                         platform,
-                        unsafe_paint_invalidator(*old),
-                        unsafe_layout_invalidator(*old)};
+                        paint_invalidator(*old),
+                        layout_invalidator(*old)};
                     // Preparation above may allocate. Advance only once the next
                     // operation is the application callback itself: if it throws,
                     // recovery never invokes that already-started callback again.
@@ -152,8 +152,8 @@
                     FocusContext context{
                         next->bounds,
                         platform,
-                        unsafe_paint_invalidator(*next),
-                        unsafe_layout_invalidator(*next)};
+                        paint_invalidator(*next),
+                        layout_invalidator(*next)};
                     focus_transition_stack_[index].phase = FocusTransitionPhase::InvalidateNew;
                     next->component->focus_changed(true, context);
                     break;
@@ -476,8 +476,8 @@
                 FocusContext context{
                     old->bounds,
                     platform,
-                    unsafe_paint_invalidator(*old),
-                    unsafe_layout_invalidator(*old)};
+                    paint_invalidator(*old),
+                    layout_invalidator(*old)};
                 // Publish caller-independent started-callback identity immediately
                 // before application code. Recovery may finish framework bookkeeping
                 // but must never re-enter this already-started blur merely because

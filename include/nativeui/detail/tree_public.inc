@@ -15,7 +15,7 @@
 
     void mount() {
         if (mounted_) return;
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Mount, true};
 
         std::vector<Node*> staged_focusables;
@@ -55,7 +55,7 @@
             availability_structure_dirty_ = false;
             focus_structure_dirty_ = true;
             mounted_ = false;
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             throw;
         }
 
@@ -163,7 +163,7 @@
         };
 
         if (!active_) {
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             return;
         }
         capture_error([&] { sync_availability_structure(platform); });
@@ -195,7 +195,7 @@
             capture_error([&] { sync_availability_inactive(); });
         }
         capture_error([&] { invalidate_paint(viewport_rect()); });
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
 
         if (first_error) std::rethrow_exception(first_error);
     }
@@ -203,7 +203,7 @@
     void unmount() {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) {
-            reset_t125_semantic_recovery();
+            reset_semantic_recovery();
             return;
         }
 
@@ -229,7 +229,7 @@
         capture_error([&] { unmount_node(*root_); });
         focusables_.clear();
         mounted_ = false;
-        reset_t125_semantic_recovery();
+        reset_semantic_recovery();
 
         if (first_error) std::rethrow_exception(first_error);
     }
@@ -562,7 +562,7 @@
             if (event.type == InputType::PointerUp) {
                 auto* const owner = pointer_capture_owner(event.pointer.id);
                 const auto capture_token =
-                    pointer_capture_dispatch_token(event.pointer.id);
+                    pointer_capture_interaction_token(event.pointer.id);
                 const auto interaction_token =
                     pointer_interaction_dispatch_token(event.pointer.id);
 
@@ -584,13 +584,13 @@
                         result = route_from(*target, event, platform);
                     }
 
-                    clear_pointer_capture_if_token(
+                    clear_pointer_capture_if_interaction(
                         event.pointer.id, capture_token);
                     end_pointer_interaction_if_token(
                         event.pointer.id, interaction_token);
                     return finish(result);
                 } catch (...) {
-                    clear_pointer_capture_if_token(
+                    clear_pointer_capture_if_interaction(
                         event.pointer.id, capture_token);
                     end_pointer_interaction_if_token(
                         event.pointer.id, interaction_token);
@@ -626,7 +626,7 @@
         } catch (...) {
             if (!pointer_route_committed &&
                 event.type == InputType::PointerDown) {
-                clear_pointer_capture_if_token(
+                clear_pointer_capture_if_interaction(
                     event.pointer.id, active_input_dispatch_token_);
                 end_pointer_interaction_if_token(
                     event.pointer.id, active_input_dispatch_token_);
@@ -653,7 +653,28 @@
         }
         ensure_layout();
 
-        Painter painter{canvas};
-        paint_node(*root_, painter, platform, viewport_rect());
+        // A successful full paint consumes only damage that existed before the
+        // first paint callback. Invalidation raised reentrantly by application
+        // paint code belongs to the next frame and must survive this traversal.
+        Rect pending_dirty[DirtyRegion::kMaxRects]{};
+        const auto pending_dirty_count = paint_dirty_.rects().size();
+        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+            pending_dirty[index] = paint_dirty_.rects()[index];
+        }
         paint_dirty_.clear();
+
+        try {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            Painter painter{canvas};
+            paint_node(*root_, painter, platform, viewport_rect());
+        } catch (...) {
+            // Failed paint consumes nothing. Merge the pre-existing damage back
+            // into any new invalidation raised before the failure without
+            // re-notifying already exposed regions.
+            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+                (void)retain_dirty(pending_dirty[index]);
+            }
+            throw;
+        }
     }

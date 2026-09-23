@@ -43,7 +43,7 @@
         bool active_{};
     };
 
-    void reset_t125_semantic_recovery() noexcept {
+    void reset_semantic_recovery() noexcept {
         focus_transition_stack_.clear();
         pending_focus_target_ = kInvalidNodeId;
         pending_focus_request_ = false;

@@ -82,7 +82,7 @@
         if (before.enabled == after.enabled && before.read_only == after.read_only) return false;
         if (dynamic_cast<detail::ThemeBinding*>(node.component.get()) == nullptr) return false;
 
-        // T038 style-aware components may expose availability variants that alter
+        // Style-aware components may expose availability variants that alter
         // intrinsic measurement without needing a bespoke tree hook. Reuse the
         // already-laid-out child extents as stable inputs so this fallback stays
         // bounded and does not recursively remeasure an entire subtree.
@@ -142,26 +142,6 @@
         }
     }
 
-    void sync_availability_inactive() {
-        if (!availability_structure_dirty_ || !root_) return;
-
-        std::vector<PendingAvailability> pending;
-        pending.reserve(focusables_.size() + 8);
-        collect_availability(*root_, ComponentAvailability{}, pending);
-        availability_structure_dirty_ = false;
-
-        bool layout_changed = false;
-        bool focus_changed = false;
-        bool paint_changed = false;
-        apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
-
-        if (focus_changed) focus_structure_dirty_ = true;
-        if (layout_changed) {
-            invalidate_layout_from(*root_);
-        } else if (paint_changed) {
-            publish_all_visual_bounds_then_invalidate();
-        }
-    }
 
     [[nodiscard]] static ComponentAvailability pending_availability_for(
         const std::vector<PendingAvailability>& pending, const Node* node) noexcept {
@@ -172,119 +152,6 @@
         return node->component->effective_availability();
     }
 
-    void sync_availability_structure(PlatformServices& platform) {
-        if (!availability_structure_dirty_ || syncing_availability_ || !root_) return;
-
-        syncing_availability_ = true;
-        Node* rehome_scope = nullptr;
-        bool focus_needs_rehome = false;
-        constexpr int kMaxReconcilePasses = 16;
-
-        for (int pass = 0; pass < kMaxReconcilePasses && availability_structure_dirty_; ++pass) {
-            availability_structure_dirty_ = false;
-
-            std::vector<PendingAvailability> pending;
-            pending.reserve(focusables_.size() + 8);
-            collect_availability(*root_, ComponentAvailability{}, pending);
-
-            bool any_change = false;
-            for (const auto& change : pending) {
-                if (!(change.value == change.node->component->effective_availability())) {
-                    any_change = true;
-                    break;
-                }
-            }
-            if (!any_change) {
-                // A teardown callback can reverse the state that triggered
-                // focus loss before the pending availability snapshot is
-                // applied. In that case there is no availability delta on the
-                // next pass, but focus still needs to be restored explicitly.
-                if (focus_needs_rehome && active_ && !focus_active_) {
-                    Node* fallback = nullptr;
-                    if (rehome_scope &&
-                        rehome_scope->component->effective_availability().interactive()) {
-                        fallback = first_available_focusable(rehome_scope);
-                    } else {
-                        fallback = first_available_focusable();
-                    }
-                    if (fallback) set_focus(fallback, platform);
-                    focus_needs_rehome = false;
-                    rehome_scope = nullptr;
-                }
-                continue;
-            }
-
-            while (const auto pointer = find_pointer_capture_if(
-                       [&](Node* capture) {
-                           return !pending_availability_for(pending, capture).interactive();
-                       })) {
-                InputEvent cancel{};
-                cancel.pointer.id = *pointer;
-                (void)cancel_pointer_capture(platform, cancel);
-                if (availability_structure_dirty_) break;
-            }
-
-            if (availability_structure_dirty_) continue;
-
-            // A hover route whose target becomes Hidden/Collapsed/Disabled is no
-            // longer an eligible interaction. Retained hover presentation must
-            // observe PointerLeave exactly as if the pointer had moved away;
-            // otherwise a delayed policy such as Tooltip could still fire while
-            // its anchor is unavailable.
-            if (pointer_hover_target_ &&
-                !pending_availability_for(pending, pointer_hover_target_).interactive()) {
-                InputEvent leave{};
-                leave.type = InputType::PointerLeave;
-                (void)clear_pointer_hover(leave, platform);
-            }
-
-            if (auto* focused = current_focus_node()) {
-                if (!pending_availability_for(pending, focused).interactive()) {
-                    rehome_scope = trapping_scope_for(focused);
-                    focus_needs_rehome = true;
-                    clear_focus(platform);
-                }
-            }
-
-            // PointerCancel/focus callbacks are allowed to mutate State. If they
-            // changed availability, discard this snapshot and recompute before
-            // applying suppression so callbacks always observe the old valid
-            // interaction context.
-            if (availability_structure_dirty_) continue;
-
-            bool layout_changed = false;
-            bool focus_changed = false;
-            bool paint_changed = false;
-            apply_pending_availability(pending, layout_changed, focus_changed, paint_changed);
-
-            if (focus_changed) focus_structure_dirty_ = true;
-            if (layout_changed) {
-                invalidate_layout_from(*root_);
-            } else if (paint_changed) {
-                publish_all_visual_bounds_then_invalidate();
-            }
-
-            if (focus_changed && active_) sync_focus_structure(platform);
-            if (focus_needs_rehome && active_ && !focus_active_) {
-                Node* fallback = nullptr;
-                if (rehome_scope && rehome_scope->component->effective_availability().interactive()) {
-                    fallback = first_available_focusable(rehome_scope);
-                } else {
-                    fallback = first_available_focusable();
-                }
-                if (fallback) set_focus(fallback, platform);
-                focus_needs_rehome = false;
-                rehome_scope = nullptr;
-            }
-        }
-
-        syncing_availability_ = false;
-        if (availability_structure_dirty_) {
-            // A hostile callback loop must not recurse without bound. Preserve
-            // the dirty bit and schedule another deterministic reconciliation.
-            invalidate_paint(viewport_rect());
-        }
-    }
 
     [[nodiscard]] Rect viewport_rect() const noexcept {
         return Rect{0.0f, 0.0f, std::max(0.0f, viewport_.w), std::max(0.0f, viewport_.h)};
@@ -361,6 +228,24 @@
         for (auto& child : node.children) publish_visual_bounds(*child);
     }
 
+    [[nodiscard]] static Rect published_subtree_visual_bounds(
+        const Node& node) noexcept {
+        Rect bounds = node.visual_bounds_published ? node.published_visual_bounds : Rect{};
+        for (const auto& child : node.children) {
+            bounds = unite(bounds, published_subtree_visual_bounds(*child));
+        }
+        return bounds;
+    }
+
+    void publish_subtree_visual_bounds_then_invalidate(Node& node) {
+        const Rect old_bounds = published_subtree_visual_bounds(node);
+        publish_visual_bounds(node);
+        const Rect new_bounds = published_subtree_visual_bounds(node);
+        if (const auto exposed = retain_dirty(unite(old_bounds, new_bounds))) {
+            notify_invalidation(*exposed);
+        }
+    }
+
     [[nodiscard]] std::optional<Rect> retain_dirty(Rect rect) noexcept {
         return paint_dirty_.add(rect, viewport_rect());
     }
@@ -370,6 +255,7 @@
     }
 
     void invalidate_node_paint(Node& node) {
+        mark_paint_culling_dirty();
         if (layout_transaction_active_ || !node.visual_bounds_published) {
             // Candidate geometry is not publication authority. A state change
             // during layout keeps a conservative repaint pending; successful
@@ -402,6 +288,7 @@
     }
 
     void invalidate_layout_from(Node& node) {
+        mark_paint_culling_dirty();
         for (Node* current = &node; current; current = current->parent) {
             current->layout_dirty = true;
         }
@@ -411,11 +298,6 @@
         invalidate_paint(viewport_rect());
     }
 
-    void ensure_layout() {
-        if (!layout_dirty_) return;
-        layout_node(*root_, viewport_rect());
-        layout_dirty_ = false;
-    }
 
     static std::vector<ChildMetrics> measure_children(
         const Node& node, const Constraints& constraints) {
@@ -447,67 +329,18 @@
         return placement;
     }
 
-    static void layout_node(Node& node, Rect bounds) {
-        bounds.w = std::isfinite(bounds.w) ? std::max(0.0f, bounds.w) : 0.0f;
-        bounds.h = std::isfinite(bounds.h) ? std::max(0.0f, bounds.h) : 0.0f;
 
-        if (node.component->effective_visibility() == VisibilityMode::Collapsed) {
-            node.bounds = Rect{bounds.x, bounds.y, 0.0f, 0.0f};
-            for (auto& child : node.children) layout_node(*child, node.bounds);
-            node.layout_dirty = false;
-            return;
-        }
 
-        node.bounds = bounds;
-        const auto constraints = Constraints::tight({bounds.w, bounds.h});
-        const auto child_metrics = measure_children(node, constraints);
-
-        std::vector<ChildPlacement> placements(node.children.size());
-        node.component->layout_children(bounds, child_metrics, placements);
-
-        for (std::size_t i = 0; i < node.children.size(); ++i) {
-            layout_node(*node.children[i], sanitize_placement(placements[i].bounds, bounds));
-        }
-        node.layout_dirty = false;
-    }
-
-    void mount_node(Node& node) {
-        if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
-            binding->bind_theme(node.parent ? inherited_theme_for(node) : theme_);
-            binding->set_theme_change_invalidator(
-                [this, id = node.id](ThemeInvalidation invalidation) {
-                    apply_scoped_theme_change(id, invalidation);
-                });
-        }
-        if (dynamic_source(node)) register_dynamic_node(node);
-        MountContext context{
-            node.id,
-            paint_invalidator(node),
-            layout_invalidator(node),
-            focus_invalidator(node),
-            availability_invalidator(node),
-            overlay_service_};
-        node.component->mount(context);
-        if (node.component->focusable()) focusables_.push_back(&node);
-        for (auto& child : node.children) mount_node(*child);
-    }
-
-    void activate_node(Node& node) {
-        LifecycleContext context{
-            node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
-        node.component->activate(context);
-        for (auto& child : node.children) activate_node(*child);
-    }
 
     static void remember_current_exception(std::exception_ptr& first_error) noexcept {
         if (!first_error) first_error = std::current_exception();
     }
 
-    void deactivate_node(Node& node) {
+    void deactivate_node_untracked(Node& node) {
         std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             try {
-                deactivate_node(**it);
+                deactivate_node_untracked(**it);
             } catch (...) {
                 remember_current_exception(first_error);
             }
@@ -522,11 +355,11 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
-    void unmount_node(Node& node) {
+    void unmount_node_untracked(Node& node) {
         std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             try {
-                unmount_node(**it);
+                unmount_node_untracked(**it);
             } catch (...) {
                 remember_current_exception(first_error);
             }
@@ -582,11 +415,10 @@
         if (node.component->clips_children()) {
             const Rect child_clip = intersect(inherited_clip, node.bounds);
             if (child_clip.empty()) return;
-            painter.push_clip(node.bounds);
+            auto clip_scope = painter.scoped_clip(node.bounds);
             for (const auto& child : node.children) {
                 paint_node(*child, painter, platform, child_clip);
             }
-            painter.pop_clip();
             return;
         }
 

@@ -53,6 +53,11 @@
     };
 
     void begin_layout_geometry_transaction(LayoutTransactionJournal& journal) {
+        // Any candidate geometry makes the current culling cache non-authoritative
+        // before the first layout callback or retained-bound mutation can run.
+        // This is the common transaction seam used by public, lazy and overlay layout.
+        mark_paint_culling_dirty();
+
         // Retained layout callbacks are arbitrary application code. A nested
         // layout attempt would otherwise overwrite the rollback journal of the
         // outer attempt, so fail before mutating geometry and let the outer

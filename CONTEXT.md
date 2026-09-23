@@ -27,7 +27,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `723474fa43a5d1b08be2446966a4db9007b749c6`.
+- Pugl: `hemduf/pugl` commit `94982803985eefcbaeb0a1c8d0136ec862d7cb59` (raw touch/pen pointer API).
 - Skia: `hemduf/skia-builder` `chrome/m153`, rebuilt from commit `f21749b18c14976415ec30d068c3a13e8456c3a1` with PartitionAlloc disabled for self-contained static consumers; forked from `olilarkin/skia-builder`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -188,7 +188,9 @@ Delivered contract:
 
 Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 are green. Final T042 Lifecycle Stress #845 is green on Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #569 is green for the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark.
 
-T094 / #178 remains blocked by its explicit T071 dependency; T078 itself is complete.
+T094 / #178 / PR #450 is Done: retained dirty-region traversal consumes published visual bounds and conservatively falls back when culling is uncertain. Exact frozen source head `43cee6a785662a7577c5cbb85b40c662553ca2bb` passed CI #2179, WebAssembly #97, Package #529, T050 #436, T072 #571, T042 #864 and T052 #588. Final review found no Blocking/Important issue. T095 is independently Ready; T096 awaits T095.
+
+T177 / #442 / PR #443 delivers raw touch/pen contact metadata and Pugl translation with bounded per-Tree capture and per-view positions. The T177 feature example is `nativeui_example_t177_multitouch_pointer`. Reentrant `InputContext` actions keep their original contact/generation, and terminal/throwing cleanup retires the complete old interaction without erasing a newer same-ID contact. After merging T094, the local macOS Release build passed serially with the exact Pugl pin and no warnings; 168/173 CTests passed in the sandbox, and the five known AppKit window tests passed in the graphical session (effective 173/173). Exact-head CI/review evidence is tracked in PR #443. The next independent Ready ticket on the effects line is T095; T096 awaits it.
 
 ### Remaining v1 work
 
@@ -198,7 +200,7 @@ T094 / #178 remains blocked by its explicit T071 dependency; T078 itself is comp
 Current path:
 
 ```text
-T123–T132(done) + T173(done) + T174(done) + T175(done)
+T123–T132(done) + T173(done) + T174(done) + T175(done) + T177(done)
                          |
                          v
 T070 -> T122/docs -> T071 -> v1.0.0
@@ -208,7 +210,8 @@ post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
-T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
+T076(done) -> T077(done) -> T078(done) -> T094(done) --+
+T095(ready) ---------------------------------------------------+-> T096(blocked on T095) -> NativeUI 1.1 effects
 T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
 T098(done) ---------------------------------------------------------------> T086(done)
 ```
@@ -257,9 +260,11 @@ Normal source-tree Release validation:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+Local macOS baseline on 2026-09-23: a cleaned Release build completed serially with `cmake --build build` and no compiler warnings. The sandboxed CTest run passed 164/169; five AppKit window tests failed during window creation with a non-finite frame and all five passed when rerun with graphical-session access. The prior unbounded build exhausted RAM per the user's report; do not use an unbounded `-j` build.
 
 During active development:
 
@@ -297,6 +302,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T078 / #161 is Done; T094 / #178 remains blocked on T071 before dirty-region retained traversal can start.
+4. T094 / #178 / PR #450 and T177 / #442 / PR #443 are complete; T095 / #179 is independently Ready and T096 / #180 remains blocked on T095.
 5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line; retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
