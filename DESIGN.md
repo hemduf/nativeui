@@ -8,7 +8,7 @@
 **Windowing / embedding:** Pugl (Win32 / Cocoa / X11)  
 **Rendering:** Skia Ganesh/OpenGL for native views + Skia raster for headless rendering  
 
-This document records **durable architectural decisions** for NativeUI. Execution status, ticket dependencies and short-lived implementation notes belong in `CONTEXT.md`, `ROADMAP.md` and GitHub Issues.
+This document records **durable architectural decisions** for NativeUI. Execution status and ticket dependencies belong in GitHub Issues; `ROADMAP.md` summarizes milestones.
 
 ---
 
@@ -1297,6 +1297,5 @@ None of these currently justifies reimplementing Win32, Cocoa and X11 windowing 
 - Skia build documentation — https://skia.org/docs/user/build/
 - NativeUI workflow — `AGENTS.md`
 - NativeUI mandatory review policy — `CODE_REVIEW.md`
-- NativeUI current recovery context — `CONTEXT.md`
 - NativeUI execution roadmap — `ROADMAP.md`
 - NativeUI accessibility semantics and platform mapping — `docs/accessibility.md`

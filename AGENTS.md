@@ -32,23 +32,16 @@ NativeUI does **not** own:
 - host-specific parameter gestures;
 - a custom Win32/Cocoa/X11 windowing layer.
 
-Pugl is the windowing/embedding layer. Skia is the renderer. Dependencies are acquired with CMake + CPM. Skia binaries come from `olilarkin/skia-builder`; NativeUI does not build Skia.
+Pugl is the windowing/embedding layer. Skia is the renderer. Dependencies are acquired with CMake + CPM. Skia binaries come from the pinned `hemduf/skia-builder` release configured in `cmake/Dependencies.cmake`; NativeUI does not build Skia.
 
 ## 2. Mandatory recovery sequence
 
 At the beginning of every work session, read in this order:
 
-1. `AGENTS.md`
-2. `CODE_REVIEW.md`
-3. `CI_POLICY.md`
-4. `CONTEXT.md`
-5. `ROADMAP.md`
-6. the [GitHub issue index](https://github.com/hemduf/nativeui/issues?q=is%3Aissue), including open and closed tickets
-7. the selected GitHub issue, including its latest comments and dependencies
-8. `DESIGN.md` when the ticket changes architecture/platform/rendering
-9. `VALIDATION.md` when the ticket touches build/platform integration
+1. `CODE_REVIEW.md`
+2. `DESIGN.md` when the work changes architecture, platform integration or rendering
 
-`CODE_REVIEW.md` is a mandatory merge/Done gate for every code-changing ticket. Its plug-in-host rules apply even though NativeUI itself does not implement VST3/CLAP/AU DSP APIs. `CI_POLICY.md` is the mandatory source of truth for **when** remote validation runs; it changes CI cadence, never required coverage.
+`CODE_REVIEW.md` is a mandatory merge/Done gate for every code-changing ticket. Its plug-in-host rules apply even though NativeUI itself does not implement VST3/CLAP/AU DSP APIs.
 
 Then run the current baseline tests before editing code:
 
@@ -58,7 +51,7 @@ CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-On macOS, T053 makes the Objective-C/Pugl bridge **consumer scoped**. Do not configure a global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX`. Each final application/module/shared-library consumer must attach the platform bridge with one stable non-empty `CONSUMER_ID`; the single T053 CMake derivation helper turns that exact identity into the collision-resistant runtime prefix. NativeUI's own source-tree examples/tests already register distinct identities internally. T047 owns the installed/public `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)` entry point; do not invent a source-tree-only public alternative while that package work is incomplete.
+On macOS, the Objective-C/Pugl bridge is **consumer scoped**. Do not configure a global/manual `NATIVEUI_OBJC_RUNTIME_PREFIX`. Each final application/module/shared-library consumer must use the public `nativeui_attach_platform(TARGET ... CONSUMER_ID ...)` helper with one stable non-empty identity; it derives the collision-resistant runtime prefix. NativeUI's own source-tree examples/tests register distinct identities internally.
 
 There is deliberately no generic NativeUI/Pugl fallback prefix and no reusable precompiled macOS Objective-C bridge shared across unrelated final bundles. `NativeUI::Core` and the portable Pugl C layer remain generic; only the small Cocoa/OpenGL/IME Objective-C bridge is compiled per final consumer. Core-only macOS builds (`NATIVEUI_BUILD_PLATFORM=OFF`) require no consumer platform attachment.
 
@@ -99,25 +92,11 @@ Before coding:
 - write a short implementation note in the ticket if the approach is not obvious;
 - do not broaden scope to neighboring tickets unless required to keep the code buildable.
 
-### 3.2 Mandatory merge requirement in every ticket
-
-Every GitHub issue/ticket must end with this merge requirement (or an equivalent stricter wording):
-
-```markdown
-## Merge requirement
-
-**Mandatory:** when the implementation for this ticket is merged, update `ROADMAP.md` in the same merge/completion cycle so it reflects the ticket's final status, delivered scope, dependency frontier and milestone progress.
-```
-
-This requirement is unconditional for ticket merges. Do not skip the `ROADMAP.md` update because the milestone number appears unchanged or because the implementation is small. The roadmap is the project-level execution snapshot and must stay synchronized with every merged ticket.
-
-When creating or editing a ticket, preserve this section as the final section of the issue body.
-
-### 3.3 Mandatory ticket creation format
+### 3.2 Mandatory ticket creation format
 
 Every new NativeUI GitHub issue must use the canonical work-item formalism defined by [`.github/ISSUE_TEMPLATE/work-item.yml`](.github/ISSUE_TEMPLATE/work-item.yml).
 
-This rule applies regardless of how the issue is created. Creating a ticket through the GitHub API, an agent, automation, migration script or another integration does **not** exempt it from the Issue Form schema. When the GitHub Issue Form UI is bypassed, reproduce the same fields, section order, defaults and mandatory completion/review content in the generated issue body.
+This rule applies regardless of how the issue is created. When the GitHub Issue Form UI is bypassed, reproduce the same fields and section order in the generated issue body.
 
 Every new ticket must contain, in this order:
 
@@ -131,9 +110,8 @@ Every new ticket must contain, in this order:
 8. `Acceptance criteria` — observable/testable completion criteria, including relevant failure-path recovery semantics;
 9. `Required tests` — targeted tests plus every applicable deterministic fault-injection, full-suite, feature-example, platform, sanitizer, headless or golden validation;
 10. `Implementation / scheduling note` — technical direction, failure/transaction boundaries, blocker or dependency/parallelization rationale when useful;
-11. `Completion protocol` — the standard TDD, test, review, metadata, `CONTEXT.md` and `ROADMAP.md` completion checklist;
-12. `Mandatory code review record` — the complete structured `CODE_REVIEW.md` record required by section 5, including transactional state, scheduling/queue failure, exception/unwind, partial construction, performance/allocation and privacy when applicable;
-13. `Merge requirement` — the mandatory final section from section 3.2.
+11. `Completion protocol` — local validation, review and issue metadata checklist;
+12. `Mandatory code review record` — may start as pending, but must contain the complete applicable `CODE_REVIEW.md` record before closing.
 
 The title should use `TNNN — Short imperative title` for numbered roadmap work. Use a precise category prefix only for deliberately unnumbered incident/regression tickets, while still preserving the same body formalism.
 
@@ -143,7 +121,6 @@ When creating a ticket programmatically:
 - do not omit review/test/completion sections because the task appears small;
 - keep dependencies explicit instead of inferring them from ticket number or milestone;
 - synchronize the selected priority/status with GitHub labels (`priority:P0|P1|P2`, `status:ready|doing|blocked`) and set the real GitHub milestone when applicable;
-- preserve the `## Merge requirement` section as the final section of the issue body;
 - do not place personal information in tests/examples/code/generated metadata or ticket fixtures.
 
 If the canonical issue form changes, update this section in the same change so `AGENTS.md` and `.github/ISSUE_TEMPLATE/work-item.yml` never define different ticket contracts.
@@ -201,7 +178,7 @@ Every **feature ticket** must ship a dedicated example executable in addition to
 Requirements:
 
 - add `examples/features/tNNN_<feature>.cpp`;
-- register a real `nativeui_example_tNNN_<feature>` CMake executable;
+- register a real `nativeui_example_tNNN_<feature>` CMake executable through `nativeui_add_application()` in `examples/features/CMakeLists.txt`;
 - interactive/window mode must demonstrate the public API as a user would consume it;
 - the same executable must support `--self-test` and return non-zero on failure;
 - register the self-test with CTest when platform examples are built;
@@ -212,19 +189,14 @@ Infrastructure-only tickets (build refactors, header splitting, CI plumbing) are
 
 ## 4.2 CI execution cadence — mandatory
 
-Follow [`CI_POLICY.md`](CI_POLICY.md).
+- Keep implementation PRs in Draft while source/build/tests are changing.
+- Build serially on the Mac, run targeted and full relevant local tests, and record exact commands and results before merge.
+- `Main Smoke` runs the Core unit suite after merges; remote `CI` runs the full platform matrix nightly or on demand; package contracts run for matching changes on `main`.
+- For native, dependency, ABI or packaging changes whose correctness cannot be established locally, run the relevant focused remote check before merge and record the result.
+- A failed integration check creates a priority regression. Continue independent work while the affected area is corrected.
+- Register tests in CMake and let workflows select them through CTest labels.
 
-- Keep implementation PRs Draft while source/build/tests are changing. Mark them Ready after the Mac local gate and applicable review are complete; Ready no longer launches T042/T052.
-- Build serially on the Mac, run targeted and full relevant local tests, and record exact commands/results before merge. The local gate and `CODE_REVIEW.md` findings determine ticket merge readiness.
-- Remote CI does not block ordinary PR merges. `Main Smoke` and path-scoped dedicated workflows run after matching merges to `main`; full `CI` qualifies the integrated branch nightly or on demand.
-- `T042 Lifecycle Stress` runs weekly/on demand. `T052 v0.1 Release Gate` runs for a frozen release candidate with an explicit approved benchmark baseline SHA. Release qualification is mandatory even though ordinary ticket merges are not held for the full remote matrix.
-- For native, dependency, ABI or packaging changes whose correctness cannot be established on the Mac, run the relevant focused remote check before merge and record why it is needed.
-- A failed post-merge check creates a priority regression and pauses affected-area merges until corrected; unrelated Ready work may continue. A shared Core/build failure pauses all executable merges.
-- Keep dedicated workflows path-scoped and cancel obsolete same-ref runs. Do not create an always-on per-ticket matrix when normal CTest/CI coverage suffices.
-- Any executable-contract change after release-candidate qualification requires a new candidate and applicable reruns. Pure project-state documentation does not change executable qualification.
-- Existing issue checklists keep their required tests but follow the current `CI_POLICY.md` for remote timing; stale per-PR T042/T052 wording does not block an ordinary ticket merge.
-
-This cadence changes when remote tests run. It does not weaken local testing, review or release coverage.
+Local tests and review remain mandatory even when remote qualification runs later.
 
 ## 5. Review workflow
 
@@ -301,7 +273,7 @@ Required for substantial windowing/rendering/text-input changes. Check:
 - lifecycle-control scheduling under queue full/rejection/throw;
 - macOS/Windows/Linux conditional code;
 - Pugl API behavior at the pinned commit;
-- Skia API behavior for `chrome/m149`;
+- Skia API behavior for the version pinned in `cmake/Dependencies.cmake`;
 - static-library link requirements;
 - symbol/process coexistence inside a host;
 - when Objective-C/Objective-C++ is present, the complete Objective-C runtime section of `CODE_REVIEW.md`.
@@ -376,9 +348,9 @@ When that happens, implement the generic capability first, then the widget.
 ## 9. Text rules
 
 - `KeyDown` is for commands/navigation, not text insertion;
-- committed text enters through `TextInput` events from Pugl;
+- committed text enters through `TextInput` or `Composition` commit events;
 - maintain UTF-8 correctness;
-- advanced IME composition/pre-edit remains a platform-extension task until implemented explicitly;
+- IME preedit uses `Composition` events; keep it separate from `KeyDown`;
 - clipboard behavior stays asynchronous where the platform API requires it.
 
 ## 10. Build/dependency workflow
@@ -392,7 +364,7 @@ Parallel local compilation can exhaust memory. This is a mandatory local executi
 - never pass `-j`, `-jN`, `-j N` or `--parallel` to local build commands, including CMake, Make and Ninja;
 - use `CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build <build-directory>` for every local CMake build, including targeted builds, so generators such as Ninja cannot silently use their parallel default;
 - run only one local build at a time; do not start simultaneous builds in different terminals, worktrees or agent tasks;
-- do not copy CI parallel-build flags into local commands. Remote CI concurrency remains governed by `CI_POLICY.md` and the workflows.
+- do not copy CI parallel-build flags into local commands. Remote CI concurrency is configured in the workflows.
 
 ### 10.1 Compiler warning policy
 
@@ -423,13 +395,12 @@ A build that emits an unapproved NativeUI warning is failed work, not a successf
 - only required platform + OpenGL backend sources;
 - Windows/Linux keep one generic Pugl platform target;
 - macOS compiles `common.c`/`internal.c` once as generic platform C code, while `mac.m`, `mac_gl.m` and NativeUI's Cocoa IME bridge are compiled into a small final-consumer bridge;
-- macOS consumer identity is the source of truth: derive runtime names only through T053's frozen `nativeui_compute_objc_runtime_prefix()` algorithm and attach each final target exactly once with its stable `CONSUMER_ID`;
 - never require or restore a global/cache `NATIVEUI_OBJC_RUNTIME_PREFIX` as a normal consumer path;
 - never publish a generic precompiled static macOS Objective-C platform archive whose runtime names cannot vary per final application/plug-in consumer.
 
 ### Skia
 
-- binary dependency from `olilarkin/skia-builder` release assets;
+- binary dependency from pinned `hemduf/skia-builder` release assets;
 - exact tag/asset/SHA256;
 - support both CPM-flattened archive layout and manual extraction layout;
 - do not introduce GN/Ninja/depot_tools into NativeUI.
@@ -437,8 +408,6 @@ A build that emits an unapproved NativeUI warning is failed work, not a successf
 When updating either dependency, create a dedicated ticket and update:
 
 - `THIRD_PARTY.md`;
-- `VALIDATION.md`;
-- `CONTEXT.md`;
 - build matrix results.
 
 ## 11. Definition of Done
@@ -451,35 +420,17 @@ A ticket is `Done` only when:
 - NativeUI-owned targets build with the default empty `NATIVEUI_ALLOWED_WARNINGS` and emit no compiler warnings; any explicitly approved exception is recorded in the ticket/PR and requires the corresponding CMake opt-in;
 - all applicable review passes are complete;
 - the **complete current** mandatory `CODE_REVIEW.md` review record is present in the issue or PR — old reduced records are insufficient — and all Blocking/Important findings are corrected;
-- the exact local Mac validation and applicable review evidence required by `CI_POLICY.md` are recorded; any risk-specific pre-merge remote check required by that policy is green;
+- exact local validation and applicable review evidence are recorded; any necessary focused pre-merge remote check is green;
 - multi-instance/global-state impact is explicitly assessed for every code change;
 - transactional state, scheduling/queue failure, exception/unwind, partial construction, lifetime/reentrancy, performance/allocation and privacy fields are explicitly assessed when applicable;
 - Objective-C runtime naming/prefix strategy is recorded whenever Objective-C/Objective-C++ code is touched;
 - docs/API examples are updated when behavior changed;
 - the GitHub issue is marked `Done` with `status:done` and closed as completed; optional local ticket copies are synchronized if present;
-- `CONTEXT.md` is updated with current state and next recommended ticket;
-- `ROADMAP.md` is updated in the same merge/completion cycle for **every merged ticket**, including final status, delivered scope, dependency-frontier changes and milestone progress;
-- the issue body still ends with the mandatory `## Merge requirement` section.
+- the issue status and metadata reflect the final merged result.
 
-A ticket must not be considered complete merely because its code and local tests are green if the roadmap synchronization or current review record is missing. `Done` does not imply that the ticket SHA passed deferred cross-platform CI; release candidates require the full green remote evidence in `CI_POLICY.md`.
+A ticket is not complete when its code and local tests are green but the current review record or issue metadata is incomplete.
 
-## 12. End-of-session compaction
-
-Before ending any session, update `CONTEXT.md` so another agent can resume without chat history.
-
-Keep it compact. It must contain:
-
-- current architecture and pinned dependency versions;
-- current build/test state;
-- last completed ticket;
-- ticket currently in progress, if any;
-- exact known failures/blockers;
-- next recommended ticket;
-- important temporary decisions that are not yet in `DESIGN.md`.
-
-Do not turn `CONTEXT.md` into a changelog. Move durable decisions to `DESIGN.md` and completed history to ticket files.
-
-## 13. Git workflow when a repository is available
+## 12. Git workflow when a repository is available
 
 For each ticket:
 
@@ -491,11 +442,10 @@ For each ticket:
 - use local fixup/squash workflows freely to keep the remote branch readable;
 - avoid drive-by formatting or unrelated refactors;
 - before requesting review or merge, build the affected surface and run targeted plus full relevant local tests, including fault-injection recovery paths;
-- complete the mandatory review and mark the locally validated PR Ready for review; merge when the ticket gate is satisfied without waiting for ordinary remote CI;
-- after merge, monitor the `main` smoke, path-scoped and nightly integration results and follow `CI_POLICY.md` on failures;
-- freeze and qualify a separate exact release-candidate SHA with full remote gates before release;
-- update the GitHub issue, `CONTEXT.md` and `ROADMAP.md` in the final merge/completion cycle;
-- do not merge/close the ticket with a stale roadmap or stale reduced code-review record.
+- complete the mandatory review and mark the locally validated PR Ready for review;
+- after merge, monitor the applicable integration results and correct failures;
+- update the GitHub issue in the final merge/completion cycle;
+- do not close the ticket with a stale or reduced code-review record.
 
 Independent branches should start from `main`, not from another feature branch, unless an explicit ticket dependency requires stacking. Rebase or merge `main` only when needed to validate integration or resolve conflicts.
 
@@ -511,13 +461,13 @@ platform(TNNN): harden embedded Pugl lifecycle
 
 Avoid histories such as `test: add RED`, `fix: make RED green`, `test: next case`, `fix: next case` for a sequence that is one bounded acceptance slice. Keep that sequence local and publish the completed slice.
 
-## 14. When blocked
+## 13. When blocked
 
 Do not guess around a platform/API uncertainty.
 
 1. isolate the uncertainty in a minimal test or probe;
 2. inspect the pinned Pugl/Skia API/source and current VST3/CLAP/Objective-C runtime documentation when the uncertainty concerns plug-in embedding;
-3. document the blocker in the ticket and `CONTEXT.md`;
+3. document the blocker in the ticket;
 4. continue another independent `Ready` ticket if possible.
 
-A remote/platform wait on one ticket must not become a global project stop when independent `Ready` work exists. Post-merge failures block affected-area merges as defined by `CI_POLICY.md`.
+A remote/platform wait on one ticket must not become a global project stop when independent `Ready` work exists. Post-merge failures block affected-area merges until corrected.

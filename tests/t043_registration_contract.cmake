@@ -5,6 +5,8 @@ if(NOT DEFINED SOURCE_DIR OR NOT EXISTS "${SOURCE_DIR}/CMakeLists.txt")
 endif()
 
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _nativeui_root_cmake)
+file(READ "${SOURCE_DIR}/tests/CMakeLists.txt" _nativeui_tests_cmake)
+file(READ "${SOURCE_DIR}/examples/features/CMakeLists.txt" _nativeui_features_cmake)
 set(_feature_example_helper "${SOURCE_DIR}/cmake/NativeUIFeatureExamples.cmake")
 
 if(NOT EXISTS "${_feature_example_helper}")
@@ -18,14 +20,13 @@ if(NOT "t043_resize_scale" IN_LIST _feature_examples)
     "T043 completion artifact is not wired into the root build: t043_resize_scale")
 endif()
 
-foreach(_required IN ITEMS
-    "nativeui_discover_feature_examples("
-    "nativeui_add_core_test(nativeui_t043_view_geometry_tests tests/t043_view_geometry_tests.cpp)")
-  string(FIND "${_nativeui_root_cmake}" "${_required}" _found)
-  if(_found EQUAL -1)
-    message(FATAL_ERROR
-      "T043 completion artifact is not wired into the root build: ${_required}")
-  endif()
-endforeach()
+string(FIND "${_nativeui_root_cmake}" "add_subdirectory(examples)" _examples_directory)
+string(FIND "${_nativeui_root_cmake}" "add_subdirectory(tests)" _tests_directory)
+string(FIND "${_nativeui_features_cmake}" "nativeui_discover_feature_examples(" _discovery)
+string(FIND "${_nativeui_tests_cmake}" "nativeui_add_core_test(nativeui_t043_view_geometry_tests" _test)
+if(_examples_directory EQUAL -1 OR _tests_directory EQUAL -1 OR
+   _discovery EQUAL -1 OR _test EQUAL -1)
+  message(FATAL_ERROR "T043 completion artifacts are not registered through examples/ and tests/")
+endif()
 
-message(STATUS "T043 completion artifacts are registered in the root build")
+message(STATUS "T043 completion artifacts are registered")

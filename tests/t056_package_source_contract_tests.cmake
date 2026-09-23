@@ -22,6 +22,7 @@ foreach(_required IN ITEMS
 endforeach()
 
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/tests/CMakeLists.txt" _tests_cmake)
 foreach(_module IN ITEMS NativeUIBinaryData.cmake NativeUIEmbedResource.cmake)
   string(REGEX MATCHALL "${_module}" _module_mentions "${_root_cmake}")
   list(LENGTH _module_mentions _module_count)
@@ -34,7 +35,7 @@ endforeach()
 # Public-header isolation is an extensible list. Do not make T056 depend on
 # adjacency between its header and later public headers: adding a new isolated
 # compile probe must not invalidate the older EmbeddedResourceEntry contract.
-string(REGEX MATCH "foreach\\(_header IN ITEMS [^\n]*\\)" _header_compile_list "${_root_cmake}")
+string(REGEX MATCH "foreach\\(_header IN ITEMS [^\n]*\\)" _header_compile_list "${_tests_cmake}")
 if(_header_compile_list STREQUAL "")
   message(FATAL_ERROR "T056 package source contract: public-header compile list is missing")
 endif()

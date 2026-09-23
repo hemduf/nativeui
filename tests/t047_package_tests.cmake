@@ -116,7 +116,7 @@ function(_t047_configure_build name nativeui_dir platform)
 
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${_build}"
-      --config "${CONFIG}" --parallel 2
+      --config "${CONFIG}"
     RESULT_VARIABLE _build_result
     OUTPUT_VARIABLE _build_output
     ERROR_VARIABLE _build_error
@@ -226,7 +226,7 @@ if(APPLE)
 
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${_mac_build}"
-      --config "${CONFIG}" --parallel 2
+      --config "${CONFIG}"
     RESULT_VARIABLE _mac_build_result
     OUTPUT_VARIABLE _mac_build_output
     ERROR_VARIABLE _mac_build_error

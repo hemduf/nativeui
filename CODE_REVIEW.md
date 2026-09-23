@@ -463,7 +463,7 @@ For rendering or windowing changes verify:
 
 ## 11. Mandatory validation matrix
 
-Every code ticket must run the smallest applicable subset plus the full relevant local project suite **before merge**. Mac graphical-session access is required for AppKit window tests. The integrated cross-platform suite runs after merge, and every release candidate must pass the full remote qualification. Remote execution cadence follows [`CI_POLICY.md`](CI_POLICY.md).
+Every code ticket must run the smallest applicable subset plus the full relevant local project suite before merge. Mac graphical-session access is required for AppKit window tests. Cross-platform integration runs in `.github/workflows/`.
 
 ### 11.1 Always
 
@@ -539,9 +539,9 @@ Use deterministic fault seams; do not depend on rare OOM/queue saturation occurr
 ### 11.7 Local merge and deferred CI cadence
 
 - During active TDD, keep the PR Draft. Run targeted, failure-path and full relevant tests locally on the Mac before requesting review. Record the exact commands, results and any platform limit.
-- Once local validation and the applicable review are complete, mark the PR Ready and merge without waiting for ordinary GitHub Actions. The current review record remains a merge gate with no Blocking/Important findings.
+- Once local validation and the applicable review are complete, mark the PR Ready. The current review record remains a merge gate with no Blocking/Important findings.
 - Run a focused remote check before merge for Pugl, Skia, Objective-C, ABI, packaging or dependency work when Mac evidence cannot establish a required correctness claim. Record the reason and result.
-- After merge, `Main Smoke`, matching subsystem workflows and nightly full `CI` qualify the integrated `main` SHA. T042 runs weekly/on demand; T052 qualifies a frozen release candidate with an explicit benchmark baseline. A green ticket's local evidence is never described as cross-platform qualification.
+- After merge, the full `CI` and package contracts qualify the integrated `main` SHA. A green local test result is not cross-platform qualification.
 - A failing integration check opens a priority regression and pauses affected-area merges until fixed. A shared Core/build failure pauses executable merges globally; independent local work can continue.
 - Release-candidate executable changes invalidate that candidate and require applicable remote checks on a new SHA. Project-state documentation alone does not invalidate executable qualification.
 
