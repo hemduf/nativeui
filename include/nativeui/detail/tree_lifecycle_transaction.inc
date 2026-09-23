@@ -1,5 +1,5 @@
     // Stack-confined lifecycle/focus call sites keep the immediate invalidator
-    // contract from tree_layout.inc while retained retained callbacks use the NodeId
+    // contract from tree_layout.inc while retained callbacks use the NodeId
     // overloads/factories from tree_retained_invalidation.inc.
 
 
@@ -325,7 +325,7 @@
             return;
         }
 
-        // retained retained callbacks become inert before arbitrary teardown code.
+        // retained callbacks become inert before arbitrary teardown code.
         // Whole-Tree unmount rotates the generation; dynamic subtree removal only
         // retires identities within that subtree. The retained untracked helper then
         // preserves best-effort reverse traversal and first-error propagation.

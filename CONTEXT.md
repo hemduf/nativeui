@@ -188,7 +188,7 @@ Delivered contract:
 
 Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 are green. Final T042 Lifecycle Stress #845 is green on Linux ASan+UBSan, Linux X11, Windows and macOS. Final T052 v0.1 Release Gate #569 is green for the release contract, clean Linux/macOS/Windows bootstraps and exact-head T051 benchmark.
 
-T094 / #178 remains blocked by its explicit T071 dependency; T078 itself is complete.
+T094 / #178 / PR #450 is the active retained dirty-traversal review candidate. Its implementation prerequisites T078 and T130 are complete; T071 is not an implementation dependency. The candidate uses published visual bounds, conservative unknown-cache fallback, Painter-only traversal APIs, transactional publication invalidation, paint reentrancy protection and dedicated rollback/fault/allocation/multi-Tree coverage.
 
 ### Remaining v1 work
 
@@ -208,7 +208,7 @@ post-1.0 / later-release line already landed on main:
 T073(done) ---------------------------------> NativeUI 1.1 foundation
 T074(done) ---------------------------------> NativeUI 1.1 foundation
 T075(done) ---------------------------------> NativeUI 1.1 foundation
-T076(done) -> T077(done) -> T078(done) -> T094(blocked on T071) -> NativeUI 1.1 effects
+T076(done) -> T077(done) -> T078(done) -> T094(review/#450) -> NativeUI 1.1 effects
 T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
 T098(done) ---------------------------------------------------------------> T086(done)
 ```
@@ -297,6 +297,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T078 / #161 is Done; T094 / #178 remains blocked on T071 before dirty-region retained traversal can start.
+4. T078 / #161 is Done; T094 / #178 / PR #450 is the active retained dirty-traversal review candidate, with T071 explicitly removed as a non-implementation dependency.
 5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line; retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
