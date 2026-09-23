@@ -6,8 +6,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 
 namespace {
 
