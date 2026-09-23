@@ -212,10 +212,12 @@ public:
             return false;
         }
         const float scale = geometry_.last_valid_scale();
-        const int x = static_cast<int>(std::lround(logical_point.x * scale));
-        const int y = static_cast<int>(std::lround(logical_point.y * scale));
-        renderer_.request_readback(x, y);
         const auto logical = geometry_.logical_size();
+        const float x_logical = std::clamp(logical_point.x, 0.0f, logical.w);
+        const float y_logical = std::clamp(logical_point.y, 0.0f, logical.h);
+        const int x = static_cast<int>(std::lround(x_logical * scale));
+        const int y = static_cast<int>(std::lround(y_logical * scale));
+        renderer_.request_readback(x, y);
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
