@@ -191,6 +191,7 @@ public:
         const auto status = puglUpdate(world_, timeout);
         if (status && status != PUGL_SUCCESS) {
             last_error_ = puglStrerror(status);
+            scene_error_active_ = false;
             should_close_ = true;
         }
         if (!should_close_) flush_preferred_size_notification();
@@ -561,7 +562,23 @@ private:
     void record_scale_observation(bool accepted) {
         if (!accepted) {
             last_error_ = "NativeUI ignored invalid platform scale factor";
+            scene_error_active_ = false;
         }
+    }
+
+    void record_scene_error(const char* message) noexcept {
+        try {
+            last_error_ = message ? message : "NativeUI scene rendering failed";
+            scene_error_active_ = true;
+        } catch (...) {
+            // A diagnostic allocation must not close the native view.
+        }
+    }
+
+    void clear_scene_error() noexcept {
+        if (!scene_error_active_) return;
+        last_error_.clear();
+        scene_error_active_ = false;
     }
 
     void queue_preferred_size() {
@@ -585,6 +602,7 @@ private:
         if (!last_error_.empty()) return;
         try {
             last_error_ = message ? message : "NativeUI teardown failed";
+            scene_error_active_ = false;
         } catch (...) {
             // Teardown diagnostics must never compromise native cleanup.
         }

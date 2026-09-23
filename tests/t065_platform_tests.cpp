@@ -5,14 +5,21 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace {
 
 using namespace std::chrono_literals;
 
 constexpr std::string_view kNativeBoundaryFailure{"T128 native boundary failure"};
+
+struct PaintFaultState final {
+    bool throwing{true};
+    int paints{};
+};
 
 int fail(std::string_view stage, std::string_view message) {
     std::cerr << "[T065 platform] " << stage << ": " << message << '\n';
@@ -26,19 +33,30 @@ struct Fixture {
 
 class ThrowingPaintComponent final : public ui::Component {
 public:
+    explicit ThrowingPaintComponent(std::shared_ptr<PaintFaultState> state)
+        : state_(std::move(state)) {}
+
     [[nodiscard]] ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
         return {180.0f, 72.0f};
     }
 
     void paint(ui::PaintContext&) const override {
-        throw std::runtime_error{kNativeBoundaryFailure.data()};
+        ++state_->paints;
+        if (state_->throwing) throw std::runtime_error{kNativeBoundaryFailure.data()};
     }
+
+private:
+    std::shared_ptr<PaintFaultState> state_;
 };
 
 struct ThrowingPaintRoot {
+    std::shared_ptr<PaintFaultState> state;
+
     [[nodiscard]] ui::Spec spec() const {
         ui::Spec root;
-        root.factory = [] { return std::make_unique<ThrowingPaintComponent>(); };
+        root.factory = [state = state] {
+            return std::make_unique<ThrowingPaintComponent>(state);
+        };
         return root;
     }
 };
@@ -216,7 +234,8 @@ int native_exception_boundary() {
     application.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
     if (!application.valid()) return fail("native-exception", application.last_error());
 
-    ThrowingPaintRoot root;
+    auto paint_state = std::make_shared<PaintFaultState>();
+    ThrowingPaintRoot root{paint_state};
     ui::UI tree{root};
     ui::StandaloneWindow window{
         application,
@@ -228,11 +247,13 @@ int native_exception_boundary() {
 
     // The platform expose is delivered by Pugl through a noexcept foreign ABI
     // thunk. A throwing user paint callback must be contained there: the event
-    // loop reports failure and closes the view, but no C++ exception may unwind
-    // through Cocoa, Win32, or X11/Pugl frames.
-    for (int i = 0; i < 12 && !window.should_close(); ++i) {
+    // loop records the original diagnostic and leaves the view usable for a
+    // later external invalidation; no C++ exception may cross Pugl's ABI.
+    for (int i = 0; i < 12 && paint_state->paints == 0; ++i) {
         try {
-            if (!application.poll(0.1)) break;
+            if (!application.poll(0.1)) {
+                return fail("native-exception", "application stopped after paint fault");
+            }
         } catch (const std::exception& e) {
             return fail("native-exception", e.what());
         } catch (...) {
@@ -240,13 +261,34 @@ int native_exception_boundary() {
         }
     }
 
-    if (!window.should_close()) {
+    if (paint_state->paints == 0) {
         return fail("native-exception", "throwing paint callback did not reach the native event boundary");
+    }
+    if (!window.valid() || window.should_close()) {
+        return fail("native-exception", "retryable paint fault closed the native view");
     }
     if (window.last_error() != kNativeBoundaryFailure) {
         return fail("native-exception", window.last_error().empty()
-            ? "native boundary closed without preserving the callback error"
+            ? "native boundary lost the callback diagnostic"
             : window.last_error());
+    }
+
+    paint_state->throwing = false;
+    if (!window.set_size({261.0f, 120.0f})) {
+        return fail("native-exception", "could not request a later native expose");
+    }
+    for (int i = 0; i < 12 && paint_state->paints < 2; ++i) {
+        if (!application.poll(0.1)) {
+            return fail("native-exception", "application stopped before recovery");
+        }
+    }
+    if (paint_state->paints < 2 || !window.valid() ||
+        !window.last_error().empty()) {
+        return fail("native-exception",
+                    "later expose did not recover paint and diagnostic state: paints=" +
+                        std::to_string(paint_state->paints) +
+                        " valid=" + std::to_string(window.valid()) +
+                        " error=" + std::string{window.last_error()});
     }
     return 0;
 }

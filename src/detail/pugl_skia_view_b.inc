@@ -21,6 +21,7 @@
             if (geometry_.last_valid_scale() != previous_scale &&
                 !apply_size_constraints()) {
                 last_error_ = "Failed to refresh logical window size constraints";
+                scene_error_active_ = false;
             }
 
             ui_.refresh_focus(services_);
@@ -65,26 +66,24 @@
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
                     ++failed_scene_exposes_;
 #endif
-                    try {
-                        last_error_ = "NativeUI scene build or presentation failed; waiting for a later expose";
-                    } catch (...) {}
+                    record_scene_error("NativeUI scene build or presentation failed; waiting for a later expose");
                     return PUGL_SUCCESS;
                 }
                 deferred_scene_redraw_ |= renderer_.take_deferred_redraw();
-                if (last_error_ ==
-                        "NativeUI scene build or presentation failed; waiting for a later expose" ||
-                    last_error_ ==
-                        "NativeUI scene paint failed; waiting for a later expose") {
-                    last_error_.clear();
-                }
+                clear_scene_error();
+            } catch (const std::exception& error) {
+                renderer_.invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++failed_scene_exposes_;
+#endif
+                record_scene_error(error.what());
+                return PUGL_SUCCESS;
             } catch (...) {
                 renderer_.invalidate();
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
                 ++failed_scene_exposes_;
 #endif
-                try {
-                    last_error_ = "NativeUI scene paint failed; waiting for a later expose";
-                } catch (...) {}
+                record_scene_error("Unknown NativeUI scene paint failure");
                 return PUGL_SUCCESS;
             }
             return PUGL_SUCCESS;
@@ -340,6 +339,7 @@
     const PuglDataOfferEvent* active_drop_offer_{};
     bool drop_offer_decided_{};
     std::string last_error_;
+    bool scene_error_active_{};
     std::function<void()> close_callback_;
 };
 

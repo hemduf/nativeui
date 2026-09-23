@@ -198,10 +198,13 @@ int main(int argc, char** argv) {
         !window.valid() || window.should_close()) {
         return fail("throwing retained paint crossed the native boundary");
     }
+    if (window.last_error() != "injected T095 retained paint fault") {
+        return fail("throwing retained paint lost its diagnostic");
+    }
     const auto recovered_after_throw = read_pixel(application, window, {45.0f, 29.0f});
     if (!recovered_after_throw || recovered_after_throw->b < 240 ||
         PlatformTestAccess::scene_diagnostics(window).scene_builds <=
-            before_throw.scene_builds) {
+            before_throw.scene_builds || !window.last_error().empty()) {
         return fail("throwing retained paint left the canvas clipped or invalid");
     }
 

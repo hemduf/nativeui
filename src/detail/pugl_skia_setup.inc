@@ -226,10 +226,18 @@ public:
         glGetIntegerv(kFramebufferBinding, &framebuffer);
         glGetIntegerv(kStencilBits, &stencil_bits);
         glGetIntegerv(kSamples, &samples);
-        const ScopeExit restore_binding{[this, framebuffer]() noexcept {
+        // Resolve through Pugl for the current native context. Accessing the
+        // Skia binary's GrGLInterface function table here is not ABI-safe on
+        // every sanitizer/platform build of the prebuilt Skia package.
+        const auto bind_framebuffer = reinterpret_cast<GrGLBindFramebufferFn*>(
+            puglGetProcAddress("glBindFramebuffer"));
+        if (!bind_framebuffer) {
+            invalidate_content();
+            return false;
+        }
+        const ScopeExit restore_binding{[this, framebuffer, bind_framebuffer]() noexcept {
             if (interface_ && (!context_ || !context_->abandoned())) {
-                interface_->fFunctions.fBindFramebuffer(
-                    kGlFramebuffer, static_cast<GrGLuint>(framebuffer));
+                bind_framebuffer(kGlFramebuffer, static_cast<GrGLuint>(framebuffer));
                 if (context_) context_->resetContext(kRenderTarget_GrGLBackendState);
             }
         }};
