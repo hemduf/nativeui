@@ -16,15 +16,15 @@ nativeui_discover_feature_examples(_discovered_examples "${SOURCE_DIR}")
 
 file(GLOB _canonical_sources
   RELATIVE "${_features_dir}"
-  "${_features_dir}/t[0-9][0-9][0-9]_*.cpp"
+  "${_features_dir}/*.cpp"
 )
 list(SORT _canonical_sources)
 
 set(_expected_examples)
 foreach(_source IN LISTS _canonical_sources)
-  if(NOT _source MATCHES "^t[0-9][0-9][0-9]_[A-Za-z0-9_]+[.]cpp$")
+  if(NOT _source MATCHES "^((t[0-9][0-9][0-9]_)?[a-z][a-z0-9_]*)[.]cpp$")
     message(FATAL_ERROR
-      "Feature example discovery contract: canonical glob matched invalid filename ${_source}")
+      "Feature example discovery contract: discovery matched invalid filename ${_source}")
   endif()
   get_filename_component(_name "${_source}" NAME_WE)
   list(APPEND _expected_examples "${_name}")
@@ -71,7 +71,7 @@ require_text("${_helper_source}"
   "CONFIGURE_DEPENDS"
   "automatic CMake reconfigure when feature sources change")
 
-string(FIND "${_root_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES\n  t" _manual_list_index)
+string(FIND "${_root_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES" _manual_list_index)
 if(NOT _manual_list_index EQUAL -1)
   message(FATAL_ERROR
     "Feature example discovery contract: root CMake still contains a manually maintained feature example list")

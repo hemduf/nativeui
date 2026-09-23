@@ -16,6 +16,7 @@ namespace ui {
 namespace detail {
 struct ApplicationPlatformState;
 struct ApplicationBackendAccess;
+struct PlatformTestAccess;
 } // namespace detail
 
 using NativeParentHandle = std::uintptr_t;
@@ -154,6 +155,8 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    friend struct detail::PlatformTestAccess;
+
     void handle_native_close_request();
     void process_native_close_request();
     void schedule_close_completion();
