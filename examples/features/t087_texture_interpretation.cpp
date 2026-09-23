@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,7 +33,7 @@ constexpr std::array<std::byte, 130> kTaggedPng{
     std::byte{96},std::byte{130},
 };
 
-[[nodiscard]] ui::Brush make_mixed_brush(
+[[nodiscard]] std::optional<ui::Brush> make_mixed_brush(
     const ui::ImageTexture& color,
     const ui::ImageTexture& data) {
     const auto compiled = ui::ShaderProgram::compile(R"(
@@ -44,14 +45,14 @@ constexpr std::array<std::byte, 130> kTaggedPng{
             return half4(c.r * 0.5, d.g, d.b, 1.0);
         }
     )");
-    if (!compiled.ok()) return ui::Brush{ui::Color{0.0f, 0.0f, 0.0f, 0.0f}};
+    if (!compiled.ok()) return std::nullopt;
 
     ui::ShaderInstance instance{compiled.program};
     if (instance.set_child("color_source", ui::Brush{color}) !=
             ui::ShaderSetResult::Ok ||
         instance.set_child("data_source", ui::Brush{data}) !=
             ui::ShaderSetResult::Ok) {
-        return ui::Brush{ui::Color{0.0f, 0.0f, 0.0f, 0.0f}};
+        return std::nullopt;
     }
     return ui::Brush{instance};
 }
@@ -69,11 +70,12 @@ constexpr std::array<std::byte, 130> kTaggedPng{
     const ui::Brush color_brush{color};
     const ui::Brush data_brush{data};
     const auto mixed_brush = make_mixed_brush(color, data);
+    if (!mixed_brush) return {};
 
     return std::make_unique<ui::UI>(ui::Canvas{
         560.0f,
         200.0f,
-        [color_brush, data_brush, mixed_brush](ui::CanvasContext2D& g) {
+        [color_brush, data_brush, mixed_brush = *mixed_brush](ui::CanvasContext2D& g) {
             g.fill_rect({0.0f, 0.0f, 560.0f, 200.0f}, ui::colors::panel);
             g.fill_rect({20.0f, 20.0f, 160.0f, 160.0f}, color_brush);
             g.fill_rect({200.0f, 20.0f, 160.0f, 160.0f}, data_brush);
@@ -101,13 +103,27 @@ int self_test() {
     }
 
     const auto mixed = make_mixed_brush(color, data);
+    if (!mixed) return example::fail("mixed Color/Data shader setup failed");
+
     ui::UI tree{ui::Canvas{
-        32.0f, 32.0f, [mixed](ui::CanvasContext2D& g) {
+        32.0f, 32.0f, [mixed = *mixed](ui::CanvasContext2D& g) {
             g.fill_rect({0.0f, 0.0f, 32.0f, 32.0f}, mixed);
         }}};
     ui::HeadlessRenderer renderer{{32.0f, 32.0f}, 1.0f};
     if (!renderer.render(tree)) {
         return example::fail("mixed Color/Data headless render failed");
+    }
+
+    const auto pixel = renderer.pixel(16, 16);
+    const auto near = [](std::uint8_t actual, int expected) noexcept {
+        const int value = static_cast<int>(actual);
+        return value >= expected - 4 && value <= expected + 4;
+    };
+    // The fixture is tagged linear-sRGB. Color R is halved in linear-sRGB;
+    // raw Data G/B remain numeric, then the mixed effect is encoded for sRGB.
+    if (!near(pixel.r, 137) || !near(pixel.g, 137) ||
+        !near(pixel.b, 99) || !near(pixel.a, 255)) {
+        return example::fail("mixed Color/Data self-test pixel mismatch");
     }
     return 0;
 }
