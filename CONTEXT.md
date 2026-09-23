@@ -4,7 +4,7 @@
 
 ## Current session handoff
 
-- T088 / #172 is Doing on `codex/t088-value-noise`, based on current `origin/main` `fec920b` in an isolated worktree. The issue was corrected for pinned Skia `chrome/m153`: public runtime effects support ES2, so its exact 32-bit hash is implemented with float4 byte lanes instead of unsupported `uint`/ES3. The worktree uses Pugl `94982803985eefcbaeb0a1c8d0136ec862d7cb59` from `/private/tmp/nativeui-pugl-t088` and local pinned Skia via `NATIVEUI_SKIA_ROOT`. Baseline was 173/173; the final local serial build and 176/176 CTest pass. T088 public API, exact raster/GPU hash vectors, CPU/raster value reference, failure/recovery tests, feature example, macOS GPU parity and display-less Core compilation pass locally. Warm 256×256 raster median is 165.7 ms noise versus 0.014 ms solid; 256×256 logical macOS GPU redraw/readback median is 6.18 ms versus 0.82 ms. The raster cost is the measured performance limitation. Next: qualify the Draft PR, complete exact-head CI/review and update the roadmap in the merge/completion cycle.
+- T088 / #172 / PR #454 is the latest completed rendering ticket. The corrected issue freezes a deterministic 32-bit lattice hash; pinned Skia `chrome/m153` implements it on the public ES2 runtime-effect path with exact float4 byte lanes. Frozen executable head `e31ca0bcb85175710a9fc267e69842ca592cc380` passed the serial local build, 176/176 CTest, display-less Core compilation, exact macOS GPU vectors, normal/path CI and final T042/T052 on Linux/macOS/Windows. Full `CODE_REVIEW.md` record has zero Blocking/Important findings. Warm 256×256 headless raster noise cost is 165.7 ms versus 0.014 ms solid; native macOS GPU redraw/readback is 6.18 ms versus 0.82 ms. This raster throughput is a known measured limitation. T089 becomes Ready; T090–T092 remain blocked by explicit dependencies. T095 / #179 remains the higher-priority next recommended ticket.
 - T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T177's local 173/173 macOS validation is recorded below; T096 waits for T095.
 - Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds.
 
@@ -219,6 +219,7 @@ T075(done) ---------------------------------> NativeUI 1.1 foundation
 T076(done) -> T077(done) -> T078(done) -> T094(done) --+
 T095(ready) ---------------------------------------------------+-> T096(blocked on T095) -> NativeUI 1.1 effects
 T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
+T073(done) + T079(done) -> T088(done) -> T089(ready) -> T090(blocked) -> T091(blocked) -> T092(blocked)
 T098(done) ---------------------------------------------------------------> T086(done)
 ```
 
@@ -308,6 +309,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T094 / #178 / PR #450 and T177 / #442 / PR #443 are complete; T095 / #179 is independently Ready and T096 / #180 remains blocked on T095.
-5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line; retained cache-key separation remains deferred to T097.
+4. T094 / #178 / PR #450, T177 / #442 / PR #443 and T088 / #172 / PR #454 are complete; T095 / #179 is the higher-priority Ready ticket and T096 / #180 remains blocked on T095.
+5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line. T089 / #173 is newly Ready after T088; T090–T092 remain blocked by their explicit dependencies. Retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
