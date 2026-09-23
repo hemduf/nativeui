@@ -638,6 +638,10 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t032_slider_completion_tests tests/t032_slider_completion_tests.cpp)
   nativeui_add_core_test(nativeui_t032_slider_visual_tests tests/t032_slider_visual_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_t095_scene_extent_tests tests/t095_scene_extent_tests.cpp)
+  target_include_directories(nativeui_t095_scene_extent_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
   nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
   nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
   nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
@@ -668,6 +672,17 @@ if(NATIVEUI_BUILD_TESTS)
     )
     nativeui_enable_project_warnings(nativeui_image_texture_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_image_texture_gpu_reference_tests)
+
+    add_executable(nativeui_t095_scene_gpu_tests tests/t095_scene_gpu_tests.cpp)
+    target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_t095_scene_gpu_tests
+      CONSUMER_ID org.nativeui.test.t095-scene-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_t095_scene_gpu_tests)
+    nativeui_enable_sanitizers(nativeui_t095_scene_gpu_tests)
 
     add_executable(nativeui_smoke_embedded tests/smoke_embedded.cpp)
     _nativeui_attach_consumer_platform(
@@ -719,8 +734,13 @@ if(NATIVEUI_BUILD_TESTS)
     if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
       add_test(NAME nativeui_smoke_standalone COMMAND nativeui_smoke_standalone)
       add_test(NAME nativeui_smoke_embedded COMMAND nativeui_smoke_embedded)
+      add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
+        TIMEOUT 20
+      )
+      set_tests_properties(nativeui_t095_scene_gpu_tests PROPERTIES
+        LABELS "integration;platform;gpu;t095"
         TIMEOUT 20
       )
     endif()

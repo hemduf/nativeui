@@ -627,6 +627,44 @@ detail::PlatformTestAccess::take_gpu_readback(
     return window.impl_->core->take_gpu_readback();
 }
 
+bool detail::PlatformTestAccess::inject_scene_fault(
+    StandaloneWindow& window,
+    detail::SceneFaultStage stage) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->inject_scene_fault(stage);
+}
+
+detail::SceneDiagnostics detail::PlatformTestAccess::scene_diagnostics(
+    StandaloneWindow& window) noexcept {
+    if (!window.impl_ || !window.impl_->core) return {};
+    return window.impl_->core->scene_diagnostics();
+}
+
+bool detail::PlatformTestAccess::request_context_recreation(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_context_recreation();
+}
+
+bool detail::PlatformTestAccess::override_scene_scale(
+    StandaloneWindow& window,
+    std::optional<float> scale) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->override_scene_scale(scale);
+}
+
+bool detail::PlatformTestAccess::reject_next_deferred_redraw(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->reject_next_deferred_redraw();
+}
+
+bool detail::PlatformTestAccess::request_expose(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_expose();
+}
+
 #endif
 StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>(
@@ -875,7 +913,7 @@ void StandaloneWindow::request_close() {
 }
 bool StandaloneWindow::valid() const noexcept {
     return impl_ && impl_->core && impl_->construction_error.empty() &&
-           impl_->core->last_error().empty();
+           impl_->core->native_view_open();
 }
 bool StandaloneWindow::should_close() const noexcept {
     return !impl_ || !impl_->core || impl_->close_state.pending() ||
@@ -976,6 +1014,30 @@ struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     ViewCore core;
 };
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool detail::PlatformTestAccess::request_gpu_readback(
+    EmbeddedView& view,
+    Point logical_point) noexcept {
+    return view.impl_ && view.impl_->core.request_gpu_readback(logical_point);
+}
+
+std::optional<detail::PlatformReadbackPixel>
+detail::PlatformTestAccess::take_gpu_readback(EmbeddedView& view) noexcept {
+    return view.impl_ ? view.impl_->core.take_gpu_readback() : std::nullopt;
+}
+
+bool detail::PlatformTestAccess::inject_scene_fault(
+    EmbeddedView& view,
+    detail::SceneFaultStage stage) noexcept {
+    return view.impl_ && view.impl_->core.inject_scene_fault(stage);
+}
+
+detail::SceneDiagnostics detail::PlatformTestAccess::scene_diagnostics(
+    EmbeddedView& view) noexcept {
+    return view.impl_ ? view.impl_->core.scene_diagnostics() : detail::SceneDiagnostics{};
+}
+#endif
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
     : impl_(std::make_unique<Impl>(ui, parent, size)) {}

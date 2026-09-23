@@ -23,6 +23,7 @@
 namespace ui {
 
 class Dialog;
+namespace detail { class SkiaGlRenderer; }
 
 /// One retained NativeUI component tree.
 ///
@@ -356,6 +357,11 @@ public:
 
 private:
     friend class Dialog;
+    friend class detail::SkiaGlRenderer;
+
+    [[nodiscard]] bool scene_paint_blocked() const noexcept {
+        return tree_.lifecycle_transition_active();
+    }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
     friend bool debug::inspector_enabled(const UI& ui) noexcept;
     friend void debug::set_inspector_enabled(UI& ui, bool enabled);
