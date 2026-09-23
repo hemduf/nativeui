@@ -133,6 +133,17 @@ public:
         present_pending_ = true;
     }
 
+    [[nodiscard]] bool invalidate_from_ui() noexcept {
+        invalidate();
+        if (rendering_) {
+            deferred_redraw_pending_ = true;
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool rendering() const noexcept { return rendering_; }
+
     void invalidate_content() noexcept {
         scene_valid_ = false;
         invalidate();
@@ -146,6 +157,7 @@ private:
     void clear_identity() noexcept {
         width_ = height_ = 0;
         scene_scale_ = 0.0f;
+        bind_framebuffer_ = nullptr;
         presentation_framebuffer_ = 0;
         presentation_samples_ = presentation_stencil_bits_ = 0;
         scene_valid_ = false;
@@ -226,11 +238,14 @@ public:
         glGetIntegerv(kFramebufferBinding, &framebuffer);
         glGetIntegerv(kStencilBits, &stencil_bits);
         glGetIntegerv(kSamples, &samples);
-        // Resolve through Pugl for the current native context. Accessing the
-        // Skia binary's GrGLInterface function table here is not ABI-safe on
-        // every sanitizer/platform build of the prebuilt Skia package.
-        const auto bind_framebuffer = reinterpret_cast<GrGLBindFramebufferFn*>(
-            puglGetProcAddress("glBindFramebuffer"));
+        // Resolve through Pugl once per renderer/context lifetime. Resolving
+        // on every expose allocates a CFString on macOS; accessing the prebuilt
+        // Skia function table here fails in Linux sanitizer builds.
+        if (!bind_framebuffer_) {
+            bind_framebuffer_ = reinterpret_cast<GrGLBindFramebufferFn*>(
+                puglGetProcAddress("glBindFramebuffer"));
+        }
+        const auto bind_framebuffer = bind_framebuffer_;
         if (!bind_framebuffer) {
             invalidate_content();
             return false;
@@ -448,6 +463,7 @@ private:
 #endif
     sk_sp<const GrGLInterface> interface_;
     sk_sp<GrDirectContext> context_;
+    GrGLBindFramebufferFn* bind_framebuffer_{};
     sk_sp<SkSurface> scene_;
     sk_sp<SkImage> snapshot_;
     sk_sp<SkSurface> presentation_; // borrowed Pugl framebuffer, never owned

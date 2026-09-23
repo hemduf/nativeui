@@ -36,7 +36,9 @@
             if (deferred_scene_redraw_) {
                 deferred_scene_redraw_ = false;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++deferred_redraw_attempts_;
                 if (std::exchange(reject_deferred_redraw_once_, false)) {
+                    ++deferred_redraw_rejections_;
                     return PUGL_SUCCESS;
                 }
 #endif
@@ -322,6 +324,9 @@
     bool deferred_scene_redraw_{};
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     std::uint64_t failed_scene_exposes_{};
+    std::uint64_t deferred_redraw_attempts_{};
+    std::uint64_t deferred_redraw_rejections_{};
+    std::uint64_t redraw_requests_during_render_{};
     bool recreate_renderer_on_expose_{};
     std::optional<float> scene_scale_override_;
     bool reject_deferred_redraw_once_{};

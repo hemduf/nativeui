@@ -170,8 +170,7 @@ public:
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
-            renderer_.invalidate();
-            request_redraw(rect);
+            if (renderer_.invalidate_from_ui()) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
         maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);
@@ -217,6 +216,9 @@ public:
     [[nodiscard]] detail::SceneDiagnostics scene_diagnostics() const noexcept {
         auto result = renderer_.diagnostics();
         result.failed_exposes = failed_scene_exposes_;
+        result.deferred_redraw_attempts = deferred_redraw_attempts_;
+        result.deferred_redraw_rejections = deferred_redraw_rejections_;
+        result.redraw_requests_during_render = redraw_requests_during_render_;
         return result;
     }
 
@@ -378,6 +380,9 @@ public:
 
     void request_redraw(Rect logical_rect) {
         if (!view_ || logical_rect.empty()) return;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (renderer_.rendering()) ++redraw_requests_during_render_;
+#endif
 
         const auto physical = detail::logical_to_physical_covering_rect(
             logical_rect, geometry_.last_valid_scale());

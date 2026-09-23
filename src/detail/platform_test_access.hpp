@@ -31,6 +31,9 @@ struct SceneDiagnostics final {
     std::uint64_t scene_builds{};
     std::uint64_t presentations{};
     std::uint64_t failed_exposes{};
+    std::uint64_t deferred_redraw_attempts{};
+    std::uint64_t deferred_redraw_rejections{};
+    std::uint64_t redraw_requests_during_render{};
     bool scene_valid{};
     bool full_repaint_required{};
     bool present_pending{};

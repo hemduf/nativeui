@@ -229,20 +229,32 @@ int main(int argc, char** argv) {
     retained.invalidate();
     for (int attempt = 0; attempt < 64; ++attempt) {
         (void)application.poll(0.0);
-        if (PlatformTestAccess::scene_diagnostics(window).scene_builds >
-            before_rejection.scene_builds) break;
+        if (PlatformTestAccess::scene_diagnostics(window).deferred_redraw_rejections >
+            before_rejection.deferred_redraw_rejections) break;
+    }
+    const auto after_rejection = PlatformTestAccess::scene_diagnostics(window);
+    if (after_rejection.deferred_redraw_attempts !=
+            before_rejection.deferred_redraw_attempts + 1 ||
+        after_rejection.deferred_redraw_rejections !=
+            before_rejection.deferred_redraw_rejections + 1 ||
+        after_rejection.redraw_requests_during_render !=
+            before_rejection.redraw_requests_during_render ||
+        after_rejection.scene_builds < before_rejection.scene_builds + 1 ||
+        (after_rejection.scene_builds == before_rejection.scene_builds + 1 &&
+         !after_rejection.full_repaint_required)) {
+        return fail("rejected deferred redraw did not preserve full work");
     }
     for (int attempt = 0; attempt < 32; ++attempt) {
         (void)application.poll(0.0);
     }
     const auto rejected = PlatformTestAccess::scene_diagnostics(window);
-    if (rejected.scene_builds != before_rejection.scene_builds + 1 ||
-        !rejected.full_repaint_required) {
-        return fail("rejected deferred redraw lost work or spun at idle");
+    if (rejected.deferred_redraw_attempts != after_rejection.deferred_redraw_attempts ||
+        rejected.deferred_redraw_rejections != after_rejection.deferred_redraw_rejections) {
+        return fail("rejected deferred redraw spun at idle");
     }
     if (!read_pixel(application, window, {16.0f, 12.0f}) ||
         PlatformTestAccess::scene_diagnostics(window).scene_builds <=
-            rejected.scene_builds) {
+            before_rejection.scene_builds + 1) {
         return fail("external expose did not recover rejected redraw");
     }
 
