@@ -5,6 +5,7 @@
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
@@ -509,6 +510,12 @@ void draw_resolved_image(Painter& painter,
            data->raw_image->alphaType() == kUnpremul_SkAlphaType;
 }
 
+[[nodiscard]] bool image_color_backing_is_srgb_for_test(const Image& image) noexcept {
+    const auto& data = ImageAccess::data(image);
+    return data && data->image && data->image->colorSpace() &&
+           data->image->colorSpace()->isSRGB();
+}
+
 [[nodiscard]] std::size_t
 image_texture_color_materialization_call_count_for_test() noexcept {
     return g_image_texture_color_materialization_calls;
@@ -740,30 +747,41 @@ Image Image::decode(std::span<const std::byte> encoded) {
         nullptr, SkImage::kDisallow_CachingHint);
     if (!raw_image) return {};
 
-    // Preserve the historical Color contract by deriving a premultiplied raster
-    // from the already-decoded pixels. This is a pixel-format conversion, not a
-    // second encoded decode. It keeps linear filtering/compositing coverage-safe
-    // while the raw sibling retains RGB values independently from alpha.
+    // Preserve the historical Color contract by deriving a color-managed
+    // premultiplied raster from the already-decoded pixels. This is a pixel
+    // conversion, not a second encoded decode. Untagged encoded images are
+    // explicitly interpreted as sRGB so Color participates in Skia's color
+    // transforms, while raw_image keeps the codec-decoded numeric payload for
+    // TextureInterpretation::Data.
     sk_sp<SkImage> color_image = raw_image;
-    if (raw_image->alphaType() == kUnpremul_SkAlphaType) {
-        SkBitmap premul;
-        const auto premul_info =
-            raw_image->imageInfo().makeAlphaType(kPremul_SkAlphaType);
-        if (!premul.tryAllocPixels(premul_info)) return {};
+    const bool needs_premultiplication =
+        raw_image->alphaType() == kUnpremul_SkAlphaType;
+    const bool needs_srgb_fallback = raw_image->colorSpace() == nullptr;
+    if (needs_premultiplication || needs_srgb_fallback) {
+        auto color_info = raw_image->imageInfo();
+        if (needs_premultiplication) {
+            color_info = color_info.makeAlphaType(kPremul_SkAlphaType);
+        }
+        if (needs_srgb_fallback) {
+            color_info = color_info.makeColorSpace(SkColorSpace::MakeSRGB());
+        }
 
-        SkPixmap premul_pixels;
-        if (!premul.peekPixels(&premul_pixels)) return {};
+        SkBitmap color_bitmap;
+        if (!color_bitmap.tryAllocPixels(color_info)) return {};
+
+        SkPixmap color_pixels;
+        if (!color_bitmap.peekPixels(&color_pixels)) return {};
         if (!raw_image->readPixels(
                 nullptr,
-                premul_pixels,
+                color_pixels,
                 0,
                 0,
                 SkImage::kDisallow_CachingHint)) {
             return {};
         }
 
-        premul.setImmutable();
-        color_image = SkImages::RasterFromBitmap(premul);
+        color_bitmap.setImmutable();
+        color_image = SkImages::RasterFromBitmap(color_bitmap);
         if (!color_image) return {};
     }
 
