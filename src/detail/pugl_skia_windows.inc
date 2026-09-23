@@ -612,6 +612,7 @@ struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     }
 };
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
 bool detail::PlatformTestAccess::request_gpu_readback(
     StandaloneWindow& window,
     Point logical_point) noexcept {
@@ -626,6 +627,7 @@ detail::PlatformTestAccess::take_gpu_readback(
     return window.impl_->core->take_gpu_readback();
 }
 
+#endif
 StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>(
           application.impl_ ? application.impl_->wake_backend : nullptr)) {

@@ -95,10 +95,13 @@ public:
         interface_.reset();
         width_ = 0;
         height_ = 0;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
         readback_result_.reset();
+#endif
     }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     void request_readback(int x, int y) noexcept {
         readback_x_ = x;
         readback_y_ = y;
@@ -111,6 +114,7 @@ public:
         readback_result_.reset();
         return result;
     }
+#endif
 
     bool render(UI& ui,
                 PlatformServices& services,
@@ -177,6 +181,7 @@ public:
         canvas->restore();
         context_->flushAndSubmit(surface_.get());
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         if (readback_pending_) {
             readback_pending_ = false;
             const int x = std::clamp(readback_x_, 0, width_ - 1);
@@ -198,6 +203,7 @@ public:
                     rgba[0], rgba[1], rgba[2], rgba[3]};
             }
         }
+#endif
         return true;
     }
 
@@ -207,10 +213,12 @@ private:
     sk_sp<SkSurface> surface_;
     int width_{};
     int height_{};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     int readback_x_{};
     int readback_y_{};
     bool readback_pending_{};
     std::optional<PlatformReadbackPixel> readback_result_;
+#endif
 };
 
 } // namespace detail

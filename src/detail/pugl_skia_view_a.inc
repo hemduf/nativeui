@@ -205,6 +205,7 @@ public:
         return view_ ? static_cast<NativeViewHandle>(puglGetNativeView(view_)) : 0;
     }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     [[nodiscard]] bool request_gpu_readback(Point logical_point) noexcept {
         if (!view_ ||
             !std::isfinite(logical_point.x) ||
@@ -226,6 +227,7 @@ public:
     take_gpu_readback() noexcept {
         return renderer_.take_readback();
     }
+#endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
     bool set_title(std::string_view title) {

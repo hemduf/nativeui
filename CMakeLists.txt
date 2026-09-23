@@ -161,6 +161,13 @@ if(NATIVEUI_BUILD_PLATFORM)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
+  if(NATIVEUI_BUILD_TESTS)
+    # Source-private renderer readback used only by T087 CPU/GPU parity tests.
+    # Installed/package platform sources compile without this seam.
+    target_compile_definitions(nativeui PRIVATE
+      NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS=1
+    )
+  endif()
   if(WIN32)
     # windows.h defines function-like min/max macros unless NOMINMAX is set.
     # The C++ platform bridge intentionally uses std::min/std::max throughout;
