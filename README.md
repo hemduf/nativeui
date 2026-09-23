@@ -124,7 +124,7 @@ Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)`
 
 The project bootstraps CPM.cmake, then:
 
-1. fetches Pugl source at the pinned commit `cde238e51fe79500e0289fa81220c6f1c5d7043c`; Windows/Linux/WebAssembly compile the generic platform sources for their backend, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
+1. fetches Pugl source at the pinned commit `94982803985eefcbaeb0a1c8d0136ec862d7cb59`; Windows/Linux/WebAssembly compile the generic platform sources for their backend, while macOS shares only Pugl's portable C core and compiles the Cocoa/OpenGL bridge per final consumer;
 2. downloads the pinned `skia-builder` `chrome/m153` release ZIP for the current platform and imports its static `skia` library.
 
 The Skia artifacts are checksum-pinned. Pugl is source-pinned by commit. No GN/Ninja Skia build is part of NativeUI.

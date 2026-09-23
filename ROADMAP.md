@@ -190,6 +190,7 @@ state/safety:
 pre-freeze public additions:
   T173(done) -> T174(done)
   T175(done) -----------------------------------------> current public/package surface
+  T177(done) -----------------------------------------> M2 raw touch/pen contact routing
 
 v1 critical path:
   T070 -> T122/docs closeout -> T071 -> v1.0.0
@@ -219,7 +220,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 2 — Input, focus and gestures
 
-**Complete for the v1 input surface.** Event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop are delivered. T173 completed public ASCII A-Z key exposure; T125 finalized exception-safe dispatch/reconciliation semantics; T174 provides the per-UI fallback for otherwise-unhandled raw KeyDown shortcuts; T175 adds first-class right-button ContextMenu delivery with capture-safe routing.
+**Complete for the v1 input surface, with T177's raw multi-touch extension delivered.** Event propagation, focus scopes/restoration, pointer capture, wheel normalization, gestures, commands and drag/drop are delivered. T173 completed public ASCII A-Z key exposure; T125 finalized exception-safe dispatch/reconciliation semantics; T174 provides the per-UI fallback for otherwise-unhandled raw KeyDown shortcuts; T175 adds first-class right-button ContextMenu delivery with capture-safe routing. T177 carries stable per-contact touch/pen identity through Pugl and NativeUI, with independent capture, cancellation and reentrant generation recovery.
 
 ### Milestone 3 — Rendering and graphics
 
@@ -239,7 +240,7 @@ post-1.0 / later-release work already landed:
 
 ### Milestone 7 — Platform and embedded robustness
 
-**Complete for the current v1 platform surface.** T043 resize/scale, T044 pointer capture, T053 macOS Objective-C runtime identity, T060 Application ownership, T064 DesktopServices, T065 Dispatcher, T066 window controls, T072 Linux D-Bus and T175 normalized secondary-button ContextMenu delivery are delivered. T125/T126/T128/T130/T132 close the relevant failure boundaries.
+**Complete for the current v1 platform surface.** T043 resize/scale, T044 pointer capture, T053 macOS Objective-C runtime identity, T060 Application ownership, T064 DesktopServices, T065 Dispatcher, T066 window controls, T072 Linux D-Bus and T175 normalized secondary-button ContextMenu delivery are delivered. T177 adds Pugl raw touch/pen event translation and contact-aware retained routing without introducing a platform type in public NativeUI headers. T125/T126/T128/T130/T132 close the relevant failure boundaries.
 
 ### Milestone 8 — Packaging, virtualization, overlays and release convergence
 
@@ -266,6 +267,7 @@ The remaining v1 sequence is:
 - **T173 / #401:** complete public ASCII A-Z key exposure and routing coverage.
 - **T174 / #409:** per-UI fallback for unhandled raw KeyDown shortcuts on final T125 semantics.
 - **T175 / #428:** first-class ContextMenu input delivery from Pugl's normalized secondary button, with focus invariance and capture-safe exception recovery.
+- **T177 / #442 / PR #443:** backend-neutral raw touch/pen metadata, Pugl down/move/up/cancel translation, bounded per-Tree contact capture and per-view pointer-position tracking. Nested dispatch keeps each borrowed `InputContext` bound to its own contact/generation; terminal and throwing cleanup retire only the affected interaction. The required `nativeui_example_t177_multitouch_pointer` executable and self-test demonstrate simultaneous contacts. This ticket has no dependency on the post-1.0 effects line.
 
 ## Completed post-1.0 foundations
 
@@ -291,4 +293,4 @@ The remaining v1 sequence is:
 
 ## Release policy
 
-T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077, T079, T080, T081, T082, T083, T084, T085, T086, T087 and T098 are merged as later-release rendering foundations outside the v1 critical path. T078 remains Ready on the effects line. Retained per-view shader/resource caching remains deferred to T097. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077, T078, T079, T080, T081, T082, T083, T084, T085, T086, T087, T094 and T098 are merged as later-release rendering foundations outside the v1 critical path; T095 is the next Ready effects ticket and T096 awaits T095. Retained per-view shader/resource caching remains deferred to T097. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

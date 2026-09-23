@@ -4,8 +4,8 @@
 
 ## Current session handoff
 
-- T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T096 waits for T095.
-- Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds. This two-file documentation change has no new product build or test result.
+- T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T177's local 173/173 macOS validation is recorded below; T096 waits for T095.
+- Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds.
 
 ## Mission and invariants
 
@@ -32,7 +32,7 @@ Non-negotiable rules:
 
 ## Pinned dependencies
 
-- Pugl: `hemduf/pugl` commit `cde238e51fe79500e0289fa81220c6f1c5d7043c` from `cmake/Dependencies.cmake`; existing build caches may still hold an older pin.
+- Pugl: `hemduf/pugl` commit `94982803985eefcbaeb0a1c8d0136ec862d7cb59` (raw touch/pen pointer API).
 - Skia: `hemduf/skia-builder` `chrome/m153`, rebuilt from commit `f21749b18c14976415ec30d068c3a13e8456c3a1` with PartitionAlloc disabled for self-contained static consumers; forked from `olilarkin/skia-builder`.
 - macOS: universal GPU Release asset.
 - Windows: x64 MSVC, `/MD` default and `/MT` selectable.
@@ -195,6 +195,8 @@ Exact-head CI #1916, Package Contracts #332, T050 #209 and T072 #401 are green. 
 
 T094 / #178 / PR #450 is Done: retained dirty-region traversal consumes published visual bounds and conservatively falls back when culling is uncertain. Exact frozen source head `43cee6a785662a7577c5cbb85b40c662553ca2bb` passed CI #2179, WebAssembly #97, Package #529, T050 #436, T072 #571, T042 #864 and T052 #588. Final review found no Blocking/Important issue. T095 is independently Ready; T096 awaits T095.
 
+T177 / #442 / PR #443 delivers raw touch/pen contact metadata and Pugl translation with bounded per-Tree capture and per-view positions. The T177 feature example is `nativeui_example_t177_multitouch_pointer`. Reentrant `InputContext` actions keep their original contact/generation, and terminal/throwing cleanup retires the complete old interaction without erasing a newer same-ID contact. After merging T094, the local macOS Release build passed serially with the exact Pugl pin and no warnings; 168/173 CTests passed in the sandbox, and the five known AppKit window tests passed in the graphical session (effective 173/173). Exact-head CI/review evidence is tracked in PR #443. The next independent Ready ticket on the effects line is T095; T096 awaits it.
+
 ### Remaining v1 work
 
 - **T069 / #81 — Deprecated.** It is no longer a scheduler/merge gate. Current `main` public/package contracts and exact-head qualification are authoritative.
@@ -203,7 +205,7 @@ T094 / #178 / PR #450 is Done: retained dirty-region traversal consumes publishe
 Current path:
 
 ```text
-T123–T132(done) + T173(done) + T174(done) + T175(done)
+T123–T132(done) + T173(done) + T174(done) + T175(done) + T177(done)
                          |
                          v
 T070 -> T122/docs -> T071 -> v1.0.0
@@ -305,6 +307,6 @@ Recovery sequence:
 1. Execute T070 reference application/Getting Started against the current validated public/package surface.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
 3. Run T071 on one exact release-candidate SHA.
-4. T094 / #178 / PR #450 is Done; T095 / #179 is independently Ready and T096 / #180 remains blocked on T095. Finish T177 / #442 / PR #443 after exact-head review and final candidate CI.
+4. T094 / #178 / PR #450 and T177 / #442 / PR #443 are complete; T095 / #179 is independently Ready and T096 / #180 remains blocked on T095.
 5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line; retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.

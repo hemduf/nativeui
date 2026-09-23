@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,6 +84,34 @@ struct CompositionEvent {
     std::size_t selection_bytes{};
 };
 
+using PointerId = std::uint32_t;
+
+enum class PointerType {
+    Unknown,
+    Mouse,
+    Touch,
+    Pen,
+    Eraser
+};
+
+struct PointerContact {
+    PointerId id{};
+    PointerType type{PointerType::Unknown};
+    float pressure{std::numeric_limits<float>::quiet_NaN()};
+    Size contact_size{
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::quiet_NaN()};
+    bool primary{};
+    bool coalesced{};
+    bool predicted{};
+
+    [[nodiscard]] constexpr bool tracked() const noexcept { return id != 0U; }
+    [[nodiscard]] constexpr bool hover_capable() const noexcept {
+        return type == PointerType::Mouse ||
+               (type == PointerType::Unknown && !tracked());
+    }
+};
+
 enum class InputType {
     None,
     KeyDown,
@@ -146,6 +175,9 @@ struct InputEvent {
     // Platform-normalized primary accelerator: Command on macOS, Ctrl on
     // Windows/Linux. Platform adapters set this explicitly.
     bool primary{};
+    // Appended to preserve the field order of all pre-existing aggregate
+    // initializers. Legacy pointer events leave this at its id-0 default.
+    PointerContact pointer{};
 
     [[nodiscard]] bool primary_shortcut() const noexcept { return primary; }
     [[nodiscard]] bool offers_drop_type(std::string_view requested_type) const noexcept {

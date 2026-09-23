@@ -6,40 +6,169 @@
         return EventResult::Ignored;
     }
 
+    static constexpr std::size_t kMaxTrackedPointers = 16U;
+
     struct PointerCaptureState {
+        PointerId pointer{};
         Node* node{};
         NodeId owner{kInvalidNodeId};
+        std::uint64_t interaction_token{};
+        bool cancelling{};
     };
 
-    [[nodiscard]] Node* pointer_capture_owner() noexcept {
-        if (!pointer_capture_.node) return nullptr;
-        if (pointer_capture_.owner == kInvalidNodeId ||
-            pointer_capture_.node->id != pointer_capture_.owner) {
-            clear_pointer_capture();
+    struct PointerInteractionState {
+        PointerId pointer{};
+        std::uint64_t dispatch_token{};
+    };
+
+    [[nodiscard]] std::size_t pointer_capture_index(PointerId pointer) const noexcept {
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            if (pointer_captures_[i].pointer == pointer) return i;
+        }
+        return pointer_capture_count_;
+    }
+
+    [[nodiscard]] Node* pointer_capture_owner(PointerId pointer) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_) return nullptr;
+        auto& capture = pointer_captures_[index];
+        if (!capture.node || capture.owner == kInvalidNodeId ||
+            capture.node->id != capture.owner) {
+            clear_pointer_capture(pointer);
             return nullptr;
         }
-        return pointer_capture_.node;
+        return capture.node;
     }
 
-    void set_pointer_capture(Node& node) noexcept {
-        if (pointer_capture_blocked_ || dynamic_teardown_quarantines(&node)) return;
-        if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) return;
-
-        if (pointer_capture_.node) clear_pointer_capture();
-        pointer_capture_ = PointerCaptureState{&node, node.id};
-        if (active_platform_) active_platform_->begin_pointer_capture();
+    [[nodiscard]] std::uint64_t pointer_capture_interaction_token(
+        PointerId pointer) const noexcept {
+        const auto index = pointer_capture_index(pointer);
+        return index == pointer_capture_count_
+            ? 0U
+            : pointer_captures_[index].interaction_token;
     }
 
-    void release_pointer_capture(Node& node) noexcept {
-        if (pointer_capture_.node == &node && pointer_capture_.owner == node.id) {
-            clear_pointer_capture();
+    [[nodiscard]] std::optional<PointerId> first_pointer_capture_id() noexcept {
+        std::size_t i = 0U;
+        while (i < pointer_capture_count_) {
+            const auto pointer = pointer_captures_[i].pointer;
+            if (!pointer_capture_owner(pointer)) continue;
+
+            const auto index = pointer_capture_index(pointer);
+            if (index != pointer_capture_count_ &&
+                (pointer == 0U || !pointer_captures_[index].cancelling)) {
+                return pointer;
+            }
+            ++i;
         }
+        return std::nullopt;
+    }
+
+    template <class Predicate>
+    [[nodiscard]] std::optional<PointerId> find_pointer_capture_if(Predicate&& predicate) {
+        std::size_t i = 0U;
+        while (i < pointer_capture_count_) {
+            const auto pointer = pointer_captures_[i].pointer;
+            if (auto* owner = pointer_capture_owner(pointer)) {
+                if (predicate(owner)) return pointer;
+                ++i;
+            }
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool node_has_pointer_capture(NodeId owner) const noexcept {
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            const auto& capture = pointer_captures_[i];
+            if (capture.owner == owner && capture.node && capture.node->id == owner) return true;
+        }
+        return false;
+    }
+
+    void set_pointer_capture(
+        Node& node,
+        PointerId pointer,
+        std::uint64_t interaction_generation) noexcept {
+        // InputContext can outlive a nested dispatch on the same callback stack.
+        // Never let an older frame overwrite capture owned by a newer contact
+        // generation that reused the same pointer ID.
+        if (pointer_interaction_dispatch_token(pointer) != interaction_generation ||
+            pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) {
+            return;
+        }
+        // A callback for an older frame can still hold its InputContext while
+        // a nested terminal callback for this same contact is running. Do not
+        // let it renew capture between terminal entry and token-matched cleanup.
+        if (active_input_callback_pointer_id_ == pointer &&
+            (active_input_callback_type_ == InputType::PointerUp ||
+             active_input_callback_type_ == InputType::PointerCancel ||
+             active_input_callback_type_ == InputType::ContextMenu)) {
+            return;
+        }
+        const auto index = pointer_capture_index(pointer);
+        if (index != pointer_capture_count_) {
+            auto& capture = pointer_captures_[index];
+            if (!capture.cancelling &&
+                capture.node == &node &&
+                capture.owner == node.id) {
+                capture.interaction_token = interaction_generation;
+                return;
+            }
+            clear_pointer_capture(pointer);
+        }
+        if (pointer_capture_count_ >= pointer_captures_.size()) return;
+        pointer_captures_[pointer_capture_count_++] = {
+            pointer, &node, node.id, interaction_generation};
+        if (pointer == 0U && active_platform_) active_platform_->begin_pointer_capture();
+    }
+
+    void release_pointer_capture(
+        Node& node,
+        PointerId pointer,
+        std::uint64_t interaction_generation) noexcept {
+        // Symmetric with set_pointer_capture(): a stale outer callback must not
+        // release a newer capture created reentrantly with the same pointer ID.
+        if (pointer_interaction_dispatch_token(pointer) != interaction_generation) {
+            return;
+        }
+        const auto index = pointer_capture_index(pointer);
+        if (index != pointer_capture_count_ &&
+            pointer_captures_[index].node == &node &&
+            pointer_captures_[index].owner == node.id) {
+            clear_pointer_capture(pointer);
+        }
+    }
+
+    void clear_pointer_capture(PointerId pointer) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_) return;
+        const bool release_platform = pointer == 0U;
+        --pointer_capture_count_;
+        if (index != pointer_capture_count_) {
+            pointer_captures_[index] = pointer_captures_[pointer_capture_count_];
+        }
+        pointer_captures_[pointer_capture_count_] = {};
+        if (release_platform && active_platform_) active_platform_->end_pointer_capture();
+    }
+
+    void clear_pointer_capture_if_interaction(
+        PointerId pointer, std::uint64_t interaction_token) noexcept {
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_ ||
+            pointer_captures_[index].interaction_token != interaction_token) {
+            return;
+        }
+        clear_pointer_capture(pointer);
     }
 
     void clear_pointer_capture() noexcept {
-        if (!pointer_capture_.node) return;
-        pointer_capture_ = {};
-        if (active_platform_) active_platform_->end_pointer_capture();
+        bool release_platform = false;
+        for (std::size_t i = 0; i < pointer_capture_count_; ++i) {
+            release_platform = release_platform || pointer_captures_[i].pointer == 0U;
+            pointer_captures_[i] = {};
+        }
+        pointer_capture_count_ = 0U;
+        if (release_platform && active_platform_) active_platform_->end_pointer_capture();
     }
 
     enum class PointerHoverTransitionPhase {
@@ -67,7 +196,7 @@
     }
 
     [[nodiscard]] InputContext prepare_input_context(
-        Node& node, PlatformServices& platform) {
+        Node& node, const InputEvent& event, PlatformServices& platform) {
         if (fail_next_input_context_preparation_for_testing_) {
             fail_next_input_context_preparation_for_testing_ = false;
             throw std::bad_alloc{};
@@ -77,25 +206,45 @@
             platform,
             paint_invalidator(node),
             layout_invalidator(node),
-            [this, &node] { set_pointer_capture(node); },
-            [this, &node] { release_pointer_capture(node); }};
+            {event.pointer.id,
+             pointer_interaction_dispatch_token(event.pointer.id),
+             event.type != InputType::PointerUp &&
+                 event.type != InputType::PointerCancel &&
+                 event.type != InputType::ContextMenu},
+            // The action is owned by this callback context. The closures keep
+            // their two-pointer small-buffer representation, while reentrant
+            // dispatch cannot replace the outer context's pointer identity.
+            [this, &node](const InputContext::PointerAction& action) {
+                set_pointer_capture(node, action.id, action.interaction_token);
+            },
+            [this, &node](const InputContext::PointerAction& action) {
+                release_pointer_capture(node, action.id, action.interaction_token);
+            }};
     }
 
     [[nodiscard]] EventResult send_prepared_to(
         Node& node, const InputEvent& event, InputContext& context) {
+        const auto previous_type = active_input_callback_type_;
+        const auto previous_pointer = active_input_callback_pointer_id_;
+        active_input_callback_type_ = event.type;
+        active_input_callback_pointer_id_ = event.pointer.id;
         try {
-            return node.component->input(event, context);
+            const auto result = node.component->input(event, context);
+            active_input_callback_type_ = previous_type;
+            active_input_callback_pointer_id_ = previous_pointer;
+            return result;
         } catch (...) {
-            if (event.type == InputType::PointerDown ||
-                event.type == InputType::PointerUp ||
-                event.type == InputType::PointerCancel) {
-                // Component input may acquire or retain capture before throwing.
-                // Framework-only cleanup is noexcept and performs no component
-                // callback, so later pointer input starts from a coherent idle
-                // interaction instead of inheriting a failed native capture.
-                clear_pointer_capture();
-                pointer_interaction_active_ = false;
+            if (event.type == InputType::PointerDown) {
+                // Only unwind state created by this dispatch. A callback may
+                // recursively deliver a newer PointerDown with the same ID;
+                // its capture/interaction must survive the older frame.
+                clear_pointer_capture_if_interaction(
+                    event.pointer.id, active_input_dispatch_token_);
+                end_pointer_interaction_if_token(
+                    event.pointer.id, active_input_dispatch_token_);
             }
+            active_input_callback_type_ = previous_type;
+            active_input_callback_pointer_id_ = previous_pointer;
             throw;
         }
     }
@@ -211,7 +360,7 @@
                         // retryable; after cursor advance only Component::input is
                         // allowed to throw, so begun callbacks remain at-most-once.
                         const auto leave = pointer_hover_transition_stack_[index].leave;
-                        auto context = prepare_input_context(*current, platform);
+                        auto context = prepare_input_context(*current, leave, platform);
                         pointer_hover_transition_stack_[index].cursor = following;
                         (void)send_prepared_to(*current, leave, context);
                         cursor = following;
@@ -373,56 +522,93 @@
 
     [[nodiscard]] EventResult route_without_pointer_capture(
         Node& target, const InputEvent& event, PlatformServices& platform) {
-        // Some targeted events are explicitly not allowed to establish pointer
-        // capture. Preserve an outer guard across reentrant dispatch and restore
-        // it exactly even when application input code throws.
-        const bool previous_blocked = pointer_capture_blocked_;
-        pointer_capture_blocked_ = true;
-        try {
-            const auto result = route_from(target, event, platform);
-            pointer_capture_blocked_ = previous_blocked;
-            return result;
-        } catch (...) {
-            pointer_capture_blocked_ = previous_blocked;
-            throw;
-        }
+        // Capture permission is local to the InputContext for this event, so a
+        // nested newer event with the same pointer ID is not accidentally
+        // blocked by the outer cancellation/context-menu frame.
+        return route_from(target, event, platform);
     }
 
     [[nodiscard]] EventResult cancel_pointer_capture(
         PlatformServices& platform, InputEvent event = InputEvent{}) {
-        auto* owner = pointer_capture_owner();
-        if (!owner) return EventResult::Ignored;
+        const auto pointer = event.pointer.id;
+        auto* owner = pointer_capture_owner(pointer);
+        const auto capture_token = pointer_capture_interaction_token(pointer);
+        const auto interaction_token = pointer_interaction_dispatch_token(pointer);
+        if (!owner) {
+            end_pointer_interaction_if_token(pointer, interaction_token);
+            return EventResult::Ignored;
+        }
+
+        const auto index = pointer_capture_index(pointer);
+        if (index == pointer_capture_count_) return EventResult::Ignored;
+        // Preserve the legacy id=0 nested-cancel contract while making raw
+        // tracked contacts idempotent under cancellation re-entry.
+        if (pointer != 0U && pointer_captures_[index].cancelling) {
+            return EventResult::Ignored;
+        }
+        pointer_captures_[index].cancelling = true;
 
         event.type = InputType::PointerCancel;
-        // Keep the owner recorded while routing so release_pointer() remains
-        // idempotent, but prevent a cancellation handler from re-capturing.
-        // Terminate the stale capture even when application code throws.
-        // Cleanup performs no component callback, so the original exception can
-        // propagate to the C++ caller while later input remains usable.
         try {
             const auto result = route_without_pointer_capture(*owner, event, platform);
-            clear_pointer_capture();
+            clear_pointer_capture_if_interaction(pointer, capture_token);
+            end_pointer_interaction_if_token(pointer, interaction_token);
             return result;
         } catch (...) {
-            clear_pointer_capture();
+            clear_pointer_capture_if_interaction(pointer, capture_token);
+            end_pointer_interaction_if_token(pointer, interaction_token);
             throw;
         }
     }
 
+    [[nodiscard]] EventResult cancel_all_pointer_captures(PlatformServices& platform) {
+        // Keep the historical id=0 nested-cancellation behavior: legacy mouse
+        // callbacks may explicitly request another observable cancel. Tracked
+        // raw contacts mark their in-flight capture as cancelling, so a nested
+        // global pass skips only that contact while still draining siblings.
+        const bool previous_barrier = pointer_capture_barrier_;
+        pointer_capture_barrier_ = true;
+
+        EventResult result = EventResult::Ignored;
+        std::exception_ptr first_error;
+        while (const auto pointer = first_pointer_capture_id()) {
+            InputEvent event{};
+            event.pointer.id = *pointer;
+            try {
+                const auto one = cancel_pointer_capture(platform, event);
+                if (handled(one)) result = one;
+            } catch (...) {
+                if (!first_error) first_error = std::current_exception();
+            }
+        }
+
+        clear_pointer_interactions();
+        pointer_capture_barrier_ = previous_barrier;
+        if (first_error) std::rethrow_exception(first_error);
+        return result;
+    }
+
     [[nodiscard]] EventResult send_to(
         Node& node, const InputEvent& event, PlatformServices& platform) {
-        auto context = prepare_input_context(node, platform);
+        auto context = prepare_input_context(node, event, platform);
         return send_prepared_to(node, event, context);
     }
 
     std::unique_ptr<Node> root_;
     std::vector<Node*> focusables_;
     std::size_t focused_index_{};
-    PointerCaptureState pointer_capture_{};
+    std::array<PointerCaptureState, kMaxTrackedPointers> pointer_captures_{};
+    std::size_t pointer_capture_count_{};
     Node* pointer_hover_target_{};
     detail::OverlayService* overlay_service_{};
+    std::array<PointerInteractionState, kMaxTrackedPointers> active_pointer_interactions_{};
+    std::size_t active_pointer_interaction_count_{};
     bool pointer_interaction_active_{};
-    bool pointer_capture_blocked_{};
+    std::uint64_t next_input_dispatch_token_{1U};
+    std::uint64_t active_input_dispatch_token_{};
+    InputType active_input_callback_type_{InputType::None};
+    PointerId active_input_callback_pointer_id_{};
+    bool pointer_capture_barrier_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};

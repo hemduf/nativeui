@@ -79,7 +79,11 @@ jobs:
         run: |
           # Hosted images include unrelated third-party apt sources. A stale
           # Chrome index must not turn a NativeUI clean-bootstrap gate red.
-          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
+          for source in /etc/apt/sources.list.d/*; do
+            if [ -f "${source}" ] && grep -q 'dl.google.com/linux/chrome' "${source}"; then
+              sudo rm -f "${source}"
+            fi
+          done
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
 
@@ -160,7 +164,11 @@ jobs:
       - name: Install benchmark dependencies
         shell: bash
         run: |
-          grep -rl 'dl.google.com/linux/chrome' /etc/apt/sources.list.d 2>/dev/null | xargs -r sudo rm -f
+          for source in /etc/apt/sources.list.d/*; do
+            if [ -f "${source}" ] && grep -q 'dl.google.com/linux/chrome' "${source}"; then
+              sudo rm -f "${source}"
+            fi
+          done
           sudo apt-get update
           sudo apt-get install -y ninja-build libfontconfig1-dev
 

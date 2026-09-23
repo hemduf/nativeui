@@ -24,7 +24,7 @@
 
         focus_active_ = false;
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         focus_structure_dirty_ = true;
         pointer_passthrough_dynamic_root_ =
             dynamic_source(*root_) != nullptr &&
@@ -49,7 +49,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             active_ = false;
             availability_structure_dirty_ = false;
@@ -102,7 +102,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
@@ -129,7 +129,7 @@
             focus_active_ = false;
             clear_pointer_capture();
             pointer_hover_target_ = nullptr;
-            pointer_interaction_active_ = false;
+            clear_pointer_interactions();
             active_platform_ = nullptr;
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
@@ -171,7 +171,7 @@
         InputEvent leave{};
         leave.type = InputType::PointerLeave;
         capture_error([&] { (void)clear_pointer_hover(leave, platform); });
-        capture_error([&] { (void)cancel_pointer_capture(platform); });
+        capture_error([&] { (void)cancel_all_pointer_captures(platform); });
 
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
@@ -184,7 +184,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         active_platform_ = nullptr;
 
         capture_error([&] { deactivate_node(*root_); });
@@ -219,7 +219,7 @@
         focus_active_ = false;
         clear_pointer_capture();
         pointer_hover_target_ = nullptr;
-        pointer_interaction_active_ = false;
+        clear_pointer_interactions();
         active_platform_ = nullptr;
         if (active_) {
             capture_error([&] { deactivate_node(*root_); });
@@ -297,8 +297,66 @@
         global_key_down_handler_ = std::move(handler);
     }
 
-    void begin_pointer_interaction() noexcept { pointer_interaction_active_ = true; }
-    void end_pointer_interaction() noexcept { pointer_interaction_active_ = false; }
+    [[nodiscard]] std::size_t pointer_interaction_index(
+        PointerId pointer) const noexcept {
+        for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
+            if (active_pointer_interactions_[i].pointer == pointer) return i;
+        }
+        return active_pointer_interaction_count_;
+    }
+
+    [[nodiscard]] std::uint64_t pointer_interaction_dispatch_token(
+        PointerId pointer) const noexcept {
+        const auto index = pointer_interaction_index(pointer);
+        return index == active_pointer_interaction_count_
+            ? 0U
+            : active_pointer_interactions_[index].dispatch_token;
+    }
+
+    void begin_pointer_interaction(PointerId pointer = 0U) noexcept {
+        const auto index = pointer_interaction_index(pointer);
+        if (index != active_pointer_interaction_count_) {
+            active_pointer_interactions_[index].dispatch_token =
+                active_input_dispatch_token_;
+            pointer_interaction_active_ = true;
+            return;
+        }
+        if (active_pointer_interaction_count_ < active_pointer_interactions_.size()) {
+            active_pointer_interactions_[active_pointer_interaction_count_++] = {
+                pointer, active_input_dispatch_token_};
+        }
+        pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
+    }
+
+    void end_pointer_interaction(PointerId pointer = 0U) noexcept {
+        const auto index = pointer_interaction_index(pointer);
+        if (index == active_pointer_interaction_count_) return;
+        --active_pointer_interaction_count_;
+        if (index != active_pointer_interaction_count_) {
+            active_pointer_interactions_[index] =
+                active_pointer_interactions_[active_pointer_interaction_count_];
+        }
+        active_pointer_interactions_[active_pointer_interaction_count_] = {};
+        pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
+    }
+
+    void end_pointer_interaction_if_token(
+        PointerId pointer, std::uint64_t dispatch_token) noexcept {
+        const auto index = pointer_interaction_index(pointer);
+        if (index == active_pointer_interaction_count_ ||
+            active_pointer_interactions_[index].dispatch_token != dispatch_token) {
+            return;
+        }
+        end_pointer_interaction(pointer);
+    }
+
+    void clear_pointer_interactions() noexcept {
+        for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
+            active_pointer_interactions_[i] = {};
+        }
+        active_pointer_interaction_count_ = 0U;
+        pointer_interaction_active_ = false;
+    }
 
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
@@ -311,9 +369,18 @@
         if (active_) sync_focus_structure(platform);
 
         const auto previous_dispatch_depth = dispatch_depth_;
+        const auto previous_input_dispatch_token = active_input_dispatch_token_;
+        if (next_input_dispatch_token_ == 0U) next_input_dispatch_token_ = 1U;
+        active_input_dispatch_token_ = next_input_dispatch_token_++;
+        if (next_input_dispatch_token_ == 0U) next_input_dispatch_token_ = 1U;
+
         dispatch_depth_ = previous_dispatch_depth + 1;
         bool pointer_route_committed = false;
-        auto finish = [this, &platform, previous_dispatch_depth](EventResult result) {
+        auto finish = [this,
+                       &platform,
+                       previous_dispatch_depth,
+                       previous_input_dispatch_token](EventResult result) {
+            active_input_dispatch_token_ = previous_input_dispatch_token;
             dispatch_depth_ = previous_dispatch_depth;
             if (previous_dispatch_depth == 0) {
                 flush_dynamic_mutations();
@@ -401,19 +468,52 @@
             }
 
             if (event.type == InputType::PointerCancel) {
-                const auto result = cancel_pointer_capture(platform, event);
-                pointer_interaction_active_ = false;
+                // cancel_pointer_capture() owns terminal cleanup even if the
+                // callback throws. Mark this before entering user code so the
+                // generic unwind cannot erase a newer reentrant contact.
                 pointer_route_committed = true;
+                const auto result = cancel_pointer_capture(platform, event);
                 return finish(result);
             }
 
             if (event.type == InputType::PointerDown) {
-                pointer_interaction_active_ = true;
-                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
+                if (pointer_capture_barrier_) {
+                    // cancel_pointer() is a teardown barrier. A cancellation
+                    // callback may re-enter dispatch, but a nested PointerDown
+                    // must not recursively cancel the capture currently being
+                    // torn down or publish a new interaction.
+                    end_pointer_interaction(event.pointer.id);
+                    pointer_route_committed = true;
+                    return finish(EventResult::Ignored);
+                }
+                if (pointer_capture_owner(event.pointer.id)) {
+                    // If stale-capture cancellation throws, that helper has
+                    // already restored its own state and must not be followed
+                    // by generic cleanup that could erase a nested newer event.
+                    const auto stale_interaction_token =
+                        pointer_interaction_dispatch_token(event.pointer.id);
+                    pointer_route_committed = true;
+                    (void)cancel_pointer_capture(platform, event);
+                    pointer_route_committed = false;
+
+                    // The cancellation callback may synchronously deliver a
+                    // newer PointerDown that reuses this pointer ID. In that
+                    // case the newer generation is authoritative: do not let
+                    // this older outer Down overwrite its interaction/capture.
+                    const auto current_interaction_token =
+                        pointer_interaction_dispatch_token(event.pointer.id);
+                    if (current_interaction_token != 0U &&
+                        current_interaction_token != stale_interaction_token) {
+                        return finish(EventResult::Ignored);
+                    }
+                }
+                begin_pointer_interaction(event.pointer.id);
 
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
+                if (event.pointer.hover_capable()) {
+                    (void)update_pointer_hover_target(target, event, platform);
+                }
                 if (target) {
                     focus_nearest_ancestor(target);
                     const auto result = route_from(*target, event, platform);
@@ -425,13 +525,19 @@
             }
 
             if (event.type == InputType::ContextMenu) {
-                // Same targeting as a press but without keyboard focus: an
-                // active capture is cancelled so a menu request can never
-                // coexist with a stale drag, then the hit component is
-                // targeted. Context-menu handlers are not allowed to establish
-                // a replacement capture; ignored events still bubble normally.
-                if (pointer_capture_.node) (void)cancel_pointer_capture(platform);
-                pointer_interaction_active_ = false;
+                // Same targeting as a press but without keyboard focus. The
+                // existing interaction is terminal for this frame, but a
+                // callback may recursively begin a newer interaction with the
+                // same ID and that newer state must survive.
+                const auto interaction_token =
+                    pointer_interaction_dispatch_token(event.pointer.id);
+                pointer_route_committed = true;
+                if (pointer_capture_owner(event.pointer.id)) {
+                    (void)cancel_pointer_capture(platform, event);
+                } else {
+                    end_pointer_interaction_if_token(
+                        event.pointer.id, interaction_token);
+                }
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
                 if (target) {
@@ -443,8 +549,10 @@
             if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
-                if (auto* owner = pointer_capture_owner()) {
+                if (event.pointer.hover_capable()) {
+                    (void)update_pointer_hover_target(target, event, platform);
+                }
+                if (auto* owner = pointer_capture_owner(event.pointer.id)) {
                     return finish(route_from(*owner, event, platform));
                 }
                 if (target) return finish(route_from(*target, event, platform));
@@ -452,24 +560,42 @@
             }
 
             if (event.type == InputType::PointerUp) {
-                auto* target = hit_test_pointer(
-                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                (void)update_pointer_hover_target(target, event, platform);
-                if (auto* owner = pointer_capture_owner()) {
-                    const auto result = route_from(*owner, event, platform);
-                    clear_pointer_capture();
-                    pointer_interaction_active_ = false;
-                    pointer_route_committed = true;
-                    return finish(result);
-                }
-                pointer_interaction_active_ = false;
-                if (target) {
-                    const auto result = route_from(*target, event, platform);
-                    pointer_route_committed = true;
-                    return finish(result);
-                }
+                auto* const owner = pointer_capture_owner(event.pointer.id);
+                const auto capture_token =
+                    pointer_capture_interaction_token(event.pointer.id);
+                const auto interaction_token =
+                    pointer_interaction_dispatch_token(event.pointer.id);
+
+                // This frame owns cleanup of the state that existed when Up
+                // arrived. Perform only token-matched cleanup so callbacks may
+                // recursively start a newer contact with the same stable ID.
                 pointer_route_committed = true;
-                return finish(EventResult::Ignored);
+                try {
+                    auto* target = hit_test_pointer(
+                        hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
+                    if (event.pointer.hover_capable()) {
+                        (void)update_pointer_hover_target(target, event, platform);
+                    }
+
+                    EventResult result = EventResult::Ignored;
+                    if (owner) {
+                        result = route_from(*owner, event, platform);
+                    } else if (target) {
+                        result = route_from(*target, event, platform);
+                    }
+
+                    clear_pointer_capture_if_interaction(
+                        event.pointer.id, capture_token);
+                    end_pointer_interaction_if_token(
+                        event.pointer.id, interaction_token);
+                    return finish(result);
+                } catch (...) {
+                    clear_pointer_capture_if_interaction(
+                        event.pointer.id, capture_token);
+                    end_pointer_interaction_if_token(
+                        event.pointer.id, interaction_token);
+                    throw;
+                }
             }
 
             if (is_drop) {
@@ -499,13 +625,13 @@
             return finish(EventResult::Ignored);
         } catch (...) {
             if (!pointer_route_committed &&
-                (event.type == InputType::PointerDown ||
-                 event.type == InputType::PointerUp ||
-                 event.type == InputType::PointerCancel ||
-                 event.type == InputType::ContextMenu)) {
-                clear_pointer_capture();
-                pointer_interaction_active_ = false;
+                event.type == InputType::PointerDown) {
+                clear_pointer_capture_if_interaction(
+                    event.pointer.id, active_input_dispatch_token_);
+                end_pointer_interaction_if_token(
+                    event.pointer.id, active_input_dispatch_token_);
             }
+            active_input_dispatch_token_ = previous_input_dispatch_token;
             dispatch_depth_ = previous_dispatch_depth;
             throw;
         }
@@ -515,7 +641,7 @@
         if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
         sync_availability_structure(platform);
-        return cancel_pointer_capture(platform);
+        return cancel_all_pointer_captures(platform);
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
