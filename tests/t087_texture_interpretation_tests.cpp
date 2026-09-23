@@ -164,6 +164,42 @@ struct Pixel {
     return ui::Brush{instance};
 }
 
+[[nodiscard]] ui::Brush half_rgb_sample(const ui::ImageTexture& texture) {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform shader source;
+        half4 main(float2 p) {
+            half4 value = source.eval(p);
+            return half4(value.rgb * 0.5, 1.0);
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance instance{compiled.program};
+    NUI_CHECK(instance.set_child("source", ui::Brush{texture}) ==
+              ui::ShaderSetResult::Ok);
+    return ui::Brush{instance};
+}
+
+[[nodiscard]] ui::Brush mixed_color_data_sample(
+    const ui::ImageTexture& color,
+    const ui::ImageTexture& data) {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform shader color_source;
+        uniform shader data_source;
+        half4 main(float2 p) {
+            half4 color_value = color_source.eval(p);
+            half4 data_value = data_source.eval(p);
+            return half4(color_value.r * 0.5, data_value.g, 0.0, 1.0);
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance instance{compiled.program};
+    NUI_CHECK(instance.set_child("color_source", ui::Brush{color}) ==
+              ui::ShaderSetResult::Ok);
+    NUI_CHECK(instance.set_child("data_source", ui::Brush{data}) ==
+              ui::ShaderSetResult::Ok);
+    return ui::Brush{instance};
+}
+
 [[nodiscard]] ui::Brush alpha_as_rgb(const ui::ImageTexture& texture) {
     const auto compiled = ui::ShaderProgram::compile(R"(
         uniform shader source;
@@ -238,8 +274,13 @@ void tagged_color_and_data_diverge() {
     NUI_CHECK(near_channel(data_pixel.r, 128));
     NUI_CHECK(near_channel(data_pixel.g, 64));
     NUI_CHECK(near_channel(data_pixel.b, 32));
-    NUI_CHECK(color_pixel.r > data_pixel.r + 35);
-    NUI_CHECK(color_pixel.g > data_pixel.g + 25);
+
+    // The fixture is tagged linear-sRGB. Rendering it to the sRGB reference
+    // surface must therefore encode the linear sample, not expose the raw
+    // bytes as display-space RGB.
+    NUI_CHECK(near_channel(color_pixel.r, 188, 4));
+    NUI_CHECK(near_channel(color_pixel.g, 137, 4));
+    NUI_CHECK(near_channel(color_pixel.b, 99, 4));
 }
 
 void untagged_color_defaults_to_srgb() {
@@ -256,6 +297,41 @@ void untagged_color_defaults_to_srgb() {
     NUI_CHECK(near_channel(color_pixel.r, data_pixel.r));
     NUI_CHECK(near_channel(color_pixel.g, data_pixel.g));
     NUI_CHECK(near_channel(color_pixel.b, data_pixel.b));
+}
+
+void shader_arithmetic_uses_linear_color_working_space() {
+    const auto image = ui::Image::decode(kUntaggedPng);
+    NUI_CHECK(image.valid());
+
+    ui::ImageTexture color{
+        image, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 16.0f, 16.0f}};
+    auto data = color;
+    data.set_interpretation(ui::TextureInterpretation::Data);
+
+    // Untagged Color is sRGB. Halving in linear-sRGB and encoding back to the
+    // sRGB reference surface yields approximately (92,44,20), whereas doing
+    // the same arithmetic directly in gamma-encoded space would yield
+    // approximately (64,32,16).
+    const auto color_half = render_brush(half_rgb_sample(color));
+    NUI_CHECK(near_channel(color_half.r, 92, 4));
+    NUI_CHECK(near_channel(color_half.g, 44, 4));
+    NUI_CHECK(near_channel(color_half.b, 20, 4));
+
+    // A Data-only effect remains numeric and never opts into color conversion.
+    const auto data_half = render_brush(half_rgb_sample(data));
+    NUI_CHECK(near_channel(data_half.r, 64, 3));
+    NUI_CHECK(near_channel(data_half.g, 32, 3));
+    NUI_CHECK(near_channel(data_half.b, 16, 3));
+
+    // In a mixed effect, the Color child makes the effect itself linear-sRGB,
+    // but the raw Data child still ignores that working color space. The raw
+    // G byte (64/255) is therefore treated as the numeric linear output and is
+    // encoded to about 137 on the sRGB destination. A mistaken color transform
+    // of the Data child would instead land back near 64.
+    const auto mixed = render_brush(mixed_color_data_sample(color, data));
+    NUI_CHECK(near_channel(mixed.r, 92, 4));
+    NUI_CHECK(near_channel(mixed.g, 137, 4));
+    NUI_CHECK(mixed.b <= 2);
 }
 
 void data_preserves_rgb_and_alpha_payload() {
@@ -425,6 +501,7 @@ void suite() {
     api_and_value_semantics();
     tagged_color_and_data_diverge();
     untagged_color_defaults_to_srgb();
+    shader_arithmetic_uses_linear_color_working_space();
     data_preserves_rgb_and_alpha_payload();
     color_filtering_stays_premultiplied();
     normals_and_shared_image_are_independent();
