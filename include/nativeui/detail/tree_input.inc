@@ -187,42 +187,60 @@
     }
 
     [[nodiscard]] InputContext prepare_input_context(
-        Node& node, const InputEvent& event, PlatformServices& platform) {
+        Node& node, const InputEvent& /*event*/, PlatformServices& platform) {
         if (fail_next_input_context_preparation_for_testing_) {
             fail_next_input_context_preparation_for_testing_ = false;
             throw std::bad_alloc{};
         }
-        const bool capture_allowed =
-            event.type != InputType::PointerUp &&
-            event.type != InputType::PointerCancel &&
-            event.type != InputType::ContextMenu;
-        const auto interaction_generation =
-            dispatch_depth_ != 0U && event.pointer.id == active_input_pointer_id_
-                ? active_input_pointer_generation_
-                : pointer_interaction_dispatch_token(event.pointer.id);
         return InputContext{
             node.bounds,
             platform,
             unsafe_paint_invalidator(node),
             unsafe_layout_invalidator(node),
-            [this,
-             &node,
-             pointer = event.pointer.id,
-             capture_allowed,
-             interaction_generation] {
+            // Keep these closures at the historical two-pointer size. Capturing
+            // pointer metadata/generation directly makes libstdc++ std::function
+            // allocate on every routed event, including unrelated keyboard input.
+            // send_prepared_to() scopes the exact event snapshot instead.
+            [this, &node] {
+                const bool capture_allowed =
+                    active_input_type_ != InputType::PointerUp &&
+                    active_input_type_ != InputType::PointerCancel &&
+                    active_input_type_ != InputType::ContextMenu;
                 if (capture_allowed) {
-                    set_pointer_capture(node, pointer, interaction_generation);
+                    set_pointer_capture(
+                        node,
+                        active_input_pointer_id_,
+                        active_input_pointer_generation_);
                 }
             },
-            [this, &node, pointer = event.pointer.id, interaction_generation] {
-                release_pointer_capture(node, pointer, interaction_generation);
+            [this, &node] {
+                release_pointer_capture(
+                    node,
+                    active_input_pointer_id_,
+                    active_input_pointer_generation_);
             }};
     }
 
     [[nodiscard]] EventResult send_prepared_to(
         Node& node, const InputEvent& event, InputContext& context) {
+        // InputContext actions are callback-scoped borrowed operations. Snapshot
+        // the exact event generation here so an outer context remains stale after
+        // a nested same-ID dispatch, while the two std::function closures stay
+        // small enough for their no-allocation small-buffer path.
+        const auto previous_input_type = active_input_type_;
+        const auto previous_input_pointer_id = active_input_pointer_id_;
+        const auto previous_input_pointer_generation = active_input_pointer_generation_;
+        active_input_type_ = event.type;
+        active_input_pointer_id_ = event.pointer.id;
+        active_input_pointer_generation_ =
+            pointer_interaction_dispatch_token(event.pointer.id);
+
         try {
-            return node.component->input(event, context);
+            const auto result = node.component->input(event, context);
+            active_input_type_ = previous_input_type;
+            active_input_pointer_id_ = previous_input_pointer_id;
+            active_input_pointer_generation_ = previous_input_pointer_generation;
+            return result;
         } catch (...) {
             if (event.type == InputType::PointerDown) {
                 // Only unwind state created by this dispatch. A callback may
@@ -233,6 +251,9 @@
                 end_pointer_interaction_if_token(
                     event.pointer.id, active_input_dispatch_token_);
             }
+            active_input_type_ = previous_input_type;
+            active_input_pointer_id_ = previous_input_pointer_id;
+            active_input_pointer_generation_ = previous_input_pointer_generation;
             throw;
         }
     }
@@ -594,6 +615,7 @@
     bool pointer_interaction_active_{};
     std::uint64_t next_input_dispatch_token_{1U};
     std::uint64_t active_input_dispatch_token_{};
+    InputType active_input_type_{InputType::None};
     PointerId active_input_pointer_id_{};
     std::uint64_t active_input_pointer_generation_{};
     bool pointer_capture_barrier_{};
