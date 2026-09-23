@@ -395,6 +395,8 @@ void decode_materialization_and_failure_recovery() {
           "Image::decode did not preserve premultiplied Color backing");
     check(ui::detail::image_data_backing_is_unpremul_for_test(image),
           "Image::decode did not preserve unpremultiplied Data backing");
+    check(ui::detail::image_color_backing_is_srgb_for_test(image),
+          "untagged Image::decode did not apply the Color sRGB fallback");
 
     // Keep the legacy 8x8 recovery geometry while enabling mip materialization.
     // This isolates the new no-redecode assertion from the existing pixel oracle.
