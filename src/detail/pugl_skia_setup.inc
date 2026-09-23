@@ -23,6 +23,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +31,7 @@
 #include <functional>
 #include <limits>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -93,6 +95,21 @@ public:
         interface_.reset();
         width_ = 0;
         height_ = 0;
+        readback_pending_ = false;
+        readback_result_.reset();
+    }
+
+    void request_readback(int x, int y) noexcept {
+        readback_x_ = x;
+        readback_y_ = y;
+        readback_pending_ = true;
+        readback_result_.reset();
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackPixel> take_readback() noexcept {
+        auto result = readback_result_;
+        readback_result_.reset();
+        return result;
     }
 
     bool render(UI& ui,
@@ -159,6 +176,28 @@ public:
         ui.paint(*canvas, services);
         canvas->restore();
         context_->flushAndSubmit(surface_.get());
+
+        if (readback_pending_) {
+            readback_pending_ = false;
+            const int x = std::clamp(readback_x_, 0, width_ - 1);
+            const int y = std::clamp(readback_y_, 0, height_ - 1);
+            std::array<std::uint8_t, 4> rgba{};
+            const auto readback_info = SkImageInfo::Make(
+                1,
+                1,
+                kRGBA_8888_SkColorType,
+                kPremul_SkAlphaType,
+                SkColorSpace::MakeSRGB());
+            if (surface_->readPixels(
+                    readback_info,
+                    rgba.data(),
+                    rgba.size(),
+                    x,
+                    y)) {
+                readback_result_ = PlatformReadbackPixel{
+                    rgba[0], rgba[1], rgba[2], rgba[3]};
+            }
+        }
         return true;
     }
 
@@ -168,6 +207,10 @@ private:
     sk_sp<SkSurface> surface_;
     int width_{};
     int height_{};
+    int readback_x_{};
+    int readback_y_{};
+    bool readback_pending_{};
+    std::optional<PlatformReadbackPixel> readback_result_;
 };
 
 } // namespace detail
