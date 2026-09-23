@@ -135,36 +135,36 @@ int platform_smoke() {
         if (!application.valid()) {
             return example::fail(
                 application.last_error().empty()
-                    ? "T087 platform application is invalid"
+                    ? "ImageTexture platform application is invalid"
                     : application.last_error());
         }
 
         stage = "standalone";
         auto standalone_ui = make_demo_ui();
-        if (!standalone_ui) return example::fail("T087 smoke image did not decode");
+        if (!standalone_ui) return example::fail("ImageTexture smoke image did not decode");
         ui::StandaloneWindow standalone{
             application,
             *standalone_ui,
             ui::WindowDesc{
-                .title = "NativeUI T087 platform smoke",
+                .title = "NativeUI ImageTexture interpretation smoke",
                 .size = {600.0f, 240.0f},
                 .resizable = true}};
         if (!standalone.valid() || !standalone.native_handle()) {
             return example::fail(
                 standalone.last_error().empty()
-                    ? "T087 standalone window is invalid"
+                    ? "ImageTexture standalone window is invalid"
                     : standalone.last_error());
         }
 
         stage = "embedded";
         auto embedded_ui = make_demo_ui();
-        if (!embedded_ui) return example::fail("T087 embedded smoke image did not decode");
+        if (!embedded_ui) return example::fail("ImageTexture embedded smoke image did not decode");
         ui::EmbeddedView embedded{
             *embedded_ui, standalone.native_handle(), {560.0f, 200.0f}};
         if (!embedded.native_handle()) {
             return example::fail(
                 embedded.last_error().empty()
-                    ? "T087 embedded view is invalid"
+                    ? "ImageTexture embedded view is invalid"
                     : embedded.last_error());
         }
 
@@ -185,7 +185,7 @@ int platform_smoke() {
         return 0;
     } catch (const std::exception& error) {
         return example::fail(
-            std::string{"T087 platform smoke "} + stage + ": " + error.what());
+            std::string{"ImageTexture platform smoke "} + stage + ": " + error.what());
     }
 }
 

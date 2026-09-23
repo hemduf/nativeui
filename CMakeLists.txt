@@ -162,7 +162,7 @@ if(NATIVEUI_BUILD_PLATFORM)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
   if(NATIVEUI_BUILD_TESTS)
-    # Source-private renderer readback used only by T087 CPU/GPU parity tests.
+    # Source-private renderer readback used only by ImageTexture CPU/GPU parity tests.
     # Installed/package platform sources compile without this seam.
     target_compile_definitions(nativeui PRIVATE
       NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS=1
@@ -549,8 +549,8 @@ if(NATIVEUI_BUILD_TESTS)
     tests/t084_image_texture_tiling_tests.cpp)
   nativeui_add_core_test(nativeui_t086_image_texture_transform_tests
     tests/t086_image_texture_transform_tests.cpp)
-  nativeui_add_core_test(nativeui_t087_texture_interpretation_tests
-    tests/t087_texture_interpretation_tests.cpp)
+  nativeui_add_core_test(nativeui_image_texture_interpretation_tests
+    tests/image_texture_interpretation_tests.cpp)
 
   # T083 value/materialization fault seams are compiled only into this isolated
   # executable. NativeUI::Core contains no mutable test instrumentation.
@@ -655,18 +655,18 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_smoke_standalone)
     nativeui_enable_sanitizers(nativeui_smoke_standalone)
 
-    add_executable(nativeui_t087_gpu_reference_tests
-      tests/t087_gpu_reference_tests.cpp
+    add_executable(nativeui_image_texture_gpu_reference_tests
+      tests/image_texture_gpu_reference_tests.cpp
     )
-    target_include_directories(nativeui_t087_gpu_reference_tests PRIVATE
+    target_include_directories(nativeui_image_texture_gpu_reference_tests PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     _nativeui_attach_consumer_platform(
-      TARGET nativeui_t087_gpu_reference_tests
-      CONSUMER_ID org.nativeui.test.t087-gpu-reference
+      TARGET nativeui_image_texture_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.image-texture-gpu-reference
     )
-    nativeui_enable_project_warnings(nativeui_t087_gpu_reference_tests)
-    nativeui_enable_sanitizers(nativeui_t087_gpu_reference_tests)
+    nativeui_enable_project_warnings(nativeui_image_texture_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_image_texture_gpu_reference_tests)
 
     add_executable(nativeui_smoke_embedded tests/smoke_embedded.cpp)
     _nativeui_attach_consumer_platform(

@@ -252,7 +252,7 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke && ./build/nativeui_example_t063_dialog --platform-smoke && ./build/nativeui_example_t062_tooltip --platform-smoke && ./build/nativeui_example_t077_blur --platform-smoke && ./build/nativeui_example_t084_texture_tiling --platform-smoke && ./build/nativeui_example_t087_texture_interpretation --platform-smoke && ./build/nativeui_t087_gpu_reference_tests'
+          sh -c 'glxinfo -B && ./build/nativeui_smoke_standalone && ./build/nativeui_example_t035_combo_popup --platform-smoke && ./build/nativeui_example_t063_dialog --platform-smoke && ./build/nativeui_example_t062_tooltip --platform-smoke && ./build/nativeui_example_t077_blur --platform-smoke && ./build/nativeui_example_t084_texture_tiling --platform-smoke && ./build/nativeui_example_image_texture_interpretation --platform-smoke && ./build/nativeui_image_texture_gpu_reference_tests'
 
       - name: Test Linux X11
         if: runner.os == 'Linux'
@@ -276,9 +276,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./build/nativeui_example_t084_texture_tiling.exe --platform-smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_example_t087_texture_interpretation.exe --platform-smoke
+          ./build/nativeui_example_image_texture_interpretation.exe --platform-smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./build/nativeui_t087_gpu_reference_tests.exe
+          ./build/nativeui_image_texture_gpu_reference_tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # macOS CI shares one Objective-C bridge across ordinary feature examples
@@ -346,8 +346,8 @@ jobs:
           ./build/nativeui_example_t062_tooltip --platform-smoke
           ./build/nativeui_example_t077_blur --platform-smoke
           ./build/nativeui_example_t084_texture_tiling --platform-smoke
-          ./build/nativeui_example_t087_texture_interpretation --platform-smoke
-          ./build/nativeui_t087_gpu_reference_tests
+          ./build/nativeui_example_image_texture_interpretation --platform-smoke
+          ./build/nativeui_image_texture_gpu_reference_tests
 
   sanitizers:
     name: Linux ASan + UBSan

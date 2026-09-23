@@ -26,7 +26,7 @@ constexpr std::array<std::byte, 70> kUntaggedPng{
 };
 
 [[nodiscard]] int fail(const char* message) {
-    std::cerr << "FAIL T087 GPU reference: " << message << '\n';
+    std::cerr << "FAIL ImageTexture GPU reference: " << message << '\n';
     return 1;
 }
 
@@ -115,7 +115,7 @@ int main() {
             application,
             gpu_ui,
             ui::WindowDesc{
-                .title = "NativeUI T087 GPU reference",
+                .title = "NativeUI ImageTexture GPU reference",
                 .size = {64.0f, 64.0f},
                 .resizable = false}};
         if (!window.valid() || !window.native_handle()) {
@@ -142,7 +142,7 @@ int main() {
         }
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL T087 GPU reference: " << error.what() << '\n';
+        std::cerr << "FAIL ImageTexture GPU reference: " << error.what() << '\n';
         return 1;
     }
 }
