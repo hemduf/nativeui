@@ -2,6 +2,11 @@
 
 **Updated:** 2026-09-23
 
+## Current session handoff
+
+- T095 / #179 specification review and GitHub issue corrections are complete (review comment `5796963437`). It remains Ready / P0 with no dependencies; implementation and product validation are pending. T094 is Done; T177's local 173/173 macOS validation is recorded below; T096 waits for T095.
+- Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1` under `AGENTS.md` section 10.0, without local `-j`/`--parallel` or simultaneous builds.
+
 ## Mission and invariants
 
 NativeUI is a generic C++20 retained-mode UI toolkit for standalone applications and embedded/plugin views. Pugl owns native windowing/embedding/event delivery; Skia owns rendering; NativeUI owns retained UI behavior, layout, input/focus, state, widgets, text, resources, packaging and tests. Plug-in APIs, DSP/audio and host parameter semantics remain out of scope.
@@ -260,7 +265,7 @@ Normal source-tree Release validation:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
