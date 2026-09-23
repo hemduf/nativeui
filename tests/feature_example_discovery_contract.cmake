@@ -71,7 +71,7 @@ require_text("${_helper_source}"
   "CONFIGURE_DEPENDS"
   "automatic CMake reconfigure when feature sources change")
 
-string(FIND "${_root_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES\n  t" _manual_list_index)
+string(FIND "${_root_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES" _manual_list_index)
 if(NOT _manual_list_index EQUAL -1)
   message(FATAL_ERROR
     "Feature example discovery contract: root CMake still contains a manually maintained feature example list")
