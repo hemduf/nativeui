@@ -499,9 +499,22 @@
                     // If stale-capture cancellation throws, that helper has
                     // already restored its own state and must not be followed
                     // by generic cleanup that could erase a nested newer event.
+                    const auto stale_interaction_token =
+                        pointer_interaction_dispatch_token(event.pointer.id);
                     pointer_route_committed = true;
                     (void)cancel_pointer_capture(platform, event);
                     pointer_route_committed = false;
+
+                    // The cancellation callback may synchronously deliver a
+                    // newer PointerDown that reuses this pointer ID. In that
+                    // case the newer generation is authoritative: do not let
+                    // this older outer Down overwrite its interaction/capture.
+                    const auto current_interaction_token =
+                        pointer_interaction_dispatch_token(event.pointer.id);
+                    if (current_interaction_token != 0U &&
+                        current_interaction_token != stale_interaction_token) {
+                        return finish(EventResult::Ignored);
+                    }
                 }
                 begin_pointer_interaction(event.pointer.id);
                 active_input_pointer_generation_ =

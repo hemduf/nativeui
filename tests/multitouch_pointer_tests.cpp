@@ -352,6 +352,44 @@ void suite() {
             pointer(ui::InputType::PointerUp, 17U, 25.0f, 50.0f), platform);
     }
 
+    // A PointerDown that first cancels a stale same-ID capture must also yield
+    // to a newer same-ID Down delivered reentrantly by that cancellation.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 18U, 25.0f, 50.0f), platform);
+
+        bool reenter_once = true;
+        left->on_cancel = [&] {
+            if (!reenter_once) return;
+            reenter_once = false;
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 18U, 175.0f, 50.0f),
+                platform);
+        };
+
+        // This Down finds the older left capture and cancels it first. The
+        // nested right Down from on_cancel is newer and must remain authoritative.
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerDown, 18U, 25.0f, 50.0f), platform);
+        left->on_cancel = {};
+
+        left->move.clear();
+        right->move.clear();
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerMove, 18U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->move.empty());
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 18U);
+        (void)tree.dispatch(
+            pointer(ui::InputType::PointerUp, 18U, 25.0f, 50.0f), platform);
+    }
+
     // An older PointerDown frame must not capture after a nested newer Down
     // reused the same platform ID. The newer contact owns the generation.
     {
