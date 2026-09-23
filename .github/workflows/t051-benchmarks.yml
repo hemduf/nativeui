@@ -1,7 +1,7 @@
 name: T051 Release Benchmarks
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - 'tests/t051/**'
@@ -38,7 +38,7 @@ jobs:
           cmake -S tests/t051 -B build-t051 -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
-          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ github.event.pull_request.head.sha || github.sha }}
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${{ github.sha }}
 
       - name: Build benchmark suite
         run: cmake --build build-t051 --parallel 2

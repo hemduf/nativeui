@@ -1,7 +1,7 @@
 name: T051 Benchmark Contract
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - 'tests/t051_benchmark_contract_tests.cpp'

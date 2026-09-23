@@ -1,127 +1,41 @@
 # NativeUI CI execution policy
 
-This document defines **when** validation runs. It does not reduce the test/review coverage required by `AGENTS.md` or `CODE_REVIEW.md`.
+This document defines **when** validation runs. `AGENTS.md` and `CODE_REVIEW.md` define the tests and review coverage required for each change. Local Mac validation and review qualify an ordinary ticket for merge; GitHub Actions qualify the integrated `main` branch and frozen release candidates afterward.
 
-## 1. Goals
+## 1. Ticket development and merge
 
-- keep TDD feedback fast by keeping RED/GREEN iteration local whenever possible;
-- use GitHub Actions as remote qualification, not as the inner development loop;
-- batch related corrections into validation-worthy heads instead of triggering a matrix for every micro-change;
-- avoid starting unrelated platform matrices for every pushed batch;
-- avoid superseding a useful in-progress exact-head run without a concrete reason;
-- cancel obsolete runs for genuinely superseded heads;
-- preserve one complete final-candidate qualification before merge;
-- keep dedicated workflows owned by the subsystem they validate.
+1. Develop against current `main` on the Mac with local RED -> GREEN -> REFACTOR. Keep the PR Draft while its source, tests, examples or build logic are still changing.
+2. Before requesting review, build serially with the default empty `NATIVEUI_ALLOWED_WARNINGS`, run the targeted tests and the full relevant local CTest suite, and exercise any applicable feature self-test, golden, native smoke and deterministic failure/recovery seams. Run AppKit window tests in a graphical session.
+3. Complete the applicable `CODE_REVIEW.md` record and correct every Blocking/Important finding. Include exact local commands/results and any Mac-only coverage limit in the PR.
+4. Mark the PR Ready for review after this local gate. Merge the reviewed, composition-compatible ticket without waiting for GitHub Actions. A Draft PR cannot merge. Keep one PR per ticket or independently reviewable sub-unit.
+5. For a change to Pugl, Skia, Objective-C runtime/bridge code, public ABI, packaging, dependency pins, or another contract the Mac cannot establish, run the relevant remote workflow before merge when its result is necessary to judge correctness. Record this focused exception in the ticket/PR. It does not make the full CI matrix a default PR gate.
 
-## 2. Pull-request phases
+A ticket becomes `Done` after its acceptance criteria, local validation, review, merge and completion bookkeeping are satisfied. `Done` does **not** claim that every remote platform has qualified that ticket's individual SHA. Explicit ticket dependencies use this `Done` meaning.
 
-### 2.1 Development — Draft PR
+For existing open issues written under the former per-PR CI cadence, keep their acceptance criteria and test coverage but apply this policy to the timing of remote runs. Update stale CI/checklist wording when that issue is next edited; it does not restore a per-PR merge gate.
 
-Keep implementation pull requests in Draft while code is still changing.
+## 2. Post-merge integration
 
-Local development may contain many fine-grained TDD steps. Those steps do **not** require one Git commit or remote CI run each.
+- `Main Smoke` runs on each executable change pushed to `main`. It checks workflow contracts and builds/tests representative Core behavior on Linux. A newer merge may cancel an obsolete run.
+- Dedicated subsystem workflows run on matching `main` pushes through their `paths` filters. They are non-blocking for the PR that was just merged. Retain `workflow_dispatch` where available for targeted diagnosis or early risk qualification.
+- Full `CI` runs nightly on the current `main` SHA and through `workflow_dispatch` when a batch or release candidate needs earlier qualification. It retains Linux X11, Linux ARM64, macOS, Windows and sanitizer coverage. The nightly run qualifies an integrated batch, not each intermediate ticket SHA.
+- `T042 Lifecycle Stress` runs weekly on `main` and on demand after lifecycle/platform changes or for a release candidate.
+- `T052 v0.1 Release Gate` runs only on demand for a frozen release candidate. Supply the full 40-character SHA of an approved benchmark baseline; the selected workflow ref provides the exact candidate SHA. Never compare the candidate with itself.
 
-A **qualification batch** is a coherent set of tests + implementation + refactor that closes one bounded acceptance slice, one related family of review findings, or another independently reviewable unit. Before publishing such a batch:
+Scheduled Actions use the latest default-branch commit and may start late. Launch `workflow_dispatch` when an integration checkpoint or release decision cannot wait for the schedule. Record the qualified SHA and run links; do not infer qualification for later commits.
 
-1. reproduce the relevant RED locally when the environment permits it;
-2. complete the GREEN/refactor locally;
-3. build the affected production surface locally;
-4. run the targeted tests for the whole batch;
-5. run the relevant broader local suite when practical for the touched surface;
-6. fold/squash temporary local RED/GREEN/fixup commits when they do not represent independently useful rollback units.
+## 3. Failure and release response
 
-Every **pushed qualification batch** must then run:
+A red post-merge run requires prompt triage. Identify the first affected SHA and subsystem, open a priority regression issue, and fix or revert the responsible change. Pause further merges into the affected area until its integration check is green; independent work may continue. If the failure affects the shared Core/build contract, pause all executable merges until it is resolved. Never mark a release candidate qualified while a required integration or release check is red or missing.
 
-- the normal `CI` workflow;
-- any dedicated workflow whose `paths` filter matches the changed subsystem.
+Before a release, freeze one candidate SHA and run full `CI`, every applicable dedicated contract, `T042` and `T052` against that candidate. Record the exact SHA and approved T052 baseline. Any source, test, fixture, example, build, dependency, workflow or shipped API/release-documentation change creates a new candidate and requires its affected checks again. Project-state bookkeeping alone does not change executable qualification.
 
-Do **not** use remote CI as the default way to discover the next small local failure. Do **not** publish a known RED merely to create evidence when it can be reproduced locally.
+## 4. Workflow authoring
 
-An intentional RED may be pushed only when the required failure depends on a remote-only platform/environment that cannot be reproduced locally, or when the RED itself is an independently useful diagnostic checkpoint. Record that reason in the PR/ticket.
+- Ordinary ticket PRs have no required remote status checks. Do not add `pull_request` triggers to project workflows without an explicit policy change.
+- Keep broad integration in `CI`; dedicated workflows use `paths` filters for the subsystem they own on `main` pushes. Do not add umbrella headers or root `CMakeLists.txt` as generic proxies when full CI already owns generic integration.
+- Keep `workflow_dispatch` on full, lifecycle and release gates. Preserve their platform, sanitizer, clean-bootstrap and benchmark coverage.
+- A workflow that runs on `main` must cancel genuinely superseded runs of the same workflow/ref when safe. Do not cancel a frozen release-candidate run because a different ref advanced.
+- Treat workflow and policy-contract changes as code: validate their syntax, trigger contracts and relevant local tests before merging.
 
-While an exact-head remote run is queued or running, do not push another small correction to the same PR merely because another potential gap was noticed. Collect and validate additional compatible local findings, then publish the next coherent batch only after the current run has produced useful evidence or is already known to be obsolete.
-
-Heavy whole-project qualification workflows must **not** run on every Draft batch.
-
-### 2.2 Closeout batching
-
-When a ticket enters closeout/finalization:
-
-1. audit the complete ticket against all acceptance criteria and required tests in one pass;
-2. collect all current actionable Blocking/Important review findings before editing;
-3. group compatible corrections into one bounded closeout batch;
-4. run targeted/local validation for the whole batch;
-5. publish one qualification head for that closeout batch;
-6. repeat only if the resulting evidence reveals a genuinely new defect.
-
-Do not intentionally run a remote sequence of “one widget/finding -> one push -> one matrix” when those findings could have been discovered and fixed in the same complete audit.
-
-### 2.3 Final candidate — Ready for review
-
-Before changing a PR from Draft to Ready for review:
-
-1. freeze source, tests, CMake/build logic and workflow files;
-2. make the latest normal `CI` run green;
-3. make every applicable path-scoped dedicated workflow green;
-4. complete the applicable `CODE_REVIEW.md` review;
-5. preferably commit completion-state documentation before the transition.
-
-The Draft -> Ready for review transition is the explicit final-candidate trigger for heavyweight qualification. `T042 Lifecycle Stress` and `T052 v0.1 Release Gate` run on that transition and remain available through `workflow_dispatch` for recovery/manual requalification.
-
-### 2.4 Changes after final qualification
-
-A change to any of the following invalidates the final candidate:
-
-- production source or public headers;
-- tests, fixtures, goldens or examples used for validation;
-- CMake/build/dependency logic;
-- GitHub Actions workflow files;
-- release/API documentation or snippets that are consumed by tests or define shipped behavior.
-
-If one of those changes is required after the PR is Ready, convert the PR back to Draft **before editing/pushing**, make the change, obtain green normal/relevant CI again, then mark it Ready again to launch a fresh heavyweight qualification.
-
-Pure project-state/completion documentation such as `CONTEXT.md`, `ROADMAP.md`, `AGENTS.md`, `CODE_REVIEW.md`, `VALIDATION.md`, `DESIGN.md` and `THIRD_PARTY.md` does not invalidate an already qualified source/build/test candidate when it changes no executable contract. Do not rerun heavyweight platform/release gates solely because such bookkeeping changed the Git head.
-
-## 3. Commit/push cadence
-
-The remote branch should describe meaningful development checkpoints, not every local edit.
-
-- Prefer one coherent implementation commit for a bounded acceptance slice.
-- A ticket may use an additional consolidated review-fix commit when the final review finds actionable issues.
-- Completion/docs bookkeeping may be separate when it does not alter executable behavior.
-- More commits are acceptable when they are independently meaningful rollback, architecture, platform or diagnostic units.
-- Avoid published `RED -> GREEN -> next RED -> next GREEN` micro-history for one logical slice; keep that detail local and squash/fold it before push.
-- Never create a no-op or metadata-only source commit just to retrigger CI; use supported rerun/manual qualification mechanisms when the candidate itself is unchanged.
-
-The policy controls remote cadence, not local TDD granularity.
-
-## 4. Workflow authoring rules
-
-For every dedicated workflow:
-
-- use `paths` filters that describe the subsystem the workflow actually owns;
-- do not add umbrella headers such as `include/nativeui/nativeui.hpp` merely to detect exports when normal CI already compiles/tests the root project;
-- do not add root `CMakeLists.txt` merely to detect generic integration when normal CI already owns root-build validation;
-- use one PR-scoped concurrency group and cancel obsolete runs:
-
-```yaml
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-```
-
-- keep expensive whole-project/lifecycle/release gates on the final-candidate transition rather than every `pull_request synchronize` event;
-- keep `workflow_dispatch` on heavyweight gates so a candidate can be requalified explicitly without manufacturing a source commit;
-- prefer adding a test to the normal CI/CTest graph over creating another always-on per-ticket matrix;
-- a new dedicated workflow requires a clear ownership boundary that normal CI cannot cover efficiently.
-
-## 5. Merge evidence
-
-A code-changing PR is mergeable only when the evidence applicable to its final candidate is green:
-
-- latest normal `CI` for the source/build/test candidate;
-- every relevant path-scoped dedicated contract workflow;
-- heavyweight final-candidate workflows required by the ticket/project (`T042` and `T052` by default for final qualification);
-- mandatory `CODE_REVIEW.md` record with no remaining Blocking/Important finding.
-
-The purpose of this policy is to change **cadence**, not quality: validation is concentrated on coherent qualification batches and the final candidate instead of being repeated for every micro-step.
+Remote CI remains a visible integration signal and a mandatory release gate. Its failure is never silently ignored because it was non-blocking for an earlier PR.

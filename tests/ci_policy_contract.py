@@ -5,6 +5,7 @@ This test intentionally validates only repository-owned workflow policy; it does
 not attempt to emulate GitHub Actions itself.
 """
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,18 +40,41 @@ def main() -> None:
         if (WORKFLOWS / name).exists():
             raise AssertionError(f"{name}: contract must live in ci.yml")
 
-    # Every workflow that can react to PR churn must cancel superseded work.
+    # Ticket PRs use the local Mac/review gate. Remote workflows run after
+    # merge or on an explicit integration/release checkpoint.
     for path in workflow_files:
-        text = path.read_text(encoding="utf-8")
-        if "pull_request:" in text:
-            require(text, "cancel-in-progress: true", path.name)
+        workflow = path.read_text(encoding="utf-8")
+        if re.search(r"(?m)^  pull_request\s*:", workflow):
+            raise AssertionError(f"{path.name}: PR-triggered CI is forbidden")
 
-    # Whole-project qualification is final-candidate only.
-    for name in ("t042-stress.yml", "t052-release-gate.yml"):
-        text = read(name)
-        require(text, "types: [ready_for_review]", name)
-        require(text, "workflow_dispatch:", name)
-        forbid(text, "  push:\n", name)
+    full_ci = read("ci.yml")
+    require(full_ci, "  schedule:\n", "ci.yml")
+    require(full_ci, "  workflow_dispatch:\n", "ci.yml")
+    forbid(full_ci, "  push:\n", "ci.yml")
+
+    smoke = read("main-smoke.yml")
+    require(smoke, "  push:\n    branches: [main]", "main-smoke.yml")
+    require(smoke, "nativeui_state_tests nativeui_routing_tests nativeui_headless_tests", "main-smoke.yml")
+    require(smoke, "cancel-in-progress: true", "main-smoke.yml")
+
+    stress = read("t042-stress.yml")
+    require(stress, "  schedule:\n", "t042-stress.yml")
+    require(stress, "  workflow_dispatch:\n", "t042-stress.yml")
+    forbid(stress, "  push:\n", "t042-stress.yml")
+
+    release = read("t052-release-gate.yml")
+    require(release, "  workflow_dispatch:\n", "t052-release-gate.yml")
+    require(release, "baseline_sha:", "t052-release-gate.yml")
+    forbid(release, "  push:\n", "t052-release-gate.yml")
+    forbid(release, "  schedule:\n", "t052-release-gate.yml")
+
+    # Post-merge contracts are scoped to changed files on main.
+    for path in workflow_files:
+        if path.name in ("ci.yml", "main-smoke.yml", "t042-stress.yml", "t052-release-gate.yml"):
+            continue
+        workflow = path.read_text(encoding="utf-8")
+        require(workflow, "  push:\n    branches: [main]", path.name)
+        require(workflow, "    paths:\n", path.name)
 
     # Dedicated subsystem contracts must be path scoped.
     for name in (
@@ -109,7 +133,7 @@ def main() -> None:
     )
 
     ci = read("ci.yml")
-    require(ci, "pull_request:\n    branches: [main]", "ci.yml")
+    require(ci, "  schedule:\n", "ci.yml")
     forbid(ci, "tests/t047_package_tests.cmake", "ci.yml")
     forbid(ci, "tests/t048_external_consumer_tests.cmake", "ci.yml")
     forbid(ci, "tests/t054_package_tests.cmake", "ci.yml")
@@ -175,7 +199,7 @@ def main() -> None:
     require(agents, "`CI_POLICY.md`", "AGENTS.md")
 
     policy = (ROOT / "CI_POLICY.md").read_text(encoding="utf-8")
-    require(policy, "Draft -> Ready for review", "CI_POLICY.md")
+    require(policy, "post-merge", "CI_POLICY.md")
 
     print(f"CI policy contract: PASS ({len(workflow_files)} workflows checked)")
 

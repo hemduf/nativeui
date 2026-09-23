@@ -463,7 +463,7 @@ For rendering or windowing changes verify:
 
 ## 11. Mandatory validation matrix
 
-Every code ticket must run the smallest applicable subset plus the full relevant project suite **before merge/final qualification**. This is a coverage requirement, not an instruction to launch every remote workflow on every intermediate commit. Remote execution cadence follows [`CI_POLICY.md`](CI_POLICY.md).
+Every code ticket must run the smallest applicable subset plus the full relevant local project suite **before merge**. Mac graphical-session access is required for AppKit window tests. The integrated cross-platform suite runs after merge, and every release candidate must pass the full remote qualification. Remote execution cadence follows [`CI_POLICY.md`](CI_POLICY.md).
 
 ### 11.1 Always
 
@@ -536,13 +536,14 @@ Use deterministic fault seams; do not depend on rare OOM/queue saturation occurr
 - [ ] prove it performs no I/O/UI/runtime initialization;
 - [ ] verify cross-thread state handoff is bounded and race-free.
 
-### 11.7 CI qualification cadence
+### 11.7 Local merge and deferred CI cadence
 
-- During active TDD, keep the PR Draft and use normal CI plus only path-scoped dedicated workflows relevant to the changed subsystem.
-- Do not interpret this validation matrix as a requirement to run unrelated historical ticket matrices on every commit.
-- Once source/tests/build/workflows are frozen and normal/relevant CI is green, mark the PR Ready for review; that transition runs the heavyweight final-candidate lifecycle/release gates defined by `CI_POLICY.md`.
-- Source/test/build/workflow changes after qualification invalidate the candidate and require a new Draft -> Ready transition.
-- Pure project-state/completion documentation does not invalidate executable qualification unless it contains release/API material that is itself tested or shipped as part of the contract.
+- During active TDD, keep the PR Draft. Run targeted, failure-path and full relevant tests locally on the Mac before requesting review. Record the exact commands, results and any platform limit.
+- Once local validation and the applicable review are complete, mark the PR Ready and merge without waiting for ordinary GitHub Actions. The current review record remains a merge gate with no Blocking/Important findings.
+- Run a focused remote check before merge for Pugl, Skia, Objective-C, ABI, packaging or dependency work when Mac evidence cannot establish a required correctness claim. Record the reason and result.
+- After merge, `Main Smoke`, matching subsystem workflows and nightly full `CI` qualify the integrated `main` SHA. T042 runs weekly/on demand; T052 qualifies a frozen release candidate with an explicit benchmark baseline. A green ticket's local evidence is never described as cross-platform qualification.
+- A failing integration check opens a priority regression and pauses affected-area merges until fixed. A shared Core/build failure pauses executable merges globally; independent local work can continue.
+- Release-candidate executable changes invalidate that candidate and require applicable remote checks on a new SHA. Project-state documentation alone does not invalidate executable qualification.
 
 ## 12. Required review record in each issue/PR
 
@@ -561,7 +562,7 @@ Before a ticket is marked Done, add a review record containing at least:
 - **Platform integration:** pass / not applicable;
 - **Performance/allocation:** pass / measured or reasoned hot-path impact;
 - **Privacy:** pass; no personal information in tests/examples/code/generated metadata;
-- **Tests:** exact targeted/fault/full/multi-instance/platform checks run;
+- **Tests:** exact local targeted/fault/full/multi-instance/platform checks run, plus any focused pre-merge remote evidence;
 - **Remaining findings:** none, or links to explicitly non-blocking follow-ups.
 
 A bare "reviewed" is not sufficient. Omitting an applicable failure-domain field is itself an incomplete review.

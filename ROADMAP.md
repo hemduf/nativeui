@@ -7,12 +7,13 @@ NativeUI is a reusable C++20 retained-mode UI toolkit: Pugl owns native views/ev
 ## Execution rules
 
 - explicit GitHub `Dependencies:` are hard gates;
-- finish the current merge-near ticket before widening source work;
+- at most two independent source-changing lanes may progress, with one serial local Mac build at a time;
 - behavior/configuration changes use local RED -> GREEN -> REFACTOR and coherent published batches;
-- code-changing tickets require exact-head normal/path qualification and the complete `CODE_REVIEW.md` record with no Blocking/Important finding;
-- keep implementation PRs Draft while executable source/tests/build/workflows change;
-- Draft -> Ready is reserved for a frozen candidate and triggers T042/T052 final qualification;
-- any executable source/test/build/workflow change after final qualification invalidates the candidate; pure completion/project-state documentation does not;
+- code-changing tickets merge after targeted and full relevant local Mac validation, applicable `CODE_REVIEW.md` review and correction of Blocking/Important findings;
+- implementation PRs remain Draft while changing and become Ready after the local gate; ordinary remote CI does not block their merge;
+- `Main Smoke` and path-scoped checks run after merge, full `CI` qualifies integrated `main` nightly/on demand, and T042 runs weekly/on demand;
+- a frozen release candidate requires full CI, relevant dedicated checks, T042 and T052 against an explicit approved benchmark baseline;
+- post-merge failures create a priority regression and pause affected-area merges until corrected;
 - NativeUI-owned targets compile with zero unapproved warnings and the default empty `NATIVEUI_ALLOWED_WARNINGS`;
 - every completion cycle synchronizes the issue, `CONTEXT.md`, this roadmap and relevant automation status;
 - never place personal information in tickets, source, tests, examples, fixtures or generated metadata.
@@ -193,9 +194,10 @@ pre-freeze public additions:
   T177(done) -----------------------------------------> M2 raw touch/pen contact routing
 
 v1 critical path:
-  T070 -> T122/docs closeout -> T071 -> v1.0.0
-  T049(done) -----------------------------------------> T071
-  T044(done) -----------------------------------------> T071
+  T070(closed, not planned) -X-> T122/docs closeout -> release-path replan
+  T071(closed, not planned)
+  T049(done) -----------------------------------------> release-path replan
+  T044(done) -----------------------------------------> release-path replan
 
 post-1.0 / later-release work already landed:
   T073(done) -----------------------------------------> NativeUI 1.1 foundation
@@ -249,9 +251,9 @@ post-1.0 / later-release work already landed:
 
 The remaining v1 sequence is:
 
-1. validate T070 reference application/Getting Started against the current public/package surface;
+1. replan the reference-application/Getting Started path after T070 / #82 closed as not planned; T133–T137 remain unresolved;
 2. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
-3. run T071 validation/release-only on one exact RC SHA.
+3. define a new release qualification ticket after the T070/T071 closure, then qualify one exact RC SHA under `CI_POLICY.md`.
 
 ## Completed safety and pre-freeze closeouts
 
@@ -298,4 +300,4 @@ The remaining v1 sequence is:
 
 ## Release policy
 
-T069/#81 is deprecated and no longer acts as a standalone v1 freeze gate. The current backend-neutral public headers/package contracts plus exact-head T070/T122/T071 validation are authoritative for v1 closeout. T073, T074, T075, T076, T077, T078, T079, T080, T081, T082, T083, T084, T085, T086, T087, T088, T094, T095 and T098 are merged as later-release rendering foundations outside the v1 critical path; T096 is the next Ready P0 effects ticket; T089 is independently Ready after T088, and T090–T092 await explicit dependencies. Retained per-view shader/resource caching remains deferred to T097. T070 validates the reference application against the frozen surface. T071 is validation/release-only: defects found there return to a focused canonical ticket, are merged first, and then a new exact release-candidate SHA is selected. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated. T070/#82 and T071/#83 are closed as not planned; the v1 reference-app/documentation and release path needs replanning rather than implicit completion. T122 and T133–T137 remain open. T073–T088, T094, T095 and T098 are merged as later-release foundations; T096 is the next Ready P0 effects ticket, T089 is independently Ready, and T090–T092 await explicit dependencies. Retained per-view shader/resource caching remains deferred to T097. A future release ticket must freeze one candidate SHA and run full CI, relevant dedicated workflows, T042 and T052 (or its successor) against an explicit approved benchmark baseline before publication. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.

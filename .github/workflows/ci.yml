@@ -1,33 +1,15 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'AGENTS.md'
-      - 'CODE_REVIEW.md'
-      - 'CONTEXT.md'
-      - 'ROADMAP.md'
-      - 'VALIDATION.md'
-      - 'DESIGN.md'
-      - 'THIRD_PARTY.md'
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'AGENTS.md'
-      - 'CODE_REVIEW.md'
-      - 'CONTEXT.md'
-      - 'ROADMAP.md'
-      - 'VALIDATION.md'
-      - 'DESIGN.md'
-      - 'THIRD_PARTY.md'
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

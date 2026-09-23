@@ -80,7 +80,7 @@ Selection order for available work:
 6. never stack a branch on another feature branch unless the downstream ticket explicitly depends on that upstream ticket;
 7. merge an independent PR as soon as its own Definition of Done is satisfied; a lower-numbered open ticket is not a reason to delay the merge.
 
-Default concurrency limit: keep at most three implementation lanes in active coding/review at once to reduce rebase conflicts. A PR that is merely waiting on CI does not consume an implementation lane if another independent ticket can progress safely.
+Default concurrency limit: keep at most two independent implementation lanes in active coding/review at once to reduce rebase conflicts. Local builds remain strictly serial across lanes. A PR in review or awaiting optional remote evidence does not stop another independent Ready ticket.
 
 ### 3.1 Ticket status semantics
 
@@ -89,7 +89,7 @@ Use status labels consistently:
 - `Ready`: every explicit dependency is `Done` and no external blocker prevents starting;
 - `Doing`: implementation, review, rebase or required validation is actively in progress;
 - `Blocked`: at least one explicit dependency is not `Done`, or a real external blocker is documented in the issue;
-- `Done`: the ticket satisfies the Definition of Done and is closed as completed.
+- `Done`: the ticket satisfies local acceptance, review and merge/completion bookkeeping and is closed as completed. Deferred cross-platform CI qualifies an integrated `main` SHA separately.
 
 Do not use `Blocked` merely because a lower-numbered ticket remains open.
 
@@ -182,8 +182,7 @@ The default is **batch-first history**, not micro-commits.
 - A published implementation commit must represent a coherent, reviewable unit: tests + implementation + any required refactor for one bounded acceptance slice.
 - For a normal ticket, prefer **one implementation commit**, optionally **one consolidated review-fix commit**, and the final completion/docs update when needed. More commits are acceptable only when they are independently meaningful rollback/review units, not because TDD had multiple internal steps.
 - Never create a new published commit solely to record that a single test changed from RED to GREEN.
-- Do not push a new head while the current exact-head remote qualification is still running unless a completed failure has already proved that head invalid or an urgent integration conflict makes replacement necessary.
-- If a ticket is in closeout, perform **one complete acceptance/review audit**, collect all actionable gaps, fix them in one bounded correction batch, then qualify that batch. Do not resume a sequential “one widget/finding per remote CI cycle” loop.
+- If a ticket is in closeout, perform **one complete acceptance/review audit**, collect all actionable gaps and fix them in one bounded local correction batch before requesting review.
 
 Exceptions to the no-micro-commit rule are limited to:
 
@@ -215,19 +214,17 @@ Infrastructure-only tickets (build refactors, header splitting, CI plumbing) are
 
 Follow [`CI_POLICY.md`](CI_POLICY.md).
 
-- Keep implementation PRs in Draft while source/build/tests are changing.
-- Remote CI is a **qualification layer**, not the RED/GREEN inner loop.
-- Publish coherent validation batches only after the affected surface builds locally and the targeted tests for that batch are green.
-- Each pushed qualification batch runs normal `CI` plus only dedicated workflows whose subsystem `paths` filters match.
-- Do not deliberately supersede an in-progress exact-head run with another small correction; wait for the useful result unless the head is already proven invalid.
-- `T042 Lifecycle Stress` and `T052 v0.1 Release Gate` are heavyweight final-candidate gates and run on the Draft -> Ready for review transition, not every PR commit.
-- Every dedicated workflow must cancel genuinely superseded runs for the same PR.
-- Do not create an always-on per-ticket workflow when the test can live in the normal CTest/CI graph.
-- Do not use umbrella headers or root `CMakeLists.txt` as broad path-filter proxies when normal CI already owns generic integration coverage.
-- Any production source, test/fixture/example, build/dependency or workflow change after final qualification invalidates the candidate: convert the PR back to Draft before editing, then mark it Ready again after normal/relevant CI is green.
-- Pure project-state/completion documentation does not by itself invalidate an already qualified executable candidate; release/API documentation consumed by tests or defining shipped behavior does.
+- Keep implementation PRs Draft while source/build/tests are changing. Mark them Ready after the Mac local gate and applicable review are complete; Ready no longer launches T042/T052.
+- Build serially on the Mac, run targeted and full relevant local tests, and record exact commands/results before merge. The local gate and `CODE_REVIEW.md` findings determine ticket merge readiness.
+- Remote CI does not block ordinary PR merges. `Main Smoke` and path-scoped dedicated workflows run after matching merges to `main`; full `CI` qualifies the integrated branch nightly or on demand.
+- `T042 Lifecycle Stress` runs weekly/on demand. `T052 v0.1 Release Gate` runs for a frozen release candidate with an explicit approved benchmark baseline SHA. Release qualification is mandatory even though ordinary ticket merges are not held for the full remote matrix.
+- For native, dependency, ABI or packaging changes whose correctness cannot be established on the Mac, run the relevant focused remote check before merge and record why it is needed.
+- A failed post-merge check creates a priority regression and pauses affected-area merges until corrected; unrelated Ready work may continue. A shared Core/build failure pauses all executable merges.
+- Keep dedicated workflows path-scoped and cancel obsolete same-ref runs. Do not create an always-on per-ticket matrix when normal CTest/CI coverage suffices.
+- Any executable-contract change after release-candidate qualification requires a new candidate and applicable reruns. Pure project-state documentation does not change executable qualification.
+- Existing issue checklists keep their required tests but follow the current `CI_POLICY.md` for remote timing; stale per-PR T042/T052 wording does not block an ordinary ticket merge.
 
-This rule changes when expensive checks run; it does not weaken required test or review coverage.
+This cadence changes when remote tests run. It does not weaken local testing, review or release coverage.
 
 ## 5. Review workflow
 
@@ -454,7 +451,7 @@ A ticket is `Done` only when:
 - NativeUI-owned targets build with the default empty `NATIVEUI_ALLOWED_WARNINGS` and emit no compiler warnings; any explicitly approved exception is recorded in the ticket/PR and requires the corresponding CMake opt-in;
 - all applicable review passes are complete;
 - the **complete current** mandatory `CODE_REVIEW.md` review record is present in the issue or PR — old reduced records are insufficient — and all Blocking/Important findings are corrected;
-- the final candidate has the green normal, relevant path-scoped and heavyweight qualification evidence required by `CI_POLICY.md`;
+- the exact local Mac validation and applicable review evidence required by `CI_POLICY.md` are recorded; any risk-specific pre-merge remote check required by that policy is green;
 - multi-instance/global-state impact is explicitly assessed for every code change;
 - transactional state, scheduling/queue failure, exception/unwind, partial construction, lifetime/reentrancy, performance/allocation and privacy fields are explicitly assessed when applicable;
 - Objective-C runtime naming/prefix strategy is recorded whenever Objective-C/Objective-C++ code is touched;
@@ -464,7 +461,7 @@ A ticket is `Done` only when:
 - `ROADMAP.md` is updated in the same merge/completion cycle for **every merged ticket**, including final status, delivered scope, dependency-frontier changes and milestone progress;
 - the issue body still ends with the mandatory `## Merge requirement` section.
 
-A ticket must not be considered complete merely because code and CI are green if the roadmap synchronization or current review-record step has not been performed.
+A ticket must not be considered complete merely because its code and local tests are green if the roadmap synchronization or current review record is missing. `Done` does not imply that the ticket SHA passed deferred cross-platform CI; release candidates require the full green remote evidence in `CI_POLICY.md`.
 
 ## 12. End-of-session compaction
 
@@ -493,10 +490,10 @@ For each ticket:
 - default published history is one implementation commit plus, if needed, one consolidated review-fix commit and completion/docs bookkeeping; use more commits only for independently meaningful rollback/review units;
 - use local fixup/squash workflows freely to keep the remote branch readable;
 - avoid drive-by formatting or unrelated refactors;
-- before the first remote qualification push for a batch, build the affected surface and run its targeted tests locally;
-- before final qualification, run the complete relevant local test set and complete the mandatory review, including fault-injection recovery paths;
-- mark the frozen candidate Ready for review to trigger heavyweight qualification according to `CI_POLICY.md`;
-- if source/build/tests/workflows must change afterward, convert the PR back to Draft before editing and repeat the final-candidate transition after CI is green;
+- before requesting review or merge, build the affected surface and run targeted plus full relevant local tests, including fault-injection recovery paths;
+- complete the mandatory review and mark the locally validated PR Ready for review; merge when the ticket gate is satisfied without waiting for ordinary remote CI;
+- after merge, monitor the `main` smoke, path-scoped and nightly integration results and follow `CI_POLICY.md` on failures;
+- freeze and qualify a separate exact release-candidate SHA with full remote gates before release;
 - update the GitHub issue, `CONTEXT.md` and `ROADMAP.md` in the final merge/completion cycle;
 - do not merge/close the ticket with a stale roadmap or stale reduced code-review record.
 
@@ -523,4 +520,4 @@ Do not guess around a platform/API uncertainty.
 3. document the blocker in the ticket and `CONTEXT.md`;
 4. continue another independent `Ready` ticket if possible.
 
-A CI/platform wait on one branch must not become a global project stop when independent `Ready` work exists.
+A remote/platform wait on one ticket must not become a global project stop when independent `Ready` work exists. Post-merge failures block affected-area merges as defined by `CI_POLICY.md`.

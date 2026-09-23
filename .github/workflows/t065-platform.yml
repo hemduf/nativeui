@@ -1,7 +1,7 @@
 name: T065 Platform Dispatcher
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - 'include/nativeui/dispatcher.hpp'

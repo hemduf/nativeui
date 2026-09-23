@@ -102,16 +102,16 @@ body:
     id: tests
     attributes:
       label: Required tests
-      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering/fault-injection check. Remote execution cadence follows CI_POLICY.md.
+      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering/fault-injection check. Local merge and deferred remote execution follow CI_POLICY.md.
       value: |
         - [ ] Targeted regression/unit tests.
         - [ ] Deterministic callback-throw / queue-rejection / allocation-failure / partial-construction fault tests when applicable.
         - [ ] Recovery test proving the next normal operation succeeds after the injected failure.
         - [ ] Two-instance survivor/isolation test when lifetime/platform state is affected.
-        - [ ] Full relevant test suite before final qualification.
+        - [ ] Full relevant local test suite before merge.
         - [ ] Dedicated feature executable + `--self-test` when applicable.
         - [ ] Platform/headless/golden/sanitizer tests when applicable.
-        - [ ] Relevant path-scoped CI plus final-candidate qualification from `CI_POLICY.md`.
+        - [ ] Identify expected post-merge path-scoped/full CI jobs; record any risk-specific pre-merge remote check from `CI_POLICY.md`.
     validations:
       required: true
 
@@ -129,8 +129,9 @@ body:
         - [ ] Run targeted tests, including deterministic failure/fault tests where applicable.
         - [ ] Run the full relevant test suite.
         - [ ] Run required platform/headless/golden/sanitizer tests.
-        - [ ] Keep active implementation PR Draft; mark the frozen candidate Ready for review to launch heavyweight final qualification per `CI_POLICY.md`.
-        - [ ] If source/tests/build/workflows change after final qualification, return the PR to Draft and requalify.
+        - [ ] Keep the PR Draft during active changes; mark it Ready after local Mac tests and review pass, then merge without waiting for ordinary remote CI.
+        - [ ] Record exact local commands/results and any focused pre-merge remote evidence needed for native/dependency/ABI work.
+        - [ ] Record who will monitor post-merge checks; track integration and frozen release qualification separately from ticket Done per `CI_POLICY.md`.
         - [ ] Perform all applicable review passes from `AGENTS.md`.
         - [ ] Perform the mandatory final review against `CODE_REVIEW.md` and record the result in the issue/PR.
         - [ ] Explicitly assess multi-instance isolation and mutable globals/statics.

@@ -1,18 +1,17 @@
 name: T042 Lifecycle Stress
 
-# Heavy lifecycle qualification runs once for a frozen pull-request candidate.
-# Draft PR commits rely on the normal CI and narrowly scoped contract workflows.
+# Weekly lifecycle qualification covers the integrated main branch.
+# Run it manually as well for lifecycle changes or a frozen release candidate.
 on:
-  pull_request:
-    branches: [main]
-    types: [ready_for_review]
+  schedule:
+    - cron: '43 3 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

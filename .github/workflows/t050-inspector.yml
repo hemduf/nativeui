@@ -1,18 +1,6 @@
 name: T050 Inspector Contract
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/t050-inspector.yml'
-      - 'CMakeLists.txt'
-      - 'include/nativeui/component_tree.hpp'
-      - 'include/nativeui/detail/inspector_paint.hpp'
-      - 'include/nativeui/detail/tree_inspector_public.inc'
-      - 'include/nativeui/inspector.hpp'
-      - 'include/nativeui/ui.hpp'
-      - 'tests/headers/inspector.cpp'
-      - 'tests/t050_inspector_*'
   push:
     branches: [main]
     paths:
@@ -25,12 +13,13 @@ on:
       - 'include/nativeui/ui.hpp'
       - 'tests/headers/inspector.cpp'
       - 'tests/t050_inspector_*'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

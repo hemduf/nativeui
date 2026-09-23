@@ -1,7 +1,7 @@
 name: T065 Dispatcher Contract
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - 'include/nativeui/dispatcher.hpp'
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

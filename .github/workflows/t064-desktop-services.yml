@@ -1,7 +1,7 @@
 name: T064 Desktop Services Contract
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - '.github/workflows/t064-desktop-services.yml'

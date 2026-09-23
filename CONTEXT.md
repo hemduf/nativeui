@@ -4,6 +4,7 @@
 
 ## Current session handoff
 
+- Workflow transition on `main`: ordinary ticket PRs now use serial Mac local tests plus mandatory review as the merge gate. Post-merge `Main Smoke` and path-scoped workflows give immediate non-blocking feedback; full CI runs nightly/on demand, T042 weekly/on demand, and T052 only for a frozen release candidate with an explicit approved benchmark-baseline SHA. T095 / #179 has merged; T096 / #180 is the next Ready P0 effects ticket.
 - T088 / #172 / PR #454 delivers deterministic 2D value noise. The corrected issue freezes a deterministic 32-bit lattice hash; pinned Skia `chrome/m153` implements it on the public ES2 runtime-effect path with exact float4 byte lanes. Frozen executable head `e31ca0bcb85175710a9fc267e69842ca592cc380` passed the serial local build, 176/176 CTest, display-less Core compilation, exact macOS GPU vectors, normal/path CI and final T042/T052 on Linux/macOS/Windows. Full `CODE_REVIEW.md` record has zero Blocking/Important findings. Warm 256×256 headless raster noise cost is 165.7 ms versus 0.014 ms solid; native macOS GPU redraw/readback is 6.18 ms versus 0.82 ms. This raster throughput is a known measured limitation. T089 becomes Ready; T090–T092 remain blocked by explicit dependencies.
 - T095 / #179 / PR #453 is Done for the NativeUI 1.1 effects line. Frozen implementation head `7b0d7786c216e9aca589a32cd39c017c3a136ccb` retains one per-view GPU scene, separates it from the borrowed Pugl framebuffer, checks scene/presentation submission, and recovers allocation, paint, context and deferred-redraw failures. The integration with T177 and T088 on current `main` passed a serial macOS Release build with Pugl pin `9498280` and 177/177 CTests. The pre-integration candidate passed normal/path CI, T042 Lifecycle Stress #867 and T052 v0.1 Release Gate #591; final integrated exact-head qualification is recorded in PR #453. The current review record is in PR #453 with no Blocking/Important findings. A reported 2–10 second demo input delay did not recur in two fresh launches; mouse and keyboard responded immediately.
 - Next recommended ticket: T096 / #180 (P0, Ready), whose T078/T094/T095 dependencies are now Done. T088 / #172 is Done; T089 / #173 is independently Ready. Local builds must use `CMAKE_BUILD_PARALLEL_LEVEL=1`, without local `-j`/`--parallel` or simultaneous builds.
@@ -28,7 +29,7 @@ Non-negotiable rules:
 - state machines crossing fallible work have explicit prepare/commit/recovery boundaries;
 - partial native construction leaves no registered callback/native resource behind;
 - top-level `UI`/window/view destruction from an active callback is deferred unless the complete caller chain proves self-destruction safety;
-- `CODE_REVIEW.md`, `CI_POLICY.md`, exact-head tests, `CONTEXT.md` and `ROADMAP.md` are merge/Done gates for code-changing tickets;
+- local Mac tests, `CODE_REVIEW.md`, `CI_POLICY.md`, `CONTEXT.md` and `ROADMAP.md` are merge/Done gates for code-changing tickets; cross-platform exact-SHA qualification gates release candidates;
 - no personal information is placed in tickets, source, tests, examples, fixtures or generated metadata.
 
 ## Pinned dependencies
@@ -209,7 +210,8 @@ Current path:
 T123–T132(done) + T173(done) + T174(done) + T175(done) + T177(done)
                          |
                          v
-T070 -> T122/docs -> T071 -> v1.0.0
+T070(closed, not planned) -X-> T122/docs -> release-path replan
+T071(closed, not planned)
 T068 ---------------------------------------> 1.2
 
 post-1.0 / later-release line already landed on main:
@@ -263,7 +265,7 @@ Other delivered v1 foundations include T030–T036 standard widgets, T037–T040
 
 ## Validation policy
 
-Normal source-tree Release validation:
+Local Mac ticket gate:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -271,44 +273,23 @@ CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Local macOS baseline on 2026-09-23: a cleaned Release build completed serially with `cmake --build build` and no compiler warnings. The sandboxed CTest run passed 164/169; five AppKit window tests failed during window creation with a non-finite frame and all five passed when rerun with graphical-session access. The prior unbounded build exhausted RAM per the user's report; do not use an unbounded `-j` build.
+Use the pinned local Pugl/Skia overrides when already available. Run AppKit tests in the graphical session. The workflow-policy candidate rebased onto T095 built without warnings and passed **177/177 CTest** with graphical-session access; the sandboxed baseline run failed only the five known AppKit window-creation tests, which passed in the graphical rerun.
 
-During active development:
+During ticket work: local TDD and deterministic fault/recovery tests, one coherent implementation batch, full relevant local suite and mandatory review. The locally validated Ready PR can merge without waiting for normal remote CI. A focused remote check remains a pre-merge requirement when native/dependency/ABI correctness cannot be established on the Mac.
 
-1. keep source-changing PRs Draft;
-2. use local TDD and coherent correction batches;
-3. publish only qualification-worthy heads;
-4. run normal CI plus path-relevant dedicated checks;
-5. complete the full `CODE_REVIEW.md` record on the frozen head;
-6. transition Draft -> Ready only for final T042/T052 qualification;
-7. executable/build/workflow changes invalidate that candidate and require Draft + requalification;
-8. pure project-state completion documentation does not invalidate an otherwise green executable candidate.
-
-Fault injection is mandatory where normal execution cannot deterministically reproduce allocation, callback, queue, partial-construction, layout, paint, teardown or native-boundary failure classes.
+After merge: `Main Smoke` runs on `main` pushes, subsystem workflows run on matching paths, full `CI` qualifies the integrated branch nightly or on demand, and T042 runs weekly or on demand. A red check opens a priority regression and pauses affected-area merges. A frozen release candidate requires full CI, relevant dedicated workflows, T042 and T052 against a distinct approved benchmark-baseline SHA. `Done` on an issue means locally validated/reviewed/merged; it does not claim that its individual SHA passed all remote platforms.
 
 ## Automation / integration recovery
 
-GitHub live state is the only durable source of truth. The legacy Scheduler/Reporter control plane and W1–W4 persistent assignments are retired. Current automation is serialized:
+GitHub live issues, PRs, reviews and workflow runs remain the only durable control plane. The retired Scheduler/Reporter assignments remain inactive. Up to two independent source-changing lanes may progress, while local builds are strictly serial. Review or optional remote-check waiting on one PR does not stop another independent Ready ticket.
 
-```text
-implementation/source-changing lanes: 1
-independent review: on demand for a frozen candidate
-reporting/watchdog: read-only
-fallback work: disabled
-```
-
-Recovery sequence:
-
-1. read `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, `CONTEXT.md`, `ROADMAP.md` and `AUTOMATION.md`;
-2. re-fetch live issues, canonical PRs, exact heads, checks, reviews and unresolved threads;
-3. finish the current merge-near ticket before starting another source-changing ticket;
-4. do not trust retired scheduler snapshots over current GitHub state.
+Recovery sequence: read `AGENTS.md`, `CODE_REVIEW.md`, `CI_POLICY.md`, this file, `ROADMAP.md` and `AUTOMATION.md`; then re-fetch live issue/PR/integration state. If a post-merge run is red, identify the first affected SHA, record a priority regression and pause affected-area merges until corrected. Do not claim release readiness from local ticket results.
 
 ## Next actions
 
-1. Execute T070 reference application/Getting Started against the current validated public/package surface.
+1. Replan the v1 reference application/Getting Started path after T070 / #82 closed as not planned; do not infer completion of T133–T137 or T122.
 2. Complete explicitly scheduled v1 documentation closeout including T122 where applicable.
-3. Run T071 on one exact release-candidate SHA.
+3. Replan the release ticket after T071 / #83 closed as not planned, then qualify one exact candidate SHA under `CI_POLICY.md`.
 4. T094 / #178 / PR #450, T177 / #442 / PR #443, T088 / #172 / PR #454 and T095 / #179 / PR #453 are complete. T096 / #180 is Ready as the next P0 effects ticket.
 5. T084 / #168, T085 / #169, T098 / #183, T086 / #170 and T087 / #171 are Done for the ImageTexture line. T089 / #173 is Ready after T088; T090–T092 remain blocked by explicit dependencies. Retained cache-key separation remains deferred to T097.
 6. Keep T068/PR #241 parked for NativeUI 1.2.
