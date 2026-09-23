@@ -236,7 +236,7 @@ T041 adds native standalone and embedded smoke executables. T053 assigns separat
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
-cmake --build build -j
+cmake --build build
 ctest --test-dir build -L smoke --output-on-failure
 ```
 
@@ -255,7 +255,7 @@ The normal source-tree build is the same on all supported platforms; macOS consu
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/nativeui_demo
 ```

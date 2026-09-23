@@ -27,7 +27,7 @@ namespace ui {
 namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
 struct DynamicReconcileFaultAccess;
-struct T125DynamicFaultAccess;
+struct DynamicFaultAccess;
 } // namespace detail
 
 class Dialog;
@@ -37,6 +37,7 @@ struct TreeTestAccess;
 class Tree {
 public:
 #include <nativeui/detail/tree_public.inc>
+#include <nativeui/detail/tree_paint_culling_public.inc>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
 #include <nativeui/detail/tree_inspector_public.inc>
 #endif
@@ -45,54 +46,20 @@ private:
     friend class Dialog;
     friend class UI;
     friend struct TreeTestAccess;
-    friend struct detail::T125DynamicFaultAccess;
+    friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
-#define availability_invalidator unsafe_availability_invalidator
-#define paint_invalidator unsafe_paint_invalidator
-#define layout_invalidator unsafe_layout_invalidator
-#define focus_invalidator unsafe_focus_invalidator
-#define ensure_layout ensure_layout_legacy
-#define layout_node layout_node_legacy
-#define mount_node mount_node_untracked
-#define activate_node activate_node_untracked
-#define deactivate_node deactivate_node_untracked
-#define unmount_node unmount_node_untracked
-#define sync_availability_inactive sync_availability_inactive_t130_impl
-#define sync_availability_structure sync_availability_structure_t130_impl
 #include <nativeui/detail/tree_layout.inc>
-#undef sync_availability_structure
-#undef sync_availability_inactive
-#undef unmount_node
-#undef deactivate_node
-#undef activate_node
-#undef mount_node
-#undef layout_node
-#undef ensure_layout
-#undef focus_invalidator
-#undef layout_invalidator
-#undef paint_invalidator
-#undef availability_invalidator
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>
-#include <nativeui/detail/tree_t125_availability.inc>
-#include <nativeui/detail/tree_t125_semantic.inc>
+#include <nativeui/detail/tree_availability_recovery.inc>
+#include <nativeui/detail/tree_semantic_recovery.inc>
 #include <nativeui/detail/tree_focus_group.inc>
-#define register_dynamic_node unsafe_register_dynamic_node
-#define queue_dynamic_mutation queue_dynamic_mutation_t130_impl
-#define flush_dynamic_mutations flush_dynamic_mutations_t130_impl
 #include <nativeui/detail/tree_dynamic.inc>
-#undef flush_dynamic_mutations
-#undef queue_dynamic_mutation
-#undef register_dynamic_node
-#include <nativeui/detail/tree_t125_dynamic.inc>
-#define mount_node retained_mount_node_legacy
-#define unmount_node retained_unmount_node_legacy
 #include <nativeui/detail/tree_retained_invalidation.inc>
-#undef unmount_node
-#undef mount_node
+#include <nativeui/detail/tree_paint_culling_private.inc>
 #include <nativeui/detail/tree_lifecycle_transaction.inc>
 #include <nativeui/detail/tree_layout_transaction.inc>
 

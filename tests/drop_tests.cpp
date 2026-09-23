@@ -5,8 +5,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "t125_dynamic_recovery_tests.inc"
-#include "t125_quarantine_epoch_tests.inc"
+#include "dynamic_recovery_tests.inc"
+#include "dynamic_quarantine_epoch_tests.inc"
 
 namespace {
 
@@ -102,8 +102,8 @@ void borrowed_offer_unwind_contract() {
 }
 
 void suite() {
-    t125_dynamic_recovery::run();
-    t125_quarantine_epoch::run();
+    dynamic_recovery::run();
+    dynamic_quarantine_epoch::run();
     borrowed_offer_unwind_contract();
 
     auto state = std::make_shared<DropState>();
