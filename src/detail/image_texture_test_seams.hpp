@@ -23,6 +23,7 @@ enum class ImageTextureMaterializationFailurePoint {
 [[nodiscard]] bool image_backing_is_lazy_for_test(const Image& image) noexcept;
 [[nodiscard]] bool image_color_backing_is_premul_for_test(const Image& image) noexcept;
 [[nodiscard]] bool image_data_backing_is_unpremul_for_test(const Image& image) noexcept;
+[[nodiscard]] bool image_color_backing_is_srgb_for_test(const Image& image) noexcept;
 
 void set_image_texture_materialization_failure_for_test(
     ImageTextureMaterializationFailurePoint point) noexcept;
