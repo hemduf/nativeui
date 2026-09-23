@@ -54,7 +54,7 @@ Then run the current baseline tests before editing code:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
@@ -150,17 +150,6 @@ If the canonical issue form changes, update this section in the same change so `
 
 ## 4. Development workflow — local TDD, coherent batches, no micro-commit churn
 
-### 4.0 Source-code naming — semantic, never ticket-derived
-
-Ticket identifiers such as `T094`, `T125` or GitHub issue numbers belong to planning/tracking metadata only. Do **not** encode them into production or test code nomenclature.
-
-- use semantic filenames, type names, function/member names, namespaces, targets and code comments;
-- do not create `tree_tNNN_*.inc`, `TNNNThing`, `tNNN_foo()` or equivalent aliases;
-- do not use preprocessor renaming to stack ticket-era implementations;
-- when a newer implementation supersedes an older one, delete/merge the obsolete implementation or give genuinely distinct responsibilities explicit semantic names;
-- branch names, PR/issue titles, changelog/history and ticket references in planning documentation may keep ticket identifiers.
-
-
 TDD remains mandatory for behavioral changes, but **RED/GREEN/REFACTOR are local development states, not required Git commits or remote pushes**.
 
 Before editing a non-trivial ticket or closeout pass:
@@ -212,8 +201,8 @@ Every **feature ticket** must ship a dedicated example executable in addition to
 
 Requirements:
 
-- add `examples/features/<feature>.cpp` using a stable semantic feature name;
-- register a real `nativeui_example_<feature>` CMake executable with the same semantic name;
+- add `examples/features/tNNN_<feature>.cpp`;
+- register a real `nativeui_example_tNNN_<feature>` CMake executable;
 - interactive/window mode must demonstrate the public API as a user would consume it;
 - the same executable must support `--self-test` and return non-zero on failure;
 - register the self-test with CTest when platform examples are built;
