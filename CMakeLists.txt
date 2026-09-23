@@ -122,6 +122,7 @@ add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
   src/skia_shader.cpp
+  src/skia_noise.cpp
   src/skia_svg.cpp
   src/headless.cpp
   src/dispatcher.cpp
@@ -578,6 +579,30 @@ if(NATIVEUI_BUILD_TESTS)
   )
 
   nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
+  nativeui_add_core_test(nativeui_t088_noise_tests tests/t088_noise_tests.cpp)
+  target_include_directories(nativeui_t088_noise_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+  )
+  # Fault controls remain in this isolated executable, never NativeUI::Core.
+  add_executable(nativeui_t088_noise_fault_tests
+    tests/t088_noise_fault_tests.cpp
+    src/skia_noise.cpp
+    src/skia_shader.cpp
+    src/skia_image.cpp
+  )
+  target_include_directories(nativeui_t088_noise_fault_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_t088_noise_fault_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_t088_noise_fault_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_t088_noise_fault_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_t088_noise_fault_tests)
+  nativeui_enable_sanitizers(nativeui_t088_noise_fault_tests)
+  add_test(NAME nativeui_t088_noise_fault_tests
+    COMMAND nativeui_t088_noise_fault_tests)
   nativeui_add_core_test(nativeui_t081_shader_brush_tests tests/t081_shader_brush_tests.cpp)
   target_include_directories(nativeui_t081_shader_brush_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -683,6 +708,19 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_image_texture_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_image_texture_gpu_reference_tests)
 
+    add_executable(nativeui_t088_noise_gpu_reference_tests
+      tests/t088_noise_gpu_reference_tests.cpp
+    )
+    target_include_directories(nativeui_t088_noise_gpu_reference_tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_t088_noise_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.t088-noise-gpu-reference
+    )
+    nativeui_enable_project_warnings(nativeui_t088_noise_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_t088_noise_gpu_reference_tests)
+
     add_executable(nativeui_t095_scene_gpu_tests tests/t095_scene_gpu_tests.cpp)
     target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -758,7 +796,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

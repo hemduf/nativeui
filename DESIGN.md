@@ -1,7 +1,7 @@
 # NativeUI Design — C++20 Retained-Mode UI with Pugl + Skia
 
 **Status:** active architecture baseline  
-**Updated:** September 10, 2026  
+**Updated:** September 23, 2026
 **Targets:** Windows, macOS, Linux/X11  
 **Language:** C++20  
 **Distribution:** static libraries  
@@ -236,13 +236,13 @@ A second platform backend should be introduced only if a real second implementat
 
 ## 6. Rendering: Skia
 
-NativeUI uses Skia as the rendering engine and `olilarkin/skia-builder` as the binary distribution source.
+NativeUI uses Skia as the rendering engine and the pinned `hemduf/skia-builder` fork of `olilarkin/skia-builder` as the binary distribution source.
 
 Current pin:
 
 ```text
-repository: olilarkin/skia-builder
-release:    chrome/m149
+repository: hemduf/skia-builder (fork of olilarkin/skia-builder)
+release:    chrome/m153
 ```
 
 NativeUI does not run GN, Ninja or depot_tools and does not maintain parallel Skia build arguments.
@@ -308,6 +308,22 @@ Linux   -> Vulkan / Dawn / Graphite
 ```
 
 That change must not require rewriting the component model, DSL, layout or widget APIs.
+
+### 6.4 Built-in procedural sources
+
+`NoiseSource` is a backend-neutral immutable value. Creating it explicitly
+compiles the built-in SkSL through the same `ShaderProgram` path used by user
+shaders. Turning it into a `Brush` binds uniforms and snapshots the compiled
+program; painting never recompiles source. Mutable GPU/context resources remain
+owned by the renderer and are not shared across independent views.
+
+The pinned Skia public runtime-effect API admits ES2 SkSL. The NativeUI 1.1
+value-noise hash therefore represents each 32-bit integer as four exact byte
+lanes in `float4`, including modulo arithmetic, rotation and shifts. It does
+not require SkSL `uint`, `#version 300`, or private runtime-effect options.
+The ticket freezes the complete hash, high-24-bit lattice value and quintic
+interpolation contract for later noise families. Raster and GPU paths use the
+same SkSL and are compared with an independent double-precision CPU oracle.
 
 ---
 
