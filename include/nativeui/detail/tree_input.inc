@@ -88,7 +88,8 @@
     void set_pointer_capture(
         Node& node,
         PointerId pointer,
-        std::uint64_t interaction_generation) noexcept {
+        std::uint64_t interaction_generation,
+        std::uint64_t dispatch_token) noexcept {
         // InputContext can outlive a nested dispatch on the same callback stack.
         // Never let an older frame overwrite capture owned by a newer contact
         // generation that reused the same pointer ID.
@@ -102,14 +103,14 @@
             if (!capture.cancelling &&
                 capture.node == &node &&
                 capture.owner == node.id) {
-                capture.dispatch_token = active_input_dispatch_token_;
+                capture.dispatch_token = dispatch_token;
                 return;
             }
             clear_pointer_capture(pointer);
         }
         if (pointer_capture_count_ >= pointer_captures_.size()) return;
         pointer_captures_[pointer_capture_count_++] = {
-            pointer, &node, node.id, active_input_dispatch_token_};
+            pointer, &node, node.id, dispatch_token};
         if (pointer == 0U && active_platform_) active_platform_->begin_pointer_capture();
     }
 
@@ -187,7 +188,7 @@
     }
 
     [[nodiscard]] InputContext prepare_input_context(
-        Node& node, const InputEvent& /*event*/, PlatformServices& platform) {
+        Node& node, const InputEvent& event, PlatformServices& platform) {
         if (fail_next_input_context_preparation_for_testing_) {
             fail_next_input_context_preparation_for_testing_ = false;
             throw std::bad_alloc{};
@@ -197,50 +198,28 @@
             platform,
             unsafe_paint_invalidator(node),
             unsafe_layout_invalidator(node),
-            // Keep these closures at the historical two-pointer size. Capturing
-            // pointer metadata/generation directly makes libstdc++ std::function
-            // allocate on every routed event, including unrelated keyboard input.
-            // send_prepared_to() scopes the exact event snapshot instead.
-            [this, &node] {
-                const bool capture_allowed =
-                    active_input_type_ != InputType::PointerUp &&
-                    active_input_type_ != InputType::PointerCancel &&
-                    active_input_type_ != InputType::ContextMenu;
-                if (capture_allowed) {
-                    set_pointer_capture(
-                        node,
-                        active_input_pointer_id_,
-                        active_input_pointer_generation_);
-                }
+            {event.pointer.id,
+             pointer_interaction_dispatch_token(event.pointer.id),
+             active_input_dispatch_token_,
+             event.type != InputType::PointerUp &&
+                 event.type != InputType::PointerCancel &&
+                 event.type != InputType::ContextMenu},
+            // The action is owned by this callback context. The closures keep
+            // their two-pointer small-buffer representation, while reentrant
+            // dispatch cannot replace the outer context's pointer identity.
+            [this, &node](const InputContext::PointerAction& action) {
+                set_pointer_capture(
+                    node, action.id, action.interaction_token, action.dispatch_token);
             },
-            [this, &node] {
-                release_pointer_capture(
-                    node,
-                    active_input_pointer_id_,
-                    active_input_pointer_generation_);
+            [this, &node](const InputContext::PointerAction& action) {
+                release_pointer_capture(node, action.id, action.interaction_token);
             }};
     }
 
     [[nodiscard]] EventResult send_prepared_to(
         Node& node, const InputEvent& event, InputContext& context) {
-        // InputContext actions are callback-scoped borrowed operations. Snapshot
-        // the exact event generation here so an outer context remains stale after
-        // a nested same-ID dispatch, while the two std::function closures stay
-        // small enough for their no-allocation small-buffer path.
-        const auto previous_input_type = active_input_type_;
-        const auto previous_input_pointer_id = active_input_pointer_id_;
-        const auto previous_input_pointer_generation = active_input_pointer_generation_;
-        active_input_type_ = event.type;
-        active_input_pointer_id_ = event.pointer.id;
-        active_input_pointer_generation_ =
-            pointer_interaction_dispatch_token(event.pointer.id);
-
         try {
-            const auto result = node.component->input(event, context);
-            active_input_type_ = previous_input_type;
-            active_input_pointer_id_ = previous_input_pointer_id;
-            active_input_pointer_generation_ = previous_input_pointer_generation;
-            return result;
+            return node.component->input(event, context);
         } catch (...) {
             if (event.type == InputType::PointerDown) {
                 // Only unwind state created by this dispatch. A callback may
@@ -251,9 +230,6 @@
                 end_pointer_interaction_if_token(
                     event.pointer.id, active_input_dispatch_token_);
             }
-            active_input_type_ = previous_input_type;
-            active_input_pointer_id_ = previous_input_pointer_id;
-            active_input_pointer_generation_ = previous_input_pointer_generation;
             throw;
         }
     }
@@ -615,9 +591,6 @@
     bool pointer_interaction_active_{};
     std::uint64_t next_input_dispatch_token_{1U};
     std::uint64_t active_input_dispatch_token_{};
-    InputType active_input_type_{InputType::None};
-    PointerId active_input_pointer_id_{};
-    std::uint64_t active_input_pointer_generation_{};
     bool pointer_capture_barrier_{};
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};

@@ -14,6 +14,8 @@ struct ContactState {
     std::vector<ui::PointerId> up;
     std::vector<ui::PointerId> cancel;
     std::function<void(ui::InputContext&)> before_down_capture;
+    std::function<void(ui::InputContext&)> after_down_capture;
+    std::function<void(ui::InputContext&)> on_move_context;
     std::function<void()> on_up;
     std::function<void(ui::InputContext&)> on_up_context;
     std::function<void()> on_cancel;
@@ -34,9 +36,11 @@ public:
         case ui::InputType::PointerDown:
             if (state_->before_down_capture) state_->before_down_capture(context);
             context.capture_pointer();
+            if (state_->after_down_capture) state_->after_down_capture(context);
             return ui::EventResult::Handled;
         case ui::InputType::PointerMove:
             state_->move.push_back(event.pointer.id);
+            if (state_->on_move_context) state_->on_move_context(context);
             return ui::EventResult::Handled;
         case ui::InputType::PointerUp:
             state_->up.push_back(event.pointer.id);
@@ -450,6 +454,69 @@ void suite() {
         NUI_CHECK(right->move.empty());
         (void)tree.dispatch(
             pointer(ui::InputType::PointerUp, 11U, 175.0f, 50.0f), platform);
+    }
+
+    // A still-live outer InputContext may be used while another contact's
+    // callback is on the stack. Its release must keep the outer pointer ID.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 21U, 25.0f, 50.0f), platform);
+        left->on_move_context = [&](ui::InputContext& outer) {
+            right->after_down_capture = [&](ui::InputContext&) {
+                outer.release_pointer();
+            };
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 22U, 175.0f, 50.0f), platform);
+            right->after_down_capture = {};
+        };
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 21U, 25.0f, 50.0f), platform);
+        left->on_move_context = {};
+        left->move.clear();
+        right->move.clear();
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 21U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 22U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->move.empty());
+        NUI_CHECK(right->move.size() == 2U &&
+                  right->move[0] == 21U && right->move[1] == 22U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 21U, 175.0f, 50.0f), platform);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 22U, 25.0f, 50.0f), platform);
+    }
+
+    // If a nested Down reuses the pointer ID, an outer context must retain
+    // its older generation even while the newer callback is still active.
+    {
+        auto left = std::make_shared<ContactState>();
+        auto right = std::make_shared<ContactState>();
+        test::MockPlatform platform;
+        ui::UI tree{Split{ContactProbe{left}, ContactProbe{right}}};
+        tree.resize({200.0f, 100.0f});
+        tree.activate(platform);
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerDown, 23U, 25.0f, 50.0f), platform);
+        left->on_move_context = [&](ui::InputContext& outer) {
+            right->after_down_capture = [&](ui::InputContext&) {
+                outer.capture_pointer();
+            };
+            (void)tree.dispatch(
+                pointer(ui::InputType::PointerDown, 23U, 175.0f, 50.0f), platform);
+            right->after_down_capture = {};
+        };
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 23U, 25.0f, 50.0f), platform);
+        left->on_move_context = {};
+        left->move.clear();
+        right->move.clear();
+
+        (void)tree.dispatch(pointer(ui::InputType::PointerMove, 23U, 25.0f, 50.0f), platform);
+        NUI_CHECK(left->move.empty());
+        NUI_CHECK(right->move.size() == 1U && right->move.back() == 23U);
+        (void)tree.dispatch(pointer(ui::InputType::PointerUp, 23U, 25.0f, 50.0f), platform);
     }
 
     // Reentrant cancel_pointer() is idempotent for the active teardown pass:

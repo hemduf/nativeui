@@ -370,26 +370,17 @@
 
         const auto previous_dispatch_depth = dispatch_depth_;
         const auto previous_input_dispatch_token = active_input_dispatch_token_;
-        const auto previous_input_pointer_id = active_input_pointer_id_;
-        const auto previous_input_pointer_generation = active_input_pointer_generation_;
         if (next_input_dispatch_token_ == 0U) next_input_dispatch_token_ = 1U;
         active_input_dispatch_token_ = next_input_dispatch_token_++;
         if (next_input_dispatch_token_ == 0U) next_input_dispatch_token_ = 1U;
-        active_input_pointer_id_ = event.pointer.id;
-        active_input_pointer_generation_ =
-            pointer_interaction_dispatch_token(event.pointer.id);
 
         dispatch_depth_ = previous_dispatch_depth + 1;
         bool pointer_route_committed = false;
         auto finish = [this,
                        &platform,
                        previous_dispatch_depth,
-                       previous_input_dispatch_token,
-                       previous_input_pointer_id,
-                       previous_input_pointer_generation](EventResult result) {
+                       previous_input_dispatch_token](EventResult result) {
             active_input_dispatch_token_ = previous_input_dispatch_token;
-            active_input_pointer_id_ = previous_input_pointer_id;
-            active_input_pointer_generation_ = previous_input_pointer_generation;
             dispatch_depth_ = previous_dispatch_depth;
             if (previous_dispatch_depth == 0) {
                 flush_dynamic_mutations();
@@ -517,8 +508,6 @@
                     }
                 }
                 begin_pointer_interaction(event.pointer.id);
-                active_input_pointer_generation_ =
-                    pointer_interaction_dispatch_token(event.pointer.id);
 
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
@@ -643,8 +632,6 @@
                     event.pointer.id, active_input_dispatch_token_);
             }
             active_input_dispatch_token_ = previous_input_dispatch_token;
-            active_input_pointer_id_ = previous_input_pointer_id;
-            active_input_pointer_generation_ = previous_input_pointer_generation;
             dispatch_depth_ = previous_dispatch_depth;
             throw;
         }

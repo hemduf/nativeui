@@ -260,6 +260,13 @@ private:
 
 class InputContext {
 public:
+    struct PointerAction {
+        PointerId id{};
+        std::uint64_t interaction_token{};
+        std::uint64_t dispatch_token{};
+        bool capture_allowed{};
+    };
+
     InputContext(
         Rect bounds,
         PlatformServices& platform,
@@ -271,6 +278,22 @@ public:
           platform_(platform),
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)),
+          legacy_capture_(std::move(capture)),
+          legacy_release_(std::move(release)) {}
+
+    InputContext(
+        Rect bounds,
+        PlatformServices& platform,
+        std::function<void()> invalidate,
+        std::function<void()> invalidate_layout,
+        PointerAction pointer_action,
+        std::function<void(const PointerAction&)> capture,
+        std::function<void(const PointerAction&)> release)
+        : bounds_(bounds),
+          platform_(platform),
+          invalidate_(std::move(invalidate)),
+          invalidate_layout_(std::move(invalidate_layout)),
+          pointer_action_(pointer_action),
           capture_(std::move(capture)),
           release_(std::move(release)) {}
 
@@ -294,16 +317,28 @@ public:
     void invalidate() const { invalidate_(); }
     /// Recompute layout from this component through its ancestors, then repaint.
     void invalidate_layout() const { invalidate_layout_(); }
-    void capture_pointer() const { capture_(); }
-    void release_pointer() const { release_(); }
+    void capture_pointer() const {
+        if (capture_) {
+            if (pointer_action_.capture_allowed) capture_(pointer_action_);
+        } else if (legacy_capture_) {
+            legacy_capture_();
+        }
+    }
+    void release_pointer() const {
+        if (release_) release_(pointer_action_);
+        else if (legacy_release_) legacy_release_();
+    }
 
 private:
     Rect bounds_{};
     PlatformServices& platform_;
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
-    std::function<void()> capture_;
-    std::function<void()> release_;
+    PointerAction pointer_action_{};
+    std::function<void(const PointerAction&)> capture_;
+    std::function<void(const PointerAction&)> release_;
+    std::function<void()> legacy_capture_;
+    std::function<void()> legacy_release_;
 };
 
 class CanvasInputContext {
