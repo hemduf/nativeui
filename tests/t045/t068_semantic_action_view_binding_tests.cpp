@@ -209,6 +209,87 @@ void independent_view_bindings_do_not_share_target_lifetime() {
     T068_CHECK(*count_b == 1);
 }
 
+void platform_endpoint_routes_stable_identity_only_through_t065() {
+    auto publisher = published_button();
+    ui::detail::DispatcherOwner dispatcher_owner;
+    auto dispatch_count = std::make_shared<int>(0);
+    auto target = std::make_shared<RecordingTarget>(dispatch_count);
+
+    ui::detail::SemanticActionViewBinding binding{
+        dispatcher_owner.dispatcher(), target, publisher};
+    target.reset();
+
+    const auto endpoint = binding.endpoint().lock();
+    T068_CHECK(endpoint != nullptr);
+
+    const ui::detail::SemanticIdentity identity{42, std::nullopt};
+    T068_CHECK(endpoint->post(identity, activate_request()));
+    T068_CHECK(*dispatch_count == 0);
+    T068_CHECK(dispatcher_owner.checkpoint() == 1);
+    T068_CHECK(*dispatch_count == 1);
+
+    const ui::detail::SemanticIdentity missing{43, std::nullopt};
+    T068_CHECK(!endpoint->post(missing, activate_request()));
+    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+}
+
+void platform_endpoint_fails_closed_after_binding_retirement() {
+    auto publisher = published_button();
+    ui::detail::DispatcherOwner dispatcher_owner;
+    auto dispatch_count = std::make_shared<int>(0);
+    auto target = std::make_shared<RecordingTarget>(dispatch_count);
+
+    ui::detail::SemanticActionViewBinding binding{
+        dispatcher_owner.dispatcher(), target, publisher};
+    target.reset();
+
+    auto weak_endpoint = binding.endpoint();
+    auto in_flight_endpoint = weak_endpoint.lock();
+    T068_CHECK(in_flight_endpoint != nullptr);
+
+    binding.reset();
+    const ui::detail::SemanticIdentity identity{42, std::nullopt};
+    T068_CHECK(!in_flight_endpoint->post(identity, activate_request()));
+    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+    T068_CHECK(*dispatch_count == 0);
+
+    in_flight_endpoint.reset();
+    T068_CHECK(weak_endpoint.expired());
+}
+
+void endpoint_isolation_matches_view_binding_isolation() {
+    auto publisher_a = published_button();
+    auto publisher_b = published_button();
+    ui::detail::DispatcherOwner dispatcher_a;
+    ui::detail::DispatcherOwner dispatcher_b;
+    auto count_a = std::make_shared<int>(0);
+    auto count_b = std::make_shared<int>(0);
+    auto target_a = std::make_shared<RecordingTarget>(count_a);
+    auto target_b = std::make_shared<RecordingTarget>(count_b);
+
+    ui::detail::SemanticActionViewBinding binding_a{
+        dispatcher_a.dispatcher(), target_a, publisher_a};
+    ui::detail::SemanticActionViewBinding binding_b{
+        dispatcher_b.dispatcher(), target_b, publisher_b};
+    target_a.reset();
+    target_b.reset();
+
+    const auto endpoint_a = binding_a.endpoint().lock();
+    const auto endpoint_b = binding_b.endpoint().lock();
+    T068_CHECK(endpoint_a != nullptr);
+    T068_CHECK(endpoint_b != nullptr);
+    T068_CHECK(endpoint_a.get() != endpoint_b.get());
+
+    binding_a.reset();
+    const ui::detail::SemanticIdentity identity{42, std::nullopt};
+    T068_CHECK(!endpoint_a->post(identity, activate_request()));
+    T068_CHECK(endpoint_b->post(identity, activate_request()));
+    T068_CHECK(dispatcher_a.checkpoint() == 0);
+    T068_CHECK(dispatcher_b.checkpoint() == 1);
+    T068_CHECK(*count_a == 0);
+    T068_CHECK(*count_b == 1);
+}
+
 void empty_binding_fails_closed() {
     auto publisher = published_button();
     ui::detail::SemanticActionViewBinding binding;
@@ -216,6 +297,7 @@ void empty_binding_fails_closed() {
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42));
 
     T068_CHECK(!router.post(activate_request()));
+    T068_CHECK(binding.endpoint().expired());
 }
 
 void suite() {
@@ -224,6 +306,9 @@ void suite() {
     reset_during_live_recheck_blocks_dispatch();
     reentrant_reset_rejects_nested_future_work();
     independent_view_bindings_do_not_share_target_lifetime();
+    platform_endpoint_routes_stable_identity_only_through_t065();
+    platform_endpoint_fails_closed_after_binding_retirement();
+    endpoint_isolation_matches_view_binding_isolation();
     empty_binding_fails_closed();
 }
 
