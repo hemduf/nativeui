@@ -91,6 +91,35 @@ void bridge_routes_against_its_own_snapshot_and_target() {
     T068_CHECK(*count == 1);
 }
 
+void bridge_exposes_lifetime_safe_native_action_endpoint() {
+    ui::detail::DispatcherOwner dispatcher_owner;
+    ui::detail::SemanticNativeViewBridge bridge;
+    auto count = std::make_shared<int>(0);
+    auto target = std::make_shared<RecordingTarget>(count);
+
+    bridge.bind_actions(dispatcher_owner.dispatcher(), target);
+    target.reset();
+    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+
+    auto weak_endpoint = bridge.native_action_endpoint();
+    auto endpoint = weak_endpoint.lock();
+    T068_CHECK(endpoint != nullptr);
+
+    const ui::detail::SemanticIdentity identity{42, std::nullopt};
+    T068_CHECK(endpoint->post(identity, activate_request()));
+    T068_CHECK(*count == 0);
+    T068_CHECK(dispatcher_owner.checkpoint() == 1);
+    T068_CHECK(*count == 1);
+
+    bridge.unbind_actions();
+    T068_CHECK(!endpoint->post(identity, activate_request()));
+    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+    T068_CHECK(*count == 1);
+
+    endpoint.reset();
+    T068_CHECK(weak_endpoint.expired());
+}
+
 void sibling_views_keep_query_proxies_isolated() {
     ui::detail::SemanticNativeViewBridge bridge_a;
     ui::detail::SemanticNativeViewBridge bridge_b;
@@ -337,6 +366,7 @@ void lifetime_binding_rejects_work_after_owner_death() {
 
 void suite() {
     bridge_routes_against_its_own_snapshot_and_target();
+    bridge_exposes_lifetime_safe_native_action_endpoint();
     sibling_views_keep_query_proxies_isolated();
     destroying_one_view_invalidates_only_its_domain();
     sibling_views_keep_snapshot_and_action_domains_isolated();

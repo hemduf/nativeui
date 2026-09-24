@@ -44,7 +44,9 @@ public:
                       std::shared_ptr<SemanticActionTarget> target) {
         if (!view_state_.active()) return;
         SemanticActionViewBinding prepared{
-            std::move(dispatcher), std::move(target)};
+            std::move(dispatcher),
+            std::move(target),
+            view_state_.publisher()};
         action_binding_.reset();
         action_binding_ = std::move(prepared);
     }
@@ -114,6 +116,17 @@ public:
     [[nodiscard]] std::weak_ptr<const SemanticNativePublicationSource>
     native_reader_source() const noexcept {
         return native_publication_state_.reader_source();
+    }
+
+    /// Lifetime-safe endpoint for platform semantic action requests. The
+    /// binding owns the endpoint; native adapters retain only this weak handle
+    /// and post stable semantic identity plus a typed request through T065.
+    /// Rebind/unbind/shutdown retire the endpoint lifetime before target or
+    /// retained-view teardown, so an in-flight strong endpoint lease fails
+    /// closed rather than extending live UI state.
+    [[nodiscard]] std::weak_ptr<const SemanticActionViewEndpoint>
+    native_action_endpoint() const noexcept {
+        return action_binding_.endpoint();
     }
 
     /// Mint a query proxy from this native view's immutable publisher. Platform
