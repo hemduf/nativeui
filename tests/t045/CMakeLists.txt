@@ -51,11 +51,13 @@ if(APPLE)
   nativeui_add_semantics_test(semantic_macos_appkit_frame semantic_macos_appkit_frame_tests.mm)
   nativeui_add_semantics_test(semantic_macos_proxy_cache semantic_macos_proxy_cache_tests.mm)
   nativeui_add_semantics_test(semantic_macos_children_callbacks semantic_macos_children_callbacks_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_interaction semantic_macos_interaction_tests.mm)
   set_target_properties(
     semantic_macos_appkit
     semantic_macos_appkit_frame
     semantic_macos_proxy_cache
     semantic_macos_children_callbacks
+    semantic_macos_interaction
     PROPERTIES
       OBJCXX_STANDARD 20
       OBJCXX_STANDARD_REQUIRED YES
@@ -66,6 +68,7 @@ if(APPLE)
   target_link_libraries(semantic_macos_appkit_frame PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_proxy_cache PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_children_callbacks PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_interaction PRIVATE "${T045_APPKIT_FRAMEWORK}")
 endif()
 
 target_sources(t068_semantic_action_router PRIVATE
