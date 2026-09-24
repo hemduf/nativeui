@@ -81,6 +81,71 @@ macos_accessibility_appkit_interaction(
     return std::nullopt;
 }
 
+[[nodiscard]] inline bool macos_accessibility_appkit_action_selector(
+    SEL selector) noexcept {
+    if (!selector) {
+        return false;
+    }
+
+    return sel_isEqual(selector, @selector(accessibilityPerformPress)) ||
+           sel_isEqual(selector, @selector(accessibilityPerformIncrement)) ||
+           sel_isEqual(selector, @selector(accessibilityPerformDecrement)) ||
+           sel_isEqual(selector, @selector(setAccessibilityFocused:)) ||
+           sel_isEqual(selector, @selector(setAccessibilitySelected:)) ||
+           sel_isEqual(selector, @selector(setAccessibilityExpanded:)) ||
+           sel_isEqual(selector, @selector(setAccessibilityValue:));
+}
+
+[[nodiscard]] inline bool macos_accessibility_appkit_selector_allowed(
+    const SemanticInfo& info,
+    SEL selector) noexcept {
+    if (!macos_accessibility_appkit_action_selector(selector)) {
+        return false;
+    }
+
+    std::optional<MacOSAccessibilityAppKitInteraction> matched;
+    for (const SemanticAction action : info.actions) {
+        if (!semantic_action_allowed(info, action)) {
+            continue;
+        }
+
+        const auto mapped = macos_accessibility_interaction_mapping(action);
+        if (!mapped) {
+            continue;
+        }
+        const auto appkit = macos_accessibility_appkit_interaction(*mapped);
+        if (!appkit || !sel_isEqual(appkit->selector, selector)) {
+            continue;
+        }
+
+        if (action == SemanticAction::SetValue) {
+            const bool numeric_domain =
+                info.numeric_value.has_value() || info.value_range.has_value();
+            const bool text_domain = info.text_value.has_value();
+            if (numeric_domain == text_domain) {
+                continue;
+            }
+        }
+
+        if (!matched) {
+            matched = *appkit;
+            continue;
+        }
+
+        const bool opposite_boolean_directions =
+            matched->kind == MacOSAccessibilityAppKitInteractionKind::BooleanSetter &&
+            appkit->kind == MacOSAccessibilityAppKitInteractionKind::BooleanSetter &&
+            matched->boolean_value.has_value() &&
+            appkit->boolean_value.has_value() &&
+            matched->boolean_value != appkit->boolean_value;
+        if (!opposite_boolean_directions) {
+            return false;
+        }
+    }
+
+    return matched.has_value();
+}
+
 /// Resolve one concrete AppKit callback shape back to the single currently
 /// advertised NativeUI semantic action that it represents.
 ///

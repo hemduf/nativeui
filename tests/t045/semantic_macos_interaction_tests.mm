@@ -156,6 +156,57 @@ void appkit_callbacks_reverse_to_the_single_advertised_action() {
     CHECK(collapse == ui::SemanticAction::Collapse);
 }
 
+void selector_availability_matches_current_semantic_actions() {
+    for (const auto& expected : expected_interactions) {
+        auto info = info_for(expected.action);
+        if (expected.action == ui::SemanticAction::SetValue) {
+            info.numeric_value = 0.5;
+        }
+        CHECK(ui::detail::macos_accessibility_appkit_action_selector(
+            expected.selector));
+        CHECK(ui::detail::macos_accessibility_appkit_selector_allowed(
+            info, expected.selector));
+    }
+
+    auto ambiguous_press = info_for(ui::SemanticAction::Activate);
+    ambiguous_press.actions.push_back(ui::SemanticAction::Toggle);
+    CHECK(!ui::detail::macos_accessibility_appkit_selector_allowed(
+        ambiguous_press, @selector(accessibilityPerformPress)));
+
+    ui::SemanticInfo expansion;
+    expansion.role = ui::SemanticRole::ComboBox;
+    expansion.enabled = true;
+    expansion.actions = {
+        ui::SemanticAction::Expand,
+        ui::SemanticAction::Collapse,
+    };
+    CHECK(ui::detail::macos_accessibility_appkit_selector_allowed(
+        expansion, @selector(setAccessibilityExpanded:)));
+
+    auto disabled = info_for(ui::SemanticAction::Increment);
+    disabled.enabled = false;
+    CHECK(!ui::detail::macos_accessibility_appkit_selector_allowed(
+        disabled, @selector(accessibilityPerformIncrement)));
+
+    auto read_only = info_for(ui::SemanticAction::SetValue);
+    read_only.read_only = true;
+    read_only.numeric_value = 0.5;
+    CHECK(!ui::detail::macos_accessibility_appkit_selector_allowed(
+        read_only, @selector(setAccessibilityValue:)));
+
+    auto malformed_value = info_for(ui::SemanticAction::SetValue);
+    CHECK(!ui::detail::macos_accessibility_appkit_selector_allowed(
+        malformed_value, @selector(setAccessibilityValue:)));
+    malformed_value.numeric_value = 0.0;
+    malformed_value.text_value = std::string{};
+    CHECK(!ui::detail::macos_accessibility_appkit_selector_allowed(
+        malformed_value, @selector(setAccessibilityValue:)));
+
+    CHECK(!ui::detail::macos_accessibility_appkit_action_selector(nullptr));
+    CHECK(!ui::detail::macos_accessibility_appkit_action_selector(
+        @selector(accessibilityPerformPick)));
+}
+
 void argument_free_and_boolean_requests_preserve_action_identity() {
     for (const auto& expected : expected_interactions) {
         if (expected.action == ui::SemanticAction::SetValue) {
@@ -288,6 +339,7 @@ int main() {
             semantic_actions_translate_to_exact_appkit_dispatch_forms();
             malformed_interaction_values_fail_closed();
             appkit_callbacks_reverse_to_the_single_advertised_action();
+            selector_availability_matches_current_semantic_actions();
             argument_free_and_boolean_requests_preserve_action_identity();
             request_preparation_applies_current_eligibility();
             numeric_value_requests_are_typed_and_finite();

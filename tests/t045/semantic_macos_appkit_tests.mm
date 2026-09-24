@@ -629,6 +629,20 @@ void accessibility_proxy_actions_route_only_through_the_view_endpoint() {
         ui::detail::macos_accessibility_appkit_proxy_create(
             anchor, std::move(*state));
     CHECK(element != nil);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(accessibilityPerformPress)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(accessibilityPerformIncrement)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(accessibilityPerformDecrement)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityFocused:)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilitySelected:)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityExpanded:)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityValue:)] == YES);
 
     CHECK([element accessibilityPerformPress] == YES);
     CHECK(records->empty());
@@ -728,6 +742,14 @@ void accessibility_virtual_proxy_action_preserves_logical_identity() {
         ui::detail::macos_accessibility_appkit_proxy_create(
             anchor, std::move(*state));
     CHECK(element != nil);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilitySelected:)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityFocused:)] == YES);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(accessibilityPerformPress)] == NO);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityValue:)] == NO);
 
     [element setAccessibilitySelected:YES];
     CHECK(records->empty());

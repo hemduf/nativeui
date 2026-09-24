@@ -647,6 +647,45 @@ inline id macos_accessibility_proxy_parent(id object, SEL) noexcept {
     }
 }
 
+[[nodiscard]] inline BOOL macos_accessibility_super_selector_allowed(
+    id object,
+    SEL selector,
+    SEL candidate) noexcept {
+    Class const proxy_class = object ? object_getClass(object) : Nil;
+    Class const superclass = proxy_class ? class_getSuperclass(proxy_class) : Nil;
+    if (!object || !superclass || !candidate) return NO;
+
+    struct objc_super super_call { object, superclass };
+    @try {
+        using SuperCall = BOOL (*)(struct objc_super*, SEL, SEL);
+        return reinterpret_cast<SuperCall>(objc_msgSendSuper)(
+            &super_call, selector, candidate);
+    } @catch (...) {
+        return NO;
+    }
+}
+
+inline BOOL macos_accessibility_proxy_selector_allowed(
+    id object,
+    SEL selector,
+    SEL candidate) noexcept {
+    if (!macos_accessibility_appkit_action_selector(candidate)) {
+        return macos_accessibility_super_selector_allowed(
+            object, selector, candidate);
+    }
+
+    try {
+        auto* const state = macos_accessibility_proxy_stored_state(object);
+        if (!state) return NO;
+        const auto read = state->read();
+        if (!read) return NO;
+        return macos_accessibility_appkit_selector_allowed(
+            read->info(), candidate) ? YES : NO;
+    } catch (...) {
+        return NO;
+    }
+}
+
 [[nodiscard]] inline bool macos_accessibility_proxy_post_action(
     id object,
     SEL selector,
@@ -844,6 +883,11 @@ macos_accessibility_appkit_proxy_class(Class consumer_view_class) noexcept {
             proxy_class,
             @selector(accessibilityParent),
             reinterpret_cast<IMP>(&macos_accessibility_proxy_parent)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(isAccessibilitySelectorAllowed:),
+            reinterpret_cast<IMP>(
+                &macos_accessibility_proxy_selector_allowed)) &&
         macos_accessibility_add_proxy_override(
             proxy_class,
             @selector(accessibilityPerformPress),
