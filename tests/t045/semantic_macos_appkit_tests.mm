@@ -1,5 +1,7 @@
 #include "../../src/detail/semantic_macos_appkit.hpp"
 
+#include <nativeui/detail/dispatcher_owner.hpp>
+
 #include <array>
 #include <cstdlib>
 #include <iostream>
@@ -8,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -524,6 +527,216 @@ void accessibility_proxy_value_projects_checked_state() {
     CHECK([(NSNumber*)value integerValue] == 2);
 }
 
+struct RecordedSemanticAction final {
+    ui::detail::SemanticIdentity identity;
+    ui::detail::SemanticActionRequest request;
+};
+
+class RecordingSemanticActionTarget final
+    : public ui::detail::SemanticActionTarget {
+public:
+    RecordingSemanticActionTarget(
+        ui::detail::SemanticIdentity expected_identity,
+        ui::SemanticInfo current_info,
+        std::shared_ptr<std::vector<RecordedSemanticAction>> records)
+        : expected_identity_(expected_identity),
+          current_info_(std::move(current_info)),
+          records_(std::move(records)) {}
+
+    [[nodiscard]] std::optional<ui::SemanticInfo> current_semantics(
+        const ui::detail::SemanticIdentity& identity) const override {
+        return identity == expected_identity_
+            ? std::optional<ui::SemanticInfo>{current_info_}
+            : std::nullopt;
+    }
+
+    bool dispatch_semantic_action(
+        const ui::detail::SemanticIdentity& identity,
+        const ui::detail::SemanticActionRequest& request) override {
+        if (identity != expected_identity_) {
+            return false;
+        }
+        records_->push_back({identity, request});
+        return true;
+    }
+
+private:
+    ui::detail::SemanticIdentity expected_identity_;
+    ui::SemanticInfo current_info_;
+    std::shared_ptr<std::vector<RecordedSemanticAction>> records_;
+};
+
+std::shared_ptr<const ui::SemanticTreeSnapshot> actionable_snapshot(
+    std::uint64_t generation,
+    ui::SemanticId node_id) {
+    auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
+    snapshot->generation = generation;
+    snapshot->root = node_id;
+
+    ui::SemanticNodeSnapshot node;
+    node.id = node_id;
+    node.info.role = ui::SemanticRole::Slider;
+    node.info.name = "action target";
+    node.info.enabled = true;
+    node.info.focusable = true;
+    node.info.numeric_value = 0.25;
+    node.info.value_range = ui::SemanticValueRange{0.0, 1.0, 0.01};
+    node.info.actions = {
+        ui::SemanticAction::Activate,
+        ui::SemanticAction::Focus,
+        ui::SemanticAction::Increment,
+        ui::SemanticAction::Decrement,
+        ui::SemanticAction::SetValue,
+        ui::SemanticAction::Select,
+        ui::SemanticAction::Expand,
+        ui::SemanticAction::Collapse,
+    };
+    snapshot->nodes.push_back(std::move(node));
+    return snapshot;
+}
+
+void accessibility_proxy_actions_route_only_through_the_view_endpoint() {
+    NativePublicationState publication_state;
+    constexpr ui::SemanticId node_id = 94U;
+    const auto snapshot = actionable_snapshot(1U, node_id);
+    CHECK(publication_state.publish(
+        snapshot,
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
+    CHECK(!publisher->publish(*snapshot).empty());
+
+    ui::detail::DispatcherOwner dispatcher_owner;
+    auto records = std::make_shared<std::vector<RecordedSemanticAction>>();
+    const ui::detail::SemanticIdentity identity{node_id, std::nullopt};
+    auto target = std::make_shared<RecordingSemanticActionTarget>(
+        identity, snapshot->nodes.front().info, records);
+    ui::detail::SemanticActionViewBinding binding{
+        dispatcher_owner.dispatcher(), target, publisher};
+    target.reset();
+
+    auto state = NativeProxyState::ordinary(
+        publication_state.reader_source(),
+        node_id,
+        {},
+        binding.endpoint());
+    CHECK(state.has_value());
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_appkit_actions_666666666666_PuglWrapperView");
+    NSAccessibilityElement* element =
+        ui::detail::macos_accessibility_appkit_proxy_create(
+            anchor, std::move(*state));
+    CHECK(element != nil);
+
+    CHECK([element accessibilityPerformPress] == YES);
+    CHECK(records->empty());
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Activate);
+
+    CHECK([element accessibilityPerformIncrement] == YES);
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Increment);
+
+    CHECK([element accessibilityPerformDecrement] == YES);
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Decrement);
+
+    [element setAccessibilityFocused:YES];
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Focus);
+    const std::size_t after_focus = records->size();
+    [element setAccessibilityFocused:NO];
+    CHECK(dispatcher_owner.checkpoint() == 0U);
+    CHECK(records->size() == after_focus);
+
+    [element setAccessibilitySelected:YES];
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Select);
+    const std::size_t after_selection = records->size();
+    [element setAccessibilitySelected:NO];
+    CHECK(dispatcher_owner.checkpoint() == 0U);
+    CHECK(records->size() == after_selection);
+
+    [element setAccessibilityExpanded:YES];
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Expand);
+    [element setAccessibilityExpanded:NO];
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::Collapse);
+
+    [element setAccessibilityValue:@0.75];
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->back().request.action == ui::SemanticAction::SetValue);
+    CHECK(records->back().request.numeric_value == 0.75);
+    CHECK(!records->back().request.text_value.has_value());
+
+    const std::size_t after_value = records->size();
+    [element setAccessibilityValue:@"invalid"];
+    CHECK(dispatcher_owner.checkpoint() == 0U);
+    CHECK(records->size() == after_value);
+
+    binding.reset();
+    CHECK([element accessibilityPerformPress] == NO);
+    [element setAccessibilityExpanded:YES];
+    CHECK(dispatcher_owner.checkpoint() == 0U);
+    CHECK(records->size() == after_value);
+}
+
+void accessibility_virtual_proxy_action_preserves_logical_identity() {
+    NativePublicationState publication_state;
+    constexpr ui::SemanticId list_id = 95U;
+    constexpr ui::VirtualSemanticItemToken token = 8123U;
+    const auto snapshot = virtual_list_snapshot(1U, list_id, token, true);
+    CHECK(publication_state.publish(
+        snapshot,
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
+    CHECK(!publisher->publish(*snapshot).empty());
+
+    ui::SemanticInfo live_info;
+    live_info.role = ui::SemanticRole::ListItem;
+    live_info.enabled = true;
+    live_info.actions = {
+        ui::SemanticAction::Select,
+        ui::SemanticAction::Focus,
+    };
+
+    ui::detail::DispatcherOwner dispatcher_owner;
+    auto records = std::make_shared<std::vector<RecordedSemanticAction>>();
+    const ui::detail::SemanticIdentity identity{list_id, token};
+    auto target = std::make_shared<RecordingSemanticActionTarget>(
+        identity, live_info, records);
+    ui::detail::SemanticActionViewBinding binding{
+        dispatcher_owner.dispatcher(), target, publisher};
+    target.reset();
+
+    auto state = NativeProxyState::virtual_item(
+        publication_state.reader_source(),
+        list_id,
+        token,
+        {},
+        binding.endpoint());
+    CHECK(state.has_value());
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_appkit_virtual_actions_777777777777_PuglWrapperView");
+    NSAccessibilityElement* element =
+        ui::detail::macos_accessibility_appkit_proxy_create(
+            anchor, std::move(*state));
+    CHECK(element != nil);
+
+    [element setAccessibilitySelected:YES];
+    CHECK(records->empty());
+    CHECK(dispatcher_owner.checkpoint() == 1U);
+    CHECK(records->size() == 1U);
+    CHECK(records->front().identity == identity);
+    CHECK(records->front().request.action == ui::SemanticAction::Select);
+}
+
 void accessibility_proxy_runtime_class_rejects_unscoped_anchor() {
     Class unscoped = test_anchor_class("NativeUIAccessibilityUnscopedAnchor");
     CHECK(ui::detail::macos_accessibility_appkit_proxy_class(unscoped) == Nil);
@@ -543,6 +756,8 @@ int main() {
             accessibility_proxy_instance_reads_current_snapshot_and_fails_closed();
             accessibility_proxy_projects_help_enabled_and_focus_state();
             accessibility_proxy_value_projects_checked_state();
+            accessibility_proxy_actions_route_only_through_the_view_endpoint();
+            accessibility_virtual_proxy_action_preserves_logical_identity();
             accessibility_proxy_runtime_class_rejects_unscoped_anchor();
             std::cout << "PASS semantic macOS AppKit mapping\n";
             return EXIT_SUCCESS;

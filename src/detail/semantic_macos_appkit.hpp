@@ -14,6 +14,7 @@
 
 #include "semantic_macos_children.hpp"
 #include "semantic_macos_frame.hpp"
+#include "semantic_macos_interaction.hpp"
 #include "semantic_native_bounds.hpp"
 
 #include <cstddef>
@@ -646,6 +647,68 @@ inline id macos_accessibility_proxy_parent(id object, SEL) noexcept {
     }
 }
 
+[[nodiscard]] inline bool macos_accessibility_proxy_post_action(
+    id object,
+    SEL selector,
+    std::optional<bool> boolean_value = std::nullopt) noexcept {
+    try {
+        auto* const state = macos_accessibility_proxy_stored_state(object);
+        if (!state) return false;
+        const auto endpoint = state->action_endpoint().lock();
+        if (!endpoint) return false;
+        auto read = state->read();
+        if (!read) return false;
+        auto request = macos_accessibility_appkit_action_request(
+            read->info(), selector, boolean_value);
+        if (!request) return false;
+        const SemanticIdentity identity{read->node_id(), read->virtual_token()};
+        return endpoint->post(identity, std::move(*request));
+    } catch (...) {
+        return false;
+    }
+}
+
+[[nodiscard]] inline bool macos_accessibility_proxy_post_value_action(
+    id object,
+    SEL selector,
+    id value) noexcept {
+    try {
+        auto* const state = macos_accessibility_proxy_stored_state(object);
+        if (!state) return false;
+        const auto endpoint = state->action_endpoint().lock();
+        if (!endpoint) return false;
+        auto read = state->read();
+        if (!read) return false;
+        auto request = macos_accessibility_appkit_value_action_request(
+            read->info(), selector, value);
+        if (!request) return false;
+        const SemanticIdentity identity{read->node_id(), read->virtual_token()};
+        return endpoint->post(identity, std::move(*request));
+    } catch (...) {
+        return false;
+    }
+}
+
+inline BOOL macos_accessibility_proxy_perform_action(
+    id object,
+    SEL selector) noexcept {
+    return macos_accessibility_proxy_post_action(object, selector) ? YES : NO;
+}
+
+inline void macos_accessibility_proxy_set_boolean_action(
+    id object,
+    SEL selector,
+    BOOL value) noexcept {
+    (void)macos_accessibility_proxy_post_action(object, selector, value != NO);
+}
+
+inline void macos_accessibility_proxy_set_value_action(
+    id object,
+    SEL selector,
+    id value) noexcept {
+    (void)macos_accessibility_proxy_post_value_action(object, selector, value);
+}
+
 inline void macos_accessibility_proxy_dealloc(id object, SEL selector) noexcept {
     auto* const state = macos_accessibility_proxy_stored_state(object);
     (void)macos_accessibility_proxy_store_state(object, nullptr);
@@ -781,6 +844,34 @@ macos_accessibility_appkit_proxy_class(Class consumer_view_class) noexcept {
             proxy_class,
             @selector(accessibilityParent),
             reinterpret_cast<IMP>(&macos_accessibility_proxy_parent)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityPerformPress),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_perform_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityPerformIncrement),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_perform_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityPerformDecrement),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_perform_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(setAccessibilityFocused:),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_set_boolean_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(setAccessibilitySelected:),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_set_boolean_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(setAccessibilityExpanded:),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_set_boolean_action)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(setAccessibilityValue:),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_set_value_action)) &&
         macos_accessibility_add_proxy_override(
             proxy_class,
             sel_registerName("dealloc"),
