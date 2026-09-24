@@ -255,6 +255,21 @@ private:
 /// and never pair a later semantic load with older/newer geometry.
 class SemanticNativeSnapshotQuery final {
 public:
+    /// Resolve the semantic root from one already-retained native publication.
+    /// Root identity and projected properties therefore come from the same
+    /// immutable semantic+geometry generation supplied by the caller.
+    [[nodiscard]] static std::optional<SemanticNativeSnapshotRead> root(
+        std::shared_ptr<const SemanticNativePublicationSnapshot> publication) {
+        if (!publication || !publication->semantic_snapshot) {
+            return std::nullopt;
+        }
+        const SemanticId root_id = publication->semantic_snapshot->root;
+        if (root_id == kInvalidSemanticId) {
+            return std::nullopt;
+        }
+        return resolve(std::move(publication), root_id, std::nullopt);
+    }
+
     [[nodiscard]] static std::optional<SemanticNativeSnapshotRead> ordinary(
         std::shared_ptr<const SemanticNativePublicationSnapshot> publication,
         SemanticId node_id) {

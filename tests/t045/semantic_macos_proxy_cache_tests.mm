@@ -170,6 +170,63 @@ void ordinary_identity_is_stable_per_view_and_stale_entries_are_evicted() {
     CHECK(second_view.tracked_identities() == 0U);
 }
 
+void current_root_materialization_is_lazy_stable_and_fail_closed() {
+    NativePublicationState publication_state;
+    CHECK(publication_state.publish(
+        ordinary_snapshot(1U, true),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_proxy_cache_root_757575757575_PuglWrapperView");
+    ProxyCache cache{anchor, publication_state.reader_source()};
+
+    NSAccessibilityElement* root = cache.root();
+    CHECK(root != nil);
+    CHECK(cache.root() == root);
+    CHECK(cache.tracked_identities() == 1U);
+
+    auto* const root_state =
+        ui::detail::macos_accessibility_proxy_stored_state(root);
+    CHECK(root_state != nullptr);
+    CHECK(root_state->node_id() == 1U);
+    CHECK(!root_state->virtual_token().has_value());
+    CHECK([[root accessibilityRole] isEqualToString:NSAccessibilityGroupRole]);
+
+    [root retain];
+    CHECK(publication_state.publish(
+        ordinary_snapshot(
+            2U,
+            true,
+            ui::SemanticRole::Button,
+            ui::SemanticRole::None),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    CHECK(cache.root() == nil);
+    CHECK([root isAccessibilityElement] == NO);
+    CHECK(cache.prune_defunct() == 1U);
+    CHECK(cache.tracked_identities() == 0U);
+    [root release];
+
+    CHECK(publication_state.publish(
+        virtual_snapshot(3U, 100000U, 9000U),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    NSAccessibilityElement* list_root = cache.root();
+    CHECK(list_root != nil);
+    CHECK(cache.tracked_identities() == 1U);
+
+    auto* const list_state =
+        ui::detail::macos_accessibility_proxy_stored_state(list_root);
+    CHECK(list_state != nullptr);
+    CHECK(list_state->node_id() == 11U);
+    CHECK(!list_state->virtual_token().has_value());
+    CHECK([[list_root accessibilityRole] isEqualToString:NSAccessibilityListRole]);
+    CHECK(cache.tracked_identities() == 1U);
+}
+
 void endpoint_lease_survives_facade_only_for_in_flight_work() {
     NativePublicationState publication_state;
     CHECK(publication_state.publish(
@@ -515,6 +572,7 @@ int main() {
     @autoreleasepool {
         try {
             ordinary_identity_is_stable_per_view_and_stale_entries_are_evicted();
+            current_root_materialization_is_lazy_stable_and_fail_closed();
             endpoint_lease_survives_facade_only_for_in_flight_work();
             action_endpoint_is_weak_and_scoped_per_cache();
             exact_role_factory_does_not_reload_newer_generation();

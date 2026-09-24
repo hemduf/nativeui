@@ -97,18 +97,8 @@ public:
                 return nil;
             }
 
-            auto publication = source->current();
-            if (!publication || !publication->semantic_snapshot) {
-                return nil;
-            }
-
-            const SemanticId root_id = publication->semantic_snapshot->root;
-            if (root_id == kInvalidSemanticId) {
-                return nil;
-            }
-
-            auto root_read = SemanticNativeSnapshotQuery::ordinary(
-                std::move(publication), root_id);
+            auto root_read =
+                SemanticNativeSnapshotQuery::root(source->current());
             if (!root_read) {
                 return nil;
             }
@@ -120,7 +110,8 @@ public:
             }
 
             return get_or_create_known_live(
-                MacOSAccessibilityChildIdentity{root_id, std::nullopt},
+                MacOSAccessibilityChildIdentity{
+                    root_read->node_id(), std::nullopt},
                 *initial_mapping);
         } catch (...) {
             return nil;

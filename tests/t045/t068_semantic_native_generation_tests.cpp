@@ -182,6 +182,50 @@ void native_query_retains_exact_semantic_and_geometry_generation() {
     T068_CHECK(first->info().name == "First");
 }
 
+void native_query_resolves_root_from_one_retained_generation() {
+    ui::detail::SemanticNativeViewBridge bridge;
+
+    bridge.stage(button_snapshot("Root"));
+    const auto first_batch = bridge.checkpoint_native_publication(
+        ui::detail::SemanticNativeGeometry{1.75f, {40.0f, -60.0f}});
+    T068_CHECK(first_batch.has_value());
+
+    const auto retained = bridge.native_current();
+    T068_CHECK(retained != nullptr);
+    auto root = ui::detail::SemanticNativeSnapshotQuery::root(retained);
+    T068_CHECK(root.has_value());
+    T068_CHECK(root->node_id() == 42);
+    T068_CHECK(!root->virtual_token().has_value());
+    T068_CHECK(root->generation() == first_batch->generation());
+    T068_CHECK(root->semantic_generation() == first_batch->semantic_generation());
+    T068_CHECK(root->info().name == "Root");
+    T068_CHECK(root->geometry().scale == 1.75f);
+    T068_CHECK(root->geometry().physical_screen_origin.x == 40.0f);
+    T068_CHECK(root->geometry().physical_screen_origin.y == -60.0f);
+
+    auto successor = button_snapshot("Successor");
+    successor.nodes.front().bounds.x = 8.0f;
+    bridge.stage(std::move(successor));
+    const auto second_batch = bridge.checkpoint_native_publication(
+        ui::detail::SemanticNativeGeometry{2.0f, {-100.0f, 120.0f}});
+    T068_CHECK(second_batch.has_value());
+
+    const auto current_root =
+        ui::detail::SemanticNativeSnapshotQuery::root(bridge.native_current());
+    T068_CHECK(current_root.has_value());
+    T068_CHECK(current_root->info().name == "Successor");
+
+    T068_CHECK(root->info().name == "Root");
+    T068_CHECK(root->geometry().scale == 1.75f);
+    T068_CHECK(root->geometry().physical_screen_origin.x == 40.0f);
+    T068_CHECK(root->geometry().physical_screen_origin.y == -60.0f);
+
+    bridge.shutdown();
+    T068_CHECK(!ui::detail::SemanticNativeSnapshotQuery::root(
+        bridge.native_current()).has_value());
+    T068_CHECK(root->info().name == "Root");
+}
+
 ui::VirtualSemanticChildren::TokenIndexSnapshot token_index_for(
     const ui::VirtualSemanticChildren::MetadataSnapshot& metadata) {
     auto token_index = std::make_shared<ui::VirtualSemanticChildren::TokenIndex>();
@@ -266,6 +310,7 @@ int main() {
         native_generation_stays_atomic_when_wrapper_publication_fails();
         shutdown_defuncts_future_native_reads_but_retained_generation_survives();
         native_query_retains_exact_semantic_and_geometry_generation();
+        native_query_resolves_root_from_one_retained_generation();
         native_query_resolves_virtual_items_only_through_t067_index();
         std::cout << "PASS t068 semantic native generation\n";
         return EXIT_SUCCESS;
