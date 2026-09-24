@@ -17,10 +17,17 @@ namespace {
 using Mapping = ui::detail::MacOSAccessibilityRoleMapping;
 using NativeRole = ui::detail::MacOSAccessibilityRole;
 using Subrole = ui::detail::MacOSAccessibilitySubrole;
+using Interaction = ui::detail::MacOSAccessibilityInteraction;
+using InteractionMapping = ui::detail::MacOSAccessibilityInteractionMapping;
 
 struct ExpectedMapping final {
     ui::SemanticRole semantic_role;
     Mapping native_mapping;
+};
+
+struct ExpectedInteraction final {
+    ui::SemanticAction semantic_action;
+    InteractionMapping native_mapping;
 };
 
 constexpr std::array expected_mappings{
@@ -49,6 +56,18 @@ constexpr std::array expected_mappings{
     ExpectedMapping{ui::SemanticRole::Group, {NativeRole::Group}},
     ExpectedMapping{ui::SemanticRole::Image, {NativeRole::Image}},
     ExpectedMapping{ui::SemanticRole::Custom, {NativeRole::Group}},
+};
+
+constexpr std::array expected_interactions{
+    ExpectedInteraction{ui::SemanticAction::Activate, {Interaction::Press}},
+    ExpectedInteraction{ui::SemanticAction::Toggle, {Interaction::Press}},
+    ExpectedInteraction{ui::SemanticAction::Focus, {Interaction::Focus}},
+    ExpectedInteraction{ui::SemanticAction::Increment, {Interaction::Increment}},
+    ExpectedInteraction{ui::SemanticAction::Decrement, {Interaction::Decrement}},
+    ExpectedInteraction{ui::SemanticAction::SetValue, {Interaction::SetValue}},
+    ExpectedInteraction{ui::SemanticAction::Select, {Interaction::Selection}},
+    ExpectedInteraction{ui::SemanticAction::Expand, {Interaction::Expanded, true}},
+    ExpectedInteraction{ui::SemanticAction::Collapse, {Interaction::Expanded, false}},
 };
 
 void fixed_role_mapping_is_complete() {
@@ -80,12 +99,41 @@ void only_roles_with_native_subroles_request_them() {
     }
 }
 
+void fixed_interaction_mapping_is_complete() {
+    for (const auto& expected : expected_interactions) {
+        const auto actual = ui::detail::macos_accessibility_interaction_mapping(
+            expected.semantic_action);
+        CHECK(actual.has_value());
+        CHECK(*actual == expected.native_mapping);
+    }
+
+    CHECK(!ui::detail::macos_accessibility_interaction_mapping(
+               static_cast<ui::SemanticAction>(255))
+               .has_value());
+}
+
+void expand_and_collapse_preserve_direction() {
+    const auto expand = ui::detail::macos_accessibility_interaction_mapping(
+        ui::SemanticAction::Expand);
+    const auto collapse = ui::detail::macos_accessibility_interaction_mapping(
+        ui::SemanticAction::Collapse);
+
+    CHECK(expand.has_value());
+    CHECK(collapse.has_value());
+    CHECK(expand->interaction == Interaction::Expanded);
+    CHECK(collapse->interaction == Interaction::Expanded);
+    CHECK(expand->boolean_value == true);
+    CHECK(collapse->boolean_value == false);
+}
+
 } // namespace
 
 int main() {
     try {
         fixed_role_mapping_is_complete();
         only_roles_with_native_subroles_request_them();
+        fixed_interaction_mapping_is_complete();
+        expand_and_collapse_preserve_direction();
         std::cout << "PASS semantic macOS mapping\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
