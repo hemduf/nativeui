@@ -81,6 +81,52 @@ public:
     MacOSAccessibilityProxyCacheEndpoint& operator=(
         MacOSAccessibilityProxyCacheEndpoint&&) = delete;
 
+    /// Materialize the current semantic root from one exact immutable native
+    /// publication. Root identity and initial role are resolved from the same
+    /// retained generation so a cache miss cannot mix them across publication.
+    /// The returned proxy remains lazy and may become defunct if a successor
+    /// generation removes or flattens that root.
+    [[nodiscard]] NSAccessibilityElement* root() noexcept {
+        if (![NSThread isMainThread] || !consumer_view_class_) {
+            return nil;
+        }
+
+        try {
+            const auto source = publication_source_.lock();
+            if (!source) {
+                return nil;
+            }
+
+            auto publication = source->current();
+            if (!publication || !publication->semantic_snapshot) {
+                return nil;
+            }
+
+            const SemanticId root_id = publication->semantic_snapshot->root;
+            if (root_id == kInvalidSemanticId) {
+                return nil;
+            }
+
+            auto root_read = SemanticNativeSnapshotQuery::ordinary(
+                std::move(publication), root_id);
+            if (!root_read) {
+                return nil;
+            }
+
+            const auto initial_mapping =
+                macos_accessibility_role_mapping(root_read->info().role);
+            if (!initial_mapping) {
+                return nil;
+            }
+
+            return get_or_create_known_live(
+                MacOSAccessibilityChildIdentity{root_id, std::nullopt},
+                *initial_mapping);
+        } catch (...) {
+            return nil;
+        }
+    }
+
     [[nodiscard]] NSAccessibilityElement* ordinary(SemanticId node_id) noexcept {
         return get_or_create(
             MacOSAccessibilityChildIdentity{node_id, std::nullopt});
@@ -582,6 +628,10 @@ public:
     [[nodiscard]] std::weak_ptr<MacOSAccessibilityProxyCacheEndpoint>
     endpoint() const noexcept {
         return endpoint_;
+    }
+
+    [[nodiscard]] NSAccessibilityElement* root() noexcept {
+        return endpoint_->root();
     }
 
     [[nodiscard]] NSAccessibilityElement* ordinary(SemanticId node_id) noexcept {
