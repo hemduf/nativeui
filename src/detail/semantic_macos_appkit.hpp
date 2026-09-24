@@ -409,6 +409,40 @@ inline BOOL macos_accessibility_proxy_focused(id object, SEL) noexcept {
     return read && read->info().focused ? YES : NO;
 }
 
+inline BOOL macos_accessibility_proxy_selected(id object, SEL) noexcept {
+    const auto read = macos_accessibility_proxy_callback_read(object);
+    return read && read->info().selected ? YES : NO;
+}
+
+inline BOOL macos_accessibility_proxy_expanded(id object, SEL) noexcept {
+    const auto read = macos_accessibility_proxy_callback_read(object);
+    return read && read->info().expanded == SemanticExpandedState::Expanded
+        ? YES
+        : NO;
+}
+
+inline id macos_accessibility_proxy_min_value(id object, SEL) noexcept {
+    const auto read = macos_accessibility_proxy_callback_read(object);
+    if (!read || !read->info().value_range) return nil;
+
+    @try {
+        return [NSNumber numberWithDouble:read->info().value_range->minimum];
+    } @catch (...) {
+        return nil;
+    }
+}
+
+inline id macos_accessibility_proxy_max_value(id object, SEL) noexcept {
+    const auto read = macos_accessibility_proxy_callback_read(object);
+    if (!read || !read->info().value_range) return nil;
+
+    @try {
+        return [NSNumber numberWithDouble:read->info().value_range->maximum];
+    } @catch (...) {
+        return nil;
+    }
+}
+
 inline id macos_accessibility_proxy_value(id object, SEL) noexcept {
     const auto read = macos_accessibility_proxy_callback_read(object);
     if (!read) return nil;
@@ -859,6 +893,22 @@ macos_accessibility_appkit_proxy_class(Class consumer_view_class) noexcept {
             proxy_class,
             @selector(isAccessibilityFocused),
             reinterpret_cast<IMP>(&macos_accessibility_proxy_focused)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(isAccessibilitySelected),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_selected)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(isAccessibilityExpanded),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_expanded)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityMinValue),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_min_value)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityMaxValue),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_max_value)) &&
         macos_accessibility_add_proxy_override(
             proxy_class,
             @selector(accessibilityValue),

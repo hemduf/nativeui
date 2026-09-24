@@ -122,6 +122,30 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_state_snapshot(
     return snapshot;
 }
 
+std::shared_ptr<const ui::SemanticTreeSnapshot> principal_state_snapshot(
+    std::uint64_t generation,
+    ui::SemanticId node_id,
+    ui::SemanticRole role,
+    bool selected,
+    ui::SemanticExpandedState expanded,
+    std::optional<ui::SemanticValueRange> value_range = std::nullopt) {
+    auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
+    snapshot->generation = generation;
+    snapshot->root = node_id;
+
+    ui::SemanticNodeSnapshot node;
+    node.id = node_id;
+    node.info.role = role;
+    node.info.name = "principal state";
+    node.info.selected = selected;
+    node.info.expanded = expanded;
+    node.info.numeric_value = value_range ? std::optional<double>{0.5} : std::nullopt;
+    node.info.value_range = value_range;
+    node.bounds = {1.0f, 2.0f, 30.0f, 12.0f};
+    snapshot->nodes.push_back(std::move(node));
+    return snapshot;
+}
+
 std::shared_ptr<const ui::SemanticTreeSnapshot> virtual_list_snapshot(
     std::uint64_t generation,
     ui::SemanticId list_id,
@@ -527,6 +551,71 @@ void accessibility_proxy_value_projects_checked_state() {
     CHECK([(NSNumber*)value integerValue] == 2);
 }
 
+void accessibility_proxy_projects_selected_expanded_and_range_state() {
+    NativePublicationState publication_state;
+    constexpr ui::SemanticId node_id = 96U;
+
+    CHECK(publication_state.publish(
+        principal_state_snapshot(
+            1U,
+            node_id,
+            ui::SemanticRole::ListItem,
+            true,
+            ui::SemanticExpandedState::NotApplicable),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    auto state = NativeProxyState::ordinary(
+        publication_state.reader_source(), node_id);
+    CHECK(state.has_value());
+    Class anchor = test_anchor_class(
+        "NUI_semantic_appkit_principal_888888888888_PuglWrapperView");
+    NSAccessibilityElement* element =
+        ui::detail::macos_accessibility_appkit_proxy_create(
+            anchor, std::move(*state));
+    CHECK(element != nil);
+    CHECK([element isAccessibilitySelected] == YES);
+    CHECK([element isAccessibilityExpanded] == NO);
+    CHECK([element accessibilityMinValue] == nil);
+    CHECK([element accessibilityMaxValue] == nil);
+
+    CHECK(publication_state.publish(
+        principal_state_snapshot(
+            2U,
+            node_id,
+            ui::SemanticRole::ComboBox,
+            false,
+            ui::SemanticExpandedState::Expanded),
+        {ui::SemanticChange::SelectionChanged, ui::SemanticChange::ValueChanged},
+        {}).has_value());
+    CHECK([element isAccessibilitySelected] == NO);
+    CHECK([element isAccessibilityExpanded] == YES);
+
+    CHECK(publication_state.publish(
+        principal_state_snapshot(
+            3U,
+            node_id,
+            ui::SemanticRole::Slider,
+            false,
+            ui::SemanticExpandedState::NotApplicable,
+            ui::SemanticValueRange{-1.0, 2.0, 0.1}),
+        {ui::SemanticChange::ValueChanged},
+        {}).has_value());
+    CHECK([element isAccessibilityExpanded] == NO);
+    id minimum = [element accessibilityMinValue];
+    id maximum = [element accessibilityMaxValue];
+    CHECK([minimum isKindOfClass:[NSNumber class]]);
+    CHECK([maximum isKindOfClass:[NSNumber class]]);
+    CHECK([(NSNumber*)minimum doubleValue] == -1.0);
+    CHECK([(NSNumber*)maximum doubleValue] == 2.0);
+
+    publication_state.shutdown();
+    CHECK([element isAccessibilitySelected] == NO);
+    CHECK([element isAccessibilityExpanded] == NO);
+    CHECK([element accessibilityMinValue] == nil);
+    CHECK([element accessibilityMaxValue] == nil);
+}
+
 struct RecordedSemanticAction final {
     ui::detail::SemanticIdentity identity;
     ui::detail::SemanticActionRequest request;
@@ -782,6 +871,7 @@ int main() {
             accessibility_proxy_instance_reads_current_snapshot_and_fails_closed();
             accessibility_proxy_projects_help_enabled_and_focus_state();
             accessibility_proxy_value_projects_checked_state();
+            accessibility_proxy_projects_selected_expanded_and_range_state();
             accessibility_proxy_actions_route_only_through_the_view_endpoint();
             accessibility_virtual_proxy_action_preserves_logical_identity();
             accessibility_proxy_runtime_class_rejects_unscoped_anchor();
