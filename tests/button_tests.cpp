@@ -78,6 +78,34 @@ bool same_pixel(ui::Rgba8 a, ui::Rgba8 b) {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
+void semantic_projection() {
+    ui::detail::ButtonComponent button{"Apply", [] {}, {}};
+    const auto info = button.semantics();
+
+    NUI_CHECK(info.role == ui::SemanticRole::Button);
+    NUI_CHECK(info.name == "Apply");
+    NUI_CHECK(info.focusable);
+    NUI_CHECK(info.supports(ui::SemanticAction::Activate));
+    NUI_CHECK(info.supports(ui::SemanticAction::Focus));
+    NUI_CHECK(!info.supports(ui::SemanticAction::Toggle));
+}
+
+void semantic_activation_dispatches_normal_callback_policy() {
+    int activations = 0;
+    ui::detail::ButtonComponent button{"Apply", [&activations] { ++activations; }, {}};
+    ui::detail::SemanticActionHandler& handler = button;
+
+    ui::detail::SemanticActionRequest activate;
+    activate.action = ui::SemanticAction::Activate;
+    NUI_CHECK(handler.perform_semantic_action(activate));
+    NUI_CHECK(activations == 1);
+
+    ui::detail::SemanticActionRequest unsupported;
+    unsupported.action = ui::SemanticAction::Toggle;
+    NUI_CHECK(!handler.perform_semantic_action(unsupported));
+    NUI_CHECK(activations == 1);
+}
+
 void pointer_and_keyboard_activation() {
     int activations = 0;
     ui::UI tree{ui::Button{"Run", [&activations] { ++activations; }}};
@@ -449,6 +477,8 @@ void equal_resolved_hover_style_does_not_invalidate() {
 }
 
 void suite() {
+    semantic_projection();
+    semantic_activation_dispatches_normal_callback_policy();
     pointer_and_keyboard_activation();
     availability_and_reentrancy();
     exception_recovery_contracts();

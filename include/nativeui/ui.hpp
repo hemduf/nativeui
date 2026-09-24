@@ -23,7 +23,10 @@
 namespace ui {
 
 class Dialog;
-namespace detail { class SkiaGlRenderer; }
+namespace detail {
+class SkiaGlRenderer;
+class ViewCore;
+} // namespace detail
 
 /// One retained NativeUI component tree.
 ///
@@ -358,6 +361,7 @@ public:
 private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
+    friend class detail::ViewCore;
 
     [[nodiscard]] bool scene_paint_blocked() const noexcept {
         return tree_.lifecycle_transition_active();

@@ -1,0 +1,108 @@
+#pragma once
+
+#include <nativeui/semantics.hpp>
+
+#include <optional>
+
+namespace ui::detail {
+
+// Backend-neutral tokens for the fixed macOS accessibility role mapping.
+// The Objective-C++ boundary translates these tokens to AppKit constants; no
+// AppKit type crosses a NativeUI C++ header or immutable semantic snapshot.
+enum class MacOSAccessibilityRole {
+    Button,
+    CheckBox,
+    RadioButton,
+    Slider,
+    ProgressIndicator,
+    LevelIndicator,
+    StaticText,
+    TextField,
+    TextArea,
+    ComboBox,
+    Menu,
+    MenuItem,
+    List,
+    Row,
+    TabGroup,
+    Group,
+    Window,
+    Image,
+};
+
+enum class MacOSAccessibilitySubrole {
+    None,
+    TabButton,
+    Dialog,
+};
+
+struct MacOSAccessibilityRoleMapping final {
+    MacOSAccessibilityRole role{};
+    MacOSAccessibilitySubrole subrole{MacOSAccessibilitySubrole::None};
+
+    bool operator==(const MacOSAccessibilityRoleMapping&) const = default;
+};
+
+/// Map the closed NativeUI semantic role set to the fixed macOS accessibility
+/// contract. SemanticRole::None is intentionally absent because flattened
+/// layout wrappers never receive a native accessibility object of their own.
+[[nodiscard]] constexpr std::optional<MacOSAccessibilityRoleMapping>
+macos_accessibility_role_mapping(SemanticRole role) noexcept {
+    using Mapping = MacOSAccessibilityRoleMapping;
+    using NativeRole = MacOSAccessibilityRole;
+    using Subrole = MacOSAccessibilitySubrole;
+
+    switch (role) {
+        case SemanticRole::None:
+            return std::nullopt;
+        case SemanticRole::Button:
+            return Mapping{NativeRole::Button};
+        case SemanticRole::Checkbox:
+            return Mapping{NativeRole::CheckBox};
+        case SemanticRole::RadioButton:
+            return Mapping{NativeRole::RadioButton};
+        case SemanticRole::Toggle:
+            return Mapping{NativeRole::CheckBox};
+        case SemanticRole::Slider:
+        case SemanticRole::RangeSliderHandle:
+            return Mapping{NativeRole::Slider};
+        case SemanticRole::ProgressBar:
+            return Mapping{NativeRole::ProgressIndicator};
+        case SemanticRole::Meter:
+            return Mapping{NativeRole::LevelIndicator};
+        case SemanticRole::Text:
+            return Mapping{NativeRole::StaticText};
+        case SemanticRole::TextInput:
+            return Mapping{NativeRole::TextField};
+        case SemanticRole::TextArea:
+            return Mapping{NativeRole::TextArea};
+        case SemanticRole::ComboBox:
+            return Mapping{NativeRole::ComboBox};
+        case SemanticRole::PopupMenu:
+            return Mapping{NativeRole::Menu};
+        case SemanticRole::MenuItem:
+            return Mapping{NativeRole::MenuItem};
+        case SemanticRole::ListView:
+            return Mapping{NativeRole::List};
+        case SemanticRole::ListItem:
+            return Mapping{NativeRole::Row};
+        case SemanticRole::Tabs:
+            return Mapping{NativeRole::TabGroup};
+        case SemanticRole::Tab:
+            return Mapping{NativeRole::RadioButton, Subrole::TabButton};
+        case SemanticRole::TabPanel:
+            return Mapping{NativeRole::Group};
+        case SemanticRole::Dialog:
+            return Mapping{NativeRole::Window, Subrole::Dialog};
+        case SemanticRole::Group:
+            return Mapping{NativeRole::Group};
+        case SemanticRole::Image:
+            return Mapping{NativeRole::Image};
+        case SemanticRole::Custom:
+            return Mapping{NativeRole::Group};
+    }
+
+    return std::nullopt;
+}
+
+} // namespace ui::detail

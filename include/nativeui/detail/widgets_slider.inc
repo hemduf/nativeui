@@ -1,6 +1,8 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/slider_value.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/slider_style.hpp>
@@ -124,7 +126,9 @@ struct SliderTrackAxis final {
     return SliderTrackAxis{start, end, true};
 }
 
-class SliderComponent final : public Component, public ThemeBinding {
+class SliderComponent final : public Component,
+                              public ThemeBinding,
+                              public SemanticActionHandler {
 public:
     using Formatter = std::function<std::string(float)>;
 
@@ -143,6 +147,54 @@ public:
           style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return slider_semantic_info(
+            domain_.effective_external(state_.get()),
+            domain_.minimum(),
+            domain_.maximum(),
+            domain_.step());
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (!effective_enabled() || effective_read_only()) {
+            return false;
+        }
+
+        // Match the ordinary unshifted keyboard/value policy. State observers
+        // may synchronously reconcile or destroy this component, so compute the
+        // complete target before set() and never touch component state after it.
+        auto state = state_;
+        const float current = state.get();
+        const float effective = domain_.effective_external(current);
+        double requested{};
+
+        switch (request.action) {
+            case SemanticAction::Increment:
+                requested = static_cast<double>(effective) +
+                            domain_.keyboard_increment(false);
+                break;
+            case SemanticAction::Decrement:
+                requested = static_cast<double>(effective) -
+                            domain_.keyboard_increment(false);
+                break;
+            case SemanticAction::SetValue:
+                if (!request.numeric_value || !std::isfinite(*request.numeric_value)) {
+                    return false;
+                }
+                requested = *request.numeric_value;
+                break;
+            default:
+                return false;
+        }
+
+        const float target = domain_.normalize(requested);
+        if (current != target) {
+            state.set(target);
+        }
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto& theme = current_theme();

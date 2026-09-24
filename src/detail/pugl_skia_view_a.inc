@@ -185,6 +185,53 @@ public:
     ViewCore(const ViewCore&) = delete;
     ViewCore& operator=(const ViewCore&) = delete;
 
+    /// Bind exactly one T068 semantic domain after the concrete native owner and
+    /// its T065 DispatcherOwner are fully constructed. Keeping this out of the
+    /// ViewCore constructor avoids cross-casting a partially constructed
+    /// DispatcherProvider and preserves one dispatcher namespace per view.
+    void bind_semantics(Dispatcher dispatcher) {
+        if (semantic_domain_) return;
+        if (!view_ || should_close_ || !semantic_view_lifetime_ ||
+            !ui_.lifetime_ || !dispatcher.valid()) {
+            throw std::runtime_error("NativeUI semantic view binding failed");
+        }
+
+        semantic_domain_ = std::make_shared<SemanticRetainedViewDomain>(
+            std::move(dispatcher),
+            std::weak_ptr<const void>{ui_.lifetime_},
+            ui_.tree_);
+    }
+
+    [[nodiscard]] std::weak_ptr<const void> semantic_view_lifetime() const noexcept {
+        return std::weak_ptr<const void>{semantic_view_lifetime_};
+    }
+
+    [[nodiscard]] std::shared_ptr<SemanticRetainedViewDomain>
+    semantic_domain() const noexcept {
+        return semantic_domain_;
+    }
+
+    /// Retain the tiny T043 native-geometry source for an outer semantic pump.
+    /// The returned object contains only scale + physical screen origin values;
+    /// it does not retain this ViewCore, the retained tree, or a native handle.
+    /// A pump may therefore keep it alive across a re-entrant T065 drain and
+    /// sample it afterwards only if the independent view lifetime survives.
+    [[nodiscard]] std::shared_ptr<const ViewNativeGeometryCaptureState>
+    semantic_native_geometry_capture_state() {
+        return geometry_.retain_native_geometry_capture_state();
+    }
+
+    /// Copy the borrowed platform tokens needed to refresh an Embedded view's
+    /// physical screen origin. The returned value owns nothing and is safe to
+    /// keep across a dispatcher drain only when paired with semantic_view_lifetime().
+    [[nodiscard]] detail::NativeScreenOriginCaptureSource
+    semantic_native_screen_origin_capture_source() const noexcept {
+        if (!native_view_open() || !world_) return {};
+        return detail::NativeScreenOriginCaptureSource{
+            static_cast<std::uintptr_t>(puglGetNativeView(view_)),
+            puglGetNativeWorld(world_)};
+    }
+
     bool poll(double timeout) {
         if (!world_ || should_close_) return false;
         const auto status = puglUpdate(world_, timeout);
@@ -322,6 +369,11 @@ public:
     }
 
     bool close_native_view() noexcept {
+        // Publish semantic endpoint death before retained focus/component/native
+        // teardown can run application callbacks. Any in-flight immutable read
+        // keeps only its snapshot; queued action work becomes fail-closed.
+        retire_semantics();
+
         if (!view_) {
             should_close_ = true;
             visible_ = false;
@@ -491,6 +543,12 @@ public:
     }
 
 private:
+    // View lifetime is distinct from the UI/tree lifetime. Outer pump code takes
+    // only a weak copy so a T065 callback can close/destroy this native view
+    // while a leased semantic domain safely finishes the checkpoint stack.
+    std::shared_ptr<int> semantic_view_lifetime_{std::make_shared<int>(0)};
+    std::shared_ptr<SemanticRetainedViewDomain> semantic_domain_;
+
     struct ConstructionCleanup {
         explicit ConstructionCleanup(ViewCore& owner,
                                      NativeViewConstructionFaultResult* fault_result) noexcept
@@ -601,6 +659,13 @@ private:
             auto callback = preferred_size_callback_;
             if (callback) callback(preferred);
         });
+    }
+
+    void retire_semantics() noexcept {
+        semantic_view_lifetime_.reset();
+        if (!semantic_domain_) return;
+        semantic_domain_->shutdown();
+        semantic_domain_.reset();
     }
 
     void remember_teardown_error(const char* message) noexcept {

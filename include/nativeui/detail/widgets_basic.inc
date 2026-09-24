@@ -1,6 +1,8 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/gesture.hpp>
@@ -49,6 +51,10 @@ public:
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto metrics = TextService::measure(text_, style_);
         return Size{metrics.width, metrics.height};
+    }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::label_semantic_info(text_);
     }
 
     void paint(PaintContext& context) const override {
@@ -165,6 +171,7 @@ public:
     }
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         return Size{176.0f, 182.0f};
     }
@@ -281,12 +288,32 @@ private:
 };
 
 
-class ToggleComponent final : public Component, public detail::ThemeBinding {
+class ToggleComponent final : public Component,
+                              public detail::ThemeBinding,
+                              public detail::SemanticActionHandler {
 public:
     ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style)
         : label_(std::move(label)), state_(std::move(state)), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::toggle_semantic_info(label_, state_.get());
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const detail::SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Toggle ||
+            !effective_enabled() || effective_read_only()) {
+            return false;
+        }
+
+        auto state = state_;
+        const bool target = !state.get();
+        state.set(target);
+        return true;
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);
         return Size{resolved.control_width, resolved.control_height};

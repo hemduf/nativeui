@@ -4,6 +4,17 @@
             return PUGL_SUCCESS;
 
         case PUGL_CONFIGURE: {
+            // Pugl reports top-level configure positions in root/screen physical
+            // pixels. Retain that authoritative origin for T068 native bounds.
+            // Embedded configure positions are parent-relative, so they require
+            // a later platform parent-to-screen conversion and must not be
+            // mistaken for screen coordinates here.
+            if (!puglGetParent(view_)) {
+                (void)geometry_.observe_physical_screen_origin(
+                    {static_cast<float>(event->configure.x),
+                     static_cast<float>(event->configure.y)});
+            }
+
             const float previous_scale = geometry_.last_valid_scale();
             const Size physical{static_cast<float>(event->configure.width),
                                 static_cast<float>(event->configure.height)};

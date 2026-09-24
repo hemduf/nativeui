@@ -87,6 +87,42 @@ void test_scale_observation_acceptance_state() {
     NUI_CHECK(close(geometry.last_valid_scale(), 1.5f));
 }
 
+void test_physical_screen_origin_validation_and_retention() {
+    using ui::detail::ViewGeometryState;
+    ViewGeometryState geometry{{100.0f, 50.0f}};
+
+    NUI_CHECK(geometry.last_screen_origin_observation_valid());
+    NUI_CHECK(same(geometry.physical_screen_origin(), {0.0f, 0.0f}));
+
+    // Negative/fractional coordinates are valid on multi-monitor desktops and
+    // must be retained exactly as physical screen coordinates.
+    const ui::Point retained{-1920.5f, -240.25f};
+    NUI_CHECK(geometry.observe_physical_screen_origin(retained));
+    NUI_CHECK(geometry.last_screen_origin_observation_valid());
+    NUI_CHECK(same(geometry.physical_screen_origin(), retained));
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    for (const ui::Point invalid : {ui::Point{nan, 12.0f},
+                                    ui::Point{12.0f, nan},
+                                    ui::Point{inf, 12.0f},
+                                    ui::Point{12.0f, -inf}}) {
+        NUI_CHECK(!geometry.observe_physical_screen_origin(invalid));
+        NUI_CHECK(!geometry.last_screen_origin_observation_valid());
+        NUI_CHECK(same(geometry.physical_screen_origin(), retained));
+    }
+
+    const ui::Point restored{3840.0f, 120.5f};
+    NUI_CHECK(geometry.observe_physical_screen_origin(restored));
+    NUI_CHECK(geometry.last_screen_origin_observation_valid());
+    NUI_CHECK(same(geometry.physical_screen_origin(), restored));
+
+    // Translation is applied after T043 covering conversion and exactly once.
+    NUI_CHECK(same(ui::detail::logical_to_physical_screen_rect(
+                       {1.25f, 2.25f, 3.5f, 4.5f}, 1.5f, retained),
+                   {-1919.5f, -237.25f, 7.0f, 8.0f}));
+}
+
 void test_invalid_requests_and_transient_zero_configure() {
     using ui::detail::ViewGeometryState;
     ViewGeometryState geometry{{120.0f, 80.0f}};
@@ -322,6 +358,7 @@ void suite() {
     test_scale_validation_and_conversion();
     test_invalid_scale_retains_last_valid();
     test_scale_observation_acceptance_state();
+    test_physical_screen_origin_validation_and_retention();
     test_invalid_requests_and_transient_zero_configure();
     test_request_bookkeeping_is_configure_authoritative();
     test_size_request_echo_does_not_recurse();

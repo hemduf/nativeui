@@ -247,6 +247,10 @@ struct ApplicationWindowRecord final {
     bool open{true};
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     std::weak_ptr<int> lifetime;
+    std::weak_ptr<const void> semantic_view_lifetime;
+    std::weak_ptr<detail::SemanticRetainedViewDomain> semantic_domain;
+    std::shared_ptr<const detail::ViewNativeGeometryCaptureState>
+        semantic_native_geometry_capture_state;
     void* close_control_context{};
     void (*close_control_checkpoint)(void*){};
 };
@@ -255,6 +259,14 @@ struct WindowControlCheckpoint final {
     std::weak_ptr<int> lifetime;
     void* context{};
     void (*checkpoint)(void*){};
+};
+
+struct SemanticWindowCheckpoint final {
+    std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    std::weak_ptr<const void> view_lifetime;
+    std::weak_ptr<detail::SemanticRetainedViewDomain> domain;
+    std::shared_ptr<const detail::ViewNativeGeometryCaptureState>
+        native_geometry_capture_state;
 };
 
 [[nodiscard]] double bound_dispatch_timeout(
@@ -377,6 +389,23 @@ struct Application::Impl final {
         return owners;
     }
 
+    [[nodiscard]] std::vector<platform_detail::SemanticWindowCheckpoint>
+    semantic_checkpoint_snapshot() const {
+        std::vector<platform_detail::SemanticWindowCheckpoint> checkpoints;
+        checkpoints.reserve(open_window_count);
+        for (const auto& [id, record] : windows) {
+            (void)id;
+            if (record.open && record.dispatcher_owner) {
+                checkpoints.push_back({
+                    record.dispatcher_owner,
+                    record.semantic_view_lifetime,
+                    record.semantic_domain,
+                    record.semantic_native_geometry_capture_state});
+            }
+        }
+        return checkpoints;
+    }
+
     [[nodiscard]] std::vector<platform_detail::WindowControlCheckpoint>
     close_control_snapshot() const {
         std::vector<platform_detail::WindowControlCheckpoint> controls;
@@ -397,9 +426,15 @@ struct Application::Impl final {
     std::uint64_t register_window(
         const std::shared_ptr<detail::DispatcherOwner>& dispatcher_owner,
         std::weak_ptr<int> lifetime,
+        std::weak_ptr<const void> semantic_view_lifetime,
+        std::weak_ptr<detail::SemanticRetainedViewDomain> semantic_domain,
+        std::shared_ptr<const detail::ViewNativeGeometryCaptureState>
+            semantic_native_geometry_capture_state,
         void* close_control_context,
         void (*close_control_checkpoint)(void*)) {
-        if (!runnable() || !dispatcher_owner || !close_control_context ||
+        if (!runnable() || !dispatcher_owner || lifetime.expired() ||
+            semantic_view_lifetime.expired() || semantic_domain.expired() ||
+            !semantic_native_geometry_capture_state || !close_control_context ||
             !close_control_checkpoint || next_window_id == 0) {
             return 0;
         }
@@ -421,6 +456,9 @@ struct Application::Impl final {
                 true,
                 dispatcher_owner,
                 std::move(lifetime),
+                std::move(semantic_view_lifetime),
+                std::move(semantic_domain),
+                std::move(semantic_native_geometry_capture_state),
                 close_control_context,
                 close_control_checkpoint});
         ++open_window_count;
@@ -446,10 +484,19 @@ struct Application::Impl final {
         windows.erase(id);
     }
 
-    void drain_dispatchers() {
-        const auto owners = dispatcher_snapshot();
-        for (const auto& owner : owners) {
-            if (owner) (void)owner->checkpoint();
+    void drain_dispatchers_and_publish_semantics() {
+        const auto checkpoints = semantic_checkpoint_snapshot();
+        for (const auto& checkpoint : checkpoints) {
+            (void)detail::SemanticRetainedViewCheckpoint::
+                drain_and_publish_native_with_capture(
+                    checkpoint.dispatcher_owner,
+                    checkpoint.view_lifetime,
+                    checkpoint.domain.lock(),
+                    [geometry_state = checkpoint.native_geometry_capture_state]() noexcept {
+                        return detail::SemanticNativeGeometry{
+                            geometry_state->last_valid_scale(),
+                            geometry_state->physical_screen_origin()};
+                    });
         }
     }
 
@@ -486,11 +533,12 @@ struct Application::Impl final {
 
         // Snapshot after native dispatch: a native close may have destroyed a
         // logical owner, while another callback may have created a new one.
-        // DispatcherOwner::checkpoint itself is reentrancy-safe if a callback
-        // destroys its own window or a sibling. Lifecycle controls run only
-        // after dispatcher callbacks have unwound and never depend on a free
-        // user-queue slot.
-        drain_dispatchers();
+        // Each retained checkpoint holds the T065 owner and the tiny T043
+        // geometry source strongly, weakly locks the per-view semantic domain,
+        // drains accepted work exactly once, then samples scale/origin only if
+        // the independent native-view lifetime survived that drain. Lifecycle
+        // controls run afterwards and never depend on a free user-queue slot.
+        drain_dispatchers_and_publish_semantics();
         drain_close_controls();
         return !quit_requested;
     }
@@ -687,10 +735,19 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
             0,
             application.impl_->world,
             [this] { handle_native_close_request(); });
+        impl_->core->bind_semantics(impl_->dispatcher_owner->dispatcher());
         const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+        const auto semantic_view_lifetime = impl_->core->semantic_view_lifetime();
+        const std::weak_ptr<detail::SemanticRetainedViewDomain> semantic_domain =
+            impl_->core->semantic_domain();
+        const auto semantic_native_geometry_capture_state =
+            impl_->core->semantic_native_geometry_capture_state();
         impl_->registration_id = application.impl_->register_window(
             impl_->dispatcher_owner,
             lifetime,
+            semantic_view_lifetime,
+            semantic_domain,
+            semantic_native_geometry_capture_state,
             this,
             [](void* context) {
                 auto* self = static_cast<StandaloneWindow*>(context);
@@ -735,6 +792,7 @@ StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
         0,
         nullptr,
         [this] { handle_native_close_request(); });
+    impl_->core->bind_semantics(impl_->dispatcher_owner->dispatcher());
 }
 
 StandaloneWindow::~StandaloneWindow() {
@@ -882,6 +940,10 @@ bool StandaloneWindow::poll(double timeout_seconds) {
 
     const auto owner = impl_->dispatcher_owner;
     const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+    const auto semantic_view_lifetime = impl_->core->semantic_view_lifetime();
+    auto semantic_domain = impl_->core->semantic_domain();
+    const auto semantic_native_geometry_capture_state =
+        impl_->core->semantic_native_geometry_capture_state();
     std::vector<std::shared_ptr<detail::DispatcherOwner>> owners;
     if (owner) owners.push_back(owner);
     const bool close_control_ready =
@@ -892,7 +954,16 @@ bool StandaloneWindow::poll(double timeout_seconds) {
     const double pugl_timeout =
         platform_detail::bound_dispatch_timeout(requested, owners);
     const bool alive = impl_->core->poll(pugl_timeout);
-    if (owner) (void)owner->checkpoint();
+    (void)detail::SemanticRetainedViewCheckpoint::
+        drain_and_publish_native_with_capture(
+            owner,
+            semantic_view_lifetime,
+            std::move(semantic_domain),
+            [semantic_native_geometry_capture_state]() noexcept {
+                return detail::SemanticNativeGeometry{
+                    semantic_native_geometry_capture_state->last_valid_scale(),
+                    semantic_native_geometry_capture_state->physical_screen_origin()};
+            });
     if (lifetime.expired()) return false;
 
     if (impl_->close_state.requesting()) {
@@ -990,7 +1061,9 @@ struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true, std::nullopt, std::nullopt},
-               parent) {}
+               parent) {
+        core.bind_semantics(dispatcher_owner->dispatcher());
+    }
 
     ~Impl() override {
         if (dispatcher_owner) dispatcher_owner->shutdown();
@@ -1046,8 +1119,26 @@ EmbeddedView::~EmbeddedView() = default;
 bool EmbeddedView::poll() {
     if (!impl_) return false;
     const auto owner = impl_->dispatcher_owner;
+    const auto semantic_view_lifetime = impl_->core.semantic_view_lifetime();
+    auto semantic_domain = impl_->core.semantic_domain();
+    const auto semantic_native_geometry_capture_state =
+        impl_->core.semantic_native_geometry_capture_state();
+    const auto semantic_native_screen_origin_capture_source =
+        impl_->core.semantic_native_screen_origin_capture_source();
     const bool alive = impl_->core.poll(0.0);
-    if (owner) (void)owner->checkpoint();
+
+    const detail::DeferredSemanticNativeGeometryCapture native_geometry_capture{
+        detail::SemanticNativeGeometryCaptureLease{
+            std::move(semantic_native_geometry_capture_state)},
+        [source = semantic_native_screen_origin_capture_source]() noexcept {
+            return detail::capture_native_physical_screen_origin(source);
+        }};
+    (void)detail::SemanticRetainedViewCheckpoint::
+        drain_and_publish_native_with_capture(
+            owner,
+            semantic_view_lifetime,
+            std::move(semantic_domain),
+            native_geometry_capture);
     return alive;
 }
 void EmbeddedView::request_close() {
