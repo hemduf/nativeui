@@ -57,6 +57,12 @@ NSUInteger appkit_child_index(NSAccessibilityElement* parent, id child) {
     return reinterpret_cast<Callback>(objc_msgSend)(parent, selector, child);
 }
 
+id appkit_parent(NSAccessibilityElement* element) {
+    using Callback = id (*)(id, SEL);
+    const SEL selector = sel_registerName("accessibilityParent");
+    return reinterpret_cast<Callback>(objc_msgSend)(element, selector);
+}
+
 std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot() {
     auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
     snapshot->generation = 1U;
@@ -157,6 +163,10 @@ void ordinary_children_callbacks_use_bounded_stable_proxies() {
     CHECK(appkit_child_index(root, first) == 0U);
     CHECK(appkit_child_index(root, second) == 1U);
     CHECK(appkit_child_index(root, root) == NSNotFound);
+    CHECK(appkit_parent(first) == root);
+    CHECK(appkit_parent(second) == root);
+    CHECK(appkit_parent(root) == nil);
+    CHECK(cache.tracked_identities() == 3U);
 
     ProxyCache other_cache{anchor, publication_state.reader_source()};
     NSAccessibilityElement* other_first = other_cache.ordinary_child_at(1U, 0U);
@@ -202,6 +212,10 @@ void virtual_children_callbacks_do_not_materialize_the_collection() {
     CHECK(first != second);
     CHECK(appkit_child_index(list, first) == middle_index);
     CHECK(appkit_child_index(list, second) == middle_index + 1U);
+    CHECK(appkit_parent(first) == list);
+    CHECK(appkit_parent(second) == list);
+    CHECK(appkit_parent(list) == nil);
+    CHECK(cache.tracked_identities() == 3U);
 
     NSArray* same_window = appkit_child_range(list, middle_index, 2U);
     CHECK(same_window != nil);
@@ -214,6 +228,7 @@ void virtual_children_callbacks_do_not_materialize_the_collection() {
     CHECK(last != nil);
     CHECK(appkit_child_index(list, last) ==
           static_cast<NSUInteger>(item_count - 1U));
+    CHECK(appkit_parent(last) == list);
     CHECK(cache.tracked_identities() == 4U);
 
     CHECK(appkit_child_count(first) == 0U);
@@ -245,11 +260,13 @@ void retired_resolver_fails_closed_without_retaining_the_cache() {
         [child retain];
         CHECK(appkit_child_count(root) == 2U);
         CHECK(appkit_child_index(root, child) == 0U);
+        CHECK(appkit_parent(child) == root);
     }
 
     CHECK(appkit_child_count(root) == 0U);
     CHECK(appkit_child_range(root, 0U, 1U) == nil);
     CHECK(appkit_child_index(root, child) == NSNotFound);
+    CHECK(appkit_parent(child) == nil);
     CHECK([root isAccessibilityElement] == YES);
     [child release];
     [root release];

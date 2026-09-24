@@ -46,6 +46,9 @@ public:
         SemanticId parent_node_id,
         std::size_t start,
         std::size_t max_count) noexcept = 0;
+
+    [[nodiscard]] virtual NSAccessibilityElement* parent_from_projection(
+        const MacOSAccessibilityChildProjection& child_projection) noexcept = 0;
 };
 
 // Private Objective-C++ boundary for the fixed macOS accessibility role mapping. Keep AppKit
@@ -610,6 +613,26 @@ inline NSUInteger macos_accessibility_proxy_index_of_child(
     }
 }
 
+inline id macos_accessibility_proxy_parent(id object, SEL) noexcept {
+    auto* const state = macos_accessibility_proxy_stored_state(object);
+    if (!state) return nil;
+
+    const auto resolver = state->child_resolver_endpoint().lock();
+    if (!resolver) return nil;
+
+    try {
+        auto child_read = state->read();
+        if (!child_read || !macos_accessibility_role_mapping(child_read->info().role)) {
+            return nil;
+        }
+
+        MacOSAccessibilityChildProjection projection{std::move(*child_read)};
+        return resolver->parent_from_projection(projection);
+    } catch (...) {
+        return nil;
+    }
+}
+
 inline void macos_accessibility_proxy_dealloc(id object, SEL selector) noexcept {
     auto* const state = macos_accessibility_proxy_stored_state(object);
     (void)macos_accessibility_proxy_store_state(object, nullptr);
@@ -741,6 +764,10 @@ macos_accessibility_appkit_proxy_class(Class consumer_view_class) noexcept {
             proxy_class,
             sel_registerName("accessibilityIndexOfChild:"),
             reinterpret_cast<IMP>(&macos_accessibility_proxy_index_of_child)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilityParent),
+            reinterpret_cast<IMP>(&macos_accessibility_proxy_parent)) &&
         macos_accessibility_add_proxy_override(
             proxy_class,
             sel_registerName("dealloc"),
