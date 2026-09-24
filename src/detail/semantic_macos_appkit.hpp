@@ -8,6 +8,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+#include <nativeui/detail/semantic_action_view_binding.hpp>
 #include <nativeui/detail/semantic_macos_mapping.hpp>
 #include <nativeui/detail/semantic_native_query.hpp>
 
@@ -114,8 +115,8 @@ macos_accessibility_appkit_subrole(MacOSAccessibilitySubrole subrole) noexcept {
 
 /// Lifetime-safe state carried by one lazy macOS accessibility proxy.
 ///
-/// The state stores only weak per-view publication and child-resolver endpoints
-/// plus stable semantic identity. Every semantic read loads the latest exact
+/// The state stores only weak per-view publication, child-resolver and action
+/// endpoints plus stable semantic identity. Every semantic read loads the latest exact
 /// semantic+geometry publication once and resolves through
 /// SemanticNativeSnapshotQuery. It never retains a bridge, ViewCore, Tree, Node,
 /// Component, native view, or cache owner. Once the owning view retires either
@@ -131,7 +132,8 @@ public:
     [[nodiscard]] static std::optional<MacOSAccessibilityProxyState> ordinary(
         std::weak_ptr<const SemanticNativePublicationSource> publication_source,
         SemanticId node_id,
-        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver = {}) noexcept {
+        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver = {},
+        std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint = {}) noexcept {
         if (node_id == kInvalidSemanticId) {
             return std::nullopt;
         }
@@ -139,14 +141,16 @@ public:
             std::move(publication_source),
             node_id,
             std::nullopt,
-            std::move(child_resolver)};
+            std::move(child_resolver),
+            std::move(action_endpoint)};
     }
 
     [[nodiscard]] static std::optional<MacOSAccessibilityProxyState> virtual_item(
         std::weak_ptr<const SemanticNativePublicationSource> publication_source,
         SemanticId list_node_id,
         VirtualSemanticItemToken token,
-        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver = {}) noexcept {
+        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver = {},
+        std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint = {}) noexcept {
         if (list_node_id == kInvalidSemanticId ||
             token == kInvalidVirtualSemanticItemToken) {
             return std::nullopt;
@@ -155,7 +159,8 @@ public:
             std::move(publication_source),
             list_node_id,
             token,
-            std::move(child_resolver)};
+            std::move(child_resolver),
+            std::move(action_endpoint)};
     }
 
     [[nodiscard]] SemanticId node_id() const noexcept {
@@ -169,6 +174,11 @@ public:
     [[nodiscard]] std::weak_ptr<MacOSAccessibilityChildResolver>
     child_resolver_endpoint() const noexcept {
         return child_resolver_endpoint_;
+    }
+
+    [[nodiscard]] std::weak_ptr<const SemanticActionViewEndpoint>
+    action_endpoint() const noexcept {
+        return action_endpoint_;
     }
 
     [[nodiscard]] std::optional<SemanticNativeSnapshotRead> read() const {
@@ -195,14 +205,17 @@ private:
         std::weak_ptr<const SemanticNativePublicationSource> publication_source,
         SemanticId node_id,
         std::optional<VirtualSemanticItemToken> virtual_token,
-        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver) noexcept
+        std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver,
+        std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint) noexcept
         : publication_source_(std::move(publication_source)),
           child_resolver_endpoint_(std::move(child_resolver)),
+          action_endpoint_(std::move(action_endpoint)),
           node_id_(node_id),
           virtual_token_(virtual_token) {}
 
     std::weak_ptr<const SemanticNativePublicationSource> publication_source_;
     std::weak_ptr<MacOSAccessibilityChildResolver> child_resolver_endpoint_;
+    std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint_;
     SemanticId node_id_{kInvalidSemanticId};
     std::optional<VirtualSemanticItemToken> virtual_token_;
 };

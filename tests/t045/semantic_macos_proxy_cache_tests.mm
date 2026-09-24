@@ -60,6 +60,14 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot(
     return snapshot;
 }
 
+std::shared_ptr<ui::detail::SemanticActionViewEndpoint> inert_action_endpoint() {
+    return std::make_shared<ui::detail::SemanticActionViewEndpoint>(
+        std::weak_ptr<ui::detail::SemanticSnapshotPublisher>{},
+        ui::Dispatcher{},
+        std::weak_ptr<ui::detail::SemanticActionTarget>{},
+        std::weak_ptr<const void>{});
+}
+
 std::shared_ptr<const ui::SemanticTreeSnapshot> virtual_snapshot(
     std::uint64_t generation,
     std::size_t count,
@@ -212,6 +220,66 @@ void endpoint_lease_survives_facade_only_for_in_flight_work() {
     CHECK(retained_state->child_resolver_endpoint().expired());
     CHECK([child isAccessibilityElement] == YES);
     [child release];
+}
+
+
+void action_endpoint_is_weak_and_scoped_per_cache() {
+    NativePublicationState publication_state;
+    CHECK(publication_state.publish(
+        ordinary_snapshot(1U, true),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    auto first_action_endpoint = inert_action_endpoint();
+    auto second_action_endpoint = inert_action_endpoint();
+    std::weak_ptr<const ui::detail::SemanticActionViewEndpoint> first_weak =
+        first_action_endpoint;
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_proxy_cache_actions_575757575757_PuglWrapperView");
+    ProxyCache first_view{
+        anchor, publication_state.reader_source(), first_action_endpoint};
+    ProxyCache second_view{
+        anchor, publication_state.reader_source(), second_action_endpoint};
+
+    NSAccessibilityElement* first = first_view.ordinary(2U);
+    NSAccessibilityElement* second = second_view.ordinary(2U);
+    CHECK(first != nil);
+    CHECK(second != nil);
+
+    auto* const first_state =
+        ui::detail::macos_accessibility_proxy_stored_state(first);
+    auto* const second_state =
+        ui::detail::macos_accessibility_proxy_stored_state(second);
+    CHECK(first_state != nullptr);
+    CHECK(second_state != nullptr);
+    CHECK(first_state->action_endpoint().lock().get() ==
+          first_action_endpoint.get());
+    CHECK(second_state->action_endpoint().lock().get() ==
+          second_action_endpoint.get());
+    CHECK(first_state->action_endpoint().lock().get() !=
+          second_state->action_endpoint().lock().get());
+
+    // Cache/proxy state must not extend the action binding lifetime.
+    first_action_endpoint.reset();
+    CHECK(first_weak.expired());
+    CHECK(first_state->action_endpoint().expired());
+    CHECK(second_state->action_endpoint().lock().get() ==
+          second_action_endpoint.get());
+
+    constexpr ui::VirtualSemanticItemToken token = 9000U;
+    CHECK(publication_state.publish(
+        virtual_snapshot(2U, 1U, token),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    NSAccessibilityElement* row = second_view.virtual_item(11U, token);
+    CHECK(row != nil);
+    auto* const row_state =
+        ui::detail::macos_accessibility_proxy_stored_state(row);
+    CHECK(row_state != nullptr);
+    CHECK(row_state->action_endpoint().lock().get() ==
+          second_action_endpoint.get());
 }
 
 void exact_role_factory_does_not_reload_newer_generation() {
@@ -448,6 +516,7 @@ int main() {
         try {
             ordinary_identity_is_stable_per_view_and_stale_entries_are_evicted();
             endpoint_lease_survives_facade_only_for_in_flight_work();
+            action_endpoint_is_weak_and_scoped_per_cache();
             exact_role_factory_does_not_reload_newer_generation();
             parent_materialization_uses_the_retained_child_generation();
             virtual_range_lookup_materializes_only_requested_items();

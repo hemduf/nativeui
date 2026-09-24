@@ -62,9 +62,11 @@ public:
 
     MacOSAccessibilityProxyCacheEndpoint(
         Class consumer_view_class,
-        std::weak_ptr<const SemanticNativePublicationSource> publication_source) noexcept
+        std::weak_ptr<const SemanticNativePublicationSource> publication_source,
+        std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint = {}) noexcept
         : consumer_view_class_(consumer_view_class),
-          publication_source_(std::move(publication_source)) {}
+          publication_source_(std::move(publication_source)),
+          action_endpoint_(std::move(action_endpoint)) {}
 
     ~MacOSAccessibilityProxyCacheEndpoint() noexcept override {
         clear();
@@ -280,10 +282,11 @@ private:
                 publication_source_,
                 identity.node_id,
                 *identity.virtual_token,
-                child_resolver);
+                child_resolver,
+                action_endpoint_);
         }
         return MacOSAccessibilityProxyState::ordinary(
-            publication_source_, identity.node_id, child_resolver);
+            publication_source_, identity.node_id, child_resolver, action_endpoint_);
     }
 
     [[nodiscard]] NSAccessibilityElement* tracked_element(
@@ -545,6 +548,7 @@ private:
 
     Class consumer_view_class_{Nil};
     std::weak_ptr<const SemanticNativePublicationSource> publication_source_;
+    std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint_;
     EntryMap entries_;
 };
 
@@ -561,9 +565,12 @@ public:
 
     MacOSAccessibilityProxyCache(
         Class consumer_view_class,
-        std::weak_ptr<const SemanticNativePublicationSource> publication_source)
+        std::weak_ptr<const SemanticNativePublicationSource> publication_source,
+        std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint = {})
         : endpoint_(std::make_shared<MacOSAccessibilityProxyCacheEndpoint>(
-              consumer_view_class, std::move(publication_source))) {}
+              consumer_view_class,
+              std::move(publication_source),
+              std::move(action_endpoint))) {}
 
     ~MacOSAccessibilityProxyCache() noexcept = default;
 
