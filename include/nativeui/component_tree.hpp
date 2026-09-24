@@ -13,6 +13,7 @@
 #endif
 
 #include <array>
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -22,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 namespace ui {
 

@@ -145,6 +145,7 @@ public:
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
     [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;
     }
@@ -287,6 +288,7 @@ public:
         if (!image_filter) {
             throw std::bad_alloc{};
         }
+        used_effects_ = true;
 
         SkIRect device_output_bounds;
         if (!effect_filter_output_bounds(
@@ -1050,6 +1052,7 @@ private:
     int restore_floor_{};
     LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};
     bool fail_transform_history_overflow_{};
+    bool used_effects_{};
 };
 
 class PlatformServices {

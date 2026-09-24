@@ -35,6 +35,54 @@ void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer)
 namespace ui {
 
 struct TreeTestAccess {
+    [[nodiscard]] static bool paint_damage_transaction_recovers(
+        Tree& tree,
+        Rect reentrant_damage) {
+        const auto& initial_regions = tree.paint_dirty_.rects();
+        if (initial_regions.empty()) return false;
+
+        Rect captured_bounds{};
+        for (const auto region : initial_regions) {
+            captured_bounds = unite(captured_bounds, region);
+        }
+
+        try {
+            auto transaction = tree.begin_paint_damage_transaction();
+            if (!transaction.valid() || !transaction.has_damage() ||
+                !transaction.damage_bounds_valid() ||
+                !transaction.damage_bounds().contains(captured_bounds) ||
+                !tree.lifecycle_transition_active()) {
+                return false;
+            }
+            tree.invalidate(reentrant_damage);
+            if (!tree.paint_dirty()) return false;
+            throw std::runtime_error("injected scene submission failure");
+        } catch (const std::runtime_error&) {
+        }
+
+        if (!tree.paint_dirty() || tree.lifecycle_transition_active()) return false;
+        Rect recovered_bounds{};
+        for (const auto region : tree.dirty_regions()) {
+            recovered_bounds = unite(recovered_bounds, region);
+        }
+        if (!recovered_bounds.contains(captured_bounds) ||
+            !recovered_bounds.contains(reentrant_damage)) {
+            return false;
+        }
+
+        auto retry = tree.begin_paint_damage_transaction();
+        if (!retry.valid() || !retry.has_damage() ||
+            !retry.damage_bounds_valid() ||
+            !retry.damage_bounds().contains(recovered_bounds)) {
+            return false;
+        }
+        retry.commit();
+        if (tree.paint_dirty() || tree.lifecycle_transition_active()) return false;
+
+        tree.invalidate(reentrant_damage);
+        return tree.paint_dirty();
+    }
+
     static void make_cache_unavailable(Tree& tree) noexcept {
         tree.paint_cull_cache_.clear();
         tree.paint_cull_cache_dirty_ = false;
@@ -772,6 +820,16 @@ void warm_culling_decisions_allocate_zero() {
     NUI_CHECK(allocation_probe::allocation_count == before);
 }
 
+void paint_damage_transaction_rollback_and_retry() {
+    auto state = std::make_shared<PaintProbeState>();
+    ui::Tree tree{ui::compile(probe_spec(state))};
+    tree.mount();
+    tree.layout({80.0f, 48.0f});
+
+    NUI_CHECK(ui::TreeTestAccess::paint_damage_transaction_recovers(
+        tree, {8.0f, 6.0f, 12.0f, 10.0f}));
+}
+
 void two_tree_cache_isolation_contract() {
     auto root_a = std::make_shared<PaintProbeState>();
     auto left_a = std::make_shared<PaintProbeState>();
@@ -843,6 +901,7 @@ void suite() {
     widened_region_preserves_neighbor_contributor();
     overlapping_pixel_parity();
     warm_culling_decisions_allocate_zero();
+    paint_damage_transaction_rollback_and_retry();
     two_tree_cache_isolation_contract();
 }
 

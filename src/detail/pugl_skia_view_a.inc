@@ -170,7 +170,7 @@ public:
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
-            if (renderer_.invalidate_from_ui()) request_redraw(rect);
+            if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
         maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);

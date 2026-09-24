@@ -133,12 +133,13 @@ public:
         present_pending_ = true;
     }
 
-    [[nodiscard]] bool invalidate_from_ui() noexcept {
-        invalidate();
-        if (rendering_) {
+    [[nodiscard]] bool invalidate_from_ui(Rect rect) noexcept {
+        if (!retain_pending_damage(rect)) full_repaint_required_ = true;
+        present_pending_ = true;
+        if (rendering_ && scene_frame_captured_) {
             deferred_redraw_pending_ = true;
-            return false;
         }
+        if (rendering_) return false;
         return true;
     }
 
@@ -154,6 +155,72 @@ public:
     }
 
 private:
+    [[nodiscard]] bool retain_pending_damage(Rect rect) noexcept {
+        if (!std::isfinite(rect.x) || !std::isfinite(rect.y) ||
+            !std::isfinite(rect.w) || !std::isfinite(rect.h) ||
+            !(rect.w > 0.0f) || !(rect.h > 0.0f)) {
+            return false;
+        }
+        const double right = static_cast<double>(rect.x) + rect.w;
+        const double bottom = static_cast<double>(rect.y) + rect.h;
+        if (!std::isfinite(right) || !std::isfinite(bottom)) return false;
+
+        if (!pending_damage_valid_) {
+            pending_damage_ = rect;
+            pending_damage_valid_ = true;
+            return true;
+        }
+
+        const double left_union = (std::min)(
+            static_cast<double>(pending_damage_.x), static_cast<double>(rect.x));
+        const double top_union = (std::min)(
+            static_cast<double>(pending_damage_.y), static_cast<double>(rect.y));
+        const double right_union = (std::max)(
+            static_cast<double>(pending_damage_.x) + pending_damage_.w, right);
+        const double bottom_union = (std::max)(
+            static_cast<double>(pending_damage_.y) + pending_damage_.h, bottom);
+        constexpr double max_float =
+            static_cast<double>(std::numeric_limits<float>::max());
+        if (left_union < -max_float || top_union < -max_float ||
+            right_union > max_float || bottom_union > max_float ||
+            right_union - left_union > max_float ||
+            bottom_union - top_union > max_float) {
+            return false;
+        }
+        const auto lower = [](double value) noexcept {
+            float result = static_cast<float>(value);
+            if (static_cast<double>(result) > value) {
+                result = std::nextafter(result,
+                                        -std::numeric_limits<float>::infinity());
+            }
+            return result;
+        };
+        const auto upper = [](double value) noexcept {
+            float result = static_cast<float>(value);
+            if (static_cast<double>(result) < value) {
+                result = std::nextafter(result,
+                                        std::numeric_limits<float>::infinity());
+            }
+            return result;
+        };
+        const float x = lower(left_union);
+        const float y = lower(top_union);
+        const float right_edge = upper(right_union);
+        const float bottom_edge = upper(bottom_union);
+        const double width_extent = static_cast<double>(right_edge) - x;
+        const double height_extent = static_cast<double>(bottom_edge) - y;
+        if (width_extent > max_float || height_extent > max_float) return false;
+        const float width = upper(width_extent);
+        const float height = upper(height_extent);
+        if (!std::isfinite(x) || !std::isfinite(y) ||
+            !std::isfinite(width) || !std::isfinite(height)) {
+            return false;
+        }
+        pending_damage_ = Rect{x, y, width, height};
+        return true;
+    }
+
+
     void clear_identity() noexcept {
         width_ = height_ = 0;
         scene_scale_ = 0.0f;
@@ -165,6 +232,10 @@ private:
         present_pending_ = true;
         rendering_ = false;
         deferred_redraw_pending_ = false;
+        scene_frame_captured_ = false;
+        pending_damage_ = {};
+        pending_damage_valid_ = false;
+        scene_uses_effects_ = false;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
         readback_result_.reset();
@@ -179,8 +250,16 @@ public:
         return SceneDiagnostics{
             .scene_allocations = scene_allocations_,
             .scene_builds = scene_builds_,
+            .partial_scene_updates = partial_scene_updates_,
             .presentations = presentations_,
             .failed_exposes = 0,
+            .deferred_redraw_attempts = 0,
+            .deferred_redraw_rejections = 0,
+            .redraw_requests_during_render = 0,
+            .last_update_x = last_update_x_,
+            .last_update_y = last_update_y_,
+            .last_update_width = last_update_width_,
+            .last_update_height = last_update_height_,
             .scene_valid = scene_valid_,
             .full_repaint_required = full_repaint_required_,
             .present_pending = present_pending_,
@@ -312,26 +391,32 @@ public:
             scene_valid_ = false;
             invalidate();
         }
-        if (ui.dirty()) invalidate();
-
-        if (!scene_valid_ || full_repaint_required_) {
-            scene_valid_ = false; // in-place pixels are invalid from the first mutation
+        const bool needs_scene_update = !scene_valid_ || full_repaint_required_ ||
+                                        scene_scale_ != scale_factor || ui.dirty();
+        if (needs_scene_update && !ui.scene_partial_paint_supported()) {
+            // Overlays and the optional inspector retain their existing full
+            // UI preparation/render path until their additional scene layers
+            // have a partial-reconstruction contract of their own.
+            scene_valid_ = false;
             full_repaint_required_ = true;
-            snapshot_.reset(); // avoid snapshot-triggered copy-on-write on rebuild
+            snapshot_.reset();
             auto* canvas = scene_->getCanvas();
             canvas->restoreToCount(1);
             canvas->resetMatrix();
-            canvas->clear(SK_ColorBLACK); // canonical opaque native background
+            canvas->clear(SK_ColorBLACK);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             if (fail_at(SceneFaultStage::AfterSceneReset)) return false;
 #endif
-            full_repaint_required_ = false;
+            scene_frame_captured_ = true;
+            const ScopeExit finish_capture{
+                [this]() noexcept { scene_frame_captured_ = false; }};
             try {
+                full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 canvas->scale(scale_factor, scale_factor);
                 ui.paint(*canvas, services);
             } catch (...) {
-                full_repaint_required_ = true;
+                invalidate();
                 throw;
             }
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
@@ -353,11 +438,138 @@ public:
             }
             scene_scale_ = scale_factor;
             scene_valid_ = true;
-            if (ui.dirty()) full_repaint_required_ = true;
-            deferred_redraw_pending_ = full_repaint_required_;
+            scene_uses_effects_ = true; // conservative for the legacy paths
+            full_repaint_required_ = ui.dirty();
+            deferred_redraw_pending_ |= full_repaint_required_;
+            if (!full_repaint_required_) clear_pending_damage();
+            remember_scene_update(SkIRect::MakeWH(physical_width, physical_height), false);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             ++scene_builds_;
 #endif
+        } else if (needs_scene_update) {
+            bool preparation_requires_full = false;
+            if (!ui.prepare_scene_paint(services, preparation_requires_full)) {
+                invalidate();
+                return false;
+            }
+
+            auto transaction = ui.begin_scene_paint_transaction();
+            if (!ui.scene_paint_transaction_valid(transaction)) {
+                invalidate();
+                return false;
+            }
+            scene_frame_captured_ = true;
+            const ScopeExit finish_capture{
+                [this]() noexcept { scene_frame_captured_ = false; }};
+
+            bool full_update = !scene_valid_ || full_repaint_required_ ||
+                               scene_scale_ != scale_factor ||
+                               preparation_requires_full || scene_uses_effects_;
+            std::optional<DeviceDamage> damage;
+            if (!full_update) {
+                if (!ui.scene_paint_transaction_has_damage(transaction) ||
+                    !ui.scene_paint_transaction_damage_valid(transaction)) {
+                    full_update = true;
+                } else {
+                    damage = ::ui::detail::map_device_damage(
+                        ui.scene_paint_transaction_damage(transaction),
+                        scale_factor, physical_width, physical_height);
+                    if (!damage || damage->covers_scene) full_update = true;
+                }
+            }
+            const SkIRect partial_clip = full_update
+                ? SkIRect::MakeEmpty()
+                : SkIRect::MakeLTRB(
+                      damage->left, damage->top, damage->right, damage->bottom);
+
+            snapshot_.reset(); // partial writes must not trigger stale COW snapshots
+            scene_valid_ = false;
+            full_repaint_required_ = true;
+            auto* canvas = scene_->getCanvas();
+            canvas->restoreToCount(1);
+            canvas->resetMatrix();
+            if (full_update) {
+                canvas->clear(SK_ColorBLACK); // canonical opaque native background
+            } else {
+                const SkAutoCanvasRestore restore_region{canvas, true};
+                canvas->resetMatrix();
+                canvas->clipIRect(partial_clip, SkClipOp::kIntersect);
+                SkPaint reset;
+                reset.setColor(SK_ColorBLACK);
+                reset.setBlendMode(SkBlendMode::kSrc);
+                reset.setAntiAlias(false);
+                canvas->drawRect(SkRect::Make(partial_clip), reset);
+            }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (fail_at(SceneFaultStage::AfterSceneReset)) return false;
+#endif
+
+            bool used_effects = false;
+            bool painted = false;
+            try {
+                const SkAutoCanvasRestore restore_canvas{canvas, true};
+                if (full_update) {
+                    canvas->scale(scale_factor, scale_factor);
+                    painted = ui.paint_full_scene_prepared(
+                        transaction, *canvas, services, used_effects);
+                } else {
+                    canvas->resetMatrix();
+                    canvas->clipIRect(partial_clip, SkClipOp::kIntersect);
+                    canvas->scale(scale_factor, scale_factor);
+                    painted = ui.paint_partial_scene_prepared(
+                        transaction, *canvas, services,
+                        damage->logical_query, used_effects);
+                }
+            } catch (...) {
+                invalidate();
+                throw;
+            }
+            if (!painted) {
+                invalidate();
+                return false;
+            }
+            if (!full_update && used_effects) {
+                // Filter input can lie outside the output clip. Preserve the
+                // captured generation and rebuild from the full reference path.
+                invalidate();
+                deferred_redraw_pending_ = true;
+                return false;
+            }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (fail_at(SceneFaultStage::AfterRetainedPaint)) {
+                invalidate();
+                return false;
+            }
+#endif
+            const auto scene_submission = context_->flushAndSubmit(scene_.get());
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            const bool scene_submission_failed =
+                fail_at(SceneFaultStage::SceneSubmission);
+#else
+            constexpr bool scene_submission_failed = false;
+#endif
+            if (!scene_submission.fSuccess || scene_submission_failed) {
+                invalidate();
+                return false;
+            }
+
+            ui.commit_scene_paint(transaction);
+            scene_scale_ = scale_factor;
+            scene_valid_ = true;
+            scene_uses_effects_ = full_update ? used_effects
+                                               : scene_uses_effects_ || used_effects;
+            full_repaint_required_ = ui.dirty();
+            deferred_redraw_pending_ |= full_repaint_required_;
+            if (!full_repaint_required_) clear_pending_damage();
+            const auto updated = full_update
+                ? SkIRect::MakeWH(physical_width, physical_height)
+                : partial_clip;
+            remember_scene_update(updated, !full_update);
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            ++scene_builds_;
+#endif
+        } else if (!ui.dirty()) {
+            clear_pending_damage();
         }
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
@@ -422,7 +634,7 @@ public:
             present_pending_ = true;
             return false;
         }
-        present_pending_ = false;
+        present_pending_ = ui.dirty();
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         ++presentations_;
 #endif
@@ -454,6 +666,23 @@ public:
     }
 
 private:
+    void clear_pending_damage() noexcept {
+        pending_damage_ = {};
+        pending_damage_valid_ = false;
+    }
+
+    void remember_scene_update(const SkIRect& update, bool partial) noexcept {
+        last_update_x_ = update.left();
+        last_update_y_ = update.top();
+        last_update_width_ = update.width();
+        last_update_height_ = update.height();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (partial) ++partial_scene_updates_;
+#else
+        (void)partial;
+#endif
+    }
+
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     bool fail_at(SceneFaultStage stage) noexcept {
         if (fault_stage_ != stage) return false;
@@ -470,6 +699,14 @@ private:
     int width_{};
     int height_{};
     float scene_scale_{};
+    Rect pending_damage_{};
+    bool pending_damage_valid_{};
+    bool scene_uses_effects_{};
+    bool scene_frame_captured_{};
+    int last_update_x_{};
+    int last_update_y_{};
+    int last_update_width_{};
+    int last_update_height_{};
     GLint presentation_framebuffer_{};
     GLint presentation_samples_{};
     GLint presentation_stencil_bits_{};
@@ -482,6 +719,7 @@ private:
     SceneFaultStage fault_stage_{SceneFaultStage::None};
     std::uint64_t scene_allocations_{};
     std::uint64_t scene_builds_{};
+    std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};
     int readback_x_{};
     int readback_y_{};

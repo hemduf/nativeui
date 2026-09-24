@@ -50,8 +50,167 @@
         bool owns_{};
     };
 
+    class PaintDamageTransaction final {
+    public:
+        PaintDamageTransaction() = default;
+        PaintDamageTransaction(const PaintDamageTransaction&) = delete;
+        PaintDamageTransaction& operator=(const PaintDamageTransaction&) = delete;
+
+        PaintDamageTransaction(PaintDamageTransaction&& other) noexcept
+            : owner_(std::exchange(other.owner_, nullptr)),
+              count_(other.count_),
+              bounds_(other.bounds_),
+              bounds_valid_(other.bounds_valid_) {
+            for (std::size_t index = 0; index < count_; ++index) {
+                captured_[index] = other.captured_[index];
+            }
+            other.count_ = 0;
+        }
+
+        PaintDamageTransaction& operator=(PaintDamageTransaction&& other) noexcept {
+            if (this != &other) {
+                rollback();
+                owner_ = std::exchange(other.owner_, nullptr);
+                count_ = other.count_;
+                bounds_ = other.bounds_;
+                bounds_valid_ = other.bounds_valid_;
+                for (std::size_t index = 0; index < count_; ++index) {
+                    captured_[index] = other.captured_[index];
+                }
+                other.count_ = 0;
+            }
+            return *this;
+        }
+
+        ~PaintDamageTransaction() noexcept { rollback(); }
+
+        [[nodiscard]] bool valid() const noexcept { return owner_ != nullptr; }
+        [[nodiscard]] bool has_damage() const noexcept { return count_ != 0; }
+        [[nodiscard]] Rect damage_bounds() const noexcept { return bounds_; }
+        [[nodiscard]] bool damage_bounds_valid() const noexcept {
+            return bounds_valid_;
+        }
+
+        void commit() noexcept {
+            if (!owner_) return;
+            owner_->scene_frame_transaction_active_ = false;
+            owner_ = nullptr;
+            count_ = 0;
+        }
+
+    private:
+        friend class Tree;
+        friend class UI;
+
+        explicit PaintDamageTransaction(Tree& owner) noexcept {
+            if (owner.scene_frame_transaction_active_ ||
+                owner.lifecycle_transition_ != LifecycleTransition::None) {
+                return;
+            }
+
+            owner_ = &owner;
+            const auto& dirty = owner.paint_dirty_.rects();
+            count_ = dirty.size();
+            for (std::size_t index = 0; index < count_; ++index) {
+                captured_[index] = dirty[index];
+            }
+            bounds_valid_ = calculate_bounds();
+            owner.paint_dirty_.clear();
+            owner.scene_frame_transaction_active_ = true;
+        }
+
+        [[nodiscard]] bool calculate_bounds() noexcept {
+            if (count_ == 0) return true;
+
+            double left = std::numeric_limits<double>::infinity();
+            double top = std::numeric_limits<double>::infinity();
+            double right = -std::numeric_limits<double>::infinity();
+            double bottom = -std::numeric_limits<double>::infinity();
+            for (std::size_t index = 0; index < count_; ++index) {
+                const Rect rect = captured_[index];
+                if (!std::isfinite(rect.x) || !std::isfinite(rect.y) ||
+                    !std::isfinite(rect.w) || !std::isfinite(rect.h) ||
+                    !(rect.w > 0.0f) || !(rect.h > 0.0f)) {
+                    return false;
+                }
+                const double rect_right = static_cast<double>(rect.x) + rect.w;
+                const double rect_bottom = static_cast<double>(rect.y) + rect.h;
+                if (!std::isfinite(rect_right) || !std::isfinite(rect_bottom)) {
+                    return false;
+                }
+                left = (std::min)(left, static_cast<double>(rect.x));
+                top = (std::min)(top, static_cast<double>(rect.y));
+                right = (std::max)(right, rect_right);
+                bottom = (std::max)(bottom, rect_bottom);
+            }
+
+            constexpr double max_float =
+                static_cast<double>(std::numeric_limits<float>::max());
+            if (left < -max_float || top < -max_float ||
+                right > max_float || bottom > max_float ||
+                right - left > max_float || bottom - top > max_float) {
+                return false;
+            }
+
+            const auto lower = [](double value) noexcept {
+                float result = static_cast<float>(value);
+                if (static_cast<double>(result) > value) {
+                    result = std::nextafter(result,
+                                            -std::numeric_limits<float>::infinity());
+                }
+                return result;
+            };
+            const auto upper = [](double value) noexcept {
+                float result = static_cast<float>(value);
+                if (static_cast<double>(result) < value) {
+                    result = std::nextafter(result,
+                                            std::numeric_limits<float>::infinity());
+                }
+                return result;
+            };
+
+            const float x = lower(left);
+            const float y = lower(top);
+            const float right_edge = upper(right);
+            const float bottom_edge = upper(bottom);
+            const double width_extent = static_cast<double>(right_edge) - x;
+            const double height_extent = static_cast<double>(bottom_edge) - y;
+            if (width_extent > max_float || height_extent > max_float) return false;
+            const float width = upper(width_extent);
+            const float height = upper(height_extent);
+            if (!std::isfinite(x) || !std::isfinite(y) ||
+                !std::isfinite(width) || !std::isfinite(height) ||
+                !(width > 0.0f) || !(height > 0.0f)) {
+                return false;
+            }
+            bounds_ = Rect{x, y, width, height};
+            return true;
+        }
+
+        void rollback() noexcept {
+            if (!owner_) return;
+            for (std::size_t index = 0; index < count_; ++index) {
+                (void)owner_->retain_dirty(captured_[index]);
+            }
+            owner_->scene_frame_transaction_active_ = false;
+            owner_ = nullptr;
+            count_ = 0;
+        }
+
+        Tree* owner_{};
+        std::array<Rect, DirtyRegion::kMaxRects> captured_{};
+        std::size_t count_{};
+        Rect bounds_{};
+        bool bounds_valid_{true};
+    };
+
+    [[nodiscard]] PaintDamageTransaction begin_paint_damage_transaction() {
+        return PaintDamageTransaction{*this};
+    }
+
     [[nodiscard]] bool lifecycle_transition_active() const noexcept {
-        return lifecycle_transition_ != LifecycleTransition::None;
+        return lifecycle_transition_ != LifecycleTransition::None ||
+               scene_frame_transaction_active_;
     }
 
     // retained transactions are short-lived and usually small. Keep the common
@@ -335,5 +494,6 @@
     }
 
     LifecycleTransition lifecycle_transition_{LifecycleTransition::None};
+    bool scene_frame_transaction_active_{};
     Node* failed_mount_root_{};
     Node* failed_activation_root_{};

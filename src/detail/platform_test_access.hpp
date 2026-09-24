@@ -29,11 +29,16 @@ enum class SceneFaultStage : std::uint8_t {
 struct SceneDiagnostics final {
     std::uint64_t scene_allocations{};
     std::uint64_t scene_builds{};
+    std::uint64_t partial_scene_updates{};
     std::uint64_t presentations{};
     std::uint64_t failed_exposes{};
     std::uint64_t deferred_redraw_attempts{};
     std::uint64_t deferred_redraw_rejections{};
     std::uint64_t redraw_requests_during_render{};
+    int last_update_x{};
+    int last_update_y{};
+    int last_update_width{};
+    int last_update_height{};
     bool scene_valid{};
     bool full_repaint_required{};
     bool present_pending{};
