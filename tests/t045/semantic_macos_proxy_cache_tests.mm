@@ -35,14 +35,15 @@ Class test_anchor_class(const char* runtime_name) {
 std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot(
     std::uint64_t generation,
     bool include_child,
-    ui::SemanticRole child_role = ui::SemanticRole::Button) {
+    ui::SemanticRole child_role = ui::SemanticRole::Button,
+    ui::SemanticRole root_role = ui::SemanticRole::Group) {
     auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
     snapshot->generation = generation;
     snapshot->root = 1U;
 
     ui::SemanticNodeSnapshot root;
     root.id = 1U;
-    root.info.role = ui::SemanticRole::Group;
+    root.info.role = root_role;
     if (include_child) {
         root.children.push_back(2U);
     }
@@ -259,6 +260,84 @@ void exact_role_factory_does_not_reload_newer_generation() {
         anchor, std::move(*current_state)) == nil);
 }
 
+void parent_materialization_uses_the_retained_child_generation() {
+    NativePublicationState publication_state;
+    CHECK(publication_state.publish(
+        ordinary_snapshot(
+            1U,
+            true,
+            ui::SemanticRole::Button,
+            ui::SemanticRole::Group),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_proxy_cache_parent_676767676767_PuglWrapperView");
+    ProxyCache cache{anchor, publication_state.reader_source()};
+    NSAccessibilityElement* child = cache.ordinary(2U);
+    CHECK(child != nil);
+    CHECK(cache.tracked_identities() == 1U);
+
+    auto* const child_state =
+        ui::detail::macos_accessibility_proxy_stored_state(child);
+    CHECK(child_state != nullptr);
+    auto retained_child_read = child_state->read();
+    CHECK(retained_child_read.has_value());
+    ui::detail::MacOSAccessibilityChildProjection retained_child{
+        std::move(*retained_child_read)};
+    CHECK(retained_child.parent_role() ==
+          std::optional<ui::SemanticRole>{ui::SemanticRole::Group});
+
+    // Replace the current root role before the cache miss. The parent proxy must
+    // still be constructible from the exact identity + role retained by the
+    // child projection rather than reloading this newer generation.
+    CHECK(publication_state.publish(
+        ordinary_snapshot(
+            2U,
+            true,
+            ui::SemanticRole::Button,
+            ui::SemanticRole::None),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    const auto endpoint = cache.endpoint().lock();
+    CHECK(endpoint != nullptr);
+    NSAccessibilityElement* parent =
+        endpoint->parent_from_projection(retained_child);
+    CHECK(parent != nil);
+    CHECK(cache.tracked_identities() == 2U);
+    CHECK([parent isAccessibilityElement] == NO);
+
+    constexpr ui::VirtualSemanticItemToken first_token = 7000U;
+    CHECK(publication_state.publish(
+        virtual_snapshot(3U, 3U, first_token),
+        {ui::SemanticChange::StructureChanged},
+        {}).has_value());
+
+    NSAccessibilityElement* row = cache.virtual_item(11U, first_token + 1U);
+    CHECK(row != nil);
+    auto* const row_state =
+        ui::detail::macos_accessibility_proxy_stored_state(row);
+    CHECK(row_state != nullptr);
+    auto row_read = row_state->read();
+    CHECK(row_read.has_value());
+    ui::detail::MacOSAccessibilityChildProjection row_projection{
+        std::move(*row_read)};
+    NSAccessibilityElement* list_parent =
+        endpoint->parent_from_projection(row_projection);
+    CHECK(list_parent != nil);
+    CHECK(list_parent == cache.ordinary(11U));
+
+    auto* const list_state =
+        ui::detail::macos_accessibility_proxy_stored_state(list_parent);
+    CHECK(list_state != nullptr);
+    auto list_read = list_state->read();
+    CHECK(list_read.has_value());
+    ui::detail::MacOSAccessibilityChildProjection list_projection{
+        std::move(*list_read)};
+    CHECK(endpoint->parent_from_projection(list_projection) == nil);
+}
+
 void virtual_range_lookup_materializes_only_requested_items() {
     NativePublicationState publication_state;
     constexpr std::size_t item_count = 100000U;
@@ -370,6 +449,7 @@ int main() {
             ordinary_identity_is_stable_per_view_and_stale_entries_are_evicted();
             endpoint_lease_survives_facade_only_for_in_flight_work();
             exact_role_factory_does_not_reload_newer_generation();
+            parent_materialization_uses_the_retained_child_generation();
             virtual_range_lookup_materializes_only_requested_items();
             invalid_identity_and_retired_source_fail_closed();
             std::cout << "PASS macOS accessibility proxy cache\n";

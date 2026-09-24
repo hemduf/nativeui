@@ -139,6 +139,32 @@ public:
         }
     }
 
+    /// Materialize the ordinary semantic parent described by one callback-local
+    /// child projection. Parent identity and initial role are both read from the
+    /// exact immutable publication retained by that projection, so a cache miss
+    /// never reloads a successor generation before constructing the parent proxy.
+    /// Virtual rows naturally resolve to their owning ListView as an ordinary
+    /// parent; roots and unmapped parents fail closed.
+    [[nodiscard]] NSAccessibilityElement* parent_from_projection(
+        const MacOSAccessibilityChildProjection& child_projection) noexcept {
+        try {
+            const auto identity = child_projection.parent_identity();
+            const auto semantic_role = child_projection.parent_role();
+            if (!identity || identity->virtual_token.has_value() || !semantic_role) {
+                return nil;
+            }
+
+            const auto initial_mapping =
+                macos_accessibility_role_mapping(*semantic_role);
+            if (!initial_mapping) {
+                return nil;
+            }
+            return get_or_create_known_live(*identity, *initial_mapping);
+        } catch (...) {
+            return nil;
+        }
+    }
+
     /// Count ordinary children from one immutable publication without creating
     /// native proxy objects. This is the O(1) count primitive for AppKit's
     /// bounded array-attribute query path.
