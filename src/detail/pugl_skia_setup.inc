@@ -220,6 +220,17 @@ private:
         return true;
     }
 
+    [[nodiscard]] static bool covers(Rect outer, Rect inner) noexcept {
+        const double outer_right = static_cast<double>(outer.x) + outer.w;
+        const double outer_bottom = static_cast<double>(outer.y) + outer.h;
+        const double inner_right = static_cast<double>(inner.x) + inner.w;
+        const double inner_bottom = static_cast<double>(inner.y) + inner.h;
+        return std::isfinite(outer_right) && std::isfinite(outer_bottom) &&
+               std::isfinite(inner_right) && std::isfinite(inner_bottom) &&
+               outer.x <= inner.x && outer.y <= inner.y &&
+               outer_right >= inner_right && outer_bottom >= inner_bottom;
+    }
+
 
     void clear_identity() noexcept {
         width_ = height_ = 0;
@@ -468,11 +479,14 @@ public:
             std::optional<DeviceDamage> damage;
             if (!full_update) {
                 if (!ui.scene_paint_transaction_has_damage(transaction) ||
-                    !ui.scene_paint_transaction_damage_valid(transaction)) {
+                    !ui.scene_paint_transaction_damage_valid(transaction) ||
+                    !pending_damage_valid_ ||
+                    !covers(pending_damage_,
+                            ui.scene_paint_transaction_damage(transaction))) {
                     full_update = true;
                 } else {
                     damage = ::ui::detail::map_device_damage(
-                        ui.scene_paint_transaction_damage(transaction),
+                        pending_damage_,
                         scale_factor, physical_width, physical_height);
                     if (!damage || damage->covers_scene) full_update = true;
                 }
