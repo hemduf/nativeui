@@ -677,6 +677,8 @@ inline BOOL macos_accessibility_proxy_selector_allowed(
     try {
         auto* const state = macos_accessibility_proxy_stored_state(object);
         if (!state) return NO;
+        const auto endpoint = state->action_endpoint().lock();
+        if (!endpoint || !endpoint->available()) return NO;
         const auto read = state->read();
         if (!read) return NO;
         return macos_accessibility_appkit_selector_allowed(

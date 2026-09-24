@@ -26,6 +26,12 @@ public:
           target_(std::move(target)),
           endpoint_lifetime_(std::move(endpoint_lifetime)) {}
 
+    [[nodiscard]] bool available() const noexcept {
+        return !endpoint_lifetime_.expired() &&
+               !publisher_.expired() &&
+               !target_.expired();
+    }
+
     [[nodiscard]] bool post(
         const SemanticIdentity& identity,
         SemanticActionRequest request) const noexcept {

@@ -246,8 +246,10 @@ void platform_endpoint_fails_closed_after_binding_retirement() {
     auto weak_endpoint = binding.endpoint();
     auto in_flight_endpoint = weak_endpoint.lock();
     T068_CHECK(in_flight_endpoint != nullptr);
+    T068_CHECK(in_flight_endpoint->available());
 
     binding.reset();
+    T068_CHECK(!in_flight_endpoint->available());
     const ui::detail::SemanticIdentity identity{42, std::nullopt};
     T068_CHECK(!in_flight_endpoint->post(identity, activate_request()));
     T068_CHECK(dispatcher_owner.checkpoint() == 0);

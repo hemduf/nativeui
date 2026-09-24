@@ -692,6 +692,10 @@ void accessibility_proxy_actions_route_only_through_the_view_endpoint() {
     CHECK(records->size() == after_value);
 
     binding.reset();
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(accessibilityPerformPress)] == NO);
+    CHECK([element isAccessibilitySelectorAllowed:
+        @selector(setAccessibilityExpanded:)] == NO);
     CHECK([element accessibilityPerformPress] == NO);
     [element setAccessibilityExpanded:YES];
     CHECK(dispatcher_owner.checkpoint() == 0U);
