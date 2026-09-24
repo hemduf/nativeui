@@ -305,6 +305,33 @@ public:
         return entries_.size();
     }
 
+    /// Consume one exact native publication batch at the cache boundary.
+    ///
+    /// Only a structure change can make a previously materialized semantic
+    /// identity disappear. Non-structural batches therefore avoid an O(cache)
+    /// scan. A superseded or foreign batch is ignored: pruning is permitted
+    /// only when the batch still is this view's exact current publication.
+    [[nodiscard]] std::size_t apply_publication_batch(
+        const SemanticNativePublicationBatch& batch) noexcept {
+        if (![NSThread isMainThread] || !batch.publication ||
+            std::find(batch.changes.begin(),
+                      batch.changes.end(),
+                      SemanticChange::StructureChanged) == batch.changes.end()) {
+            return 0U;
+        }
+
+        const auto source = publication_source_.lock();
+        if (!source) {
+            return 0U;
+        }
+        const auto current = source->current();
+        if (!current || current.get() != batch.publication.get()) {
+            return 0U;
+        }
+
+        return prune_defunct();
+    }
+
     /// Drop cached elements whose identity is absent from the current immutable
     /// publication. Allocation/query failure is not treated as proof of
     /// staleness: the entry is retained and may be retried on a later checkpoint.
@@ -721,6 +748,11 @@ public:
 
     [[nodiscard]] std::size_t tracked_identities() const noexcept {
         return endpoint_->tracked_identities();
+    }
+
+    [[nodiscard]] std::size_t apply_publication_batch(
+        const SemanticNativePublicationBatch& batch) noexcept {
+        return endpoint_->apply_publication_batch(batch);
     }
 
     [[nodiscard]] std::size_t prune_defunct() noexcept {

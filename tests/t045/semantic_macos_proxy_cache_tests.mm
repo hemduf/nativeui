@@ -533,6 +533,54 @@ void virtual_range_lookup_materializes_only_requested_items() {
     CHECK(cache.virtual_item(11U, last_token) == nil);
 }
 
+void publication_batch_prunes_only_current_structure_changes() {
+    NativePublicationState publication_state;
+    const auto initial = publication_state.publish(
+        ordinary_snapshot(1U, true),
+        {ui::SemanticChange::StructureChanged},
+        {});
+    CHECK(initial.has_value());
+
+    Class anchor = test_anchor_class(
+        "NUI_semantic_proxy_cache_batch_919191919191_PuglWrapperView");
+    ProxyCache cache{anchor, publication_state.reader_source()};
+
+    NSAccessibilityElement* root = cache.root();
+    NSAccessibilityElement* child = cache.ordinary_child_at(1U, 0U);
+    CHECK(root != nil);
+    CHECK(child != nil);
+    CHECK(cache.tracked_identities() == 2U);
+    [child retain];
+
+    const auto value_only = publication_state.publish(
+        ordinary_snapshot(2U, true),
+        {ui::SemanticChange::ValueChanged},
+        {});
+    CHECK(value_only.has_value());
+    CHECK(cache.apply_publication_batch(*value_only) == 0U);
+    CHECK(cache.tracked_identities() == 2U);
+
+    const auto structure = publication_state.publish(
+        ordinary_snapshot(3U, false),
+        {ui::SemanticChange::StructureChanged},
+        {});
+    CHECK(structure.has_value());
+
+    // A delayed callback for an older generation must not prune against the
+    // newer current publication.
+    CHECK(cache.apply_publication_batch(*value_only) == 0U);
+    CHECK(cache.tracked_identities() == 2U);
+
+    CHECK(cache.apply_publication_batch(*structure) == 1U);
+    CHECK(cache.tracked_identities() == 1U);
+    CHECK([child isAccessibilityElement] == NO);
+
+    // Re-consuming the same exact batch is idempotent.
+    CHECK(cache.apply_publication_batch(*structure) == 0U);
+    CHECK(cache.tracked_identities() == 1U);
+    [child release];
+}
+
 void invalid_identity_and_retired_source_fail_closed() {
     NativePublicationState publication_state;
     CHECK(publication_state.publish(
@@ -578,6 +626,7 @@ int main() {
             exact_role_factory_does_not_reload_newer_generation();
             parent_materialization_uses_the_retained_child_generation();
             virtual_range_lookup_materializes_only_requested_items();
+            publication_batch_prunes_only_current_structure_changes();
             invalid_identity_and_retired_source_fail_closed();
             std::cout << "PASS macOS accessibility proxy cache\n";
             return EXIT_SUCCESS;
