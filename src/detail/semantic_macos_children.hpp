@@ -30,6 +30,13 @@ struct MacOSAccessibilityChildIdentity final {
     bool operator==(const MacOSAccessibilityChildIdentity&) const = default;
 };
 
+struct MacOSAccessibilitySelectedChild final {
+    MacOSAccessibilityChildIdentity identity;
+    SemanticRole role{SemanticRole::None};
+
+    bool operator==(const MacOSAccessibilitySelectedChild&) const = default;
+};
+
 /// Callback-local child projection retained from one exact immutable native
 /// publication generation.
 ///
@@ -76,6 +83,62 @@ public:
 
     [[nodiscard]] std::size_t virtual_child_count() const noexcept {
         return read_.virtual_child_count();
+    }
+
+    /// Resolve at most one selected child from this exact immutable
+    /// publication. Ordinary children are small and are checked in logical order;
+    /// virtual collections use the retained selected token plus immutable token
+    /// index, so a 100k-item list does not require a metadata scan or eager proxy
+    /// materialization. Multiple selected ordinary children fail closed.
+    [[nodiscard]] std::optional<MacOSAccessibilitySelectedChild>
+    selected_child() const {
+        const std::size_t ordinary_count = ordinary_child_count();
+        const std::size_t virtual_count = virtual_child_count();
+        if (ordinary_count != 0U && virtual_count != 0U) {
+            return std::nullopt;
+        }
+
+        if (virtual_count != 0U) {
+            const auto token = read_.virtual_selected_child_token();
+            if (!token) {
+                return std::nullopt;
+            }
+            const auto index = read_.virtual_child_index_of(*token);
+            if (!index) {
+                return std::nullopt;
+            }
+            const auto identity = virtual_child_identity_at(*index);
+            const auto role = virtual_child_role_at(*index);
+            if (!identity || !role) {
+                return std::nullopt;
+            }
+            return MacOSAccessibilitySelectedChild{*identity, *role};
+        }
+
+        std::optional<std::size_t> selected_index;
+        for (std::size_t index = 0U; index < ordinary_count; ++index) {
+            const auto selected = read_.ordinary_child_selected_at(index);
+            if (!selected) {
+                return std::nullopt;
+            }
+            if (!*selected) {
+                continue;
+            }
+            if (selected_index) {
+                return std::nullopt;
+            }
+            selected_index = index;
+        }
+
+        if (!selected_index) {
+            return std::nullopt;
+        }
+        const auto identity = ordinary_child_identity_at(*selected_index);
+        const auto role = ordinary_child_role_at(*selected_index);
+        if (!identity || !role) {
+            return std::nullopt;
+        }
+        return MacOSAccessibilitySelectedChild{*identity, *role};
     }
 
     [[nodiscard]] std::optional<MacOSAccessibilityChildIdentity>

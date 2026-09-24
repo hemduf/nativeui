@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -63,7 +64,14 @@ id appkit_parent(NSAccessibilityElement* element) {
     return reinterpret_cast<Callback>(objc_msgSend)(element, selector);
 }
 
-std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot() {
+NSArray* appkit_selected_children(NSAccessibilityElement* element) {
+    using Callback = NSArray* (*)(id, SEL);
+    const SEL selector = @selector(accessibilitySelectedChildren);
+    return reinterpret_cast<Callback>(objc_msgSend)(element, selector);
+}
+
+std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot(
+    bool select_second = false) {
     auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
     snapshot->generation = 1U;
     snapshot->root = 1U;
@@ -86,13 +94,15 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot() {
     second.parent = 1U;
     second.info.role = ui::SemanticRole::Button;
     second.info.name = "second";
+    second.info.selected = select_second;
     snapshot->nodes.push_back(std::move(second));
     return snapshot;
 }
 
 std::shared_ptr<const ui::SemanticTreeSnapshot> virtual_snapshot(
     std::size_t count,
-    ui::VirtualSemanticItemToken first_token) {
+    ui::VirtualSemanticItemToken first_token,
+    std::optional<ui::VirtualSemanticItemToken> selected = std::nullopt) {
     auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
     snapshot->generation = 1U;
     snapshot->root = 11U;
@@ -121,7 +131,7 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> virtual_snapshot(
         1U,
         std::shared_ptr<const ui::VirtualSemanticChildren::Metadata>{metadata},
         std::shared_ptr<const ui::VirtualSemanticChildren::TokenIndex>{token_index},
-        std::nullopt,
+        selected,
         list.bounds,
         20.0f,
         0.0f);
@@ -239,6 +249,73 @@ void virtual_children_callbacks_do_not_materialize_the_collection() {
     CHECK(cache.tracked_identities() == 4U);
 }
 
+void selected_children_callbacks_are_lazy_and_generation_safe() {
+    {
+        NativePublicationState publication_state;
+        CHECK(publication_state.publish(
+            ordinary_snapshot(true),
+            {ui::SemanticChange::StructureChanged, ui::SemanticChange::SelectionChanged},
+            {}).has_value());
+
+        Class anchor = test_anchor_class(
+            "NUI_semantic_children_callbacks_selected_ordinary_848484848484_PuglWrapperView");
+        ProxyCache cache{anchor, publication_state.reader_source()};
+        NSAccessibilityElement* root = cache.ordinary(1U);
+        CHECK(root != nil);
+        CHECK(cache.tracked_identities() == 1U);
+
+        NSArray* selected = appkit_selected_children(root);
+        CHECK(selected != nil);
+        CHECK([selected count] == 1U);
+        CHECK(cache.tracked_identities() == 2U);
+        NSAccessibilityElement* selected_child = [selected objectAtIndex:0U];
+        CHECK(appkit_child_index(root, selected_child) == 1U);
+        CHECK(appkit_parent(selected_child) == root);
+
+        NSArray* selected_again = appkit_selected_children(root);
+        CHECK(selected_again != nil);
+        CHECK([selected_again count] == 1U);
+        CHECK([selected_again objectAtIndex:0U] == selected_child);
+        CHECK(cache.tracked_identities() == 2U);
+    }
+
+    {
+        NativePublicationState publication_state;
+        constexpr std::size_t item_count = 100000U;
+        constexpr ui::VirtualSemanticItemToken first_token = 9000U;
+        constexpr std::size_t selected_index = 54321U;
+        constexpr ui::VirtualSemanticItemToken selected_token =
+            first_token + static_cast<ui::VirtualSemanticItemToken>(selected_index);
+
+        CHECK(publication_state.publish(
+            virtual_snapshot(item_count, first_token, selected_token),
+            {ui::SemanticChange::StructureChanged, ui::SemanticChange::SelectionChanged},
+            {}).has_value());
+
+        Class anchor = test_anchor_class(
+            "NUI_semantic_children_callbacks_selected_virtual_858585858585_PuglWrapperView");
+        ProxyCache cache{anchor, publication_state.reader_source()};
+        NSAccessibilityElement* list = cache.ordinary(11U);
+        CHECK(list != nil);
+        CHECK(cache.tracked_identities() == 1U);
+
+        NSArray* selected = appkit_selected_children(list);
+        CHECK(selected != nil);
+        CHECK([selected count] == 1U);
+        CHECK(cache.tracked_identities() == 2U);
+        NSAccessibilityElement* selected_item = [selected objectAtIndex:0U];
+        CHECK(appkit_child_index(list, selected_item) ==
+              static_cast<NSUInteger>(selected_index));
+        CHECK(appkit_parent(selected_item) == list);
+
+        NSArray* selected_again = appkit_selected_children(list);
+        CHECK(selected_again != nil);
+        CHECK([selected_again count] == 1U);
+        CHECK([selected_again objectAtIndex:0U] == selected_item);
+        CHECK(cache.tracked_identities() == 2U);
+    }
+}
+
 void retired_resolver_fails_closed_without_retaining_the_cache() {
     NativePublicationState publication_state;
     CHECK(publication_state.publish(
@@ -267,6 +344,7 @@ void retired_resolver_fails_closed_without_retaining_the_cache() {
     CHECK(appkit_child_range(root, 0U, 1U) == nil);
     CHECK(appkit_child_index(root, child) == NSNotFound);
     CHECK(appkit_parent(child) == nil);
+    CHECK(appkit_selected_children(root) == nil);
     CHECK([root isAccessibilityElement] == YES);
     [child release];
     [root release];
@@ -279,6 +357,7 @@ int main() {
         try {
             ordinary_children_callbacks_use_bounded_stable_proxies();
             virtual_children_callbacks_do_not_materialize_the_collection();
+            selected_children_callbacks_are_lazy_and_generation_safe();
             retired_resolver_fails_closed_without_retaining_the_cache();
         } catch (const std::exception& error) {
             std::cerr << error.what() << '\n';

@@ -185,6 +185,44 @@ public:
         return found->second;
     }
 
+    /// Read one ordinary child's selected flag from this exact publication.
+    /// The lookup never reloads the publication source, so a platform selection
+    /// query cannot combine a child identity from one generation with state from
+    /// another generation.
+    [[nodiscard]] std::optional<bool> ordinary_child_selected_at(
+        std::size_t index) const noexcept {
+        if (virtual_item_ || !publication_ || !publication_->semantic_snapshot) {
+            return std::nullopt;
+        }
+
+        const auto child_id = child_at(index);
+        if (!child_id || *child_id == kInvalidSemanticId) {
+            return std::nullopt;
+        }
+
+        for (const auto& node : publication_->semantic_snapshot->nodes) {
+            if (node.id == *child_id) {
+                return node.info.selected;
+            }
+        }
+        return std::nullopt;
+    }
+
+    /// Return the selected virtual token retained by this exact publication.
+    /// Resolving that token back to an index remains O(1) through
+    /// virtual_child_index_of(), so a native selected-children query never scans
+    /// a large virtual collection.
+    [[nodiscard]] std::optional<VirtualSemanticItemToken>
+    virtual_selected_child_token() const noexcept {
+        if (virtual_item_ || !publication_ || !publication_->semantic_snapshot) {
+            return std::nullopt;
+        }
+
+        const auto& virtual_children =
+            publication_->semantic_snapshot->nodes[node_index_].virtual_children;
+        return virtual_children ? virtual_children->selected_token() : std::nullopt;
+    }
+
     /// Resolve the role of one ordinary child from this exact publication.
     /// No later publication-source load occurs, so native proxy construction can
     /// keep the child identity and its initial role in the same generation.

@@ -49,6 +49,9 @@ public:
         std::size_t start,
         std::size_t max_count) noexcept = 0;
 
+    [[nodiscard]] virtual std::optional<ElementRange> appkit_selected_children(
+        SemanticId parent_node_id) noexcept = 0;
+
     [[nodiscard]] virtual NSAccessibilityElement* parent_from_projection(
         const MacOSAccessibilityChildProjection& child_projection) noexcept = 0;
 };
@@ -610,6 +613,38 @@ inline NSArray* macos_accessibility_proxy_array_attribute_values(
     }
 }
 
+inline NSArray* macos_accessibility_proxy_selected_children(
+    id object,
+    SEL) noexcept {
+    auto* const state = macos_accessibility_proxy_stored_state(object);
+    if (!state) return nil;
+
+    @try {
+        if (state->virtual_token().has_value()) {
+            return [NSArray array];
+        }
+    } @catch (...) {
+        return nil;
+    }
+
+    const auto resolver = state->child_resolver_endpoint().lock();
+    if (!resolver) return nil;
+
+    const auto selected = resolver->appkit_selected_children(state->node_id());
+    if (!selected) return nil;
+
+    @try {
+        NSMutableArray* result = [NSMutableArray arrayWithCapacity:selected->size()];
+        for (NSAccessibilityElement* const element : *selected) {
+            if (!element) return nil;
+            [result addObject:element];
+        }
+        return result;
+    } @catch (...) {
+        return nil;
+    }
+}
+
 inline NSUInteger macos_accessibility_proxy_index_of_child(
     id object,
     SEL,
@@ -913,6 +948,11 @@ macos_accessibility_appkit_proxy_class(Class consumer_view_class) noexcept {
             proxy_class,
             @selector(accessibilityValue),
             reinterpret_cast<IMP>(&macos_accessibility_proxy_value)) &&
+        macos_accessibility_add_proxy_override(
+            proxy_class,
+            @selector(accessibilitySelectedChildren),
+            reinterpret_cast<IMP>(
+                &macos_accessibility_proxy_selected_children)) &&
         macos_accessibility_add_proxy_override(
             proxy_class,
             @selector(accessibilityFrame),

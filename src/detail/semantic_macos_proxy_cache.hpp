@@ -178,6 +178,54 @@ public:
         }
     }
 
+    /// Materialize at most the currently selected child from one exact immutable
+    /// publication. Virtual selection uses the T067 selected token and token
+    /// index, so this creates at most one native proxy and never walks or
+    /// materializes the full logical collection.
+    [[nodiscard]] std::optional<ElementRange> appkit_selected_children(
+        SemanticId parent_node_id) noexcept override {
+        auto projection = child_projection(parent_node_id);
+        if (!projection) {
+            return std::nullopt;
+        }
+
+        const std::size_t ordinary_count = projection->ordinary_child_count();
+        const std::size_t virtual_count = projection->virtual_child_count();
+        if (ordinary_count != 0U && virtual_count != 0U) {
+            return std::nullopt;
+        }
+
+        ElementRange result;
+        try {
+            const auto selected = projection->selected_child();
+            if (!selected) {
+                return result;
+            }
+
+            if (NSAccessibilityElement* const existing =
+                    tracked_element(selected->identity)) {
+                result.push_back(existing);
+                return result;
+            }
+
+            const auto initial_mapping =
+                macos_accessibility_role_mapping(selected->role);
+            if (!initial_mapping) {
+                return std::nullopt;
+            }
+
+            NSAccessibilityElement* const element =
+                get_or_create_known_live(selected->identity, *initial_mapping);
+            if (!element) {
+                return std::nullopt;
+            }
+            result.push_back(element);
+            return result;
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
     /// Materialize the ordinary semantic parent described by one callback-local
     /// child projection. Parent identity and initial role are both read from the
     /// exact immutable publication retained by that projection, so a cache miss
