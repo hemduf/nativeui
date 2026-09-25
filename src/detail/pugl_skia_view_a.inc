@@ -272,6 +272,22 @@ public:
     take_gpu_readback() noexcept {
         return renderer_.take_readback();
     }
+
+    [[nodiscard]] bool request_gpu_readback_region(int x,
+                                                   int y,
+                                                   int width,
+                                                   int height) noexcept {
+        if (!view_) return false;
+        if (!renderer_.request_readback_region(x, y, width, height)) return false;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackRegion>
+    take_gpu_readback_region() noexcept {
+        return renderer_.take_readback_region();
+    }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 

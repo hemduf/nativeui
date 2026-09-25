@@ -145,6 +145,7 @@ public:
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
     [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    // Renderer-internal effect observability for scene update validation.
     [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;

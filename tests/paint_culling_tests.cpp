@@ -83,10 +83,72 @@ struct TreeTestAccess {
         return tree.paint_dirty();
     }
 
+    // Exercises an active region pass: newer damage, a layout request, a
+    // structural mutation and a nested paint/lifecycle entry must not alter the
+    // captured target or start a second transaction. The injected failure then
+    // proves the guard and newer work survive rollback.
+    template <class TryNestedPaint, class TryMutation>
+    [[nodiscard]] static bool paint_damage_transaction_active_work_survives(
+        Tree& tree,
+        Rect captured_damage,
+        Rect newer_damage,
+        TryNestedPaint&& try_nested_paint,
+        TryMutation&& try_mutation) {
+        Rect active_bounds{};
+        try {
+            auto transaction = tree.begin_paint_damage_transaction();
+            if (!transaction.valid() || !transaction.has_damage() ||
+                !transaction.damage_bounds().contains(captured_damage) ||
+                !tree.lifecycle_transition_active()) {
+                return false;
+            }
+            active_bounds = transaction.damage_bounds();
+
+            tree.invalidate(newer_damage);
+            tree.invalidate_layout();
+            if (transaction.damage_bounds().x != active_bounds.x ||
+                transaction.damage_bounds().y != active_bounds.y ||
+                transaction.damage_bounds().w != active_bounds.w ||
+                transaction.damage_bounds().h != active_bounds.h) {
+                return false;
+            }
+
+            // A second transaction must be rejected while the first is active.
+            auto nested = tree.begin_paint_damage_transaction();
+            if (nested.valid() || nested.has_damage()) return false;
+            if (!try_nested_paint()) return false;
+            if (!try_mutation()) return false;
+            if (!tree.paint_dirty() || !tree.layout_dirty()) return false;
+
+            throw std::runtime_error("injected active-pass failure");
+        } catch (const std::runtime_error&) {
+        }
+
+        if (tree.lifecycle_transition_active() || !tree.paint_dirty() ||
+            !tree.layout_dirty()) {
+            return false;
+        }
+        Rect recovered{};
+        for (const auto region : tree.dirty_regions()) {
+            recovered = unite(recovered, region);
+        }
+        return recovered.contains(captured_damage) &&
+               recovered.contains(newer_damage);
+    }
+
     static void make_cache_unavailable(Tree& tree) noexcept {
         tree.paint_cull_cache_.clear();
         tree.paint_cull_cache_dirty_ = false;
         tree.paint_cull_cached_viewport_ = tree.viewport_;
+    }
+
+    [[nodiscard]] static Tree::PaintDamageTransaction begin_scene_paint_transaction(
+        Tree& tree) {
+        return tree.begin_paint_damage_transaction();
+    }
+
+    [[nodiscard]] static bool scene_transaction_active(const Tree& tree) noexcept {
+        return tree.scene_frame_transaction_active_;
     }
 
     static void mark_cached_own_bounds_unknown(Tree& tree) noexcept {
@@ -830,6 +892,102 @@ void paint_damage_transaction_rollback_and_retry() {
         tree, {8.0f, 6.0f, 12.0f, 10.0f}));
 }
 
+void paint_damage_transaction_active_work_survives() {
+    ui::State<bool> visible{true};
+    auto child = std::make_shared<PaintProbeState>();
+    ui::Tree tree{ui::compile(ui::make_spec(ui::If{visible, PaintProbe{child}}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({120.0f, 60.0f});
+    tree.paint(canvas, platform);
+
+    const ui::Rect captured{10.0f, 10.0f, 20.0f, 20.0f};
+    const ui::Rect newer{50.0f, 5.0f, 8.0f, 8.0f};
+    tree.invalidate(captured);
+
+    const bool survived = ui::TreeTestAccess::paint_damage_transaction_active_work_survives(
+        tree,
+        captured,
+        newer,
+        [&]() {
+            // Nested paint/lifecycle entry must be rejected without walking the
+            // retained tree or touching the active captured target.
+            reset(child);
+            tree.paint(canvas, platform);
+            return child->paints == 0;
+        },
+        [&]() {
+            // Structural mutation requested from the active pass stays queued.
+            visible.set(false);
+            return child->unmounts == 0;
+        });
+    NUI_CHECK(survived);
+
+    // The deferred structural mutation is still pending and flushes on the next
+    // normal preparation, after which a fresh transaction commits cleanly.
+    NUI_CHECK(tree.paint_dirty());
+    tree.layout({120.0f, 60.0f});
+    NUI_CHECK(child->unmounts == 1);
+
+    auto retry = ui::TreeTestAccess::begin_scene_paint_transaction(tree);
+    NUI_CHECK(retry.valid());
+    retry.commit();
+    NUI_CHECK(!tree.paint_dirty());
+    NUI_CHECK(!ui::TreeTestAccess::scene_transaction_active(tree));
+
+    // A later normal operation still recovers: invalidate, capture, commit.
+    tree.invalidate(newer);
+    auto recovered = ui::TreeTestAccess::begin_scene_paint_transaction(tree);
+    NUI_CHECK(recovered.valid() && recovered.has_damage());
+    recovered.commit();
+    NUI_CHECK(!tree.paint_dirty());
+}
+
+void transparent_root_reference_surface_keeps_reference_alpha() {
+    // The native renderer resets its persistent scene to opaque black. A
+    // transparent baseline exists only on an explicitly transparent reference
+    // surface, so reference-alpha comparisons must not redefine the native
+    // alpha contract.
+    ui::UI tree{ui::Canvas{40.0f, 30.0f, [](ui::CanvasContext2D& canvas) {
+        canvas.fill_rect({10.0f, 10.0f, 10.0f, 10.0f}, {1.0f, 0.0f, 0.0f, 1.0f});
+    }}};
+    tree.resize({40.0f, 30.0f});
+
+    const auto info = SkImageInfo::Make(
+        40, 30, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(surface && surface->getCanvas());
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+
+    test::MockPlatform platform;
+    tree.paint(*surface->getCanvas(), platform);
+
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(40) * 30 * 4);
+    NUI_CHECK(surface->readPixels(
+        info,
+        pixels.data(),
+        static_cast<std::size_t>(40) * 4,
+        0,
+        0));
+    const auto channel = [&](int x, int y, int index) {
+        return pixels[(static_cast<std::size_t>(y) * 40 +
+                       static_cast<std::size_t>(x)) * 4 +
+                      static_cast<std::size_t>(index)];
+    };
+
+    NUI_CHECK(channel(15, 15, 0) == 255);
+    NUI_CHECK(channel(15, 15, 1) == 0);
+    NUI_CHECK(channel(15, 15, 2) == 0);
+    NUI_CHECK(channel(15, 15, 3) == 255);
+    NUI_CHECK(channel(2, 2, 0) == 0);
+    NUI_CHECK(channel(2, 2, 1) == 0);
+    NUI_CHECK(channel(2, 2, 2) == 0);
+    NUI_CHECK(channel(2, 2, 3) == 0);
+}
+
 void two_tree_cache_isolation_contract() {
     auto root_a = std::make_shared<PaintProbeState>();
     auto left_a = std::make_shared<PaintProbeState>();
@@ -902,6 +1060,8 @@ void suite() {
     overlapping_pixel_parity();
     warm_culling_decisions_allocate_zero();
     paint_damage_transaction_rollback_and_retry();
+    paint_damage_transaction_active_work_survives();
+    transparent_root_reference_surface_keeps_reference_alpha();
     two_tree_cache_isolation_contract();
 }
 

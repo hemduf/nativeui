@@ -189,6 +189,9 @@
 
         void rollback() noexcept {
             if (!owner_) return;
+            // DirtyRegion::add is infallible for this bounded captured set:
+            // the region owns reserved capacity for the fixed kMaxRects(+1)
+            // collapse bound, so rollback never allocates or throws.
             for (std::size_t index = 0; index < count_; ++index) {
                 (void)owner_->retain_dirty(captured_[index]);
             }

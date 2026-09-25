@@ -250,6 +250,8 @@ private:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
         readback_result_.reset();
+        readback_region_pending_ = false;
+        readback_region_result_.reset();
 #endif
     }
 
@@ -267,6 +269,8 @@ public:
             .deferred_redraw_attempts = 0,
             .deferred_redraw_rejections = 0,
             .redraw_requests_during_render = 0,
+            .scene_width = width_,
+            .scene_height = height_,
             .last_update_x = last_update_x_,
             .last_update_y = last_update_y_,
             .last_update_width = last_update_width_,
@@ -287,6 +291,36 @@ public:
     [[nodiscard]] std::optional<PlatformReadbackPixel> take_readback() noexcept {
         auto result = readback_result_;
         readback_result_.reset();
+        return result;
+    }
+
+    // Test-only bounded physical-pixel readback for whole-surface scene
+    // oracles. Bounded so a test cannot request an unbounded staging buffer.
+    static constexpr std::uint64_t kMaxReadbackRegionPixels =
+        4u * 1024u * 1024u;
+
+    [[nodiscard]] bool request_readback_region(int x,
+                                               int y,
+                                               int width,
+                                               int height) noexcept {
+        readback_region_pending_ = false;
+        readback_region_result_.reset();
+        if (x < 0 || y < 0 || width <= 0 || height <= 0) return false;
+        const auto pixels = static_cast<std::uint64_t>(width) *
+                            static_cast<std::uint64_t>(height);
+        if (pixels > kMaxReadbackRegionPixels) return false;
+        readback_region_x_ = x;
+        readback_region_y_ = y;
+        readback_region_width_ = width;
+        readback_region_height_ = height;
+        readback_region_pending_ = true;
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackRegion>
+    take_readback_region() noexcept {
+        auto result = std::move(readback_region_result_);
+        readback_region_result_.reset();
         return result;
     }
 #endif
@@ -675,6 +709,51 @@ public:
                     rgba[0], rgba[1], rgba[2], rgba[3]};
             }
         }
+        if (readback_region_pending_) {
+            // Serve the request only on a successful presented frame so the
+            // caller observes the same committed scene it would present. The
+            // staging allocation is test-only and failure-contained; it never
+            // changes scene/presentation state.
+            readback_region_pending_ = false;
+            readback_region_result_.reset();
+            try {
+                if (width_ > 0 && height_ > 0) {
+                    const int x = std::clamp(readback_region_x_, 0, width_ - 1);
+                    const int y = std::clamp(readback_region_y_, 0, height_ - 1);
+                    const int region_width =
+                        std::clamp(readback_region_width_, 0, width_ - x);
+                    const int region_height =
+                        std::clamp(readback_region_height_, 0, height_ - y);
+                    if (region_width > 0 && region_height > 0) {
+                        PlatformReadbackRegion region{};
+                        region.x = x;
+                        region.y = y;
+                        region.width = region_width;
+                        region.height = region_height;
+                        region.pixels.resize(
+                            static_cast<std::size_t>(region_width) *
+                            static_cast<std::size_t>(region_height));
+                        const auto region_info = SkImageInfo::Make(
+                            region_width,
+                            region_height,
+                            kRGBA_8888_SkColorType,
+                            kPremul_SkAlphaType,
+                            SkColorSpace::MakeSRGB());
+                        if (presentation_->readPixels(
+                                region_info,
+                                region.pixels.data(),
+                                static_cast<std::size_t>(region_width) *
+                                    sizeof(PlatformReadbackPixel),
+                                x,
+                                y)) {
+                            readback_region_result_ = std::move(region);
+                        }
+                    }
+                }
+            } catch (...) {
+                readback_region_result_.reset();
+            }
+        }
 #endif
         return true;
     }
@@ -739,6 +818,12 @@ private:
     int readback_y_{};
     bool readback_pending_{};
     std::optional<PlatformReadbackPixel> readback_result_;
+    int readback_region_x_{};
+    int readback_region_y_{};
+    int readback_region_width_{};
+    int readback_region_height_{};
+    bool readback_region_pending_{};
+    std::optional<PlatformReadbackRegion> readback_region_result_;
 #endif
 };
 
