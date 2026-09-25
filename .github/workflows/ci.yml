@@ -23,8 +23,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS Intel
-            os: macos-15-intel
+          # macOS Intel disabled: the macos-15-intel runner is far slower than
+          # the other platforms and adds no additional coverage. Re-enable by
+          # uncommenting the two entries below.
+          # - name: macOS Intel
+          #   os: macos-15-intel
           - name: macOS ARM64
             os: macos-15
           - name: Windows x64
