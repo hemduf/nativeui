@@ -58,7 +58,6 @@ concurrency:
 env:
   TASKFLOW_REF: 669a16a4fff8bd24886337e29f6348f6dc1f1415
   TASKFLOW_DIR: .taskflow/seclab-taskflows-fuzzing
-  RESULTS_ROOT: ~/.local/share/seclab-taskflow-agent/seclab-taskflows
 
 jobs:
   fuzz:
@@ -92,6 +91,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
+          cache-dependency-path: ${{ env.TASKFLOW_DIR }}/pyproject.toml
 
       - name: Install pinned taskflow
         shell: bash
