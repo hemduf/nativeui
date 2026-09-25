@@ -44,6 +44,12 @@ if(NATIVEUI_BUILD_TESTS)
       -P "${PROJECT_SOURCE_DIR}/tests/t054_argument_boundary_tests.cmake"
   )
   add_test(
+    NAME nativeui_t440_skia_flag_isolation_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${PROJECT_SOURCE_DIR}/tests/t440_skia_flag_isolation_contract.cmake"
+  )
+  add_test(
     NAME nativeui_t054_package_source_contract_tests
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -116,6 +122,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_t054_argument_boundary_tests
     nativeui_t054_package_source_contract_tests
     PROPERTIES LABELS "build;cmake;package;t054" TIMEOUT 300
+  )
+  set_tests_properties(
+    nativeui_t440_skia_flag_isolation_contract
+    PROPERTIES LABELS "build;cmake;t440;privacy" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t064_root_integration_contract

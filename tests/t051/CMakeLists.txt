@@ -57,7 +57,28 @@ add_executable(nativeui_t067_benchmark_contract
 )
 nativeui_configure_t051_target(nativeui_t067_benchmark_contract)
 
+# T440 research probe: evaluates Skia M153 strike-cache modes for NativeUI text
+# workloads. Research-only; it never links into NativeUI::Core or the main test
+# suite. Platform memory APIs used by the probe:
+#   macOS   - mach task_info
+#   Linux   - /proc/self/statm
+#   Windows - GetProcessMemoryInfo (psapi)
+add_executable(nativeui_t440_strikecache_probe
+  "${NATIVEUI_SOURCE_DIR}/tests/t051/t440_strikecache_probe.cpp"
+)
+nativeui_configure_t051_target(nativeui_t440_strikecache_probe)
+if(WIN32)
+  target_link_libraries(nativeui_t440_strikecache_probe PRIVATE psapi)
+endif()
+
 enable_testing()
 add_test(NAME t051.workload_contract COMMAND nativeui_t051_workload_contract_tests)
 add_test(NAME t051.t067_virtual_list COMMAND nativeui_t067_benchmark_contract)
+add_test(NAME t051.t440_strikecache_self_test
+  COMMAND nativeui_t440_strikecache_probe --self-test
+)
 set_tests_properties(t051.t067_virtual_list PROPERTIES LABELS "benchmark;release-gate;component")
+set_tests_properties(t051.t440_strikecache_self_test PROPERTIES
+  LABELS "research;benchmark;t440"
+  TIMEOUT 300
+)
