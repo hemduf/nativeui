@@ -1,0 +1,143 @@
+name: Fuzzing Taskflow
+
+# GitHub Security Lab Fuzzing Taskflow integration.
+#
+# Security model:
+# - manual-only while the upstream taskflow is in active development;
+# - ephemeral GitHub-hosted Linux runner;
+# - repository token is read-only;
+# - AI_API_TOKEN is exposed only to the fuzzing step;
+# - no repository write-back, issue creation, patch application, or merge action.
+#
+# The upstream taskflow executes LLM-selected build and shell commands. Keep the
+# AI token dedicated to this workflow, avoid adding privileged secrets, and
+# review every generated vulnerability report/patch before acting on it.
+#
+# Setup:
+# 1. Add an Actions secret named AI_API_TOKEN. Upstream expects a GitHub token
+#    for an account entitled to the model service used by the Taskflow Agent.
+# 2. Run "Fuzzing Taskflow" manually from the repository default branch.
+# 3. Download the fuzzing-taskflow-* artifact after the run.
+#
+# Upstream pin update procedure:
+# - review GitHubSecurityLab/seclab-taskflows-fuzzing release/commit changes,
+#   especially its security warning and driver/model behavior;
+# - update TASKFLOW_REF below;
+# - manually run one campaign and review its artifacts before accepting the pin.
+
+on:
+  workflow_dispatch:
+    inputs:
+      harness_candidates:
+        description: Candidate harnesses generated per target
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+      plateau_threshold_pct:
+        description: Stop after two iterations gain less than this line-coverage percentage
+        required: true
+        default: '1.0'
+        type: choice
+        options:
+          - '0.25'
+          - '0.5'
+          - '1.0'
+          - '2.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzzing-taskflow-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  TASKFLOW_REF: 669a16a4fff8bd24886337e29f6348f6dc1f1415
+  TASKFLOW_DIR: .taskflow/seclab-taskflows-fuzzing
+  RESULTS_ROOT: ~/.local/share/seclab-taskflow-agent/seclab-taskflows
+
+jobs:
+  fuzz:
+    name: NativeUI autonomous fuzzing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Require default-branch dispatch
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error::Run this workflow from the default branch (${DEFAULT_BRANCH})."
+            echo "::error::The upstream driver accepts an owner/repository slug and fuzzes the repository default branch."
+            exit 2
+          fi
+
+      - name: Checkout pinned GitHub Security Lab taskflow
+        uses: actions/checkout@v4
+        with:
+          repository: GitHubSecurityLab/seclab-taskflows-fuzzing
+          ref: ${{ env.TASKFLOW_REF }}
+          path: ${{ env.TASKFLOW_DIR }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install pinned taskflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "./${TASKFLOW_DIR}"
+
+      - name: Run fuzzing campaign
+        shell: bash
+        env:
+          AI_API_TOKEN: ${{ secrets.AI_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          FUZZ_NO_DASHBOARD: '1'
+          HARNESS_CANDIDATES: ${{ inputs.harness_candidates }}
+          FUZZ_PLATEAU_THRESHOLD_PCT: ${{ inputs.plateau_threshold_pct }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${AI_API_TOKEN:-}" ]]; then
+            echo "::error::Missing Actions secret AI_API_TOKEN."
+            echo "::error::Configure a dedicated model token before running this workflow."
+            exit 2
+          fi
+
+          bash "./${TASKFLOW_DIR}/scripts/fuzzing/run_fuzzing.sh" "${GITHUB_REPOSITORY}"
+
+      - name: Publish campaign summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="${HOME}/.local/share/seclab-taskflow-agent/seclab-taskflows/fuzz_runner/repo/${GITHUB_REPOSITORY_OWNER}__${GITHUB_REPOSITORY#*/}/REPORT.md"
+          if [[ -f "${report}" ]]; then
+            cat "${report}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No campaign REPORT.md was produced." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload fuzzing artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzzing-taskflow-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ~/.local/share/seclab-taskflow-agent/seclab-taskflows/fuzz_context/fuzz_context.db
+            ~/.local/share/seclab-taskflow-agent/seclab-taskflows/fuzz_runner/repo/${{ github.repository_owner }}__${{ github.event.repository.name }}/
+            ~/.local/share/seclab-taskflow-agent/seclab-taskflows/fuzz_runner/runs/**/coverage/
