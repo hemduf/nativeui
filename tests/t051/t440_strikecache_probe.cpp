@@ -13,6 +13,11 @@
 //   C - pinned chrome/m153 archive (flag OFF) with the exported experimental
 //       runtime selector forced to true before any text operation
 //
+// Modes: --self-test, --json <path>, --threads <list> (default 1,2,4,8),
+//        --variant <A|B|C>, --skia-archive-sha256 <64 hex chars> (recorded as
+//        provenance; mandatory for decision-grade runs, see the research doc).
+// Result schema: t440-strikecache-v2.
+//
 // Measurement protocol reuses the frozen T051 constants and summarize_samples()
 // semantics: 5 discarded warmup samples, 30 measured samples, median = average
 // of sorted samples 14/15, p95 = sorted sample 28. T051's run_fixed_protocol()
@@ -29,7 +34,9 @@
 //   - SkGraphics::GetFontCacheUsed()/GetFontCacheCountUsed() are sampled on each
 //     rendering thread after its batch. With a process-global cache every thread
 //     observes the same process-wide value; with thread-local caches the values
-//     are disjoint per-thread values. Both interpretations are reported.
+//     are disjoint per-thread values. The document records the raw per-thread
+//     arrays, their largest thread, and a scope-aware total that is the only
+//     field comparable across variants (process-global value vs per-thread sum).
 //   - Process RSS/footprint deltas come from platform APIs. The T051 operator-new
 //     interception is deliberately absent here: Skia allocates strike caches
 //     through malloc, which operator new cannot see. Process-level deltas are
@@ -56,6 +63,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -115,12 +123,16 @@ using nativeui::bench::kMeasuredSamples;
 using nativeui::bench::SampleSummary;
 using nativeui::bench::summarize_samples;
 
-inline constexpr std::string_view kSchema = "t440-strikecache-v1";
+inline constexpr std::string_view kSchema = "t440-strikecache-v2";
 inline constexpr std::string_view kTextLayoutPaint = "text_layout_paint";
 inline constexpr std::string_view kFontSizeChurn = "font_size_churn";
 inline constexpr float kViewportWidth = 1024.0f;
 inline constexpr float kViewportHeight = 768.0f;
 inline constexpr float kFixedFontSize = 11.0f;
+// Alternate content for the isolation/staleness checks: a different strike
+// descriptor must produce different pixels, so equal checksums cannot pass
+// vacuously through content-addressed cache reuse.
+inline constexpr float kAlternateFontSize = 17.0f;
 inline constexpr int kMaximumThreadCount = 64;
 
 // 24 deterministic distinct font sizes for the churn workload. The op count per
@@ -704,6 +716,11 @@ struct RunResult {
     SampleSummary aggregate;
     std::vector<double> thread_median_ns_per_op;
     std::vector<double> thread_p95_ns_per_op;
+    // Scope actually active while this run measured: true = each worker owns a
+    // disjoint thread-local strike cache, false = all workers sample one shared
+    // process-global cache. Required to interpret the raw per-thread arrays
+    // correctly; only the derived scope-aware totals are comparable across A/B/C.
+    bool threadlocal_effective{};
     std::vector<std::uint64_t> font_cache_used_before_bytes;
     std::vector<std::uint64_t> font_cache_used_after_bytes;
     std::vector<int> font_cache_count_before;
@@ -714,7 +731,54 @@ struct RunResult {
     MemorySnapshot memory_after;
 };
 
-RunResult run_concurrent(const ProbeWorkload& workload, int thread_count) {
+std::uint64_t font_cache_used_largest_thread(const RunResult& run) {
+    std::uint64_t largest = 0;
+    for (const auto value : run.font_cache_used_after_bytes) {
+        largest = std::max(largest, value);
+    }
+    return largest;
+}
+
+std::uint64_t font_cache_used_sum(const RunResult& run) {
+    std::uint64_t sum = 0;
+    for (const auto value : run.font_cache_used_after_bytes) {
+        sum += value;
+    }
+    return sum;
+}
+
+std::int64_t font_cache_count_largest_thread(const RunResult& run) {
+    int largest = 0;
+    for (const auto value : run.font_cache_count_after) {
+        largest = std::max(largest, value);
+    }
+    return static_cast<std::int64_t>(largest);
+}
+
+std::int64_t font_cache_count_sum(const RunResult& run) {
+    std::int64_t sum = 0;
+    for (const auto value : run.font_cache_count_after) {
+        sum += static_cast<std::int64_t>(value);
+    }
+    return sum;
+}
+
+// The only cross-scope comparable aggregate: the process-global cache value
+// when the OFF build shares one cache, and the sum of the disjoint per-thread
+// caches when the thread-local selector is active.
+std::uint64_t font_cache_used_total(const RunResult& run) {
+    return run.threadlocal_effective ? font_cache_used_sum(run)
+                                     : font_cache_used_largest_thread(run);
+}
+
+std::int64_t font_cache_count_total(const RunResult& run) {
+    return run.threadlocal_effective ? font_cache_count_sum(run)
+                                     : font_cache_count_largest_thread(run);
+}
+
+RunResult run_concurrent(const ProbeWorkload& workload,
+                         int thread_count,
+                         bool threadlocal_effective) {
     if (thread_count < 1 || thread_count > kMaximumThreadCount) {
         throw std::invalid_argument("T440 thread count out of range");
     }
@@ -784,6 +848,7 @@ RunResult run_concurrent(const ProbeWorkload& workload, int thread_count) {
     result.thread_count = thread_count;
     result.workload = std::string(workload.name);
     result.operations_per_sample = workload.operations_per_sample;
+    result.threadlocal_effective = threadlocal_effective;
     result.aggregate = summarize_samples(aggregate_samples);
     result.memory_before = memory_before;
     result.memory_after = memory_after;
@@ -811,8 +876,10 @@ struct CheckRecord {
     bool passed{};
     std::uint64_t cycles{};
     std::string checksum_control;
+    std::string checksum_control_alternate;
     std::string checksum_survivor;
     std::string checksum_cold_control;
+    std::string checksum_cold_control_alternate;
     std::string checksum_after_purge;
     std::uint64_t font_cache_used_before_purge{};
     std::uint64_t font_cache_used_after_purge{};
@@ -821,33 +888,42 @@ struct CheckRecord {
     std::string detail;
 };
 
-// Single-instance control: create, render, checksum, destroy.
-std::string render_control_checksum() {
-    auto fixture = make_text_fixture(kFixedFontSize);
-    const std::string checksum = render_fixture_checksum(fixture, false);
-    return checksum;
+// Single-instance control for the requested content: create, render, checksum,
+// destroy.
+std::string render_control_checksum(float font_size) {
+    auto fixture = make_text_fixture(font_size);
+    return render_fixture_checksum(fixture, false);
 }
 
 CheckRecord run_multi_instance_lifecycle_check() {
     CheckRecord check;
     check.name = "multi_instance_lifecycle";
     check.cycles = 50;
-    check.checksum_control = render_control_checksum();
+    check.checksum_control = render_control_checksum(kFixedFontSize);
+    check.checksum_control_alternate = render_control_checksum(kAlternateFontSize);
+    if (check.checksum_control == check.checksum_control_alternate) {
+        check.passed = false;
+        check.detail = "alternate-content control must differ from the fixed-content control";
+        return check;
+    }
 
+    // The two simultaneously alive instances render different content. A stale
+    // or contaminated cache that returned another instance's content-correct
+    // strikes under a colliding key would then produce the wrong checksum.
     bool passed = true;
     std::string survivor_checksum;
     for (std::uint64_t cycle = 0; cycle < check.cycles && passed; ++cycle) {
         auto first = make_text_fixture(kFixedFontSize);
-        auto second = make_text_fixture(kFixedFontSize);
+        auto second = make_text_fixture(kAlternateFontSize);
         passed = render_fixture_checksum(first, false) == check.checksum_control &&
-                 render_fixture_checksum(second, false) == check.checksum_control;
+                 render_fixture_checksum(second, false) == check.checksum_control_alternate;
         if (!passed) break;
 
         if (cycle % 2 == 0) {
             first.renderer.reset();
             first.tree.reset();
             survivor_checksum = render_fixture_checksum(second, false);
-            passed = survivor_checksum == check.checksum_control;
+            passed = survivor_checksum == check.checksum_control_alternate;
             second.renderer.reset();
             second.tree.reset();
         } else {
@@ -863,9 +939,10 @@ CheckRecord run_multi_instance_lifecycle_check() {
     check.passed = passed;
     check.checksum_survivor = survivor_checksum;
     check.detail = passed
-        ? "50 create/render/checksum/destroy cycles in both destruction orders; "
-          "the surviving instance stayed functional and matched the control"
-        : "instance isolation or survivor rendering diverged from the control";
+        ? "50 create/render/checksum/destroy cycles of two different-content instances "
+          "in both destruction orders; the surviving instance stayed functional and "
+          "matched its own content control"
+        : "instance isolation or survivor rendering diverged from the content control";
     return check;
 }
 
@@ -873,31 +950,40 @@ CheckRecord run_cache_staleness_check() {
     CheckRecord check;
     check.name = "cache_staleness_after_destruction";
 
-    // Establish a clean cache baseline on the rendering thread, then render the
-    // cold control with a fresh instance that is destroyed before the staleness
-    // step.
+    // Establish a clean cache baseline on the rendering thread, then render two
+    // cold single-instance controls with different content. The alternate
+    // control is the non-vacuous post-purge reference: it proves the check
+    // cannot pass by reusing the fixed-content strikes.
     SkGraphics::PurgeFontCache();
-    check.checksum_cold_control = render_control_checksum();
+    check.checksum_cold_control = render_control_checksum(kFixedFontSize);
+    check.checksum_cold_control_alternate = render_control_checksum(kAlternateFontSize);
 
     check.font_cache_used_before_purge = SkGraphics::GetFontCacheUsed();
     SkGraphics::PurgeFontCache();
     check.font_cache_used_after_purge = SkGraphics::GetFontCacheUsed();
     check.purge_on_rendering_thread = true;
 
-    // Every renderer is destroyed at this point; re-render the identical
-    // content with a fresh instance and require the identical pixels.
-    auto fresh = make_text_fixture(kFixedFontSize);
+    // Every renderer is destroyed at this point; re-render the alternate
+    // content with a fresh instance and require its own cold control checksum.
+    auto fresh = make_text_fixture(kAlternateFontSize);
     check.checksum_after_purge = render_fixture_checksum(fresh, false);
     check.font_cache_used_after_rerender = SkGraphics::GetFontCacheUsed();
     fresh.renderer.reset();
     fresh.tree.reset();
 
-    check.passed = check.checksum_after_purge == check.checksum_cold_control &&
-                   check.font_cache_used_after_purge <= check.font_cache_used_before_purge;
+    const bool controls_differ =
+        check.checksum_cold_control != check.checksum_cold_control_alternate;
+    const bool purge_reduced_nonempty_cache =
+        check.font_cache_used_before_purge > 0 &&
+        (check.font_cache_used_after_purge == 0 ||
+         check.font_cache_used_after_purge < check.font_cache_used_before_purge);
+    check.passed = controls_differ && purge_reduced_nonempty_cache &&
+                   check.checksum_after_purge == check.checksum_cold_control_alternate;
     check.detail = check.passed
-        ? "purge on the rendering thread after all renderers were destroyed; "
-          "re-render matched the cold control"
-        : "re-render after purge diverged from the cold control or purge grew the cache";
+        ? "purge on the rendering thread strictly reduced a non-empty cache after all "
+          "renderers were destroyed; re-rendered alternate content matched its cold control"
+        : "purge was a no-op on an empty cache, or re-rendered alternate content "
+          "diverged from its cold control";
     return check;
 }
 
@@ -907,6 +993,7 @@ CheckRecord run_cache_staleness_check() {
 
 struct Document {
     std::string variant;
+    std::string skia_archive_sha256;
     bool runtime_threadlocal_default{};
     bool runtime_threadlocal_effective{};
     std::vector<int> requested_threads;
@@ -934,6 +1021,7 @@ std::string to_json(const Document& document) {
     out << "  \"schema\": " << json_quote(kSchema) << ",\n";
     out << "  \"probe\": \"nativeui_t440_strikecache_probe\",\n";
     out << "  \"nativeui_commit_sha\": " << json_quote(NATIVEUI_BENCHMARK_COMMIT_SHA) << ",\n";
+    out << "  \"skia_archive_sha256\": " << json_quote(document.skia_archive_sha256) << ",\n";
     out << "  \"variant\": " << json_quote(document.variant) << ",\n";
     out << "  \"variant_note\": " << json_quote(variant_note(document.variant)) << ",\n";
     out << "  \"runtime_threadlocal_default\": "
@@ -976,6 +1064,8 @@ std::string to_json(const Document& document) {
         out << "      \"threads\": " << run.thread_count << ",\n";
         out << "      \"workload\": " << json_quote(run.workload) << ",\n";
         out << "      \"operations_per_sample\": " << run.operations_per_sample << ",\n";
+        out << "      \"font_cache_scope\": "
+            << json_quote(font_cache_scope(run.threadlocal_effective)) << ",\n";
         out << "      \"aggregate_median_ns_per_op\": " << json_number(run.aggregate.median_ns_per_op) << ",\n";
         out << "      \"aggregate_p95_ns_per_op\": " << json_number(run.aggregate.p95_ns_per_op) << ",\n";
         out << "      \"aggregate_min_ns_per_op\": " << json_number(run.aggregate.min_ns_per_op) << ",\n";
@@ -1004,15 +1094,10 @@ std::string to_json(const Document& document) {
         }
         out << "],\n";
 
-        std::uint64_t font_cache_used_after_sum = 0;
-        std::uint64_t font_cache_used_after_max = 0;
         out << "      \"font_cache_used_after_bytes\": [";
         for (std::size_t thread = 0; thread < run.font_cache_used_after_bytes.size(); ++thread) {
             if (thread > 0) out << ", ";
             out << run.font_cache_used_after_bytes[thread];
-            font_cache_used_after_sum += run.font_cache_used_after_bytes[thread];
-            font_cache_used_after_max =
-                std::max(font_cache_used_after_max, run.font_cache_used_after_bytes[thread]);
         }
         out << "],\n";
 
@@ -1023,18 +1108,22 @@ std::string to_json(const Document& document) {
         }
         out << "],\n";
 
-        int font_cache_count_after_sum = 0;
         out << "      \"font_cache_count_used_after\": [";
         for (std::size_t thread = 0; thread < run.font_cache_count_after.size(); ++thread) {
             if (thread > 0) out << ", ";
             out << run.font_cache_count_after[thread];
-            font_cache_count_after_sum += run.font_cache_count_after[thread];
         }
         out << "],\n";
 
-        out << "      \"font_cache_used_after_sum_bytes\": " << font_cache_used_after_sum << ",\n";
-        out << "      \"font_cache_used_after_max_bytes\": " << font_cache_used_after_max << ",\n";
-        out << "      \"font_cache_count_used_after_sum\": " << font_cache_count_after_sum << ",\n";
+        // Only the scope-aware totals are comparable across variants: under
+        // process-global scope the raw per-thread arrays repeat one shared
+        // cache, so summing them would multiply the real value by the thread
+        // count. The raw arrays remain in the document as per-thread evidence.
+        out << "      \"font_cache_used_after_largest_thread_bytes\": "
+            << font_cache_used_largest_thread(run) << ",\n";
+        out << "      \"font_cache_used_after_total_bytes\": " << font_cache_used_total(run) << ",\n";
+        out << "      \"font_cache_count_used_largest_thread\": " << font_cache_count_largest_thread(run) << ",\n";
+        out << "      \"font_cache_count_used_total\": " << font_cache_count_total(run) << ",\n";
         out << "      \"font_cache_limit_bytes\": " << run.font_cache_limit_bytes << ",\n";
         out << "      \"font_cache_count_limit\": " << run.font_cache_count_limit << ",\n";
 
@@ -1070,8 +1159,12 @@ std::string to_json(const Document& document) {
         out << "      \"passed\": " << (check.passed ? "true" : "false") << ",\n";
         out << "      \"cycles\": " << check.cycles << ",\n";
         out << "      \"checksum_control\": " << json_quote(check.checksum_control) << ",\n";
+        out << "      \"checksum_control_alternate\": "
+            << json_quote(check.checksum_control_alternate) << ",\n";
         out << "      \"checksum_survivor\": " << json_quote(check.checksum_survivor) << ",\n";
         out << "      \"checksum_cold_control\": " << json_quote(check.checksum_cold_control) << ",\n";
+        out << "      \"checksum_cold_control_alternate\": "
+            << json_quote(check.checksum_cold_control_alternate) << ",\n";
         out << "      \"checksum_after_purge\": " << json_quote(check.checksum_after_purge) << ",\n";
         out << "      \"font_cache_used_before_purge\": " << check.font_cache_used_before_purge << ",\n";
         out << "      \"font_cache_used_after_purge\": " << check.font_cache_used_after_purge << ",\n";
@@ -1133,9 +1226,30 @@ std::string parse_variant(std::string_view value) {
     throw std::invalid_argument("--variant must be A, B or C");
 }
 
+std::string parse_archive_sha256(std::string_view value) {
+    if (value.size() != 64) {
+        throw std::invalid_argument("--skia-archive-sha256 must be 64 hexadecimal characters");
+    }
+    std::string normalized;
+    normalized.reserve(64);
+    for (const char ch : value) {
+        if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+            normalized.push_back(ch);
+            continue;
+        }
+        if (ch >= 'A' && ch <= 'F') {
+            normalized.push_back(static_cast<char>(ch - 'A' + 'a'));
+            continue;
+        }
+        throw std::invalid_argument("--skia-archive-sha256 must be 64 hexadecimal characters");
+    }
+    return normalized;
+}
+
 struct Options {
     bool self_test{};
     std::string json_path;
+    std::string skia_archive_sha256;
     std::vector<int> threads{1, 2, 4, 8};
     std::string variant{"A"};
 };
@@ -1149,6 +1263,11 @@ Options parse_options(int argc, char** argv) {
         } else if (argument == "--json") {
             if (++index >= argc) throw std::invalid_argument("--json requires a path");
             options.json_path = argv[index];
+        } else if (argument == "--skia-archive-sha256") {
+            if (++index >= argc) {
+                throw std::invalid_argument("--skia-archive-sha256 requires a value");
+            }
+            options.skia_archive_sha256 = parse_archive_sha256(argv[index]);
         } else if (argument == "--threads") {
             if (++index >= argc) throw std::invalid_argument("--threads requires a value");
             options.threads = parse_threads(argv[index]);
@@ -1165,6 +1284,8 @@ Options parse_options(int argc, char** argv) {
 Document make_self_test_document() {
     Document document;
     document.variant = "A";
+    document.skia_archive_sha256 =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     document.runtime_threadlocal_default = false;
     document.runtime_threadlocal_effective = false;
     document.requested_threads = {1};
@@ -1173,6 +1294,7 @@ Document make_self_test_document() {
     run.thread_count = 1;
     run.workload = std::string(kTextLayoutPaint);
     run.operations_per_sample = kWorkloads.front().operations_per_sample;
+    run.threadlocal_effective = false;
     run.aggregate = SampleSummary{
         .median_ns_per_op = 100.0,
         .p95_ns_per_op = 120.0,
@@ -1196,6 +1318,7 @@ Document make_self_test_document() {
     lifecycle.passed = true;
     lifecycle.cycles = 1;
     lifecycle.checksum_control = "fnv1a64:0000000000000001";
+    lifecycle.checksum_control_alternate = "fnv1a64:0000000000000003";
     lifecycle.checksum_survivor = lifecycle.checksum_control;
     lifecycle.detail = "self-test";
     document.checks.push_back(lifecycle);
@@ -1204,7 +1327,8 @@ Document make_self_test_document() {
     staleness.name = "cache_staleness_after_destruction";
     staleness.passed = true;
     staleness.checksum_cold_control = "fnv1a64:0000000000000002";
-    staleness.checksum_after_purge = staleness.checksum_cold_control;
+    staleness.checksum_cold_control_alternate = "fnv1a64:0000000000000004";
+    staleness.checksum_after_purge = staleness.checksum_cold_control_alternate;
     staleness.purge_on_rendering_thread = true;
     staleness.detail = "self-test";
     document.checks.push_back(staleness);
@@ -1256,6 +1380,15 @@ int run_self_test() {
         rejected = false;
         try { (void)parse_variant("D"); } catch (const std::invalid_argument&) { rejected = true; }
         if (!rejected) throw std::runtime_error("T440 self-test: unknown variant accepted");
+        if (parse_archive_sha256(std::string(64, 'A')) != std::string(64, 'a')) {
+            throw std::runtime_error("T440 self-test: --skia-archive-sha256 was not normalized");
+        }
+        rejected = false;
+        try { (void)parse_archive_sha256("abcd"); } catch (const std::invalid_argument&) { rejected = true; }
+        if (!rejected) throw std::runtime_error("T440 self-test: short --skia-archive-sha256 accepted");
+        rejected = false;
+        try { (void)parse_archive_sha256(std::string(64, 'g')); } catch (const std::invalid_argument&) { rejected = true; }
+        if (!rejected) throw std::runtime_error("T440 self-test: non-hex --skia-archive-sha256 accepted");
     }
 
     // Deterministic paint: two independent fixtures must produce identical
@@ -1267,6 +1400,36 @@ int run_self_test() {
         const auto second_checksum = render_fixture_checksum(second, true);
         if (first_checksum.empty() || first_checksum != second_checksum) {
             throw std::runtime_error("T440 self-test: deterministic paint checksum drifted");
+        }
+    }
+
+    // The isolation and staleness checks rely on alternate content being
+    // visually distinct; a colliding checksum would make them vacuous.
+    {
+        auto fixed = make_text_fixture(kFixedFontSize);
+        auto alternate = make_text_fixture(kAlternateFontSize);
+        const auto fixed_checksum = render_fixture_checksum(fixed, true);
+        const auto alternate_checksum = render_fixture_checksum(alternate, true);
+        if (fixed_checksum.empty() || fixed_checksum == alternate_checksum) {
+            throw std::runtime_error(
+                "T440 self-test: alternate font size did not produce distinct pixels");
+        }
+    }
+
+    // The strengthened staleness assertion requires a purge to strictly reduce
+    // a non-empty cache; both halves are deterministic and wall-clock free.
+    {
+        SkGraphics::PurgeFontCache();
+        auto fixture = make_text_fixture(kFixedFontSize);
+        (void)render_fixture_checksum(fixture, true);
+        const auto used_before = SkGraphics::GetFontCacheUsed();
+        SkGraphics::PurgeFontCache();
+        const auto used_after = SkGraphics::GetFontCacheUsed();
+        if (used_before == 0) {
+            throw std::runtime_error("T440 self-test: text render did not populate the strike cache");
+        }
+        if (!(used_after == 0 || used_after < used_before)) {
+            throw std::runtime_error("T440 self-test: purge did not reduce the strike cache");
         }
     }
 
@@ -1313,11 +1476,16 @@ int run_self_test() {
         throw std::runtime_error("T440 self-test: result document is not valid JSON");
     }
     for (const std::string_view needle : {
-             "\"schema\": \"t440-strikecache-v1\"",
+             "\"schema\": \"t440-strikecache-v2\"",
              "\"variant\": \"A\"",
              "\"variant_note\":",
+             "\"skia_archive_sha256\": \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"",
              "\"font_cache_scope\": \"process-global\"",
-             "\"font_cache_used_after_max_bytes\": 1024",
+             "\"font_cache_used_after_total_bytes\": 1024",
+             "\"font_cache_used_after_largest_thread_bytes\": 1024",
+             "\"font_cache_count_used_total\": 1",
+             "\"checksum_control_alternate\": \"fnv1a64:0000000000000003\"",
+             "\"checksum_cold_control_alternate\": \"fnv1a64:0000000000000004\"",
              "\"process_memory_delta_bytes\": 500",
              "\"process_resident_delta_bytes\": 500",
              "\"multi_instance_lifecycle\"",
@@ -1370,20 +1538,22 @@ int run_research(const Options& options) {
 
     Document document;
     document.variant = options.variant;
+    document.skia_archive_sha256 = options.skia_archive_sha256;
     document.runtime_threadlocal_default = runtime_default;
     document.runtime_threadlocal_effective = runtime_effective;
     document.requested_threads = options.threads;
 
     for (const auto& workload : kWorkloads) {
         for (const int thread_count : options.threads) {
-            auto result = run_concurrent(workload, thread_count);
+            auto result = run_concurrent(workload, thread_count, runtime_effective);
             std::cout << "  " << result.workload
                       << " threads=" << thread_count
                       << " median=" << result.aggregate.median_ns_per_op << "ns/op"
                       << " p95=" << result.aggregate.p95_ns_per_op << "ns/op"
                       << " throughput=" << (1.0e9 / result.aggregate.median_ns_per_op) << " ops/s"
-                      << " font_cache_used=" << result.font_cache_used_after_bytes.front() << "B"
-                      << " font_cache_count=" << result.font_cache_count_after.front() << '\n';
+                      << " font_cache_scope=" << font_cache_scope(result.threadlocal_effective)
+                      << " font_cache_used_total=" << font_cache_used_total(result) << "B"
+                      << " font_cache_count_total=" << font_cache_count_total(result) << '\n';
             document.runs.push_back(std::move(result));
         }
     }
@@ -1402,7 +1572,23 @@ int run_research(const Options& options) {
             throw std::runtime_error("unable to open T440 JSON output: " + options.json_path);
         }
         output << json;
-        std::cout << "  wrote " << options.json_path << '\n';
+        output.flush();
+        if (!output) {
+            throw std::runtime_error("failed writing T440 JSON output: " + options.json_path);
+        }
+        output.close();
+        if (!output) {
+            throw std::runtime_error("failed closing T440 JSON output: " + options.json_path);
+        }
+        // A stream can report success while the final bytes never reached the
+        // file; decision-grade evidence must be complete or the run fails.
+        std::error_code size_error;
+        const auto written_size = std::filesystem::file_size(options.json_path, size_error);
+        if (size_error || written_size != static_cast<std::uintmax_t>(json.size())) {
+            throw std::runtime_error(
+                "T440 JSON output is truncated or unreadable: " + options.json_path);
+        }
+        std::cout << "  wrote " << options.json_path << " (" << written_size << " bytes)\n";
     } else {
         std::cout << json;
     }

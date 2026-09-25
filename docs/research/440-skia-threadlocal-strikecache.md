@@ -82,29 +82,51 @@ same `NativeUI::Core`/Skia as the frozen T051 benchmarks) implements:
 - **Per-thread memory**: `SkGraphics::GetFontCacheUsed()`,
   `GetFontCacheCountUsed()`, `GetFontCacheLimit()`,
   `GetFontCacheCountLimit()` are sampled on each rendering thread after its
-  batch. The document records the per-thread values, their sum, and their
-  maximum, because OFF runs report one process-global number on every thread
-  while ON runs report disjoint per-thread numbers.
+  batch.
+  - Each run records its actual `font_cache_scope`
+    (`process-global` in the OFF build, `per-thread` when the thread-local
+    selector is active, including variant C).
+  - Raw per-thread evidence stays in
+    `font_cache_used_after_bytes` / `font_cache_count_used_after` plus the
+    `*_largest_thread_*` maxima.
+  - The only cross-scope comparable aggregates are
+    `font_cache_used_after_total_bytes` and `font_cache_count_used_total`: they
+    are the process-global cache value under `process-global` scope and the sum
+    of the disjoint per-thread caches under `per-thread` scope.
+  - **Never sum `font_cache_used_after_bytes` across threads for comparison**:
+    under `process-global` scope every entry repeats the same shared cache, so
+    the sum would be the thread count times the real value. Raw per-thread
+    arrays may only be compared inside one scope (and only the totals across
+    A/B/C).
 - **Process memory**: RSS/footprint deltas per run from platform APIs under
   `#ifdef` (macOS `task_info`/`TASK_VM_INFO`; Linux `/proc/self/statm`; Windows
   `GetProcessMemoryInfo`). T051's operator-new interception is deliberately not
   used: Skia strike caches allocate through `malloc`, which operator new cannot
   observe.
-- **Result schema**: `t440-strikecache-v1`, written with `--json <path>`.
-  Provenance fields: NativeUI commit SHA, variant, runtime selector default and
-  effective values, Skia milestone, compiler/build/OS/architecture metadata.
-  The frozen T051 schema/workload ids are not reused or altered.
+- **Result schema**: `t440-strikecache-v2`, written with `--json <path>`.
+  Provenance fields: NativeUI commit SHA, `skia_archive_sha256` (see below),
+  variant, runtime selector default and effective values, Skia milestone,
+  compiler/build/OS/architecture metadata. The frozen T051 schema/workload ids
+  are not reused or altered.
 
 ### Isolation, staleness and lifecycle checks
 
 - **`multi_instance_lifecycle`**: two independently owned
   `UI` + `HeadlessRenderer` instances are created, rendered, pixel-checksummed
-  and destroyed in alternating orders for 50 cycles. The surviving instance must
-  still render a checksum identical to the single-instance control.
-- **`cache_staleness_after_destruction`**: after every renderer has been
-  destroyed, the font cache is purged on the rendering thread and a fresh
-  instance re-renders identical content. The checksum must equal the cold
-  control checksum and the purge must not grow the cache.
+  and destroyed in alternating orders for 50 cycles. The two simultaneously
+  alive instances render **different** content (11 px vs 17 px text), so a
+  cache-contamination failure that returned the other instance's
+  content-correct strikes would be detected. The surviving instance must still
+  render a checksum identical to its own single-instance content control, and
+  the two content controls must differ (otherwise the check fails as vacuous).
+- **`cache_staleness_after_destruction`**: cold single-instance controls are
+  rendered for both contents, then every renderer is destroyed, the font cache
+  is purged on the rendering thread, and a fresh instance re-renders the
+  **alternate** content. The re-render must equal the alternate cold control
+  (identical fixed-content reuse cannot satisfy the check), the two controls
+  must differ, and the purge must strictly reduce a non-empty cache
+  (`before_purge > 0` and `after_purge == 0` or `after_purge < before_purge`).
+  A no-op purge on an empty cache fails the check.
 
 ## Provenance requirements
 
@@ -113,6 +135,11 @@ same `NativeUI::Core`/Skia as the frozen T051 benchmarks) implements:
   (`SHA256=bbf23943d044a70b07bab3f935dc8bf725fac8f77593f2bd3f9c77cdb16bb640`
   as recorded in `cmake/Dependencies.cmake`). A variant B archive must be built
   at the same skia-builder commit/milestone and its SHA256 recorded before use.
+- Decision-grade runs must pass `--skia-archive-sha256 <64 hex chars>` so the
+  result document self-identifies the consumed archive. The probe normalizes the
+  value to lowercase, records it in `skia_archive_sha256`, and records an empty
+  string when the argument is omitted; runs without it are smoke/exploratory
+  evidence only.
 - Machine-readable probe JSON results stay **outside** the repository. Only the
   probe, its contracts, and this report are committed. Result files may be
   attached to the issue/PR as evidence, without local absolute paths.
@@ -141,9 +168,12 @@ the following hold:
    `throughput_B(K) / throughput_A(K) - 1 >= 0.25` for at least one
    K in {4, 8}, with no single-thread median regression
    `median_B(K=1) / median_A(K=1) - 1 > 0.05` on either text workload.
-3. **Memory bounded**: every rendering thread's `font_cache_used_after_bytes`
-   is within the recorded `font_cache_limit_bytes` (2 MiB default) and the
-   maximum utilization/slack is reported. Process RSS/footprint deltas are
+3. **Memory bounded**: every rendering thread's raw
+   `font_cache_used_after_bytes` entry is within the recorded
+   `font_cache_limit_bytes` (2 MiB default) and the largest single-thread
+   utilization/slack is reported via `font_cache_used_after_largest_thread_bytes`.
+   Cross-variant memory comparisons use only the scope-aware
+   `font_cache_used_after_total_bytes`. Process RSS/footprint deltas are
    reported as supporting evidence.
 4. **Isolation/staleness clean**: `multi_instance_lifecycle` and
    `cache_staleness_after_destruction` both pass.
