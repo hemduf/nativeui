@@ -133,4 +133,68 @@ half4 main(float2 p) {
 }
 )";
 
+// Frozen T089 Perlin kernel: hash & 7 selects one of eight gradients (S is the
+// mathematical 1/sqrt(2)), T088 quintic fade interpolates corner dot products
+// and the public scalar is clamp(0.5 + raw / (2*sqrt(2)), 0, 1). ES2-safe: the
+// gradient index is selected with if/else, never an array or integer type.
+inline constexpr std::string_view kPerlinNoiseKernelSkSL = R"(
+uniform float feature_size;
+uniform float4 seed_bytes;
+layout(color) uniform float4 low_color;
+layout(color) uniform float4 high_color;
+float fade5(float t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+float2 gradient_of(float4 h) {
+    float gi = mod(h.x, 8.0);
+    if (gi < 0.5) return float2(1.0, 0.0);
+    if (gi < 1.5) return float2(-1.0, 0.0);
+    if (gi < 2.5) return float2(0.0, 1.0);
+    if (gi < 3.5) return float2(0.0, -1.0);
+    if (gi < 4.5) return float2(0.707106781186547524400844362104849,
+                               0.707106781186547524400844362104849);
+    if (gi < 5.5) return float2(-0.707106781186547524400844362104849,
+                                0.707106781186547524400844362104849);
+    if (gi < 6.5) return float2(0.707106781186547524400844362104849,
+                                -0.707106781186547524400844362104849);
+    return float2(-0.707106781186547524400844362104849,
+                  -0.707106781186547524400844362104849);
+}
+float perlin_noise(float2 p) {
+    float x = p.x / feature_size;
+    float y = p.y / feature_size;
+    if (!(x >= -2147483648.0 && x < 2147483648.0 &&
+          y >= -2147483648.0 && y < 2147483648.0)) return 0.5;
+    float ix = floor(x);
+    float iy = floor(y);
+    float fx = x - ix;
+    float fy = y - iy;
+    float4 xb = bytes_of_int(ix);
+    float4 yb = bytes_of_int(iy);
+    float4 xb1 = add_one(xb);
+    float4 yb1 = add_one(yb);
+    float d00 = dot(gradient_of(hash2(seed_bytes, xb, yb)), float2(fx, fy));
+    float d10 = dot(gradient_of(hash2(seed_bytes, xb1, yb)),
+                    float2(fx - 1.0, fy));
+    float d01 = dot(gradient_of(hash2(seed_bytes, xb, yb1)),
+                    float2(fx, fy - 1.0));
+    float d11 = dot(gradient_of(hash2(seed_bytes, xb1, yb1)),
+                    float2(fx - 1.0, fy - 1.0));
+    float ux = fade5(fx);
+    float uy = fade5(fy);
+    float r0 = d00 + (d10 - d00) * ux;
+    float r1 = d01 + (d11 - d01) * ux;
+    float raw = r0 + (r1 - r0) * uy;
+    return clamp(0.5 + raw / 2.8284271247461900976033774484194, 0.0, 1.0);
+}
+)";
+
+inline constexpr std::string_view kPerlinNoiseMainSkSL = R"(
+half4 main(float2 p) {
+    float v = perlin_noise(p);
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
 } // namespace ui::detail

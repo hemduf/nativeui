@@ -237,6 +237,8 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_shader_tests ${PROJECT_SOURCE_DIR}/tests/shader_tests.cpp)
   nativeui_add_core_test(nativeui_t088_noise_tests ${PROJECT_SOURCE_DIR}/tests/t088_noise_tests.cpp)
   target_include_directories(nativeui_t088_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_t089_perlin_noise_tests ${PROJECT_SOURCE_DIR}/tests/t089_perlin_noise_tests.cpp)
+  target_include_directories(nativeui_t089_perlin_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
 
   # Fault controls remain in this isolated executable, never NativeUI::Core.
   add_executable(nativeui_t088_noise_fault_tests
@@ -256,6 +258,25 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_enable_sanitizers(nativeui_t088_noise_fault_tests)
   add_test(NAME nativeui_t088_noise_fault_tests COMMAND nativeui_t088_noise_fault_tests)
   set_tests_properties(nativeui_t088_noise_fault_tests PROPERTIES LABELS "unit")
+
+  # Fault controls remain in this isolated executable, never NativeUI::Core.
+  add_executable(nativeui_t089_perlin_noise_fault_tests
+    ${PROJECT_SOURCE_DIR}/tests/t089_perlin_noise_fault_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+  )
+  target_include_directories(nativeui_t089_perlin_noise_fault_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_t089_perlin_noise_fault_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_t089_perlin_noise_fault_tests PRIVATE NATIVEUI_ENABLE_TEST_SEAMS=1)
+  target_link_libraries(nativeui_t089_perlin_noise_fault_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_t089_perlin_noise_fault_tests)
+  nativeui_enable_sanitizers(nativeui_t089_perlin_noise_fault_tests)
+  add_test(NAME nativeui_t089_perlin_noise_fault_tests COMMAND nativeui_t089_perlin_noise_fault_tests)
+  set_tests_properties(nativeui_t089_perlin_noise_fault_tests PROPERTIES LABELS "unit")
   nativeui_add_core_test(nativeui_t081_shader_brush_tests ${PROJECT_SOURCE_DIR}/tests/t081_shader_brush_tests.cpp)
   target_include_directories(nativeui_t081_shader_brush_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -369,6 +390,16 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_t088_noise_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_t088_noise_gpu_reference_tests)
 
+    add_executable(nativeui_t089_perlin_noise_gpu_reference_tests
+      ${PROJECT_SOURCE_DIR}/tests/t089_perlin_noise_gpu_reference_tests.cpp)
+    target_include_directories(nativeui_t089_perlin_noise_gpu_reference_tests PRIVATE ${PROJECT_SOURCE_DIR})
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_t089_perlin_noise_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.t089-perlin-noise-gpu-reference
+    )
+    nativeui_enable_project_warnings(nativeui_t089_perlin_noise_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_t089_perlin_noise_gpu_reference_tests)
+
     add_executable(nativeui_t095_scene_gpu_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_gpu_tests.cpp)
     target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
       "${PROJECT_SOURCE_DIR}"
@@ -434,13 +465,17 @@ if(NATIVEUI_BUILD_TESTS)
         COMMAND nativeui_image_texture_gpu_reference_tests)
       add_test(NAME nativeui_t088_noise_gpu_reference_tests
         COMMAND nativeui_t088_noise_gpu_reference_tests)
+      add_test(NAME nativeui_t089_perlin_noise_gpu_reference_tests
+        COMMAND nativeui_t089_perlin_noise_gpu_reference_tests)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
         TIMEOUT 20
       )
       set_tests_properties(nativeui_image_texture_gpu_reference_tests
-        nativeui_t088_noise_gpu_reference_tests nativeui_t095_scene_gpu_tests PROPERTIES
+        nativeui_t088_noise_gpu_reference_tests
+        nativeui_t089_perlin_noise_gpu_reference_tests
+        nativeui_t095_scene_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
         TIMEOUT 20
       )
