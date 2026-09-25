@@ -106,12 +106,16 @@ Every new ticket must contain, in this order:
 4. `Status` — `Ready`, `Doing` or `Blocked`, using section 3.1 semantics;
 5. `Dependencies` — explicit ticket dependencies only, or `None`;
 6. `Objective` — the observable result, not implementation detail;
-7. `Scope` — included work, relevant architectural constraints, failure/recovery behavior and explicit exclusions where useful;
-8. `Acceptance criteria` — observable/testable completion criteria, including relevant failure-path recovery semantics;
-9. `Required tests` — targeted tests plus every applicable deterministic fault-injection, full-suite, feature-example, platform, sanitizer, headless or golden validation;
-10. `Implementation / scheduling note` — technical direction, failure/transaction boundaries, blocker or dependency/parallelization rationale when useful;
-11. `Completion protocol` — local validation, review and issue metadata checklist;
-12. `Mandatory code review record` — may start as pending, but must contain the complete applicable `CODE_REVIEW.md` record before closing.
+7. `Architectural context` — affected subsystem boundaries, authoritative design/docs and the existing state the change composes with;
+8. `Invariants` — behavior/ownership/threading/failure rules that MUST remain true;
+9. `Scope` — included work and bounded implementation surface;
+10. `Out of scope` — explicit neighboring work the implementer must not absorb;
+11. `Acceptance criteria` — observable/testable completion criteria, including relevant failure-path recovery semantics;
+12. `Required tests` — targeted tests plus every applicable deterministic fault-injection, full-suite, feature-example, platform, sanitizer, headless or golden validation;
+13. `Implementation / scheduling note` — technical direction, failure/transaction boundaries, blocker or dependency/parallelization rationale when useful;
+14. `Planning gate` — planner verdict, dependency verification, open questions and architecture decisions; `Ready`/`Doing` requires `Planner verdict: READY` and `Open questions: None`;
+15. `Completion protocol` — local validation, independent review and issue metadata checklist;
+16. `Mandatory code review record` — may start as pending, but must contain the complete applicable `CODE_REVIEW.md` record before closing.
 
 The title should use `TNNN — Short imperative title` for numbered roadmap work. Use a precise category prefix only for deliberately unnumbered incident/regression tickets, while still preserving the same body formalism.
 
@@ -124,6 +128,34 @@ When creating a ticket programmatically:
 - do not place personal information in tests/examples/code/generated metadata or ticket fixtures.
 
 If the canonical issue form changes, update this section in the same change so `AGENTS.md` and `.github/ISSUE_TEMPLATE/work-item.yml` never define different ticket contracts.
+
+### 3.3 Mandatory planning gate before implementation
+
+For every non-trivial ticket, planning and implementation are separate responsibilities even when the same human initiates both.
+
+A ticket may be `Ready` or `Doing` only when its `Planning gate` says all of the following:
+
+- `Planner verdict: READY`;
+- every explicit dependency has been checked against current GitHub state;
+- `Open questions: None`;
+- `Architecture decisions required: None`, or every required decision is already frozen in the ticket/authoritative design document;
+- affected subsystem boundaries and invariants are explicit enough that an implementer does not need to invent architecture;
+- acceptance criteria and required evidence are concrete enough to determine success/failure;
+- neighboring work is explicitly out of scope.
+
+If any requirement, architecture decision, dependency state or code reality contradicts the ticket, the implementer must stop that scope and report `NEEDS_DECISION`. It must not silently choose a product/architecture answer, broaden the ticket, weaken a test, or reinterpret an invariant to keep coding.
+
+Execution contract:
+
+- one implementation ticket = one independently reviewable branch/worktree = one PR;
+- split the ticket before coding when the bounded change cannot be reviewed coherently as one PR;
+- the implementation agent receives the ticket plus current repository/design context and may choose implementation details only inside the frozen contract;
+- local/CI evidence is collected before final review;
+- final review is performed independently from the implementation reasoning, against the current head, ticket, `DESIGN.md`, `AGENTS.md`, `CODE_REVIEW.md` and recorded evidence;
+- zero unresolved Blocking/Important findings is required before the human merge gate.
+
+Research tickets are intentionally different: their deliverable is evidence plus a recorded decision (`adopt`, `reject`, or `needs more evidence`). A research ticket must not silently turn an experiment into a production integration. If the result is positive, create/specify a follow-up implementation ticket unless the production change was already completely specified and explicitly in scope before the research began.
+
 
 ## 4. Development workflow — local TDD, coherent batches, no micro-commit churn
 

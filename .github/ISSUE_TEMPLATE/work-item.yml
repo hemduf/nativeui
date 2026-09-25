@@ -52,10 +52,34 @@ body:
       required: true
 
   - type: textarea
+    id: architectural_context
+    attributes:
+      label: Architectural context
+      description: Affected subsystem boundaries, authoritative design/docs, and existing state this work composes with.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants
+      description: MUST/MUST NOT behavior, ownership, threading, transaction, failure or isolation rules that cannot be silently changed.
+    validations:
+      required: true
+
+  - type: textarea
     id: scope
     attributes:
       label: Scope
       description: Included work, constraints and exclusions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Explicit neighboring work this ticket must not absorb.
     validations:
       required: true
 
@@ -80,6 +104,20 @@ body:
     attributes:
       label: Implementation / scheduling note
       description: Technical direction or blocker, when useful.
+
+  - type: textarea
+    id: planning_gate
+    attributes:
+      label: Planning gate
+      description: Before Status is Ready/Doing, the planner must resolve dependencies, architecture decisions and open questions.
+      value: |
+        - **Planner verdict:** NEEDS_PLANNING
+        - **Dependency check:** NOT_VERIFIED
+        - **Open questions:** list unresolved questions, or None
+        - **Architecture decisions required:** list unresolved decisions, or None
+        - **Scope-change rule:** contradictions or missing decisions return NEEDS_DECISION; the implementer must not resolve them silently.
+    validations:
+      required: true
 
   - type: textarea
     id: completion
