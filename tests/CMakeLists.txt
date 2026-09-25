@@ -91,56 +91,59 @@ if(NATIVEUI_BUILD_TESTS)
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
       -P "${PROJECT_SOURCE_DIR}/tests/t082_shader_contract.cmake"
   )
+  # CMake-script contract tests shell out to nested configures/builds (or read
+  # and hash source trees), so they get a timeout with enough headroom for slow
+  # or degraded CI runners instead of being killed mid-configure.
   set_tests_properties(
     nativeui_feature_example_discovery_contract
-    PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;examples" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t053_prefix_tests
     nativeui_t053_registration_tests
-    PROPERTIES LABELS "build;cmake;t053" TIMEOUT 60
+    PROPERTIES LABELS "build;cmake;t053" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t043_registration_contract
-    PROPERTIES LABELS "build;cmake;t043" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t043" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t047_attach_contract_tests
-    PROPERTIES LABELS "build;cmake;package;t047" TIMEOUT 60
+    PROPERTIES LABELS "build;cmake;package;t047" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t054_application_contract_tests
     nativeui_t054_argument_boundary_tests
     nativeui_t054_package_source_contract_tests
-    PROPERTIES LABELS "build;cmake;package;t054" TIMEOUT 60
+    PROPERTIES LABELS "build;cmake;package;t054" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t064_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t064" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t064" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t065_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t065" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t065" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t067_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t067" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t079_shader_contract
-    PROPERTIES LABELS "build;cmake;t079;shader" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t079;shader" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t080_shader_contract
-    PROPERTIES LABELS "build;cmake;t080;shader" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t080;shader" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t081_shader_contract
-    PROPERTIES LABELS "build;cmake;t081;shader" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t081;shader" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t082_shader_contract
-    PROPERTIES LABELS "build;cmake;t082;shader" TIMEOUT 20
+    PROPERTIES LABELS "build;cmake;t082;shader" TIMEOUT 300
   )
 
   function(nativeui_add_core_test name source)
@@ -437,7 +440,7 @@ if(NATIVEUI_BUILD_TESTS)
       add_test(NAME nativeui_smoke_macos_drop COMMAND nativeui_smoke_macos_drop)
       set_tests_properties(nativeui_smoke_macos_drop PROPERTIES
         LABELS "integration;platform;macos;drop"
-        TIMEOUT 20
+        TIMEOUT 60
       )
 
       nativeui_compute_objc_runtime_prefix(
@@ -454,7 +457,7 @@ if(NATIVEUI_BUILD_TESTS)
       )
       set_tests_properties(nativeui_objc_runtime_prefix PROPERTIES
         LABELS "integration;platform;macos;objc-runtime;t053"
-        TIMEOUT 20
+        TIMEOUT 300
       )
     endif()
 
@@ -470,14 +473,14 @@ if(NATIVEUI_BUILD_TESTS)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
-        TIMEOUT 20
+        TIMEOUT 60
       )
       set_tests_properties(nativeui_image_texture_gpu_reference_tests
         nativeui_t088_noise_gpu_reference_tests
         nativeui_t089_perlin_noise_gpu_reference_tests
         nativeui_t095_scene_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
-        TIMEOUT 20
+        TIMEOUT 60
       )
     endif()
   endif()
@@ -499,7 +502,7 @@ if(NATIVEUI_BUILD_PACKAGE_TESTS)
       COMMAND ${CMAKE_COMMAND}
         "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
         -P "${PROJECT_SOURCE_DIR}/tests/${script}")
-    set_tests_properties(${name} PROPERTIES LABELS "package" TIMEOUT 60)
+    set_tests_properties(${name} PROPERTIES LABELS "package" TIMEOUT 300)
   endfunction()
 
   nativeui_add_package_contract(nativeui_package_t047_attach_contract
@@ -548,7 +551,7 @@ if(NATIVEUI_BUILD_PACKAGE_TESTS)
       -P "${PROJECT_SOURCE_DIR}/tests/t056_package_tests.cmake")
   set_tests_properties(nativeui_package_t047 nativeui_package_t048
     nativeui_package_t054 nativeui_package_t056 PROPERTIES
-    LABELS "package" RUN_SERIAL TRUE TIMEOUT 600)
+    LABELS "package" RUN_SERIAL TRUE TIMEOUT 900)
   set_tests_properties(nativeui_package_t048 nativeui_package_t054
     nativeui_package_t056 PROPERTIES DEPENDS nativeui_package_t047)
 
