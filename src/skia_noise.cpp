@@ -63,14 +63,19 @@ namespace {
 } // namespace
 
 NoiseCreateResult NoiseSource::create(NoiseType type, NoiseOptions options) {
-    if (type != NoiseType::Value ||
+    if ((type != NoiseType::Value && type != NoiseType::Perlin) ||
         !std::isfinite(options.feature_size) || options.feature_size <= 0.0f) {
         return {NoiseSource{}, NoiseCreateError::InvalidArgument, {}};
     }
 
     std::string source{detail::kNoiseHashSkSL};
-    source.append(detail::kValueNoiseKernelSkSL);
-    source.append(detail::kValueNoiseMainSkSL);
+    if (type == NoiseType::Perlin) {
+        source.append(detail::kPerlinNoiseKernelSkSL);
+        source.append(detail::kPerlinNoiseMainSkSL);
+    } else {
+        source.append(detail::kValueNoiseKernelSkSL);
+        source.append(detail::kValueNoiseMainSkSL);
+    }
 #if defined(NATIVEUI_ENABLE_TEST_SEAMS)
     const auto failure = detail::creation_failure_point;
     detail::creation_failure_point = detail::NoiseCreationFailurePoint::None;
@@ -81,10 +86,13 @@ NoiseCreateResult NoiseSource::create(NoiseType type, NoiseOptions options) {
 
     auto compiled = ShaderProgram::compile(source);
     if (!compiled.ok()) {
+        const char* const fallback = type == NoiseType::Perlin
+            ? "Built-in perlin-noise shader compilation failed"
+            : "Built-in value-noise shader compilation failed";
         std::string diagnostic = compiled.diagnostics.empty()
-            ? "Built-in value-noise shader compilation failed"
+            ? fallback
             : compiled.diagnostics.front().message;
-        if (diagnostic.empty()) diagnostic = "Built-in value-noise shader compilation failed";
+        if (diagnostic.empty()) diagnostic = fallback;
         return {NoiseSource{}, NoiseCreateError::BackendCompileFailed,
                 std::move(diagnostic)};
     }

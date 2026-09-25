@@ -325,6 +325,16 @@ The ticket freezes the complete hash, high-24-bit lattice value and quintic
 interpolation contract for later noise families. Raster and GPU paths use the
 same SkSL and are compared with an independent double-precision CPU oracle.
 
+T089 adds a frozen Perlin gradient kernel on the same hash and fade:
+`hash & 7` selects one of eight fixed gradients (four axis-aligned, four
+diagonal with `1/sqrt(2)` components), the four corner dot products are
+interpolated with the quintic fade, and the public scalar is exactly
+`clamp(0.5 + raw / (2 * sqrt(2)), 0, 1)`. The gradient table and
+normalization are normative, so CPU, raster and GPU cannot choose
+incompatible kernels; the double-precision CPU oracle implements the exact
+contract and raster/GPU float paths are compared with it within the single
+documented tolerance pair.
+
 ---
 
 ## 7. Logical coordinates and high DPI
