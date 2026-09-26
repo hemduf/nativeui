@@ -438,6 +438,23 @@ int main() {
         }
     }
 
+    // Reply-lifetime guard using cache pressure: libdbus only caches messages
+    // up to 10 KiB, so this reply is finalized by the single unref. The
+    // returned address must already be an owned copy; reading it after the
+    // unref is a use-after-free that ASan/LSan expose here.
+    {
+        const std::string long_address = "unix:path=/" + std::string(12'000, 'a');
+        service.set_reply_address(long_address);
+        const auto discovery =
+            LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
+        if (!discovery_matches(discovery, LinuxDbusErrorCode::None, long_address) ||
+            discovery.address.size() != long_address.size() ||
+            !wait_for_exact_call_count(service, 10, 2s)) {
+            return EXIT_FAILURE;
+        }
+        service.set_reply_address(session_address);
+    }
+
     // Invalid timeouts are rejected before any bus round-trip.
     const std::chrono::milliseconds invalid_timeouts[] = {0ms, 301s, 300s + 1ms};
     for (const auto invalid : invalid_timeouts) {
@@ -447,7 +464,7 @@ int main() {
             return EXIT_FAILURE;
         }
     }
-    if (!wait_for_exact_call_count(service, 9, 100ms)) {
+    if (!wait_for_exact_call_count(service, 10, 100ms)) {
         return EXIT_FAILURE;
     }
 
@@ -456,13 +473,64 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // Bounded concurrency contract: a discovery call that borrows a running
+    // session transport holds that transport's lifecycle mutex for the bounded
+    // call. A concurrent stop() must wait for the call to finish instead of
+    // closing the borrowed connection underneath it, and no path may deadlock.
+    {
+        if (session_transport.start(session_address) != LinuxDbusErrorCode::None ||
+            !session_transport.running()) {
+            return EXIT_FAILURE;
+        }
+        service.set_mode(FakeReplyMode::NoReply);
+        const int calls_before = service.call_count();
+        std::chrono::steady_clock::duration stop_elapsed{};
+        LinuxDbusErrorCode restart_code = LinuxDbusErrorCode::InitializationFailed;
+        std::thread concurrent_lifecycle{[&] {
+            // Wait until the fake service observed the GetAddress call: the
+            // discovery call has then already taken the lifecycle lock and is
+            // blocked inside its bounded synchronous call.
+            const auto deadline = std::chrono::steady_clock::now() + 5s;
+            while (service.call_count() == calls_before &&
+                   std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(1ms);
+            }
+            const auto stop_begin = std::chrono::steady_clock::now();
+            session_transport.stop();
+            stop_elapsed = std::chrono::steady_clock::now() - stop_begin;
+            restart_code = session_transport.start(session_address);
+        }};
+
+        const auto discovery = LinuxDbusTransport::discover_accessibility_bus_address(
+            &session_transport, 1500ms);
+        concurrent_lifecycle.join();
+
+        if (!discovery_matches(discovery, LinuxDbusErrorCode::Timeout, {})) {
+            return EXIT_FAILURE;
+        }
+        // stop() must have waited for the in-flight bounded call rather than
+        // closing the connection under it (which would produce Disconnected or
+        // corrupt the borrowed connection instead of a clean Timeout).
+        if (stop_elapsed < 100ms) {
+            return EXIT_FAILURE;
+        }
+        if (restart_code != LinuxDbusErrorCode::None || !session_transport.running() ||
+            session_transport.unique_name().empty()) {
+            return EXIT_FAILURE;
+        }
+        if (!wait_for_exact_call_count(service, calls_before + 1, 2s)) {
+            return EXIT_FAILURE;
+        }
+        service.set_mode(FakeReplyMode::Address);
+    }
+
     // End to end: the discovered address starts a real transport and registers
     // a client, exactly like the explicit-address mode contract.
     {
         service.set_mode(FakeReplyMode::Address);
         const auto discovery =
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
-        if (!discovery.available() || !wait_for_exact_call_count(service, 10, 2s)) {
+        if (!discovery.available() || !wait_for_exact_call_count(service, 12, 2s)) {
             return EXIT_FAILURE;
         }
         LinuxDbusTransport accessibility;

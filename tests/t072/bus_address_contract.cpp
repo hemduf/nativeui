@@ -85,6 +85,13 @@ public:
         return ready_;
     }
 
+    /// Number of connections the listener actually accepted and closed. A
+    /// non-zero count proves the transport's connection-open stage succeeded
+    /// (the client connected) before dbus_bus_register() failed.
+    [[nodiscard]] int accepted_count() const noexcept {
+        return accepted_.load(std::memory_order_acquire);
+    }
+
     [[nodiscard]] std::string address() const {
         return "unix:path=" + path_;
     }
@@ -96,6 +103,7 @@ private:
             if (accepted < 0) {
                 return;
             }
+            accepted_.fetch_add(1, std::memory_order_acq_rel);
             (void)::close(accepted);
         }
     }
@@ -126,6 +134,7 @@ private:
     int descriptor_{-1};
     std::thread worker_;
     std::atomic<bool> stop_{false};
+    std::atomic<int> accepted_{0};
     bool ready_{};
 };
 
@@ -250,6 +259,12 @@ int main() {
                 transport.pending_request_count() != 0 ||
                 transport.subscription_count() != 0 ||
                 transport.object_path_count() != 0 || !transport.unique_name().empty()) {
+                return EXIT_FAILURE;
+            }
+            // The listener accepted this attempt's connection, so the
+            // BusUnavailable result cannot come from the open stage: the client
+            // connected and dbus_bus_register() failed on the closed peer.
+            if (listener.accepted_count() != attempt + 1) {
                 return EXIT_FAILURE;
             }
             transport.stop(); // idempotent after the partial start

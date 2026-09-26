@@ -321,7 +321,9 @@ foreach(_public_header IN LISTS _public_headers)
       "LinuxDbusClientOperations"
       "LinuxDbusClientId"
       "LinuxDbusRequestId"
-      "LinuxDbusValue")
+      "LinuxDbusValue"
+      "LinuxDbusBusAddressDiscovery"
+      "linux_dbus_valid_bus_address")
     string(FIND "${_public_text}" "${_forbidden}" _transport_leak)
     if(NOT _transport_leak EQUAL -1)
       message(FATAL_ERROR "T072 public API leak: ${_public_header} exposes ${_forbidden}")

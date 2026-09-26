@@ -1,5 +1,6 @@
 #include "detail/linux_dbus.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <string>
 
@@ -20,6 +21,7 @@ namespace {
 } // namespace
 
 int main() {
+    using namespace std::chrono_literals;
     using namespace ui::detail;
 
     const char* env_address = environment_bus_address();
@@ -30,6 +32,10 @@ int main() {
     if (!linux_dbus_valid_bus_address(address)) {
         return EXIT_FAILURE;
     }
+
+    // Mirrors lifecycle_contract.cpp's bounded stop-time assertion: every
+    // start/stop pair below must complete without waiting on idle timeouts.
+    const auto begin = std::chrono::steady_clock::now();
 
     // Mirrors lifecycle_contract.cpp for the explicit-address mode: start,
     // idempotent double start, stop, restart, stop-then-switch-mode and two
@@ -110,6 +116,10 @@ int main() {
             return EXIT_FAILURE;
         }
         second.stop();
+    }
+
+    if (std::chrono::steady_clock::now() - begin >= 2s) {
+        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;

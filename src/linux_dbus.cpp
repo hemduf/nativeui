@@ -31,6 +31,69 @@ std::once_flag g_dbus_threads_once;
     return text.find('\0') != std::string_view::npos;
 }
 
+/// Scoped release for one owned libdbus message. libdbus has no C++ RAII, so
+/// the single unref must happen on every return/throw path, and the message
+/// must stay referenced while pointers returned by dbus_message_get_args() are
+/// still read (those point into the message).
+class DbusMessageGuard final {
+public:
+    explicit DbusMessageGuard(DBusMessage* message = nullptr) noexcept : message_{message} {}
+    ~DbusMessageGuard() {
+        reset();
+    }
+
+    DbusMessageGuard(const DbusMessageGuard&) = delete;
+    DbusMessageGuard& operator=(const DbusMessageGuard&) = delete;
+    DbusMessageGuard(DbusMessageGuard&&) = delete;
+    DbusMessageGuard& operator=(DbusMessageGuard&&) = delete;
+
+    [[nodiscard]] DBusMessage* get() const noexcept {
+        return message_;
+    }
+
+    void reset(DBusMessage* message = nullptr) noexcept {
+        if (message_ != nullptr) {
+            dbus_message_unref(message_);
+        }
+        message_ = message;
+    }
+
+private:
+    DBusMessage* message_{};
+};
+
+/// Scoped close+unref for one private libdbus connection. Private connections
+/// must be closed before the final unref, exactly once and on every
+/// return/throw path.
+class DbusPrivateConnectionGuard final {
+public:
+    explicit DbusPrivateConnectionGuard(DBusConnection* connection = nullptr) noexcept
+        : connection_{connection} {}
+    ~DbusPrivateConnectionGuard() {
+        reset();
+    }
+
+    DbusPrivateConnectionGuard(const DbusPrivateConnectionGuard&) = delete;
+    DbusPrivateConnectionGuard& operator=(const DbusPrivateConnectionGuard&) = delete;
+    DbusPrivateConnectionGuard(DbusPrivateConnectionGuard&&) = delete;
+    DbusPrivateConnectionGuard& operator=(DbusPrivateConnectionGuard&&) = delete;
+
+    [[nodiscard]] DBusConnection* get() const noexcept {
+        return connection_;
+    }
+
+    void reset(DBusConnection* connection = nullptr) noexcept {
+        if (connection_ != nullptr) {
+            dbus_connection_close(connection_);
+            dbus_connection_unref(connection_);
+        }
+        connection_ = connection;
+    }
+
+private:
+    DBusConnection* connection_{};
+};
+
 [[nodiscard]] bool valid_method_call(const LinuxDbusMethodCall& call) noexcept {
     if (call.destination.empty() || call.path.empty() || call.interface.empty() ||
         call.member.empty() || contains_nul(call.destination) || contains_nul(call.path) ||
@@ -667,19 +730,19 @@ struct LinuxDbusTransport::Impl final {
             return {LinuxDbusErrorCode::BusUnavailable, {}};
         }
 
-        DBusMessage* message = dbus_message_new_method_call(
-            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress");
-        if (message == nullptr) {
+        DbusMessageGuard message{dbus_message_new_method_call(
+            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress")};
+        if (message.get() == nullptr) {
             return {LinuxDbusErrorCode::InitializationFailed, {}};
         }
 
         DBusError error;
         dbus_error_init(&error);
-        DBusMessage* reply = dbus_connection_send_with_reply_and_block(
-            session_connection, message, static_cast<int>(timeout.count()), &error);
-        dbus_message_unref(message);
+        DbusMessageGuard reply{dbus_connection_send_with_reply_and_block(
+            session_connection, message.get(), static_cast<int>(timeout.count()), &error)};
+        message.reset();
 
-        if (reply == nullptr) {
+        if (reply.get() == nullptr) {
             LinuxDbusErrorCode code = LinuxDbusErrorCode::LocalProtocolError;
             if (dbus_error_is_set(&error)) {
                 if (std::strcmp(error.name, DBUS_ERROR_NO_REPLY) == 0) {
@@ -700,21 +763,22 @@ struct LinuxDbusTransport::Impl final {
         }
         dbus_error_free(&error);
 
-        if (dbus_message_get_type(reply) != DBUS_MESSAGE_TYPE_METHOD_RETURN) {
-            dbus_message_unref(reply);
+        if (dbus_message_get_type(reply.get()) != DBUS_MESSAGE_TYPE_METHOD_RETURN) {
             return {LinuxDbusErrorCode::LocalProtocolError, {}};
         }
 
         const char* address = nullptr;
         dbus_error_init(&error);
         const dbus_bool_t decoded = dbus_message_get_args(
-            reply, &error, DBUS_TYPE_STRING, &address, DBUS_TYPE_INVALID);
+            reply.get(), &error, DBUS_TYPE_STRING, &address, DBUS_TYPE_INVALID);
         dbus_error_free(&error);
-        dbus_message_unref(reply);
         if (decoded == FALSE || address == nullptr || *address == '\0') {
             return {LinuxDbusErrorCode::LocalProtocolError, {}};
         }
 
+        // `address` points into the reply message: copy it while the reply is
+        // still referenced. The guard releases the message after the return
+        // value has been constructed on every path.
         try {
             std::string discovered{address};
             if (discovered.empty()) {
@@ -1448,20 +1512,17 @@ LinuxDbusBusAddressDiscovery LinuxDbusTransport::discover_accessibility_bus_addr
 
     DBusError error;
     dbus_error_init(&error);
-    DBusConnection* connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
+    DbusPrivateConnectionGuard temporary{
+        dbus_bus_get_private(DBUS_BUS_SESSION, &error)};
     dbus_error_free(&error);
-    if (connection == nullptr) {
+    if (temporary.get() == nullptr) {
         return {LinuxDbusErrorCode::BusUnavailable, {}};
     }
-    dbus_connection_set_exit_on_disconnect(connection, FALSE);
+    dbus_connection_set_exit_on_disconnect(temporary.get(), FALSE);
 
-    LinuxDbusBusAddressDiscovery discovery =
-        Impl::query_accessibility_bus_address(connection, timeout);
-
-    // The temporary connection is closed before returning on every path.
-    dbus_connection_close(connection);
-    dbus_connection_unref(connection);
-    return discovery;
+    // The guard closes and unrefs the temporary connection after the result has
+    // been constructed, on every return path including a future throw.
+    return Impl::query_accessibility_bus_address(temporary.get(), timeout);
 }
 
 void LinuxDbusTransport::stop() noexcept {
