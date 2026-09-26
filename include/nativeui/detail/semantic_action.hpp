@@ -5,6 +5,7 @@
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/semantics.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -55,6 +56,22 @@ public:
     [[nodiscard]] virtual bool perform_virtual_semantic_action(
         VirtualSemanticItemToken token,
         const SemanticActionRequest& request) = 0;
+
+    /// Executes one virtual `SemanticAction::Focus` for the current logical
+    /// item. `request_owner_focus` is supplied by the owning retained tree and
+    /// moves keyboard focus to the logical collection's exposed node; the
+    /// implementation must resolve/revalidate the token against current
+    /// immutable metadata, request normal T067 scroll/materialization, and
+    /// return false when the owner rejected focus. Token resolution must never
+    /// materialize a visual row. The default fails closed for handlers that do
+    /// not own a virtual focus path.
+    [[nodiscard]] virtual bool perform_virtual_semantic_focus(
+        VirtualSemanticItemToken token,
+        const std::function<bool()>& request_owner_focus) {
+        (void)token;
+        (void)request_owner_focus;
+        return false;
+    }
 };
 
 [[nodiscard]] inline bool semantic_action_allowed(

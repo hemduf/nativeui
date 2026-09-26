@@ -1,8 +1,10 @@
 #pragma once
 
 #include <nativeui/detail/dynamic_source.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/virtual_list_row.hpp>
+#include <nativeui/detail/virtual_list_semantic_action.hpp>
 #include <nativeui/detail/virtual_list_window.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/list_tabs_style.hpp>
@@ -204,6 +206,34 @@ public:
         if (!target) return false;
         const auto before = scroll_.offset();
         scroll_.set_offset(Point{before.x, *target});
+        return true;
+    }
+
+    /// Reveal and retain one logical item as the materialization exception row
+    /// through the normal T067 scroll/window path.
+    ///
+    /// Semantic `Focus` uses this after the owning tree accepted keyboard focus
+    /// for the composite ListView. It never mutates selection, never scans O(N)
+    /// keys, and leaves the shared immutable metadata generation untouched;
+    /// only the bounded materialization window and scroll transform change.
+    [[nodiscard]] bool focus_index(std::size_t index) {
+        if (!enabled_at(index)) return false;
+        const auto target = model_.scroll_offset_for_index(
+            index,
+            row_height_,
+            scroll_.viewport_size().h,
+            scroll_.offset().y,
+            VirtualListAlignment::Nearest);
+        if (!target) return false;
+
+        focused_index_ = index;
+        const auto before = scroll_.offset();
+        if (before.y != *target) {
+            // ScrollState notifies synchronously, refreshing the window with
+            // the focus exception row already published.
+            scroll_.set_offset(Point{before.x, *target});
+        }
+        refresh_window();
         return true;
     }
 
@@ -502,7 +532,10 @@ private:
 };
 
 template <class Key>
-class VirtualListViewComponent final : public Component, public ThemeBinding {
+class VirtualListViewComponent final : public Component,
+                                       public ThemeBinding,
+                                       public VirtualSemanticChildrenSource,
+                                       public VirtualSemanticActionHandler {
 public:
     VirtualListViewComponent(
         std::shared_ptr<VirtualListRetainedRuntime<Key>> runtime,
@@ -511,6 +544,42 @@ public:
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return list_view_semantic_info();
+    }
+
+    /// The full logical dataset is exposed through the same immutable T067
+    /// metadata pointer used by the read-only presentation path; ordinary
+    /// scroll/selection/focus generations never recopy it.
+    [[nodiscard]] VirtualSemanticChildren virtual_semantic_children(
+        Rect semantic_bounds) const override {
+        return runtime_->semantic_children(semantic_bounds);
+    }
+
+    [[nodiscard]] bool perform_virtual_semantic_action(
+        VirtualSemanticItemToken token,
+        const SemanticActionRequest& request) override {
+        // The logical action may invoke application selection/activation
+        // callbacks that synchronously unmount/destroy this component. Hold an
+        // independent runtime lease so the dispatch helper never dereferences a
+        // destroyed member after the callback begins.
+        auto runtime = runtime_;
+        return dispatch_virtual_list_semantic_action(*runtime, token, request);
+    }
+
+    [[nodiscard]] bool perform_virtual_semantic_focus(
+        VirtualSemanticItemToken token,
+        const std::function<bool()>& request_owner_focus) override {
+        // Same re-entrancy rule as above: retained focus callbacks may remove
+        // the whole ListView, so the runtime lease must outlive the callback.
+        auto runtime = runtime_;
+        return dispatch_virtual_list_semantic_action(
+            *runtime,
+            token,
+            SemanticActionRequest{SemanticAction::Focus, std::nullopt, std::nullopt},
+            request_owner_focus);
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;

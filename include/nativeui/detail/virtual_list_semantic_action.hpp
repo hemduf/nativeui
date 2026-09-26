@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <optional>
 
 namespace ui::detail {
@@ -47,7 +48,7 @@ namespace ui::detail {
     return !item.read_only || !semantic_action_mutates_value(action);
 }
 
-/// Execute logical-item Select/Activate actions for a retained T067 ListView.
+/// Execute one logical-item semantic action for a retained T067 ListView.
 ///
 /// The live-tree resolver has already rechecked effective container
 /// availability immediately before entering this helper. We still resolve the
@@ -57,23 +58,42 @@ namespace ui::detail {
 /// allocation-free and the runtime alone owns any scrolling/materialization;
 /// semantic lookup never calls the visual row factory.
 ///
-/// Focus needs the owning tree's focus manager as well as the logical row
-/// index, so it deliberately remains fail-closed here until that lifetime-safe
-/// owner seam is wired. Other actions likewise stay rejected rather than
-/// synthesizing visual-row input.
+/// `SemanticAction::Focus` needs the owning tree's focus manager as well as the
+/// logical row index, so it is dispatched through `request_owner_focus`. The
+/// owner callback must move retained keyboard focus to the composite ListView
+/// and report success; only then does the normal T067 scroll/materialization
+/// window reveal the logical item. Focus is non-mutating: selection is left
+/// untouched. Stale tokens, disabled/read-only items, unadvertised actions and a
+/// rejected owner focus request all fail closed without touching the visual
+/// window. The default overload without an owner fails Focus closed.
 template <class Runtime>
 [[nodiscard]] bool dispatch_virtual_list_semantic_action(
     Runtime& runtime,
     VirtualSemanticItemToken token,
-    const SemanticActionRequest& request) {
+    const SemanticActionRequest& request,
+    const std::function<bool()>& request_owner_focus) {
+    const auto children = runtime.semantic_children(Rect{});
+    const auto index = virtual_list_semantic_index_for_token(children, token);
+    if (!index) return false;
+
+    if (request.action == SemanticAction::Focus) {
+        if (!virtual_list_semantic_action_allowed(children, *index, request.action)) {
+            return false;
+        }
+
+        // Retained keyboard focus moves to the composite owner first. A denied
+        // owner leaves the visual window untouched; an accepted owner is
+        // followed by the ordinary T067 reveal so the offscreen logical item
+        // becomes the focused exception row without a second semantic lookup.
+        if (!request_owner_focus || !request_owner_focus()) return false;
+        return runtime.focus_index(*index);
+    }
+
     if (request.action != SemanticAction::Select &&
         request.action != SemanticAction::Activate) {
         return false;
     }
-
-    const auto children = runtime.semantic_children(Rect{});
-    const auto index = virtual_list_semantic_index_for_token(children, token);
-    if (!index || !virtual_list_semantic_action_allowed(children, *index, request.action)) {
+    if (!virtual_list_semantic_action_allowed(children, *index, request.action)) {
         return false;
     }
 
@@ -88,6 +108,15 @@ template <class Runtime>
     default:
         return false;
     }
+}
+
+template <class Runtime>
+[[nodiscard]] bool dispatch_virtual_list_semantic_action(
+    Runtime& runtime,
+    VirtualSemanticItemToken token,
+    const SemanticActionRequest& request) {
+    return dispatch_virtual_list_semantic_action(
+        runtime, token, request, std::function<bool()>{});
 }
 
 } // namespace ui::detail

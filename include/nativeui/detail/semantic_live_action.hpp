@@ -196,6 +196,19 @@ using SemanticFocusRequester = std::function<bool(SemanticId)>;
             return false;
         }
 
+        if (request.action == SemanticAction::Focus) {
+            const SemanticId container = static_cast<SemanticId>(node->id);
+            // The handler re-resolves the token against current immutable
+            // metadata, requests retained keyboard focus for the composite
+            // owner through this tree callback, and only then applies normal
+            // T067 scroll/materialization. A denied callback fails closed.
+            return handler->perform_virtual_semantic_focus(
+                token,
+                [&request_focus, container] {
+                    return request_focus && request_focus(container);
+                });
+        }
+
         // The handler may invoke application code that removes/destroys this
         // node. The token and request are values; do not inspect any live-tree
         // object after the call begins.
