@@ -195,9 +195,41 @@ require_text("${_tests_cmake}"
   "nativeui_t068_objc_runtime_prefix_probe"
   "Objective-C runtime prefix probe registration")
 
-# Deliberately no examples/features/t068_accessibility.cpp assertion here yet:
-# the dedicated feature example is a later T068 batch. When it lands, extend
-# this contract with the same discovery/registration checks used by
-# nativeui_t067_root_integration_contract.
+# The dedicated T068 feature example ships through the same automatic
+# discovery/registration path as every other feature ticket: the macOS
+# application bundle, the labelled CTest --self-test and the display-less
+# compile target used when platform/examples are disabled. The example itself
+# must stay on the normal public NativeUI API and therefore must not include
+# any nativeui/detail/ header; the virtual-collection self-test reads the
+# shared metadata only through the public VirtualListState/Semantics surface.
+file(READ "${SOURCE_DIR}/examples/features/CMakeLists.txt" _features_cmake)
+set(_feature_example_helper "${SOURCE_DIR}/cmake/NativeUIFeatureExamples.cmake")
+if(NOT EXISTS "${_feature_example_helper}")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing feature example discovery helper: ${_feature_example_helper}")
+endif()
+include("${_feature_example_helper}")
+nativeui_discover_feature_examples(_feature_examples "${SOURCE_DIR}")
+if(NOT "t068_accessibility" IN_LIST _feature_examples)
+  message(FATAL_ERROR
+    "T068 root integration contract: t068_accessibility is not discovered as a feature example")
+endif()
+set(_example "${SOURCE_DIR}/examples/features/t068_accessibility.cpp")
+if(NOT EXISTS "${_example}")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing dedicated feature example: ${_example}")
+endif()
+file(READ "${_example}" _example_source)
+string(FIND "${_example_source}" "nativeui/detail/" _detail_index)
+if(NOT _detail_index EQUAL -1)
+  message(FATAL_ERROR
+    "T068 feature example must use only the normal public NativeUI API")
+endif()
+require_text("${_features_cmake}" "nativeui_add_application(nativeui_example_"
+  "feature application creation")
+require_text("${_features_cmake}" "add_test(NAME nativeui_example_"
+  "feature example CTest registration")
+require_text("${_features_cmake}" "add_library(nativeui_feature_example_"
+  "display-less feature example compile target")
 
 message(STATUS "T068 root accessibility integration contract passed")
