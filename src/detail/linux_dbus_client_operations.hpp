@@ -50,6 +50,13 @@ public:
     LinuxDbusClientOperations& operator=(LinuxDbusClientOperations&&) = delete;
 
     [[nodiscard]] LinuxDbusErrorCode start();
+
+    /// Explicit-address start mode forwarded to the owned transport. The
+    /// typed-surface closing contract is identical: a stopped surface reports
+    /// `Shutdown`, an empty/invalid address leaves the surface untouched, and a
+    /// failed open/registration surfaces the transport's bounded error.
+    [[nodiscard]] LinuxDbusErrorCode start(std::string_view bus_address);
+
     void stop() noexcept;
 
     [[nodiscard]] bool running() const noexcept;

@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -174,6 +176,45 @@ bool linux_dbus_valid_object_path(std::string_view path) noexcept {
         element_has_character = true;
     }
     return element_has_character;
+}
+
+bool linux_dbus_valid_bus_address(std::string_view address) noexcept {
+    try {
+        if (address.empty() || contains_nul(address)) {
+            return false;
+        }
+
+        const std::string text{address};
+        DBusError error;
+        dbus_error_init(&error);
+        DBusAddressEntry** entries = nullptr;
+        int entry_count = 0;
+        const dbus_bool_t parsed =
+            dbus_parse_address(text.c_str(), &entries, &entry_count, &error);
+        dbus_error_free(&error);
+
+        if (parsed == FALSE || entries == nullptr || entry_count <= 0) {
+            if (entries != nullptr) {
+                dbus_address_entries_free(entries);
+            }
+            return false;
+        }
+
+        bool valid = true;
+        for (int i = 0; i < entry_count; ++i) {
+            const char* method = dbus_address_entry_get_method(entries[i]);
+            if (method == nullptr || *method == '\0') {
+                valid = false;
+                break;
+            }
+        }
+        dbus_address_entries_free(entries);
+        return valid;
+    } catch (...) {
+        // A pure syntax probe must never acquire or leak a connection/thread;
+        // an allocation failure is reported as an invalid address.
+        return false;
+    }
 }
 
 bool linux_dbus_library_probe() noexcept {
@@ -522,6 +563,168 @@ struct LinuxDbusTransport::Impl final {
 
     Impl()
         : calls(ledger) {}
+
+    /// Requires `lifecycle_mutex`. Returns the start result when the request is
+    /// already terminal for this call (Shutdown or an idempotent running start)
+    /// and `nullopt` when a fresh connection may be acquired.
+    [[nodiscard]] std::optional<LinuxDbusErrorCode> start_precheck_locked() const noexcept {
+        if (destroying || stopping) {
+            return LinuxDbusErrorCode::Shutdown;
+        }
+        if (running.load(std::memory_order_acquire)) {
+            return LinuxDbusErrorCode::None;
+        }
+        if (connection != nullptr || io_thread.joinable()) {
+            // A previous I/O loop has stopped but has not yet been finalized by
+            // stop(). Never overwrite its connection/thread state.
+            return LinuxDbusErrorCode::Shutdown;
+        }
+        return std::nullopt;
+    }
+
+    /// Common commit tail for both start modes. Requires `lifecycle_mutex`.
+    /// Acquires at most the passed connection plus one I/O thread; every failure
+    /// path closes/unrefs the connection and leaves the transport exactly as it
+    /// was before the call, so `stop()`/restart behave like a fresh transport.
+    [[nodiscard]] LinuxDbusErrorCode commit_started_connection_locked(
+        DBusConnection* new_connection) {
+        if (new_connection == nullptr) {
+            return LinuxDbusErrorCode::BusUnavailable;
+        }
+
+        const char* bus_unique_name = dbus_bus_get_unique_name(new_connection);
+        if (bus_unique_name == nullptr || *bus_unique_name == '\0') {
+            dbus_connection_close(new_connection);
+            dbus_connection_unref(new_connection);
+            return LinuxDbusErrorCode::LocalProtocolError;
+        }
+
+        // Copy before publishing the connection/thread so an allocation failure
+        // cannot leave a half-started transport behind.
+        std::string name_copy;
+        try {
+            name_copy = bus_unique_name;
+        } catch (...) {
+            dbus_connection_close(new_connection);
+            dbus_connection_unref(new_connection);
+            return LinuxDbusErrorCode::InitializationFailed;
+        }
+
+        connection = new_connection;
+        unique_name = std::move(name_copy);
+        stop_requested.store(false, std::memory_order_release);
+        running.store(true, std::memory_order_release);
+
+        try {
+            Impl* state = this;
+            io_thread = std::thread([state] {
+                while (!state->stop_requested.load(std::memory_order_acquire)) {
+                    const auto wake_generation =
+                        state->io_wake_generation.load(std::memory_order_acquire);
+                    const int wait_ms = state->io_wait_timeout_ms();
+                    {
+                        std::unique_lock control_lock{state->control_mutex};
+                        state->io_wakeup.wait_for(
+                            control_lock, std::chrono::milliseconds{wait_ms}, [&] {
+                                return state->stop_requested.load(std::memory_order_acquire) ||
+                                       state->io_wake_generation.load(std::memory_order_acquire) !=
+                                           wake_generation ||
+                                       !state->signal_setup_commands.empty();
+                            });
+                    }
+                    if (state->stop_requested.load(std::memory_order_acquire)) {
+                        break;
+                    }
+                    state->process_signal_setup_commands();
+                    state->expire_pending_calls();
+                    if (dbus_connection_read_write_dispatch(state->connection, 0) == FALSE) {
+                        break;
+                    }
+                    state->expire_pending_calls();
+                }
+                state->fail_signal_setup_commands();
+                state->running.store(false, std::memory_order_release);
+            });
+        } catch (...) {
+            running.store(false, std::memory_order_release);
+            connection = nullptr;
+            unique_name.clear();
+            dbus_connection_close(new_connection);
+            dbus_connection_unref(new_connection);
+            return LinuxDbusErrorCode::InitializationFailed;
+        }
+
+        return LinuxDbusErrorCode::None;
+    }
+
+    /// One bounded `org.a11y.Bus.GetAddress` call on an already open session
+    /// connection. No retry, no polling and no callback execution: the caller
+    /// owns the connection and the call is fully synchronous.
+    [[nodiscard]] static LinuxDbusBusAddressDiscovery query_accessibility_bus_address(
+        DBusConnection* session_connection,
+        std::chrono::milliseconds timeout) {
+        if (session_connection == nullptr) {
+            return {LinuxDbusErrorCode::BusUnavailable, {}};
+        }
+
+        DBusMessage* message = dbus_message_new_method_call(
+            "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress");
+        if (message == nullptr) {
+            return {LinuxDbusErrorCode::InitializationFailed, {}};
+        }
+
+        DBusError error;
+        dbus_error_init(&error);
+        DBusMessage* reply = dbus_connection_send_with_reply_and_block(
+            session_connection, message, static_cast<int>(timeout.count()), &error);
+        dbus_message_unref(message);
+
+        if (reply == nullptr) {
+            LinuxDbusErrorCode code = LinuxDbusErrorCode::LocalProtocolError;
+            if (dbus_error_is_set(&error)) {
+                if (std::strcmp(error.name, DBUS_ERROR_NO_REPLY) == 0) {
+                    code = LinuxDbusErrorCode::Timeout;
+                } else if (std::strcmp(error.name, DBUS_ERROR_DISCONNECTED) == 0) {
+                    code = LinuxDbusErrorCode::Disconnected;
+                } else if (std::strcmp(error.name, DBUS_ERROR_NO_MEMORY) == 0) {
+                    code = LinuxDbusErrorCode::InitializationFailed;
+                } else {
+                    // Remote GetAddress errors (for example ServiceUnknown when
+                    // no accessibility launcher is running) keep their own
+                    // bounded remote-error classification.
+                    code = LinuxDbusErrorCode::RemoteError;
+                }
+            }
+            dbus_error_free(&error);
+            return {code, {}};
+        }
+        dbus_error_free(&error);
+
+        if (dbus_message_get_type(reply) != DBUS_MESSAGE_TYPE_METHOD_RETURN) {
+            dbus_message_unref(reply);
+            return {LinuxDbusErrorCode::LocalProtocolError, {}};
+        }
+
+        const char* address = nullptr;
+        dbus_error_init(&error);
+        const dbus_bool_t decoded = dbus_message_get_args(
+            reply, &error, DBUS_TYPE_STRING, &address, DBUS_TYPE_INVALID);
+        dbus_error_free(&error);
+        dbus_message_unref(reply);
+        if (decoded == FALSE || address == nullptr || *address == '\0') {
+            return {LinuxDbusErrorCode::LocalProtocolError, {}};
+        }
+
+        try {
+            std::string discovered{address};
+            if (discovered.empty()) {
+                return {LinuxDbusErrorCode::LocalProtocolError, {}};
+            }
+            return {LinuxDbusErrorCode::None, std::move(discovered)};
+        } catch (...) {
+            return {LinuxDbusErrorCode::InitializationFailed, {}};
+        }
+    }
 
     [[nodiscard]] std::optional<NativePendingCall> take_pending(
         LinuxDbusClientId client,
@@ -1141,16 +1344,8 @@ LinuxDbusTransport::~LinuxDbusTransport() {
 
 LinuxDbusErrorCode LinuxDbusTransport::start() {
     std::lock_guard lock{impl_->lifecycle_mutex};
-    if (impl_->destroying || impl_->stopping) {
-        return LinuxDbusErrorCode::Shutdown;
-    }
-    if (impl_->running.load(std::memory_order_acquire)) {
-        return LinuxDbusErrorCode::None;
-    }
-    if (impl_->connection != nullptr || impl_->io_thread.joinable()) {
-        // A previous I/O loop has stopped but has not yet been finalized by
-        // stop(). Never overwrite its connection/thread state.
-        return LinuxDbusErrorCode::Shutdown;
+    if (const auto early = impl_->start_precheck_locked()) {
+        return *early;
     }
 
     if (!linux_dbus_initialize_threads()) {
@@ -1160,65 +1355,113 @@ LinuxDbusErrorCode LinuxDbusTransport::start() {
     DBusError error;
     dbus_error_init(&error);
     DBusConnection* connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
-    if (connection == nullptr) {
-        dbus_error_free(&error);
-        return LinuxDbusErrorCode::BusUnavailable;
-    }
     dbus_error_free(&error);
-
-    dbus_connection_set_exit_on_disconnect(connection, FALSE);
-    const char* unique_name = dbus_bus_get_unique_name(connection);
-    if (unique_name == nullptr || *unique_name == '\0') {
-        dbus_connection_close(connection);
-        dbus_connection_unref(connection);
-        return LinuxDbusErrorCode::LocalProtocolError;
+    if (connection != nullptr) {
+        // Match the frozen session-bus contract: a disconnect must not
+        // terminate the host process.
+        dbus_connection_set_exit_on_disconnect(connection, FALSE);
     }
 
-    impl_->connection = connection;
-    impl_->unique_name = unique_name;
-    impl_->stop_requested.store(false, std::memory_order_release);
-    impl_->running.store(true, std::memory_order_release);
+    return impl_->commit_started_connection_locked(connection);
+}
 
+LinuxDbusErrorCode LinuxDbusTransport::start(std::string_view bus_address) {
+    // Validation precedes every connection/thread/fd acquisition. The address
+    // is only borrowed for the lifetime of this call and is never retained.
+    if (!linux_dbus_valid_bus_address(bus_address)) {
+        return LinuxDbusErrorCode::InvalidArgument;
+    }
+
+    std::string address;
     try {
-        Impl* state = impl_.get();
-        impl_->io_thread = std::thread([state] {
-            while (!state->stop_requested.load(std::memory_order_acquire)) {
-                const auto wake_generation =
-                    state->io_wake_generation.load(std::memory_order_acquire);
-                const int wait_ms = state->io_wait_timeout_ms();
-                {
-                    std::unique_lock control_lock{state->control_mutex};
-                    state->io_wakeup.wait_for(
-                        control_lock, std::chrono::milliseconds{wait_ms}, [&] {
-                            return state->stop_requested.load(std::memory_order_acquire) ||
-                                   state->io_wake_generation.load(std::memory_order_acquire) !=
-                                       wake_generation ||
-                                   !state->signal_setup_commands.empty();
-                        });
-                }
-                if (state->stop_requested.load(std::memory_order_acquire)) {
-                    break;
-                }
-                state->process_signal_setup_commands();
-                state->expire_pending_calls();
-                if (dbus_connection_read_write_dispatch(state->connection, 0) == FALSE) {
-                    break;
-                }
-                state->expire_pending_calls();
-            }
-            state->fail_signal_setup_commands();
-            state->running.store(false, std::memory_order_release);
-        });
+        address.assign(bus_address);
     } catch (...) {
-        impl_->running.store(false, std::memory_order_release);
-        impl_->connection = nullptr;
-        impl_->unique_name.clear();
-        dbus_connection_close(connection);
-        dbus_connection_unref(connection);
+        // Nothing has been acquired yet; report a bounded initialization error
+        // instead of leaking an exception out of the start path.
         return LinuxDbusErrorCode::InitializationFailed;
     }
 
-    return LinuxDbusErrorCode::None;
+    std::lock_guard lock{impl_->lifecycle_mutex};
+    if (const auto early = impl_->start_precheck_locked()) {
+        return *early;
+    }
+
+    if (!linux_dbus_initialize_threads()) {
+        return LinuxDbusErrorCode::InitializationFailed;
+    }
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusConnection* connection = dbus_connection_open_private(address.c_str(), &error);
+    dbus_error_free(&error);
+    if (connection == nullptr) {
+        return LinuxDbusErrorCode::BusUnavailable;
+    }
+
+    dbus_connection_set_exit_on_disconnect(connection, FALSE);
+    dbus_error_init(&error);
+    const dbus_bool_t registered = dbus_bus_register(connection, &error);
+    dbus_error_free(&error);
+    if (registered == FALSE) {
+        dbus_connection_close(connection);
+        dbus_connection_unref(connection);
+        return LinuxDbusErrorCode::BusUnavailable;
+    }
+
+    return impl_->commit_started_connection_locked(connection);
+}
+
+LinuxDbusBusAddressDiscovery LinuxDbusTransport::discover_accessibility_bus_address(
+    LinuxDbusTransport* session_transport,
+    std::chrono::milliseconds timeout) {
+    if (!linux_dbus_valid_timeout(timeout)) {
+        return {LinuxDbusErrorCode::InvalidArgument, {}};
+    }
+
+    if (const char* override_address = std::getenv("AT_SPI_BUS_ADDRESS");
+        override_address != nullptr && *override_address != '\0') {
+        try {
+            return {LinuxDbusErrorCode::None, std::string{override_address}};
+        } catch (...) {
+            return {LinuxDbusErrorCode::InitializationFailed, {}};
+        }
+    }
+
+    if (!linux_dbus_initialize_threads()) {
+        return {LinuxDbusErrorCode::InitializationFailed, {}};
+    }
+
+    // Prefer the caller's live session transport so an embedded/standalone
+    // application does not open a second session connection. A supplied but
+    // stopped transport is not "available" and falls through to the one-shot
+    // temporary connection below. The lifecycle lock is held for the bounded
+    // call so a concurrent stop() cannot close the connection underneath it.
+    if (session_transport != nullptr) {
+        std::lock_guard lock{session_transport->impl_->lifecycle_mutex};
+        Impl& session = *session_transport->impl_;
+        if (session.connection != nullptr && !session.destroying && !session.stopping &&
+            session.running.load(std::memory_order_acquire) &&
+            !session.stop_requested.load(std::memory_order_acquire)) {
+            return Impl::query_accessibility_bus_address(session.connection, timeout);
+        }
+    }
+
+    DBusError error;
+    dbus_error_init(&error);
+    DBusConnection* connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
+    dbus_error_free(&error);
+    if (connection == nullptr) {
+        return {LinuxDbusErrorCode::BusUnavailable, {}};
+    }
+    dbus_connection_set_exit_on_disconnect(connection, FALSE);
+
+    LinuxDbusBusAddressDiscovery discovery =
+        Impl::query_accessibility_bus_address(connection, timeout);
+
+    // The temporary connection is closed before returning on every path.
+    dbus_connection_close(connection);
+    dbus_connection_unref(connection);
+    return discovery;
 }
 
 void LinuxDbusTransport::stop() noexcept {

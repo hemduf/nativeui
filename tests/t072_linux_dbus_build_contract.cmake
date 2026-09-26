@@ -17,6 +17,14 @@ set(_window_header "${SOURCE_DIR}/include/nativeui/window.hpp")
 set(_source "${SOURCE_DIR}/src/linux_dbus.cpp")
 set(_codec_source "${SOURCE_DIR}/src/linux_dbus_codec.cpp")
 set(_linux_build_doc "${SOURCE_DIR}/docs/linux-build.md")
+set(_t072_test_cmake "${SOURCE_DIR}/tests/t072/CMakeLists.txt")
+set(_explicit_address_lifecycle_test
+  "${SOURCE_DIR}/tests/t072/explicit_address_lifecycle_contract.cpp")
+set(_bus_address_test "${SOURCE_DIR}/tests/t072/bus_address_contract.cpp")
+set(_accessibility_discovery_test
+  "${SOURCE_DIR}/tests/t072/accessibility_bus_discovery_contract.cpp")
+set(_accessibility_unavailable_test
+  "${SOURCE_DIR}/tests/t072/accessibility_bus_unavailable_contract.cpp")
 
 foreach(_required IN ITEMS
     "${_module}"
@@ -31,7 +39,12 @@ foreach(_required IN ITEMS
     "${_window_header}"
     "${_source}"
     "${_codec_source}"
-    "${_linux_build_doc}")
+    "${_linux_build_doc}"
+    "${_t072_test_cmake}"
+    "${_explicit_address_lifecycle_test}"
+    "${_bus_address_test}"
+    "${_accessibility_discovery_test}"
+    "${_accessibility_unavailable_test}")
   if(NOT EXISTS "${_required}")
     message(FATAL_ERROR "T072 RED: missing required internal Linux D-Bus transport file: ${_required}")
   endif()
@@ -42,6 +55,7 @@ file(READ "${_module}" _dbus_module)
 file(READ "${_attach_module}" _attach_module_text)
 file(READ "${_platform_state_header}" _platform_state_text)
 file(READ "${_application_backend_source}" _application_backend_text)
+file(READ "${_header}" _header_text)
 file(READ "${_client_operations_header}" _client_operations_header_text)
 file(READ "${_client_operations_source}" _client_operations_source_text)
 file(READ "${_owner_header}" _owner_header_text)
@@ -49,6 +63,7 @@ file(READ "${_platform_source}" _platform_source_text)
 file(READ "${_window_header}" _window_header_text)
 file(READ "${_source}" _source_text)
 file(READ "${_linux_build_doc}" _linux_build_doc_text)
+file(READ "${_t072_test_cmake}" _t072_test_cmake_text)
 
 # The root owns only the Linux platform gate and module invocation; the module
 # owns the private target/source/package details so they do not leak into
@@ -102,21 +117,69 @@ foreach(_needle IN ITEMS
     "LinuxDbusErrorCode::Shutdown"
     "kLinuxDbusMaxPendingCalls"
     "kLinuxDbusMaxSubscriptions"
-    "kLinuxDbusMaxObjectPaths")
+    "kLinuxDbusMaxObjectPaths"
+    "transport_.start(bus_address)")
   string(FIND "${_client_operations_source_text}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 typed immediate failure implementation missing token: ${_needle}")
   endif()
 endforeach()
 
+# T181 extends the frozen transport with an explicit-address start mode and a
+# one-shot accessibility-bus discovery helper without changing the default
+# session path, the limits or the error taxonomy.
+foreach(_needle IN ITEMS
+    "LinuxDbusBusAddressDiscovery"
+    "linux_dbus_valid_bus_address"
+    "start(std::string_view bus_address)"
+    "discover_accessibility_bus_address"
+    "session_transport")
+  string(FIND "${_header_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T181 explicit-address transport header missing token: ${_needle}")
+  endif()
+endforeach()
+foreach(_needle IN ITEMS
+    "dbus_connection_open_private"
+    "dbus_bus_register"
+    "dbus_bus_get_private(DBUS_BUS_SESSION"
+    "AT_SPI_BUS_ADDRESS"
+    "org.a11y.Bus"
+    "/org/a11y/bus"
+    "GetAddress"
+    "query_accessibility_bus_address")
+  string(FIND "${_source_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T181 explicit-address transport implementation missing token: ${_needle}")
+  endif()
+endforeach()
+foreach(_needle IN ITEMS
+    "t072_add_test(t072_explicit_address_lifecycle_contract explicit_address_lifecycle_contract.cpp)"
+    "t072_add_test(t072_bus_address_contract bus_address_contract.cpp)"
+    "t072_add_test(t072_accessibility_bus_discovery_contract accessibility_bus_discovery_contract.cpp)"
+    "t072_add_test(t072_accessibility_bus_unavailable_contract accessibility_bus_unavailable_contract.cpp)"
+    "target_link_libraries(t072_accessibility_bus_discovery_contract PRIVATE PkgConfig::NATIVEUI_DBUS)")
+  string(FIND "${_t072_test_cmake_text}" "${_needle}" _found)
+  if(_found EQUAL -1)
+    message(FATAL_ERROR "T181 accessibility contract test is not registered: ${_needle}")
+  endif()
+endforeach()
+
 # The Linux build/validation documentation must state the concrete system
-# prerequisite and the pkg-config module expected by package consumers.
+# prerequisite, the pkg-config module expected by package consumers and the
+# T181 explicit-address/accessibility-bus runtime contract.
 foreach(_needle IN ITEMS
     "libdbus-1"
     "libdbus-1-dev"
     "pkg-config"
     "dbus-1"
-    "macOS and Windows")
+    "macOS and Windows"
+    "AT_SPI_BUS_ADDRESS"
+    "org.a11y.Bus"
+    "GetAddress"
+    "dbus_connection_open_private"
+    "dbus_bus_register"
+    "one-shot")
   string(FIND "${_linux_build_doc_text}" "${_needle}" _found)
   if(_found EQUAL -1)
     message(FATAL_ERROR "T072 Linux prerequisite documentation missing token: ${_needle}")
