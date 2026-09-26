@@ -12,6 +12,34 @@
 
 namespace ui::detail {
 
+/// Per-view delivery hook for one committed native publication batch.
+///
+/// The owning SemanticRetainedViewDomain invokes this exactly once for every
+/// native publication commit it performs, on the owning UI thread and on the
+/// same stack as the commit, so a platform notification adapter can map the
+/// closed change set onto its native API without a second snapshot lookup.
+///
+/// Invocation is a contained boundary: a throwing implementation never escapes
+/// into the pump, never rolls back or resends the already committed batch and
+/// never prevents a later checkpoint from publishing. Implementations are
+/// expected to copy any value they need; they must not retain live retained
+/// Tree/Node/Component or native-view state. The interface stays internal and
+/// platform-type free.
+class SemanticNativeNotificationSink {
+public:
+    SemanticNativeNotificationSink() = default;
+    SemanticNativeNotificationSink(const SemanticNativeNotificationSink&) = delete;
+    SemanticNativeNotificationSink& operator=(const SemanticNativeNotificationSink&) = delete;
+    virtual ~SemanticNativeNotificationSink() = default;
+
+    /// Notify one committed native publication generation. The batch owns the
+    /// exact immutable publication that was stored for this commit, so the
+    /// changes and the semantic/geometry pair cannot drift. May throw; the
+    /// domain contains the failure.
+    virtual void on_native_publication(
+        const SemanticNativePublicationBatch& batch) = 0;
+};
+
 /// Per-native-view semantic bridge shared by platform accessibility adapters.
 ///
 /// One bridge owns both the immutable semantic publication state and the

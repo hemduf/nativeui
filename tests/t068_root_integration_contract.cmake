@@ -32,6 +32,23 @@ function(require_function_body haystack marker description out_var)
   set(${out_var} "${_body}" PARENT_SCOPE)
 endfunction()
 
+# Extract one top-level conditional block so a registration can be proven to
+# live behind the correct opt-in gate instead of merely somewhere in the file.
+function(require_conditional_body haystack marker description out_var)
+  string(FIND "${haystack}" "${marker}" _start)
+  if(_start EQUAL -1)
+    message(FATAL_ERROR "T068 root integration contract: missing ${description}: ${marker}")
+  endif()
+  string(SUBSTRING "${haystack}" ${_start} -1 _tail)
+  string(FIND "${_tail}" "endif()" _end)
+  if(_end EQUAL -1)
+    message(FATAL_ERROR "T068 root integration contract: unterminated ${description}")
+  endif()
+  math(EXPR _length "${_end} + 7")
+  string(SUBSTRING "${_tail}" 0 ${_length} _body)
+  set(${out_var} "${_body}" PARENT_SCOPE)
+endfunction()
+
 # Every T045/T068 accessibility suite must be registered in the root CTest run
 # through the helpers below. The helper body owns the private include setup and
 # the unit/accessibility/t068 labels; checking it here keeps one label source of
@@ -78,6 +95,7 @@ set(_accessibility_tests
   "nativeui_t068_semantic_native_geometry_capture|tests/t045/t068_semantic_native_geometry_capture_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_retained_action_bridge_tests|tests/t068_retained_action_bridge_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_retained_native_checkpoint_tests|tests/t068_retained_native_checkpoint_tests.cpp|nativeui_add_accessibility_test"
+  "nativeui_t068_publication_sink_tests|tests/t068_publication_sink_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_virtual_list_action_tests|tests/t068_virtual_list_action_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_semantic_macos_child_projection|tests/t045/semantic_macos_child_projection_tests.cpp|nativeui_add_macos_accessibility_test"
   "nativeui_semantic_macos_mapping|tests/t045/semantic_macos_mapping_tests.cpp|nativeui_add_macos_accessibility_test"
@@ -127,6 +145,28 @@ endif()
 file(READ "${_header_fixture}" _header_fixture_content)
 require_text("${_header_fixture_content}" "#include <nativeui/semantics.hpp>"
   "isolated semantics public-header fixture include")
+
+# The T068 platform publication smoke must stay behind the explicit smoke gate,
+# use its own consumer identity and expose its AppKit bridge for the prefix
+# audit. The portable publication-sink suite above covers the domain contract;
+# this guards the real-pump registration.
+require_conditional_body("${_tests_cmake}"
+  "if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)"
+  "platform smoke gate" _smoke_gate)
+require_text("${_smoke_gate}" "add_test(NAME nativeui_smoke_accessibility "
+  "accessibility smoke CTest registration inside the smoke gate")
+require_text("${_tests_cmake}" "add_executable(nativeui_smoke_accessibility "
+  "accessibility smoke executable target")
+require_text("${_tests_cmake}" "CONSUMER_ID org.nativeui.test.smoke-accessibility"
+  "accessibility smoke consumer identity")
+require_text("${_tests_cmake}" "OUT_BRIDGE _nativeui_smoke_accessibility_bridge"
+  "accessibility smoke bridge output for the prefix audit")
+require_text("${_tests_cmake}" "nativeui_smoke_accessibility_objc_runtime_prefix"
+  "accessibility smoke Objective-C prefix audit registration")
+if(NOT EXISTS "${SOURCE_DIR}/tests/smoke_accessibility.cpp")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing accessibility smoke source: tests/smoke_accessibility.cpp")
+endif()
 
 # Deliberately no examples/features/t068_accessibility.cpp assertion here yet:
 # the dedicated feature example is a later T068 batch. When it lands, extend

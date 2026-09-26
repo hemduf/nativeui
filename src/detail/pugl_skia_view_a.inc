@@ -319,6 +319,18 @@ public:
     take_gpu_readback() noexcept {
         return renderer_.take_readback();
     }
+
+    /// Deterministic T043 observation seam used by the platform publication
+    /// smoke. Production geometry is still owned and validated by
+    /// ViewGeometryState; these only expose the same accepted/rejected
+    /// observation path to the UI-thread test callback.
+    bool observe_native_scale(float reported_scale) noexcept {
+        return geometry_.observe_scale(reported_scale);
+    }
+
+    bool observe_native_physical_screen_origin(Point origin) noexcept {
+        return geometry_.observe_physical_screen_origin(origin);
+    }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 

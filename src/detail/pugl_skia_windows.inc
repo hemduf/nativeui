@@ -713,6 +713,52 @@ bool detail::PlatformTestAccess::request_expose(
            window.impl_->core->request_expose();
 }
 
+std::unique_ptr<StandaloneWindow>
+detail::PlatformTestAccess::make_unmanaged_standalone_window(
+    UI& ui,
+    WindowDesc desc) {
+    return std::unique_ptr<StandaloneWindow>(new StandaloneWindow(
+        ui, std::move(desc), StandaloneWindow::UnmanagedConstructionTag{}));
+}
+
+bool detail::PlatformTestAccess::install_semantic_notification_sink(
+    StandaloneWindow& window,
+    std::shared_ptr<detail::SemanticNativeNotificationSink> sink) noexcept {
+    if (!window.impl_ || !window.impl_->core) return false;
+    auto domain = window.impl_->core->semantic_domain();
+    return domain && domain->set_native_notification_sink(std::move(sink));
+}
+
+detail::SemanticPublicationDiagnostics
+detail::PlatformTestAccess::semantic_publication_diagnostics(
+    StandaloneWindow& window) noexcept {
+    detail::SemanticPublicationDiagnostics result{};
+    if (!window.impl_ || !window.impl_->core) return result;
+    auto domain = window.impl_->core->semantic_domain();
+    if (!domain) return result;
+    const auto publication = domain->bridge().native_current();
+    if (!publication) return result;
+    result.has_publication = true;
+    result.native_generation = publication->generation;
+    result.semantic_generation = publication->semantic_generation();
+    result.geometry = publication->geometry;
+    return result;
+}
+
+bool detail::PlatformTestAccess::observe_native_scale(
+    StandaloneWindow& window,
+    float scale) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->observe_native_scale(scale);
+}
+
+bool detail::PlatformTestAccess::observe_native_physical_screen_origin(
+    StandaloneWindow& window,
+    Point origin) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->observe_native_physical_screen_origin(origin);
+}
+
 #endif
 StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>(
@@ -783,6 +829,11 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
 }
 
 StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
+    : StandaloneWindow(ui, std::move(desc), UnmanagedConstructionTag{}) {}
+
+StandaloneWindow::StandaloneWindow(UI& ui,
+                                   WindowDesc desc,
+                                   UnmanagedConstructionTag)
     : impl_(std::make_unique<Impl>()) {
     impl_->core = std::make_unique<ViewCore>(
         ui,
@@ -1109,6 +1160,43 @@ bool detail::PlatformTestAccess::inject_scene_fault(
 detail::SceneDiagnostics detail::PlatformTestAccess::scene_diagnostics(
     EmbeddedView& view) noexcept {
     return view.impl_ ? view.impl_->core.scene_diagnostics() : detail::SceneDiagnostics{};
+}
+
+bool detail::PlatformTestAccess::install_semantic_notification_sink(
+    EmbeddedView& view,
+    std::shared_ptr<detail::SemanticNativeNotificationSink> sink) noexcept {
+    if (!view.impl_) return false;
+    auto domain = view.impl_->core.semantic_domain();
+    return domain && domain->set_native_notification_sink(std::move(sink));
+}
+
+detail::SemanticPublicationDiagnostics
+detail::PlatformTestAccess::semantic_publication_diagnostics(
+    EmbeddedView& view) noexcept {
+    detail::SemanticPublicationDiagnostics result{};
+    if (!view.impl_) return result;
+    auto domain = view.impl_->core.semantic_domain();
+    if (!domain) return result;
+    const auto publication = domain->bridge().native_current();
+    if (!publication) return result;
+    result.has_publication = true;
+    result.native_generation = publication->generation;
+    result.semantic_generation = publication->semantic_generation();
+    result.geometry = publication->geometry;
+    return result;
+}
+
+bool detail::PlatformTestAccess::observe_native_scale(
+    EmbeddedView& view,
+    float scale) noexcept {
+    return view.impl_ && view.impl_->core.observe_native_scale(scale);
+}
+
+bool detail::PlatformTestAccess::observe_native_physical_screen_origin(
+    EmbeddedView& view,
+    Point origin) noexcept {
+    return view.impl_ &&
+           view.impl_->core.observe_native_physical_screen_origin(origin);
 }
 #endif
 

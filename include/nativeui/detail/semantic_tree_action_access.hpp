@@ -169,10 +169,28 @@ public:
         return bridge_.has_pending_native_publication();
     }
 
+    /// Install/replace the per-view native notification sink.
+    ///
+    /// A sink observes exactly the native publication commits that complete
+    /// after installation; an already committed batch is never replayed to a
+    /// newly installed sink. The domain retains the sink strongly and invokes it
+    /// from a contained boundary, so a throwing implementation cannot escape the
+    /// pump or poison later checkpoints. Installation returns false for a
+    /// terminally shut-down domain, which can never deliver again. Passing a
+    /// null sink uninstalls without affecting already committed publications.
+    [[nodiscard]] bool set_native_notification_sink(
+        std::shared_ptr<SemanticNativeNotificationSink> sink) noexcept {
+        if (!bridge_.publisher()) return false;
+        native_notification_sink_ = std::move(sink);
+        return true;
+    }
+
     /// Retry one already committed semantic/native batch without sampling newer
     /// geometry. This is used after the native wrapper allocation failed: the
     /// pending batch owns the exact geometry from its original checkpoint and
-    /// must commit before a newer retained candidate can be projected.
+    /// must commit before a newer retained candidate can be projected. A
+    /// successful retry is delivered to the notification sink exactly once,
+    /// like any other native commit.
     [[nodiscard]] std::optional<SemanticNativePublicationBatch>
     retry_pending_native_publication() {
         if (!bridge_.publisher()) {
@@ -182,7 +200,9 @@ public:
             shutdown();
             return std::nullopt;
         }
-        return bridge_.retry_pending_native_publication();
+        const auto previous = bridge_.native_current();
+        return deliver_committed_native_publication(
+            bridge_.retry_pending_native_publication(), previous);
     }
 
     /// Publish the current committed retained state together with the exact
@@ -205,14 +225,18 @@ public:
             return std::nullopt;
         }
 
+        const auto previous = bridge_.native_current();
+
         if (bridge_.has_pending_native_publication()) {
-            return bridge_.retry_pending_native_publication();
+            return deliver_committed_native_publication(
+                bridge_.retry_pending_native_publication(), previous);
         }
 
         if (!stage_current_snapshot()) {
             return std::nullopt;
         }
-        return bridge_.checkpoint_native_publication(geometry);
+        return deliver_committed_native_publication(
+            bridge_.checkpoint_native_publication(geometry), previous);
     }
 
     /// Compatibility form used by retained tests/callers that need only the
@@ -229,9 +253,12 @@ public:
 
     /// Publish endpoint death before the surrounding native/retained view starts
     /// destruction. Idempotence and terminal non-resurrection are provided by
-    /// SemanticNativeViewBridge::shutdown().
+    /// SemanticNativeViewBridge::shutdown(). The notification sink is released
+    /// afterwards so a retired view never reaches platform delivery code later
+    /// and a sink destructor cannot reinstall delivery on a terminating domain.
     void shutdown() noexcept {
         bridge_.shutdown();
+        native_notification_sink_.reset();
     }
 
 private:
@@ -258,9 +285,40 @@ private:
         return true;
     }
 
+    /// Deliver one native publication batch that the bridge actually committed.
+    ///
+    /// `previous` is this view's committed publication observed immediately
+    /// before the call. A committed publication stores a newly allocated
+    /// immutable snapshot, while a no-op checkpoint returns that same previous
+    /// object without any store; comparing identity is therefore the exact
+    /// commit signal, including for the durable pending-batch retry. A failed
+    /// publication throws before a batch is returned and never reaches this
+    /// point. Delivery is contained so a throwing sink cannot escape the pump,
+    /// roll back the commit or poison later checkpoints; the domain keeps no
+    /// per-batch delivery state to desynchronize.
+    [[nodiscard]] std::optional<SemanticNativePublicationBatch>
+    deliver_committed_native_publication(
+        std::optional<SemanticNativePublicationBatch> batch,
+        const std::shared_ptr<const SemanticNativePublicationSnapshot>& previous) {
+        if (!batch || !batch->publication || batch->publication == previous) {
+            return batch;
+        }
+        if (auto sink = native_notification_sink_) {
+            try {
+                sink->on_native_publication(*batch);
+            } catch (...) {
+                // Notification adapters are application/platform code. Their
+                // failure must not unwind through the native pump or make the
+                // already authoritative commit unreadable to later readers.
+            }
+        }
+        return batch;
+    }
+
     std::weak_ptr<const void> owner_lifetime_;
     Tree& tree_;
     SemanticNativeViewBridge bridge_;
+    std::shared_ptr<SemanticNativeNotificationSink> native_notification_sink_;
 };
 
 /// Lifecycle-safe production checkpoint seam for a native view.

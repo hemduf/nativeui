@@ -423,6 +423,8 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/t068_retained_action_bridge_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_retained_native_checkpoint_tests
     ${PROJECT_SOURCE_DIR}/tests/t068_retained_native_checkpoint_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_t068_publication_sink_tests
+    ${PROJECT_SOURCE_DIR}/tests/t068_publication_sink_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_virtual_list_action_tests
     ${PROJECT_SOURCE_DIR}/tests/t068_virtual_list_action_tests.cpp)
 
@@ -548,6 +550,22 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_smoke_embedded)
     nativeui_enable_sanitizers(nativeui_smoke_embedded)
 
+    # T068 platform publication smoke. The private PlatformTestAccess seam is
+    # only compiled into the test-enabled platform target, so this executable
+    # exercises the real Application/legacy/Embedded pumps with a per-view
+    # notification sink and deterministic T043 geometry observations.
+    add_executable(nativeui_smoke_accessibility ${PROJECT_SOURCE_DIR}/tests/smoke_accessibility.cpp)
+    target_include_directories(nativeui_smoke_accessibility PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_smoke_accessibility
+      CONSUMER_ID org.nativeui.test.smoke-accessibility
+      OUT_BRIDGE _nativeui_smoke_accessibility_bridge
+    )
+    nativeui_enable_project_warnings(nativeui_smoke_accessibility)
+    nativeui_enable_sanitizers(nativeui_smoke_accessibility)
+
     if(APPLE)
       enable_language(OBJCXX)
       add_executable(nativeui_smoke_macos_drop ${PROJECT_SOURCE_DIR}/tests/smoke_macos_drop.mm)
@@ -584,11 +602,31 @@ if(NATIVEUI_BUILD_TESTS)
         LABELS "integration;platform;macos;objc-runtime;t053"
         TIMEOUT 300
       )
+
+      # The T068 smoke owns its own consumer-scoped AppKit bridge, so its
+      # prefix is audited independently of the embedded smoke bridge.
+      nativeui_compute_objc_runtime_prefix(
+        _nativeui_smoke_accessibility_prefix
+        org.nativeui.test.smoke-accessibility
+      )
+      add_test(
+        NAME nativeui_smoke_accessibility_objc_runtime_prefix
+        COMMAND ${CMAKE_COMMAND}
+          "-DARCHIVE=$<TARGET_FILE:${_nativeui_smoke_accessibility_bridge}>"
+          "-DNM=${CMAKE_NM}"
+          "-DPREFIX=${_nativeui_smoke_accessibility_prefix}"
+          -P "${PROJECT_SOURCE_DIR}/tests/check_objc_runtime_prefix.cmake"
+      )
+      set_tests_properties(nativeui_smoke_accessibility_objc_runtime_prefix PROPERTIES
+        LABELS "integration;platform;macos;objc-runtime;t053;accessibility;t068"
+        TIMEOUT 300
+      )
     endif()
 
     if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
       add_test(NAME nativeui_smoke_standalone COMMAND nativeui_smoke_standalone)
       add_test(NAME nativeui_smoke_embedded COMMAND nativeui_smoke_embedded)
+      add_test(NAME nativeui_smoke_accessibility COMMAND nativeui_smoke_accessibility)
       add_test(NAME nativeui_image_texture_gpu_reference_tests
         COMMAND nativeui_image_texture_gpu_reference_tests)
       add_test(NAME nativeui_t088_noise_gpu_reference_tests
@@ -598,6 +636,10 @@ if(NATIVEUI_BUILD_TESTS)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
+        TIMEOUT 60
+      )
+      set_tests_properties(nativeui_smoke_accessibility PROPERTIES
+        LABELS "integration;platform;smoke;accessibility;t068"
         TIMEOUT 60
       )
       set_tests_properties(nativeui_image_texture_gpu_reference_tests
