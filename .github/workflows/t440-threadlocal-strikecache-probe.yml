@@ -78,7 +78,7 @@ jobs:
           curl -fsSL -o variant-b.zip \
             "https://github.com/hemduf/skia-builder/releases/download/${EXPERIMENT_TAG}/${{ matrix.asset }}"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            tar -xf variant-b.zip
+            python -m zipfile -e variant-b.zip .
           else
             unzip -q variant-b.zip
           fi
@@ -170,8 +170,7 @@ jobs:
             -DNATIVEUI_SOURCE_DIR="$PWD" \
             -DNATIVEUI_BENCHMARK_COMMIT_SHA="$(git rev-parse HEAD)" \
             -DNATIVEUI_SKIA_ROOT="$PWD/variant-b" \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+            -DNATIVEUI_ENABLE_SANITIZERS=ON
           cmake --build build-asan
 
       - name: ASan/UBSan self-test and lifecycle
