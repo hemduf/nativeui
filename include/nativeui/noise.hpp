@@ -8,7 +8,7 @@
 
 namespace ui {
 
-enum class NoiseType { Value, Perlin };
+enum class NoiseType { Value, Perlin, Simplex };
 
 /// feature_size is the number of logical Painter pixels per noise cell.
 /// It must be finite and positive; seed is an exact, repeatable 32-bit value.

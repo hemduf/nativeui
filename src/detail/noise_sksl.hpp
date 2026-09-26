@@ -197,4 +197,86 @@ half4 main(float2 p) {
 }
 )";
 
+// Frozen T090 simplex kernel. Same hash and gradient table as T089; one exact
+// skew (F2) into a simplex lattice, the x0 > y0 triangle branch (equality takes
+// the second branch), q > 0 corner kernel with q^4 * dot, scale 70 and
+// clamp(0.5 + 0.5 * raw, 0, 1). ES2-safe: gradient_of is duplicated
+// byte-identically from the frozen T089 kernel, all lattice conversion goes
+// through the existing byte-lane helpers, and the lattice guard runs before
+// floor/bytes_of_int. The guard literal must stay < 2147483648.0: writing
+// 2147483646.0/2147483647.0 rounds to 2^31 in ES2 float and would admit an
+// out-of-range lattice lane.
+inline constexpr std::string_view kSimplexNoiseKernelSkSL = R"(
+uniform float feature_size;
+uniform float4 seed_bytes;
+layout(color) uniform float4 low_color;
+layout(color) uniform float4 high_color;
+float2 gradient_of(float4 h) {
+    float gi = mod(h.x, 8.0);
+    if (gi < 0.5) return float2(1.0, 0.0);
+    if (gi < 1.5) return float2(-1.0, 0.0);
+    if (gi < 2.5) return float2(0.0, 1.0);
+    if (gi < 3.5) return float2(0.0, -1.0);
+    if (gi < 4.5) return float2(0.707106781186547524400844362104849,
+                               0.707106781186547524400844362104849);
+    if (gi < 5.5) return float2(-0.707106781186547524400844362104849,
+                                0.707106781186547524400844362104849);
+    if (gi < 6.5) return float2(0.707106781186547524400844362104849,
+                                -0.707106781186547524400844362104849);
+    return float2(-0.707106781186547524400844362104849,
+                  -0.707106781186547524400844362104849);
+}
+float simplex_corner(float2 g, float cx, float cy) {
+    float q = 0.5 - cx * cx - cy * cy;
+    if (q <= 0.0) return 0.0;
+    return q * q * q * q * dot(g, float2(cx, cy));
+}
+float simplex_noise(float2 p) {
+    float x = p.x / feature_size;
+    float y = p.y / feature_size;
+    if (!(x >= -2147483648.0 && x < 2147483648.0 &&
+          y >= -2147483648.0 && y < 2147483648.0)) return 0.5;
+    float s = (x + y) * 0.366025403784438646763723170752936;
+    float u = x + s;
+    float v = y + s;
+    if (!(u >= -2147483648.0 && u < 2147483648.0 &&
+          v >= -2147483648.0 && v < 2147483648.0)) return 0.5;
+    float fi = floor(u);
+    float fj = floor(v);
+    float t = (fi + fj) * 0.211324865405187117745425609749021;
+    float x0 = x - (fi - t);
+    float y0 = y - (fj - t);
+    float4 xb = bytes_of_int(fi);
+    float4 yb = bytes_of_int(fj);
+    float4 xb1 = add_one(xb);
+    float4 yb1 = add_one(yb);
+    float i1 = 0.0;
+    float j1 = 1.0;
+    float4 c1x = xb;
+    float4 c1y = yb1;
+    if (x0 > y0) {
+        i1 = 1.0;
+        j1 = 0.0;
+        c1x = xb1;
+        c1y = yb;
+    }
+    float x1 = x0 - i1 + 0.211324865405187117745425609749021;
+    float y1 = y0 - j1 + 0.211324865405187117745425609749021;
+    float x2 = x0 - 1.0 + 2.0 * 0.211324865405187117745425609749021;
+    float y2 = y0 - 1.0 + 2.0 * 0.211324865405187117745425609749021;
+    float n0 = simplex_corner(gradient_of(hash2(seed_bytes, xb, yb)), x0, y0);
+    float n1 = simplex_corner(gradient_of(hash2(seed_bytes, c1x, c1y)), x1, y1);
+    float n2 = simplex_corner(gradient_of(hash2(seed_bytes, xb1, yb1)), x2, y2);
+    return clamp(0.5 + 0.5 * (70.0 * (n0 + n1 + n2)), 0.0, 1.0);
+}
+)";
+
+inline constexpr std::string_view kSimplexNoiseMainSkSL = R"(
+half4 main(float2 p) {
+    float v = simplex_noise(p);
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
 } // namespace ui::detail
