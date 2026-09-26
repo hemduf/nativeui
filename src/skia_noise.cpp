@@ -63,13 +63,17 @@ namespace {
 } // namespace
 
 NoiseCreateResult NoiseSource::create(NoiseType type, NoiseOptions options) {
-    if ((type != NoiseType::Value && type != NoiseType::Perlin) ||
+    if ((type != NoiseType::Value && type != NoiseType::Perlin &&
+         type != NoiseType::Simplex) ||
         !std::isfinite(options.feature_size) || options.feature_size <= 0.0f) {
         return {NoiseSource{}, NoiseCreateError::InvalidArgument, {}};
     }
 
     std::string source{detail::kNoiseHashSkSL};
-    if (type == NoiseType::Perlin) {
+    if (type == NoiseType::Simplex) {
+        source.append(detail::kSimplexNoiseKernelSkSL);
+        source.append(detail::kSimplexNoiseMainSkSL);
+    } else if (type == NoiseType::Perlin) {
         source.append(detail::kPerlinNoiseKernelSkSL);
         source.append(detail::kPerlinNoiseMainSkSL);
     } else {
@@ -86,9 +90,11 @@ NoiseCreateResult NoiseSource::create(NoiseType type, NoiseOptions options) {
 
     auto compiled = ShaderProgram::compile(source);
     if (!compiled.ok()) {
-        const char* const fallback = type == NoiseType::Perlin
-            ? "Built-in perlin-noise shader compilation failed"
-            : "Built-in value-noise shader compilation failed";
+        const char* const fallback = type == NoiseType::Simplex
+            ? "Built-in simplex-noise shader compilation failed"
+            : type == NoiseType::Perlin
+                ? "Built-in perlin-noise shader compilation failed"
+                : "Built-in value-noise shader compilation failed";
         std::string diagnostic = compiled.diagnostics.empty()
             ? fallback
             : compiled.diagnostics.front().message;
@@ -122,7 +128,7 @@ Brush NoiseSource::as_brush(Color low, Color high) const {
             ShaderSetResult::Ok &&
         shader.set_color("high_color", canonical_color(high)) ==
             ShaderSetResult::Ok;
-    if (!bound) throw std::logic_error{"Built-in value-noise shader interface mismatch"};
+    if (!bound) throw std::logic_error{"Built-in noise shader interface mismatch"};
     return Brush{shader};
 }
 

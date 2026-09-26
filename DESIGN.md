@@ -337,6 +337,19 @@ incompatible kernels; the double-precision CPU oracle implements the exact
 contract and raster/GPU float paths are compared with it within the single
 documented tolerance pair.
 
+T090 adds a simplex-style gradient kernel on the same hash and gradient table:
+local logical coordinates are scaled by `feature_size`, skewed with
+`F2 = (sqrt(3) - 1) / 2` and unskewed with `G2 = (3 - sqrt(3)) / 6` on one
+simplex lattice, and the exact `x0 > y0` branch (equality takes the second
+branch) selects the second and third lattice corners. Each corner contributes
+`q > 0 ? q^4 * dot(g, d) : 0` with `q = 0.5 - |d|^2`, and the public scalar is
+exactly `clamp(0.5 + 0.5 * 70 * (n0 + n1 + n2), 0, 1)`. Non-finite skew
+intermediates and lattice coordinates outside `[INT32_MIN, INT32_MAX - 1]`
+produce exactly 0.5 before any conversion; the ES2 float path checks the skewed
+coordinates before `floor` because it cannot represent the tighter integer
+bound. The same double-precision oracle and the same documented tolerance pair
+cover CPU, raster and GPU.
+
 ---
 
 ## 7. Logical coordinates and high DPI
