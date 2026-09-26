@@ -3,6 +3,7 @@
 #include <nativeui/combo_popup_style.hpp>
 #include <nativeui/component.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/state.hpp>
@@ -763,6 +764,9 @@ public:
           runtime_(std::move(runtime)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return combo_box_semantic_info(display_text(), runtime_->handle.valid());
+    }
     [[nodiscard]] bool dismiss_overlay_on_tab() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return true; }
 

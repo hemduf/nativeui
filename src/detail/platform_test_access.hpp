@@ -1,11 +1,22 @@
 #pragma once
 
+#include <nativeui/detail/semantic_native_publication.hpp>
+#include <nativeui/detail/semantic_native_view_bridge.hpp>
 #include <nativeui/window.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace ui::detail {
+
+/// Readback of one native view's committed semantic publication state.
+struct SemanticPublicationDiagnostics final {
+    bool has_publication{};
+    std::uint64_t native_generation{};
+    std::uint64_t semantic_generation{};
+    SemanticNativeGeometry geometry{};
+};
 
 struct PlatformReadbackPixel final {
     std::uint8_t r{};
@@ -57,6 +68,31 @@ struct PlatformTestAccess final {
     static bool reject_next_deferred_redraw(StandaloneWindow& window) noexcept;
     static bool request_expose(StandaloneWindow& window) noexcept;
 
+    /// Construct a pre-v1 unmanaged window so the platform smoke can drive the
+    /// real legacy StandaloneWindow::poll checkpoint. Test-only: the public
+    /// pre-v1 constructor is deprecated for production consumers.
+    [[nodiscard]] static std::unique_ptr<StandaloneWindow>
+    make_unmanaged_standalone_window(UI& ui, WindowDesc desc);
+
+    /// Install a test sink on the window's per-view semantic domain. Returns
+    /// false when the window has no live semantic domain (invalid/retired view).
+    [[nodiscard]] static bool install_semantic_notification_sink(
+        StandaloneWindow& window,
+        std::shared_ptr<SemanticNativeNotificationSink> sink) noexcept;
+
+    /// Read the window's committed native publication state.
+    [[nodiscard]] static SemanticPublicationDiagnostics
+    semantic_publication_diagnostics(StandaloneWindow& window) noexcept;
+
+    /// Model one T043 platform geometry observation on the window's view, as an
+    /// accepted T065 dispatcher callback would during a real configure event.
+    [[nodiscard]] static bool observe_native_scale(
+        StandaloneWindow& window,
+        float scale) noexcept;
+    [[nodiscard]] static bool observe_native_physical_screen_origin(
+        StandaloneWindow& window,
+        Point origin) noexcept;
+
     [[nodiscard]] static bool request_gpu_readback(
         EmbeddedView& view,
         Point logical_point) noexcept;
@@ -66,6 +102,18 @@ struct PlatformTestAccess final {
                                    SceneFaultStage stage) noexcept;
     [[nodiscard]] static SceneDiagnostics scene_diagnostics(
         EmbeddedView& view) noexcept;
+
+    [[nodiscard]] static bool install_semantic_notification_sink(
+        EmbeddedView& view,
+        std::shared_ptr<SemanticNativeNotificationSink> sink) noexcept;
+    [[nodiscard]] static SemanticPublicationDiagnostics
+    semantic_publication_diagnostics(EmbeddedView& view) noexcept;
+    [[nodiscard]] static bool observe_native_scale(
+        EmbeddedView& view,
+        float scale) noexcept;
+    [[nodiscard]] static bool observe_native_physical_screen_origin(
+        EmbeddedView& view,
+        Point origin) noexcept;
 };
 
 } // namespace ui::detail

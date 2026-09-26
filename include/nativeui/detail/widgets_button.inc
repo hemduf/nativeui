@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_action.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/style.hpp>
@@ -25,7 +26,9 @@ enum class ButtonVisualState {
 
 namespace detail {
 
-class ButtonComponent final : public Component, public ThemeBinding {
+class ButtonComponent final : public Component,
+                              public ThemeBinding,
+                              public SemanticActionHandler {
 public:
     using ActivateCallback = std::function<void()>;
 
@@ -35,6 +38,29 @@ public:
           style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        SemanticInfo info;
+        info.role = SemanticRole::Button;
+        info.name = label_;
+        info.focusable = true;
+        info.actions = {SemanticAction::Activate, SemanticAction::Focus};
+        return info;
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Activate || !effective_enabled()) {
+            return false;
+        }
+
+        // Match ordinary Button activation without synthesizing input. User
+        // code may synchronously disable/remove/destroy this component, so copy
+        // the callback first and never touch component state after invocation.
+        auto callback = on_activate_;
+        if (callback) callback();
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);

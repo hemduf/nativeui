@@ -120,7 +120,7 @@ T067 owns key equality, dataset validation, token retention, finite fixed-height
 | Tab | `NSAccessibilityRadioButtonRole` with tab-button subrole when available on the deployment target |
 | TabPanel | `NSAccessibilityGroupRole` |
 | Group | `NSAccessibilityGroupRole` |
-| Dialog | `NSAccessibilityDialogRole` |
+| Dialog | `NSAccessibilityWindowRole` + `NSAccessibilityDialogSubrole` |
 | Image | `NSAccessibilityImageRole` |
 | Custom | `NSAccessibilityGroupRole` unless the application selected another standard `SemanticRole` |
 

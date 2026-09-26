@@ -5,6 +5,7 @@
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/interaction_observer.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/semantic_live_action.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/transient_presentation.hpp>
 #include <nativeui/theme.hpp>
@@ -28,6 +29,7 @@ namespace ui {
 namespace detail {
 inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* parent);
 struct DynamicReconcileFaultAccess;
+struct SemanticTreeActionAccess;
 struct DynamicFaultAccess;
 } // namespace detail
 
@@ -49,6 +51,8 @@ private:
     friend struct TreeTestAccess;
     friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
+    friend struct detail::SemanticTreeActionAccess;
+#include <nativeui/detail/tree_semantic_private.inc>
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>

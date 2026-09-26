@@ -189,6 +189,22 @@ public:
         return metadata_;
     }
 
+    [[nodiscard]] const VirtualSemanticChildren::TokenIndexSnapshot& token_index_snapshot() const noexcept {
+        return token_index_;
+    }
+
+    // Diagnostic counters for T068 qualification. They count only construction
+    // of the shared O(N) semantic metadata object on an accepted dataset
+    // replacement. Ordinary semantic projections must leave both counters
+    // unchanged.
+    [[nodiscard]] std::size_t metadata_rebuild_count() const noexcept {
+        return metadata_rebuild_count_;
+    }
+
+    [[nodiscard]] std::size_t metadata_item_build_count() const noexcept {
+        return metadata_item_build_count_;
+    }
+
     [[nodiscard]] const Item* item_at(std::size_t index) const noexcept {
         return index < entries_.size() ? &entries_[index].item : nullptr;
     }
@@ -199,16 +215,25 @@ public:
 
     [[nodiscard]] std::optional<std::size_t> index_of_key(const Key& key) const {
         const auto encoded = encode_dynamic_key(key);
-        const auto it = std::find_if(entries_.begin(), entries_.end(), [&](const Entry& entry) {
-            return entry.encoded_key == encoded;
-        });
-        if (it == entries_.end()) return std::nullopt;
-        return static_cast<std::size_t>(std::distance(entries_.begin(), it));
+        const auto it = index_by_key_.find(encoded);
+        if (it == index_by_key_.end()) return std::nullopt;
+        return it->second;
     }
 
     [[nodiscard]] std::optional<VirtualSemanticItemToken> token_for_key(const Key& key) const {
         const auto index = index_of_key(key);
         return index ? std::optional<VirtualSemanticItemToken>{entries_[*index].token} : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> index_for_token(
+        VirtualSemanticItemToken token) const noexcept {
+        if (token == kInvalidVirtualSemanticItemToken || !token_index_) return std::nullopt;
+        const auto found = token_index_->find(token);
+        if (found == token_index_->end() || found->second >= entries_.size() ||
+            entries_[found->second].token != token) {
+            return std::nullopt;
+        }
+        return found->second;
     }
 
     [[nodiscard]] std::optional<float> scroll_offset_for_index(
@@ -273,8 +298,12 @@ public:
         auto next_token = next_token_;
         std::vector<Entry> next_entries;
         next_entries.reserve(items.size());
+        std::unordered_map<std::string, std::size_t> next_index_by_key;
+        next_index_by_key.reserve(items.size());
         VirtualSemanticChildren::Metadata next_metadata;
         next_metadata.reserve(items.size());
+        VirtualSemanticChildren::TokenIndex next_token_index;
+        next_token_index.reserve(items.size());
 
         for (std::size_t index = 0; index < items.size(); ++index) {
             VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
@@ -295,14 +324,26 @@ public:
             semantic.actions = items[index].actions;
             next_metadata.push_back(std::move(semantic));
             next_entries.push_back(Entry{std::move(items[index]), std::move(encoded[index]), token});
+            next_index_by_key.emplace(next_entries.back().encoded_key, index);
+            if (!next_token_index.emplace(token, index).second) return false;
         }
 
         auto next_metadata_snapshot =
             std::make_shared<const VirtualSemanticChildren::Metadata>(std::move(next_metadata));
-        entries_ = std::move(next_entries);
-        metadata_ = std::move(next_metadata_snapshot);
+        auto next_token_index_snapshot =
+            std::make_shared<const VirtualSemanticChildren::TokenIndex>(std::move(next_token_index));
+
+        // Commit the replacement only after every O(N) structure has been built
+        // successfully. Selection/scroll/focus semantic projections below read
+        // these immutable/indexed structures and never rebuild them.
+        entries_.swap(next_entries);
+        index_by_key_.swap(next_index_by_key);
+        metadata_.swap(next_metadata_snapshot);
+        token_index_.swap(next_token_index_snapshot);
         next_token_ = next_token;
         ++generation_;
+        ++metadata_rebuild_count_;
+        metadata_item_build_count_ += metadata_->size();
         return true;
     }
 
@@ -313,8 +354,8 @@ public:
         float scroll_y) const {
         std::optional<VirtualSemanticItemToken> selected_token;
         if (selected) selected_token = token_for_key(*selected);
-        return VirtualSemanticChildren::from_metadata(
-            generation_, metadata_, selected_token, list_bounds, row_height, scroll_y);
+        return VirtualSemanticChildren::from_indexed_metadata(
+            generation_, metadata_, token_index_, selected_token, list_bounds, row_height, scroll_y);
     }
 
     [[nodiscard]] VirtualSemanticChildren semantic_children(
@@ -344,10 +385,15 @@ private:
     }
 
     std::vector<Entry> entries_;
+    std::unordered_map<std::string, std::size_t> index_by_key_;
     VirtualSemanticChildren::MetadataSnapshot metadata_{
         std::make_shared<const VirtualSemanticChildren::Metadata>()};
+    VirtualSemanticChildren::TokenIndexSnapshot token_index_{
+        std::make_shared<const VirtualSemanticChildren::TokenIndex>()};
     VirtualSemanticItemToken next_token_{1};
     std::uint64_t generation_{};
+    std::size_t metadata_rebuild_count_{};
+    std::size_t metadata_item_build_count_{};
 };
 
 } // namespace ui::detail

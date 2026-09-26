@@ -37,8 +37,20 @@ inline constexpr float kPuglMaximumViewSpan = 10000.0f;
     return std::isfinite(size.w) && std::isfinite(size.h) && size.w > 0.0f && size.h > 0.0f;
 }
 
+[[nodiscard]] inline bool valid_physical_screen_origin(Point origin) noexcept {
+    return std::isfinite(origin.x) && std::isfinite(origin.y);
+}
+
 [[nodiscard]] inline float retain_last_valid_scale(float reported, float last_valid) noexcept {
     return valid_scale(reported) ? reported : (valid_scale(last_valid) ? last_valid : 1.0f);
+}
+
+[[nodiscard]] inline Point retain_last_valid_physical_screen_origin(
+    Point reported,
+    Point last_valid) noexcept {
+    return valid_physical_screen_origin(reported)
+        ? reported
+        : (valid_physical_screen_origin(last_valid) ? last_valid : Point{});
 }
 
 [[nodiscard]] inline Size logical_to_physical_size(Size logical, float scale) noexcept {
@@ -68,14 +80,88 @@ inline constexpr float kPuglMaximumViewSpan = 10000.0f;
                 std::max(0.0f, bottom - top)};
 }
 
+/// Convert one logical view-relative rectangle to physical screen coordinates.
+/// The origin is already expressed in physical coordinates, so translation is
+/// deliberately applied after the T043 scale/covering conversion and exactly
+/// once.
+[[nodiscard]] inline Rect logical_to_physical_screen_rect(
+    Rect logical,
+    float scale,
+    Point physical_screen_origin) noexcept {
+    auto physical = logical_to_physical_covering_rect(logical, scale);
+    physical.x += physical_screen_origin.x;
+    physical.y += physical_screen_origin.y;
+    return physical;
+}
+
+/// Lifetime-detached source for the small T043 native geometry pair used by
+/// retained semantic checkpoints. ViewGeometryState remains the sole authority:
+/// valid UI-thread observations update this source in-place, while invalid
+/// observations leave the last valid pair untouched.
+///
+/// A pump may retain this object across a re-entrant dispatcher drain without
+/// retaining ViewCore or any Tree/Node/Component state. The source itself is
+/// still UI-thread-confined; native readers receive only a copied immutable
+/// SemanticNativeGeometry later at the publication boundary.
+class ViewNativeGeometryCaptureState final {
+public:
+    [[nodiscard]] float last_valid_scale() const noexcept {
+        return last_valid_scale_;
+    }
+
+    [[nodiscard]] Point physical_screen_origin() const noexcept {
+        return physical_screen_origin_;
+    }
+
+private:
+    friend class ViewGeometryState;
+
+    float last_valid_scale_{1.0f};
+    Point physical_screen_origin_{};
+};
+
 class ViewGeometryState final {
 public:
     explicit ViewGeometryState(Size initial_logical) noexcept
         : logical_size_(valid_logical_size(initial_logical) ? initial_logical : Size{}) {}
 
+    /// Geometry state keeps value semantics even after a semantic pump has
+    /// retained a capture source. Copies receive the same current values but do
+    /// not share the mutable per-view capture object.
+    ViewGeometryState(const ViewGeometryState& other) noexcept
+        : last_valid_scale_(other.last_valid_scale_),
+          last_scale_observation_valid_(other.last_scale_observation_valid_),
+          physical_screen_origin_(other.physical_screen_origin_),
+          last_screen_origin_observation_valid_(other.last_screen_origin_observation_valid_),
+          logical_size_(other.logical_size_),
+          physical_size_(other.physical_size_),
+          renderable_(other.renderable_),
+          pending_request_(other.pending_request_) {}
+
+    ViewGeometryState& operator=(const ViewGeometryState& other) noexcept {
+        if (this == &other) return *this;
+
+        last_valid_scale_ = other.last_valid_scale_;
+        last_scale_observation_valid_ = other.last_scale_observation_valid_;
+        physical_screen_origin_ = other.physical_screen_origin_;
+        last_screen_origin_observation_valid_ = other.last_screen_origin_observation_valid_;
+        logical_size_ = other.logical_size_;
+        physical_size_ = other.physical_size_;
+        renderable_ = other.renderable_;
+        pending_request_ = other.pending_request_;
+        sync_native_geometry_capture_state();
+        return *this;
+    }
+
     [[nodiscard]] float last_valid_scale() const noexcept { return last_valid_scale_; }
     [[nodiscard]] bool last_scale_observation_valid() const noexcept {
         return last_scale_observation_valid_;
+    }
+    [[nodiscard]] Point physical_screen_origin() const noexcept {
+        return physical_screen_origin_;
+    }
+    [[nodiscard]] bool last_screen_origin_observation_valid() const noexcept {
+        return last_screen_origin_observation_valid_;
     }
     [[nodiscard]] Size logical_size() const noexcept { return logical_size_; }
     [[nodiscard]] Size physical_size() const noexcept { return physical_size_; }
@@ -84,10 +170,39 @@ public:
         return pending_request_;
     }
 
+    /// Retain a lifetime-safe capture source for production semantic pumps.
+    /// Allocation is intentionally lazy so non-accessibility ViewGeometryState
+    /// users keep the existing no-allocation construction path. The returned
+    /// object contains only the current scale/origin values and never retains
+    /// this ViewGeometryState or its native/retained owner.
+    [[nodiscard]] std::shared_ptr<const ViewNativeGeometryCaptureState>
+    retain_native_geometry_capture_state() {
+        if (!native_geometry_capture_state_) {
+            auto state = std::make_shared<ViewNativeGeometryCaptureState>();
+            state->last_valid_scale_ = last_valid_scale_;
+            state->physical_screen_origin_ = physical_screen_origin_;
+            native_geometry_capture_state_ = std::move(state);
+        }
+        return native_geometry_capture_state_;
+    }
+
     [[nodiscard]] bool observe_scale(float reported_scale) noexcept {
         last_scale_observation_valid_ = valid_scale(reported_scale);
         if (!last_scale_observation_valid_) return false;
         last_valid_scale_ = reported_scale;
+        sync_native_geometry_capture_state();
+        return true;
+    }
+
+    /// Retain the most recent finite physical top-left screen origin for this
+    /// view. Negative coordinates are valid on multi-monitor desktops. A
+    /// transient invalid platform report fails closed and preserves the exact
+    /// previous origin so semantic/native readers never publish NaN/Inf bounds.
+    [[nodiscard]] bool observe_physical_screen_origin(Point reported_origin) noexcept {
+        last_screen_origin_observation_valid_ = valid_physical_screen_origin(reported_origin);
+        if (!last_screen_origin_observation_valid_) return false;
+        physical_screen_origin_ = reported_origin;
+        sync_native_geometry_capture_state();
         return true;
     }
 
@@ -124,12 +239,21 @@ public:
     }
 
 private:
+    void sync_native_geometry_capture_state() noexcept {
+        if (!native_geometry_capture_state_) return;
+        native_geometry_capture_state_->last_valid_scale_ = last_valid_scale_;
+        native_geometry_capture_state_->physical_screen_origin_ = physical_screen_origin_;
+    }
+
     float last_valid_scale_{1.0f};
     bool last_scale_observation_valid_{true};
+    Point physical_screen_origin_{};
+    bool last_screen_origin_observation_valid_{true};
     Size logical_size_{};
     Size physical_size_{};
     bool renderable_{};
     std::optional<Size> pending_request_;
+    std::shared_ptr<ViewNativeGeometryCaptureState> native_geometry_capture_state_;
 };
 
 /// Submit one public logical-size request at the native boundary. The native
