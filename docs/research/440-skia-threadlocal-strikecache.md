@@ -218,10 +218,14 @@ Additional rules:
 - macOS runner hardware varied between campaigns (absolute medians varied by
   roughly 2x while compiler metadata stayed identical), so cross-campaign
   absolute values are not comparable; only within-job A/B pairs are.
-- The pinned and experimental macOS archives were built six days apart on
-  different `macos-15` image snapshots and no same-toolchain control archive was
-  built, so part of the macOS K=1 swing may be toolchain/codegen drift rather
-  than the flag.
+- The pinned and experimental macOS archives were built about five days apart
+  but from the same skia-builder base commit (`f21749b1`; the experimental
+  branch adds only the flag change) and the same `macos-15` runner image
+  snapshot (`macos-15-arm64/20260907.0337`). No flag-OFF control archive was
+  built from the same branch/time, but because the builder commit and toolchain
+  snapshot match, the macOS A/B comparison is controlled apart from the flag
+  itself, and the remaining macOS K=1 swing is measurement/runner noise rather
+  than toolchain drift.
 
 ## Evidence
 
