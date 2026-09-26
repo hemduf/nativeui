@@ -127,10 +127,30 @@ emitEvent(NativeUIImeBridge* bridge,
   }
 }
 
-static void
-callSuperKeyDown(id self, SEL selector, NSEvent* event)
+/// Resolve the class a method-super call must start from.
+///
+/// The IME IMPs are installed on the consumer-prefixed IME subclass. A further
+/// per-view subclass (for example the accessibility view subclass) may be
+/// stacked above it later, so `class_getSuperclass(object_getClass(self))` no
+/// longer names the class the IME method overrides and the super call would
+/// re-enter the IME method. The static original class recorded at creation is
+/// the only stable super for these IMPs.
+static Class
+imeMethodSuperclass(id self, NativeUIImeBridge* bridge)
 {
-  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  if (bridge && bridge->originalClass) {
+    return bridge->originalClass;
+  }
+  return class_getSuperclass(object_getClass(self));
+}
+
+static void
+callSuperKeyDown(id self,
+                 SEL selector,
+                 NSEvent* event,
+                 NativeUIImeBridge* bridge)
+{
+  struct objc_super superInfo = {self, imeMethodSuperclass(self, bridge)};
   ((void (*)(struct objc_super*, SEL, NSEvent*))objc_msgSendSuper)(
     &superInfo, selector, event);
 }
@@ -140,25 +160,30 @@ callSuperSetMarkedText(id self,
                        SEL selector,
                        id string,
                        NSRange selected,
-                       NSRange replacement)
+                       NSRange replacement,
+                       NativeUIImeBridge* bridge)
 {
-  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  struct objc_super superInfo = {self, imeMethodSuperclass(self, bridge)};
   ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
     &superInfo, selector, string, selected, replacement);
 }
 
 static void
-callSuperInsertText(id self, SEL selector, id string, NSRange replacement)
+callSuperInsertText(id self,
+                    SEL selector,
+                    id string,
+                    NSRange replacement,
+                    NativeUIImeBridge* bridge)
 {
-  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  struct objc_super superInfo = {self, imeMethodSuperclass(self, bridge)};
   ((void (*)(struct objc_super*, SEL, id, NSRange))objc_msgSendSuper)(
     &superInfo, selector, string, replacement);
 }
 
 static void
-callSuperUnmarkText(id self, SEL selector)
+callSuperUnmarkText(id self, SEL selector, NativeUIImeBridge* bridge)
 {
-  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  struct objc_super superInfo = {self, imeMethodSuperclass(self, bridge)};
   ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superInfo, selector);
 }
 
@@ -192,7 +217,7 @@ nativeuiKeyDown(id self, SEL selector, NSEvent* event)
     return;
   }
 
-  callSuperKeyDown(self, selector, event);
+  callSuperKeyDown(self, selector, event, bridge);
 }
 
 static void
@@ -202,9 +227,9 @@ nativeuiSetMarkedText(id self,
                       NSRange selected,
                       NSRange replacement)
 {
-  callSuperSetMarkedText(self, selector, string, selected, replacement);
+  NativeUIImeBridge* const bridge = bridgeForObject(self);
+  callSuperSetMarkedText(self, selector, string, selected, replacement, bridge);
 
-  NativeUIImeBridge* bridge = bridgeForObject(self);
   if (!bridge || !bridge->active) {
     return;
   }
@@ -235,7 +260,7 @@ nativeuiInsertText(id self, SEL selector, id string, NSRange replacement)
 {
   NativeUIImeBridge* bridge = bridgeForObject(self);
   if (!bridge || !bridge->active || !bridge->composing) {
-    callSuperInsertText(self, selector, string, replacement);
+    callSuperInsertText(self, selector, string, replacement, bridge);
     return;
   }
 
@@ -249,7 +274,7 @@ nativeuiInsertText(id self, SEL selector, id string, NSRange replacement)
   // Keep Pugl's NSTextInputClient bookkeeping in sync without forwarding the
   // committed text as PUGL_TEXT. The composition event above is the single
   // authoritative commit path for marked-text input.
-  callSuperUnmarkText(self, sel_registerName("unmarkText"));
+  callSuperUnmarkText(self, sel_registerName("unmarkText"), bridge);
 }
 
 static void
@@ -260,7 +285,7 @@ nativeuiUnmarkText(id self, SEL selector)
     bridge->composing = false;
     emitEvent(bridge, NATIVEUI_IME_CANCEL, NULL, 0U, 0U, 0U);
   }
-  callSuperUnmarkText(self, selector);
+  callSuperUnmarkText(self, selector, bridge);
 }
 
 static NSRect
@@ -504,7 +529,7 @@ nativeuiImeUpdate(NativeUIImeBridge* bridge,
   bridge->cursorOffset = physicalCursorOffset;
 
   if (!active && bridge->view) {
-    callSuperUnmarkText(bridge->view, sel_registerName("unmarkText"));
+    callSuperUnmarkText(bridge->view, sel_registerName("unmarkText"), bridge);
   }
 }
 
