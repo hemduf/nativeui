@@ -198,6 +198,11 @@ if(NATIVEUI_BUILD_TESTS)
   )
   nativeui_add_core_test(nativeui_invalidation_tests ${PROJECT_SOURCE_DIR}/tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_paint_culling_tests ${PROJECT_SOURCE_DIR}/tests/paint_culling_tests.cpp)
+  nativeui_add_core_test(nativeui_t096_damage_mapping_tests
+    ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)
+  target_include_directories(nativeui_t096_damage_mapping_tests PRIVATE
+    "${PROJECT_SOURCE_DIR}"
+  )
   nativeui_add_core_test(nativeui_headless_tests ${PROJECT_SOURCE_DIR}/tests/headless_tests.cpp)
   nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests ${PROJECT_SOURCE_DIR}/tests/t061_overlay_acceptance_tests.cpp)
   nativeui_add_core_test(nativeui_t062_tooltip_tests ${PROJECT_SOURCE_DIR}/tests/t062_tooltip_tests.cpp)
@@ -414,6 +419,17 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_t095_scene_gpu_tests)
     nativeui_enable_sanitizers(nativeui_t095_scene_gpu_tests)
 
+    add_executable(nativeui_t096_scene_gpu_tests ${PROJECT_SOURCE_DIR}/tests/t096_scene_gpu_tests.cpp)
+    target_include_directories(nativeui_t096_scene_gpu_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_t096_scene_gpu_tests
+      CONSUMER_ID org.nativeui.test.t096-scene-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_t096_scene_gpu_tests)
+    nativeui_enable_sanitizers(nativeui_t096_scene_gpu_tests)
+
     add_executable(nativeui_smoke_embedded ${PROJECT_SOURCE_DIR}/tests/smoke_embedded.cpp)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_smoke_embedded
@@ -471,6 +487,7 @@ if(NATIVEUI_BUILD_TESTS)
       add_test(NAME nativeui_t089_perlin_noise_gpu_reference_tests
         COMMAND nativeui_t089_perlin_noise_gpu_reference_tests)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
+      add_test(NAME nativeui_t096_scene_gpu_tests COMMAND nativeui_t096_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
         TIMEOUT 60
@@ -478,7 +495,7 @@ if(NATIVEUI_BUILD_TESTS)
       set_tests_properties(nativeui_image_texture_gpu_reference_tests
         nativeui_t088_noise_gpu_reference_tests
         nativeui_t089_perlin_noise_gpu_reference_tests
-        nativeui_t095_scene_gpu_tests PROPERTIES
+        nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
         TIMEOUT 60
       )

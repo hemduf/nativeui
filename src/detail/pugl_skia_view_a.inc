@@ -170,7 +170,7 @@ public:
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
-            if (renderer_.invalidate_from_ui()) request_redraw(rect);
+            if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
         maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);
@@ -271,6 +271,28 @@ public:
     [[nodiscard]] std::optional<PlatformReadbackPixel>
     take_gpu_readback() noexcept {
         return renderer_.take_readback();
+    }
+
+    [[nodiscard]] bool request_gpu_readback_region(int x,
+                                                   int y,
+                                                   int width,
+                                                   int height) noexcept {
+        if (!view_) return false;
+        if (!renderer_.request_readback_region(x, y, width, height)) return false;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackRegion>
+    take_gpu_readback_region() noexcept {
+        return renderer_.take_readback_region();
+    }
+
+    [[nodiscard]] bool suppress_platform_focus(bool suppressed) noexcept {
+        if (!view_) return false;
+        suppress_platform_focus_ = suppressed;
+        return true;
     }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }

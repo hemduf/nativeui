@@ -198,8 +198,71 @@
         }
         ensure_layout();
 
+        (void)paint_cull_paint_region_prepared(
+            painter, platform, requested_region);
+    }
+
+    void prepare_scene_paint(PlatformServices& platform,
+                             bool& requires_full_repaint) {
+        if (lifecycle_transition_active()) {
+            requires_full_repaint = true;
+            return;
+        }
+
+        requires_full_repaint = layout_dirty_ ||
+            !dirty_dynamic_nodes_.empty() || dynamic_reconcile_retry_all_ ||
+            availability_structure_dirty_ || focus_structure_dirty_;
+        flush_dynamic_mutations();
+        if (active_) {
+            sync_availability_structure(platform);
+            sync_focus_structure(platform);
+        }
+        if (layout_dirty_) requires_full_repaint = true;
+        ensure_layout();
+        if (layout_dirty_) requires_full_repaint = true;
+    }
+
+    [[nodiscard]] bool paint_full_scene_prepared(
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        bool& used_effects) {
+        if (!scene_frame_transaction_active_ || !root_ ||
+            lifecycle_transition_ != LifecycleTransition::None) {
+            return false;
+        }
+
+        LifecycleTransitionScope paint_scope{
+            *this, LifecycleTransition::Paint, true};
+        Painter painter{canvas};
+        paint_node(*root_, painter, platform, viewport_rect());
+        used_effects = painter.used_effects();
+        return true;
+    }
+
+    [[nodiscard]] bool paint_partial_scene_prepared(
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        Rect repaint_region,
+        bool& used_effects) {
+        if (!scene_frame_transaction_active_ || !root_ ||
+            lifecycle_transition_ != LifecycleTransition::None) {
+            return false;
+        }
+
+        Painter painter{canvas};
+        const bool painted = paint_cull_paint_region_prepared(
+            painter, platform, repaint_region);
+        used_effects = painter.used_effects();
+        return painted;
+    }
+
+    [[nodiscard]] bool paint_cull_paint_region_prepared(
+        Painter& painter,
+        PlatformServices& platform,
+        Rect requested_region) {
+
         const auto canonical = paint_cull_canonical_repaint_region(requested_region);
-        if (!root_) return;
+        if (!root_) return false;
 
         const Rect viewport = viewport_rect();
 
@@ -209,11 +272,11 @@
             LifecycleTransitionScope paint_scope{
                 *this, LifecycleTransition::Paint, true};
             paint_node(*root_, painter, platform, viewport);
-            return;
+            return true;
         }
 
         const Rect region = canonical.bounds;
-        if (region.empty()) return;
+        if (region.empty()) return false;
 
         // Full-root traversal does not need the culling cache at all. Besides
         // preserving the exact reference path, this keeps cache allocation/failure
@@ -222,13 +285,14 @@
             LifecycleTransitionScope paint_scope{
                 *this, LifecycleTransition::Paint, true};
             paint_node(*root_, painter, platform, viewport);
-            return;
+            return true;
         }
 
         paint_cull_prepare_cache();
         LifecycleTransitionScope paint_scope{
             *this, LifecycleTransition::Paint, true};
         paint_cull_paint_node(*root_, painter, platform, viewport, region);
+        return true;
     }
 
     std::vector<PaintCullEntry> paint_cull_cache_;
