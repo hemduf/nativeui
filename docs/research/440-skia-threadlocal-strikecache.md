@@ -306,8 +306,10 @@ runs in the same job/machine.
 | `5d4d7c8` | pass (churn K=8 +29.2/+53.8, p95 +46.3/+51.1) | pass | fail (text +13.3%, churn +11.2%) |
 | `366f8bc` | no (churn K=8 p95 +33.6/+17.5) | pass | fail (churn +5.5%) |
 
-Linux never satisfied threshold 1 or 2 in any campaign (all deltas within ±8%
-and some small `font_size_churn` regressions); the K=1 precondition always held.
+Linux never satisfied threshold 1 or 2 in any campaign (largest latency
+improvement 8.50%, some small `font_size_churn` regressions); its K=1
+precondition failed in one campaign (`b1acf4d`, `text_layout_paint` +5.43%
+run 1) and held in the others.
 
 ### Sanitizers
 
@@ -329,7 +331,7 @@ and some small `font_size_churn` regressions); the K=1 precondition always held.
 | Platform | Threshold 1 (two runs) | Threshold 2 + K=1 precondition | Threshold 3 memory | Threshold 4 isolation/staleness | Threshold 5 sanitizers |
 | --- | --- | --- | --- | --- | --- |
 | Windows x64 | **pass** (text K=4/8 and churn K=4/8, +53..70%) | **pass** (K=8 throughput +128..235%, precondition clean) | pass (max 119,367 B < 2 MiB) | pass | ASan/UBSan clean |
-| macOS arm64 | fail (2 of 4 campaigns passed; final campaign K=8 p95 +17.5% in run 2) | throughput passes; precondition fails (3 of 4 campaigns) | pass (max 150,154 B < 2 MiB) | pass | ASan/UBSan clean; LSan retention finding |
+| macOS arm64 | fail (2 of 4 campaigns passed; final campaign K=8 p95 +17.5% in run 2) | throughput passes; precondition fails (4 of 4 campaigns) | pass (max 150,154 B < 2 MiB) | pass | ASan/UBSan clean; LSan retention finding |
 | Linux x64 | fail | fail | pass (max 130,250 B < 2 MiB) | pass | ASan/UBSan clean |
 
 Interpretation used for this decision: the qualification thresholds are
@@ -354,7 +356,7 @@ Rationale:
    no qualifying improvement in any campaign, including small `font_size_churn`
    regressions. macOS ARM64 shows large K>=4 gains but fails the threshold-1
    latency pair in half of the campaigns and fails the threshold-2 single-thread
-   precondition in three of four campaigns.
+   precondition in four of four campaigns.
 2. The upstream per-thread caches are never freed at thread exit. LSan measured
    861,984 bytes retained in 1,083 allocations after the instrumented variant-B
    worker threads stopped. Enabling the flag by default would trade a
@@ -381,8 +383,10 @@ does not create or perform that implementation.
 - Terminal decision: `REJECT` (recorded on issue #440).
 - Variant C was exercised only for early local smoke checks; it never carried
   decision weight, as pre-registered.
-- The pre-registered thresholds and protocol were not changed after any
-  measurement; this document only adds results and the decision.
+- The numeric gates (15/20/25/5%, 2 MiB) and the measurement protocol were
+  frozen before the first decision-grade measurement and are identical between
+  `2f4578c` and the final revision. Only instrumentation/documentation wording
+  moved in the correction commit; no gate changed after measurements began.
 - Final CI campaign: NativeUI run 36209142850 at commit `366f8bc` (macOS,
   Linux, Windows, sanitizers) on top of reproduction campaigns `e0cf018`,
   `b1acf4d` and `5d4d7c8`.
