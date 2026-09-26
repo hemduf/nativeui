@@ -103,18 +103,31 @@ private:
 };
 
 /// Deferred composition used by native-view pumps that need a fresh platform
-/// screen origin. Construction retains only the detached geometry lease and a
-/// small no-throw capture callable; the platform query itself does not run until
-/// operator() is invoked by the post-dispatch checkpoint. This keeps native
-/// handle sampling on the existing UI-thread pump after accepted dispatcher work
-/// has drained, while still pairing it with the latest retained scale.
+/// screen origin. Construction retains only the detached geometry lease, the
+/// lifetime-safe per-view write-back handle and a small no-throw capture
+/// callable; the platform query itself does not run until operator() is invoked
+/// by the post-dispatch checkpoint. This keeps native handle sampling on the
+/// existing UI-thread pump after accepted dispatcher work has drained.
+///
+/// At invocation a valid platform sample is first accepted into the live
+/// per-view T043 ViewGeometryState through its writer and only then is the
+/// retained capture source sampled. The returned immutable pair is therefore
+/// exactly the pair native readers commit and later captures observe: one
+/// platform query, one scale/translation conversion, no stale pre-dispatch
+/// origin. A missing/non-finite sample or a view that already died during the
+/// dispatcher drain fails closed to the previous retained pair without mutating
+/// any state. Embedded views use this composition because their configure origin
+/// is parent-relative and must never replace the platform parent-to-screen
+/// query.
 template <class ScreenOriginCapture>
 class DeferredSemanticNativeGeometryCapture final {
 public:
     DeferredSemanticNativeGeometryCapture(
         SemanticNativeGeometryCaptureLease geometry,
+        std::weak_ptr<ViewGeometryObservationWriter> write_back,
         ScreenOriginCapture screen_origin_capture)
         : geometry_(std::move(geometry)),
+          write_back_(std::move(write_back)),
           screen_origin_capture_(std::move(screen_origin_capture)) {
         static_assert(
             std::is_nothrow_invocable_r_v<std::optional<Point>,
@@ -123,18 +136,25 @@ public:
     }
 
     [[nodiscard]] SemanticNativeGeometry operator()() const noexcept {
-        return geometry_.capture_with_physical_screen_origin(
-            screen_origin_capture_());
+        const auto sampled = screen_origin_capture_();
+        if (sampled) {
+            if (const auto writer = write_back_.lock()) {
+                (void)writer->observe_physical_screen_origin(*sampled);
+            }
+        }
+        return geometry_();
     }
 
 private:
     SemanticNativeGeometryCaptureLease geometry_;
+    std::weak_ptr<ViewGeometryObservationWriter> write_back_;
     ScreenOriginCapture screen_origin_capture_;
 };
 
 template <class ScreenOriginCapture>
 DeferredSemanticNativeGeometryCapture(
     SemanticNativeGeometryCaptureLease,
+    std::weak_ptr<ViewGeometryObservationWriter>,
     ScreenOriginCapture)
     -> DeferredSemanticNativeGeometryCapture<ScreenOriginCapture>;
 

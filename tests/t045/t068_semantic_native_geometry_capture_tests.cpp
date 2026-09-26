@@ -158,17 +158,65 @@ void capture_lease_accepts_fresh_platform_origin_without_mutating_source() {
     T068_CHECK(same(source->physical_screen_origin(), {20.0f, 30.0f}));
 }
 
-void deferred_capture_samples_only_when_checkpoint_invokes_it() {
+void observation_writer_accepts_valid_origin_into_geometry_state() {
     ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
-    T068_CHECK(geometry.observe_scale(1.25f));
-    T068_CHECK(geometry.observe_physical_screen_origin({15.0f, 25.0f}));
+    T068_CHECK(geometry.observe_scale(1.5f));
+    T068_CHECK(geometry.observe_physical_screen_origin({20.0f, 30.0f}));
     const auto source = geometry.retain_native_geometry_capture_state();
+    const auto weak_writer = geometry.retain_native_geometry_observation_writer();
+    T068_CHECK(!weak_writer.expired());
+
+    auto writer = weak_writer.lock();
+    T068_CHECK(writer != nullptr);
+    T068_CHECK(writer->observe_physical_screen_origin({-310.5f, 415.25f}));
+    T068_CHECK(same(geometry.physical_screen_origin(), {-310.5f, 415.25f}));
+    T068_CHECK(same(source->physical_screen_origin(), {-310.5f, 415.25f}));
+
+    // Non-finite observations fail closed and preserve the exact prior origin.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    T068_CHECK(!writer->observe_physical_screen_origin({nan, 1.0f}));
+    T068_CHECK(!writer->observe_physical_screen_origin({1.0f, nan}));
+    T068_CHECK(same(geometry.physical_screen_origin(), {-310.5f, 415.25f}));
+    T068_CHECK(same(source->physical_screen_origin(), {-310.5f, 415.25f}));
+
+    // A later finite observation recovers through the same locked handle.
+    T068_CHECK(writer->observe_physical_screen_origin({7.5f, -9.25f}));
+    T068_CHECK(same(geometry.physical_screen_origin(), {7.5f, -9.25f}));
+    T068_CHECK(same(source->physical_screen_origin(), {7.5f, -9.25f}));
+}
+
+void locked_observation_writer_detaches_with_geometry_owner() {
+    std::weak_ptr<ui::detail::ViewGeometryObservationWriter> weak_writer;
+    std::shared_ptr<ui::detail::ViewGeometryObservationWriter> locked;
+    {
+        ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
+        weak_writer = geometry.retain_native_geometry_observation_writer();
+        locked = weak_writer.lock();
+        T068_CHECK(locked != nullptr);
+    }
+
+    // The locked handle keeps the detached writer object alive by design; the
+    // destroyed owner must still be unreachable through it.
+    T068_CHECK(!weak_writer.expired());
+    T068_CHECK(locked != nullptr);
+    T068_CHECK(!locked->observe_physical_screen_origin({1.0f, 2.0f}));
+    locked.reset();
+    T068_CHECK(weak_writer.expired());
+}
+
+void retaining_capture_accepts_platform_origin_into_t043_state() {
+    ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
+    T068_CHECK(geometry.observe_scale(1.5f));
+    T068_CHECK(geometry.observe_physical_screen_origin({20.0f, 30.0f}));
+    const auto source = geometry.retain_native_geometry_capture_state();
+    const auto writer = geometry.retain_native_geometry_observation_writer();
     const ui::detail::SemanticNativeGeometryCaptureLease lease{source};
 
     int platform_queries = 0;
-    ui::Point platform_origin{-480.0f, 720.0f};
+    ui::Point platform_origin{-310.0f, 415.0f};
     const ui::detail::DeferredSemanticNativeGeometryCapture capture{
         lease,
+        writer,
         [&platform_queries, &platform_origin]() noexcept -> std::optional<ui::Point> {
             ++platform_queries;
             return platform_origin;
@@ -177,23 +225,87 @@ void deferred_capture_samples_only_when_checkpoint_invokes_it() {
     T068_CHECK(platform_queries == 0);
 
     // The retained state can advance after the capture object is prepared. The
-    // checkpoint must observe the newest scale while querying the native origin
-    // only when the deferred callable itself is invoked.
+    // post-drain checkpoint must accept the newest platform origin into that
+    // state, pair it with the newest retained scale, and return exactly the pair
+    // that later captures observe.
     T068_CHECK(geometry.observe_scale(2.0f));
-    T068_CHECK(geometry.observe_physical_screen_origin({40.0f, 60.0f}));
     const auto captured = capture();
 
     T068_CHECK(platform_queries == 1);
     T068_CHECK(close(captured.scale, 2.0f));
-    T068_CHECK(same(captured.physical_screen_origin, {-480.0f, 720.0f}));
-    T068_CHECK(same(source->physical_screen_origin(), {40.0f, 60.0f}));
+    T068_CHECK(same(captured.physical_screen_origin, {-310.0f, 415.0f}));
+    T068_CHECK(same(geometry.physical_screen_origin(), {-310.0f, 415.0f}));
+    T068_CHECK(same(source->physical_screen_origin(), {-310.0f, 415.0f}));
+    T068_CHECK(source->last_valid_scale() == captured.scale);
+    T068_CHECK(lease() == captured);
 
-    const ui::detail::DeferredSemanticNativeGeometryCapture failed_capture{
+    // A repeated configure moves the platform origin. Exactly the new origin is
+    // retained and returned; nothing is translated twice.
+    platform_origin = {64.0f, -8.5f};
+    const auto moved = capture();
+    T068_CHECK(platform_queries == 2);
+    T068_CHECK(close(moved.scale, 2.0f));
+    T068_CHECK(same(moved.physical_screen_origin, {64.0f, -8.5f}));
+    T068_CHECK(same(source->physical_screen_origin(), {64.0f, -8.5f}));
+
+    // Missing and non-finite observations fail closed to the exact retained pair
+    // and never mutate the authority.
+    const ui::detail::DeferredSemanticNativeGeometryCapture missing{
         lease,
+        writer,
         []() noexcept -> std::optional<ui::Point> { return std::nullopt; }};
-    const auto fallback = failed_capture();
+    const auto fallback = missing();
     T068_CHECK(close(fallback.scale, 2.0f));
-    T068_CHECK(same(fallback.physical_screen_origin, {40.0f, 60.0f}));
+    T068_CHECK(same(fallback.physical_screen_origin, {64.0f, -8.5f}));
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const ui::detail::DeferredSemanticNativeGeometryCapture invalid{
+        lease,
+        writer,
+        [nan]() noexcept -> std::optional<ui::Point> {
+            return ui::Point{nan, 99.0f};
+        }};
+    const auto rejected = invalid();
+    T068_CHECK(close(rejected.scale, 2.0f));
+    T068_CHECK(same(rejected.physical_screen_origin, {64.0f, -8.5f}));
+    T068_CHECK(same(source->physical_screen_origin(), {64.0f, -8.5f}));
+
+    // A later valid observation recovers and is retained exactly.
+    platform_origin = {-12.25f, 240.5f};
+    const auto recovered = capture();
+    T068_CHECK(same(recovered.physical_screen_origin, {-12.25f, 240.5f}));
+    T068_CHECK(same(source->physical_screen_origin(), {-12.25f, 240.5f}));
+}
+
+void retaining_capture_fails_closed_after_view_death() {
+    std::shared_ptr<const ui::detail::ViewNativeGeometryCaptureState> source;
+    std::weak_ptr<ui::detail::ViewGeometryObservationWriter> writer;
+    {
+        ui::detail::ViewGeometryState geometry{{100.0f, 50.0f}};
+        T068_CHECK(geometry.observe_scale(1.5f));
+        T068_CHECK(geometry.observe_physical_screen_origin({20.0f, 30.0f}));
+        source = geometry.retain_native_geometry_capture_state();
+        writer = geometry.retain_native_geometry_observation_writer();
+    }
+    T068_CHECK(writer.expired());
+
+    // A re-entrant view death leaves the detached source readable but must never
+    // accept a platform observation into destroyed view state.
+    const ui::detail::SemanticNativeGeometryCaptureLease lease{source};
+    bool queried = false;
+    const ui::detail::DeferredSemanticNativeGeometryCapture capture{
+        lease,
+        writer,
+        [&queried]() noexcept -> std::optional<ui::Point> {
+            queried = true;
+            return ui::Point{999.0f, 777.0f};
+        }};
+
+    const auto captured = capture();
+    T068_CHECK(queried);
+    T068_CHECK(close(captured.scale, 1.5f));
+    T068_CHECK(same(captured.physical_screen_origin, {20.0f, 30.0f}));
+    T068_CHECK(same(source->physical_screen_origin(), {20.0f, 30.0f}));
 }
 
 void suite() {
@@ -203,7 +315,10 @@ void suite() {
     capture_sources_are_isolated_per_view_geometry();
     copying_geometry_never_shares_a_capture_source();
     capture_lease_accepts_fresh_platform_origin_without_mutating_source();
-    deferred_capture_samples_only_when_checkpoint_invokes_it();
+    observation_writer_accepts_valid_origin_into_geometry_state();
+    locked_observation_writer_detaches_with_geometry_owner();
+    retaining_capture_accepts_platform_origin_into_t043_state();
+    retaining_capture_fails_closed_after_view_death();
 }
 
 } // namespace

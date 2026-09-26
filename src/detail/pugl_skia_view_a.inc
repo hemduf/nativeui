@@ -242,6 +242,15 @@ public:
         return geometry_.retain_native_geometry_capture_state();
     }
 
+    /// Retain the lifetime-safe write-back handle for the owned T043 geometry
+    /// state. The returned weak value owns nothing and stays valid across a
+    /// re-entrant dispatcher drain; the pump locks it at the post-drain
+    /// checkpoint before accepting one platform screen-origin observation.
+    [[nodiscard]] std::weak_ptr<detail::ViewGeometryObservationWriter>
+    semantic_native_geometry_observation_writer() {
+        return geometry_.retain_native_geometry_observation_writer();
+    }
+
     /// Copy the borrowed platform tokens needed to refresh an Embedded view's
     /// physical screen origin. The returned value owns nothing and is safe to
     /// keep across a dispatcher drain only when paired with semantic_view_lifetime().
@@ -351,6 +360,25 @@ public:
 
     bool observe_native_physical_screen_origin(Point origin) noexcept {
         return geometry_.observe_physical_screen_origin(origin);
+    }
+
+    /// Read the retained T043 capture pair without creating a capture source.
+    [[nodiscard]] std::optional<detail::SemanticNativeGeometry>
+    retained_native_geometry_for_test() const noexcept {
+        const auto source = geometry_.native_geometry_capture_state();
+        if (!source) return std::nullopt;
+        return detail::SemanticNativeGeometry{source->last_valid_scale(),
+                                              source->physical_screen_origin()};
+    }
+
+    [[nodiscard]] detail::EmbeddedNativeScreenOriginQuery
+    embedded_screen_origin_query_for_test() const noexcept {
+        return embedded_screen_origin_query_for_test_;
+    }
+
+    void set_embedded_screen_origin_query_for_test(
+        detail::EmbeddedNativeScreenOriginQuery query) noexcept {
+        embedded_screen_origin_query_for_test_ = query;
     }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }

@@ -1198,6 +1198,20 @@ bool detail::PlatformTestAccess::observe_native_physical_screen_origin(
     return view.impl_ &&
            view.impl_->core.observe_native_physical_screen_origin(origin);
 }
+
+std::optional<detail::SemanticNativeGeometry>
+detail::PlatformTestAccess::retained_native_geometry(EmbeddedView& view) noexcept {
+    return view.impl_ ? view.impl_->core.retained_native_geometry_for_test()
+                      : std::nullopt;
+}
+
+bool detail::PlatformTestAccess::override_embedded_screen_origin_query(
+    EmbeddedView& view,
+    detail::EmbeddedNativeScreenOriginQuery query) noexcept {
+    if (!view.impl_) return false;
+    view.impl_->core.set_embedded_screen_origin_query_for_test(query);
+    return true;
+}
 #endif
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
@@ -1211,14 +1225,41 @@ bool EmbeddedView::poll() {
     auto semantic_domain = impl_->core.semantic_domain();
     const auto semantic_native_geometry_capture_state =
         impl_->core.semantic_native_geometry_capture_state();
+    const auto semantic_native_geometry_observation_writer =
+        impl_->core.semantic_native_geometry_observation_writer();
     const auto semantic_native_screen_origin_capture_source =
         impl_->core.semantic_native_screen_origin_capture_source();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    const auto embedded_screen_origin_query =
+        impl_->core.embedded_screen_origin_query_for_test();
+#endif
     const bool alive = impl_->core.poll(0.0);
 
+    // Embedded configure coordinates are parent-relative, so T068 bounds never
+    // use them. After accepted T065 work has drained, the realized child's
+    // physical screen origin is queried once through the platform seam. A valid
+    // sample is accepted into the per-view T043 state through its lifetime-safe
+    // writer and the retained pair is what gets published, so the native reader
+    // and every later capture observe the exact same value; missing, non-finite
+    // or post-death observations fail closed to the previous retained pair.
     const detail::DeferredSemanticNativeGeometryCapture native_geometry_capture{
         detail::SemanticNativeGeometryCaptureLease{
             std::move(semantic_native_geometry_capture_state)},
-        [source = semantic_native_screen_origin_capture_source]() noexcept {
+        semantic_native_geometry_observation_writer,
+        [source = semantic_native_screen_origin_capture_source
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+         , screen_origin_query = embedded_screen_origin_query
+#endif
+        ]() noexcept -> std::optional<Point> {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            using Query = detail::EmbeddedNativeScreenOriginQuery;
+            if (screen_origin_query.mode == Query::Mode::Missing) {
+                return std::nullopt;
+            }
+            if (screen_origin_query.mode == Query::Mode::Point) {
+                return screen_origin_query.origin;
+            }
+#endif
             return detail::capture_native_physical_screen_origin(source);
         }};
     (void)detail::SemanticRetainedViewCheckpoint::

@@ -50,6 +50,16 @@ struct SceneDiagnostics final {
     bool present_pending{};
 };
 
+/// Deterministic model of the embedded parent-to-screen platform query used by
+/// the production EmbeddedView pump. RealPlatform defers to the production
+/// native_screen_origin.hpp seam; Missing models a failed query and Point models
+/// one successful physical screen-origin observation.
+struct EmbeddedNativeScreenOriginQuery final {
+    enum class Mode : std::uint8_t { RealPlatform, Missing, Point };
+    Mode mode{Mode::RealPlatform};
+    Point origin{};
+};
+
 struct PlatformTestAccess final {
     [[nodiscard]] static bool request_gpu_readback(
         StandaloneWindow& window,
@@ -114,6 +124,18 @@ struct PlatformTestAccess final {
     [[nodiscard]] static bool observe_native_physical_screen_origin(
         EmbeddedView& view,
         Point origin) noexcept;
+
+    /// Read the embedded view's retained per-view T043 capture pair (last valid
+    /// scale + physical screen origin) without creating a capture source.
+    [[nodiscard]] static std::optional<SemanticNativeGeometry>
+    retained_native_geometry(EmbeddedView& view) noexcept;
+
+    /// Replace the embedded pump's platform screen-origin query result for
+    /// subsequent polls. Passing Mode::RealPlatform restores the production
+    /// native_screen_origin.hpp query.
+    static bool override_embedded_screen_origin_query(
+        EmbeddedView& view,
+        EmbeddedNativeScreenOriginQuery query) noexcept;
 };
 
 } // namespace ui::detail

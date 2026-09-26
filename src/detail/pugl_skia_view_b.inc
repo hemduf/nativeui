@@ -417,6 +417,7 @@
     bool recreate_renderer_on_expose_{};
     std::optional<float> scene_scale_override_;
     bool reject_deferred_redraw_once_{};
+    detail::EmbeddedNativeScreenOriginQuery embedded_screen_origin_query_for_test_{};
 #endif
     bool text_input_active_{};
     Rect text_input_logical_area_{};

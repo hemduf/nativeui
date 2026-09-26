@@ -1,8 +1,10 @@
 #include "src/detail/platform_test_access.hpp"
+#include "src/detail/semantic_native_bounds.hpp"
 #include "smoke_accessibility_appkit.hpp"
 
 #include <nativeui/nativeui.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -30,6 +32,53 @@ int fail(std::string_view stage, std::string_view message) {
     return near(left.scale, right.scale) &&
            near(left.physical_screen_origin.x, right.physical_screen_origin.x) &&
            near(left.physical_screen_origin.y, right.physical_screen_origin.y);
+}
+
+[[nodiscard]] bool same_rect(ui::Rect left, ui::Rect right) {
+    return near(left.x, right.x) && near(left.y, right.y) &&
+           near(left.w, right.w) && near(left.h, right.h);
+}
+
+/// Independent oracle for the T043 embedded conversion contract: the platform
+/// physical screen origin is applied after the scale/covering conversion and
+/// exactly once. A second translation or a parent-relative configure coordinate
+/// would change the recomputed expected rectangle.
+[[nodiscard]] bool bounds_convert_scaled_then_translated_once(
+    const ui::detail::SemanticNativePublicationSnapshot& publication) {
+    if (!publication.semantic_snapshot) return false;
+    const ui::SemanticNodeSnapshot* root = nullptr;
+    for (const auto& node : publication.semantic_snapshot->nodes) {
+        if (node.id == publication.semantic_snapshot->root) {
+            root = &node;
+            break;
+        }
+    }
+    if (!root) return false;
+
+    const ui::Rect logical = root->bounds;
+    const float scale = publication.geometry.scale;
+    const ui::Point origin = publication.geometry.physical_screen_origin;
+    const float left = std::floor(logical.x * scale) + origin.x;
+    const float top = std::floor(logical.y * scale) + origin.y;
+    const float right = std::ceil((logical.x + logical.w) * scale) + origin.x;
+    const float bottom = std::ceil((logical.y + logical.h) * scale) + origin.y;
+
+    const ui::Rect actual =
+        ui::detail::SemanticNativeBoundsTransform{publication.geometry}
+            .physical_screen_bounds(logical);
+    return same_rect(actual,
+                     {left, top, std::max(0.0f, right - left),
+                      std::max(0.0f, bottom - top)});
+}
+
+using EmbeddedQuery = ui::detail::EmbeddedNativeScreenOriginQuery;
+
+[[nodiscard]] EmbeddedQuery point_query(ui::Point origin) {
+    return EmbeddedQuery{EmbeddedQuery::Mode::Point, origin};
+}
+
+[[nodiscard]] EmbeddedQuery missing_query() {
+    return EmbeddedQuery{EmbeddedQuery::Mode::Missing, {}};
 }
 
 [[nodiscard]] bool exactly_bounds_changed(
@@ -350,6 +399,172 @@ int run_embedded() {
     const auto moved = PlatformTestAccess::semantic_publication_diagnostics(*child);
     if (!diagnostics_match_sink(moved, *sink)) {
         return fail(stage, "committed publication and sink delivery diverged");
+    }
+
+    // The committed native-reader pair must also be the retained per-view T043
+    // pair: the embedded pump accepts the post-drain platform query into the
+    // live ViewGeometryState before publishing. The exposed root's logical
+    // bounds must then convert with one scale and one translation.
+    stage = "embedded-retained-capture";
+    const auto retained_after_post_drain =
+        PlatformTestAccess::retained_native_geometry(*child);
+    if (!retained_after_post_drain ||
+        !same_geometry(*retained_after_post_drain, moved.geometry)) {
+        return fail(stage, "retained T043 capture source does not match the native reader");
+    }
+    stage = "embedded-bounds-once";
+    if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
+        return fail(stage, "committed bounds are not scaled then translated exactly once");
+    }
+
+    // Deterministic parent-to-screen conversion: replace the platform query with
+    // a known physical origin and drive one real PUGL_CONFIGURE (set_size).
+    // Embedded configure coordinates are parent-relative, so the published
+    // bounds must use exactly the platform origin, scaled once and translated
+    // once, never an additional configure-coordinate translation.
+    stage = "embedded-origin-override";
+    const ui::Point override_origin{-310.5f, 415.25f};
+    if (!PlatformTestAccess::override_embedded_screen_origin_query(
+            *child, point_query(override_origin))) {
+        return fail(stage, "embedded view rejected the screen-origin override");
+    }
+    const int calls_before_override = sink->calls;
+    if (!child->dispatcher().post([&child] {
+            (void)PlatformTestAccess::observe_native_scale(*child, 1.5f);
+        })) {
+        return fail(stage, "dispatcher rejected the scale update");
+    }
+    if (!child->set_size(ui::Size{300.0f, 160.0f})) {
+        return fail(stage, "embedded view rejected the repeated-configure resize");
+    }
+    (void)child->poll();
+    if (sink->calls <= calls_before_override) {
+        return fail(stage, "repeated configure did not publish a native notification");
+    }
+    if (!near(sink->last_geometry.scale, 1.5f) ||
+        !near(sink->last_geometry.physical_screen_origin.x, override_origin.x) ||
+        !near(sink->last_geometry.physical_screen_origin.y, override_origin.y)) {
+        return fail(stage, "embedded configure coordinates contaminated the platform origin");
+    }
+    const auto overridden = PlatformTestAccess::semantic_publication_diagnostics(*child);
+    if (!same_geometry(overridden.geometry, sink->last_geometry)) {
+        return fail(stage, "committed publication and sink delivery diverged");
+    }
+    const auto override_retained =
+        PlatformTestAccess::retained_native_geometry(*child);
+    if (!override_retained || !same_geometry(*override_retained, overridden.geometry)) {
+        return fail(stage, "retained T043 capture source does not match the override publication");
+    }
+    if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
+        return fail(stage, "overridden bounds are not scaled then translated exactly once");
+    }
+
+    // A failed platform query fails closed: the exact previous valid origin stays
+    // authoritative, no NaN/Inf reaches the reader, and the retained capture
+    // source is not mutated.
+    stage = "embedded-origin-query-failure";
+    if (!PlatformTestAccess::override_embedded_screen_origin_query(
+            *child, missing_query())) {
+        return fail(stage, "embedded view rejected the missing-query override");
+    }
+    const int calls_before_failure = sink->calls;
+    if (!child->dispatcher().post([&child] {
+            (void)PlatformTestAccess::observe_native_scale(*child, 1.75f);
+        })) {
+        return fail(stage, "dispatcher rejected the scale update");
+    }
+    (void)child->poll();
+    if (sink->calls <= calls_before_failure) {
+        return fail(stage, "failed query suppressed the expected bounds publication");
+    }
+    if (!near(sink->last_geometry.scale, 1.75f) ||
+        !near(sink->last_geometry.physical_screen_origin.x, override_origin.x) ||
+        !near(sink->last_geometry.physical_screen_origin.y, override_origin.y)) {
+        return fail(stage, "failed query replaced the retained physical origin");
+    }
+    const auto failure_retained =
+        PlatformTestAccess::retained_native_geometry(*child);
+    if (!failure_retained || !same_geometry(*failure_retained, sink->last_geometry)) {
+        return fail(stage, "failed query mutated the retained T043 capture source");
+    }
+
+    // A non-finite platform observation is rejected the same way, and a later
+    // valid observation recovers: the recovered origin becomes the retained
+    // authority for subsequent failed queries.
+    stage = "embedded-origin-query-invalid";
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    if (!PlatformTestAccess::override_embedded_screen_origin_query(
+            *child, point_query({nan, nan}))) {
+        return fail(stage, "embedded view rejected the invalid-query override");
+    }
+    const int calls_before_invalid = sink->calls;
+    if (!child->dispatcher().post([&child] {
+            (void)PlatformTestAccess::observe_native_scale(*child, 1.9f);
+        })) {
+        return fail(stage, "dispatcher rejected the scale update");
+    }
+    (void)child->poll();
+    if (sink->calls <= calls_before_invalid) {
+        return fail(stage, "invalid query suppressed the expected bounds publication");
+    }
+    if (!near(sink->last_geometry.scale, 1.9f) ||
+        !near(sink->last_geometry.physical_screen_origin.x, override_origin.x) ||
+        !near(sink->last_geometry.physical_screen_origin.y, override_origin.y)) {
+        return fail(stage, "invalid query replaced the retained physical origin");
+    }
+
+    stage = "embedded-origin-query-recovery";
+    const ui::Point recovered_origin{64.0f, -8.5f};
+    if (!PlatformTestAccess::override_embedded_screen_origin_query(
+            *child, point_query(recovered_origin))) {
+        return fail(stage, "embedded view rejected the recovery override");
+    }
+    if (!child->dispatcher().post([&child] {
+            (void)PlatformTestAccess::observe_native_scale(*child, 2.0f);
+        })) {
+        return fail(stage, "dispatcher rejected the scale update");
+    }
+    (void)child->poll();
+    if (!near(sink->last_geometry.scale, 2.0f) ||
+        !near(sink->last_geometry.physical_screen_origin.x, recovered_origin.x) ||
+        !near(sink->last_geometry.physical_screen_origin.y, recovered_origin.y)) {
+        return fail(stage, "valid observation did not recover the physical origin");
+    }
+    const auto recovered_retained =
+        PlatformTestAccess::retained_native_geometry(*child);
+    if (!recovered_retained || !same_geometry(*recovered_retained, sink->last_geometry)) {
+        return fail(stage, "recovered origin was not retained in the T043 capture source");
+    }
+    if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
+        return fail(stage, "recovered bounds are not scaled then translated exactly once");
+    }
+
+    // The recovered value survives a subsequent failed query exactly, proving
+    // that acceptance (not the query result) is what updates the authority.
+    stage = "embedded-origin-recovery-retained";
+    if (!PlatformTestAccess::override_embedded_screen_origin_query(
+            *child, missing_query())) {
+        return fail(stage, "embedded view rejected the missing-query override");
+    }
+    const int calls_before_recovery_retained = sink->calls;
+    if (!child->dispatcher().post([&child] {
+            (void)PlatformTestAccess::observe_native_scale(*child, 2.25f);
+        })) {
+        return fail(stage, "dispatcher rejected the scale update");
+    }
+    (void)child->poll();
+    if (sink->calls <= calls_before_recovery_retained) {
+        return fail(stage, "failed query suppressed the expected bounds publication");
+    }
+    if (!near(sink->last_geometry.scale, 2.25f) ||
+        !near(sink->last_geometry.physical_screen_origin.x, recovered_origin.x) ||
+        !near(sink->last_geometry.physical_screen_origin.y, recovered_origin.y)) {
+        return fail(stage, "failed query did not keep the recovered physical origin");
+    }
+    const auto recovery_retained =
+        PlatformTestAccess::retained_native_geometry(*child);
+    if (!recovery_retained || !same_geometry(*recovery_retained, sink->last_geometry)) {
+        return fail(stage, "recovered retained origin drifted after a failed query");
     }
 
     stage = "embedded-reentrant-destruction";

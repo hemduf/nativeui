@@ -120,6 +120,39 @@ private:
     Point physical_screen_origin_{};
 };
 
+class ViewGeometryState;
+
+/// Lifetime-safe UI-thread write-back handle for exactly one ViewGeometryState.
+///
+/// The owning ViewGeometryState keeps the only strong reference; a native-view
+/// pump retains only the weak handle returned by
+/// ViewGeometryState::retain_native_geometry_observation_writer(). Locking the
+/// handle proves the per-view T043 authority is still alive, so a post-drain
+/// platform observation can be accepted through the same
+/// observe_physical_screen_origin() path used by the top-level configure
+/// handler. ViewGeometryState destruction detaches the raw owner, so even a
+/// strongly locked handle fails closed after the owner died instead of
+/// dereferencing destroyed state. The handle is UI-thread-confined like the
+/// state it writes.
+class ViewGeometryObservationWriter final {
+public:
+    /// Validate and retain one physical top-left screen origin observation.
+    /// Returns false for a non-finite observation or once the owning
+    /// ViewGeometryState died; the previous valid origin is preserved in both
+    /// cases.
+    [[nodiscard]] bool observe_physical_screen_origin(Point reported) noexcept;
+
+private:
+    friend class ViewGeometryState;
+
+    explicit ViewGeometryObservationWriter(ViewGeometryState* owner) noexcept
+        : owner_(owner) {}
+
+    void detach() noexcept { owner_ = nullptr; }
+
+    ViewGeometryState* owner_{};
+};
+
 class ViewGeometryState final {
 public:
     explicit ViewGeometryState(Size initial_logical) noexcept
@@ -153,6 +186,12 @@ public:
         return *this;
     }
 
+    ~ViewGeometryState() noexcept {
+        if (native_geometry_observation_writer_) {
+            native_geometry_observation_writer_->detach();
+        }
+    }
+
     [[nodiscard]] float last_valid_scale() const noexcept { return last_valid_scale_; }
     [[nodiscard]] bool last_scale_observation_valid() const noexcept {
         return last_scale_observation_valid_;
@@ -184,6 +223,28 @@ public:
             native_geometry_capture_state_ = std::move(state);
         }
         return native_geometry_capture_state_;
+    }
+
+    /// Read-only access to the retained capture source without creating one.
+    /// Returns null until retain_native_geometry_capture_state() has run.
+    [[nodiscard]] std::shared_ptr<const ViewNativeGeometryCaptureState>
+    native_geometry_capture_state() const noexcept {
+        return native_geometry_capture_state_;
+    }
+
+    /// Retain the lifetime-safe write-back handle for this state. A native-view
+    /// pump keeps only the returned weak value across a re-entrant dispatcher
+    /// drain; a successful lock is the proof that accepting one platform
+    /// observation cannot touch destroyed view state. Allocation is intentionally
+    /// lazy like the capture source.
+    [[nodiscard]] std::weak_ptr<ViewGeometryObservationWriter>
+    retain_native_geometry_observation_writer() {
+        if (!native_geometry_observation_writer_) {
+            native_geometry_observation_writer_ =
+                std::shared_ptr<ViewGeometryObservationWriter>(
+                    new ViewGeometryObservationWriter{this});
+        }
+        return native_geometry_observation_writer_;
     }
 
     [[nodiscard]] bool observe_scale(float reported_scale) noexcept {
@@ -254,7 +315,13 @@ private:
     bool renderable_{};
     std::optional<Size> pending_request_;
     std::shared_ptr<ViewNativeGeometryCaptureState> native_geometry_capture_state_;
+    std::shared_ptr<ViewGeometryObservationWriter> native_geometry_observation_writer_;
 };
+
+inline bool ViewGeometryObservationWriter::observe_physical_screen_origin(
+    Point reported) noexcept {
+    return owner_ != nullptr && owner_->observe_physical_screen_origin(reported);
+}
 
 /// Submit one public logical-size request at the native boundary. The native
 /// request callback is invoked at most once, and authoritative logical size is
