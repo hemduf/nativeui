@@ -47,7 +47,7 @@ jobs:
             probe_a: ./build-a/nativeui_t440_strikecache_probe
             probe_b: ./build-b/nativeui_t440_strikecache_probe
           - name: windows-x64-md
-            os: windows-2022
+            os: windows-latest
             asset: skia-build-win-x64-gpu-md-release.zip
             pinned_sha: 3e19bd7fb8fc81f8ac554c8a4add24ac21815d618227184d5c69aea885a20ce7
             probe_a: ./build-a/nativeui_t440_strikecache_probe.exe
