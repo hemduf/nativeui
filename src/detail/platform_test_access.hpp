@@ -79,6 +79,13 @@ struct PlatformTestAccess final {
     [[nodiscard]] static std::optional<PlatformReadbackRegion>
     take_gpu_readback_region(StandaloneWindow& window) noexcept;
 
+    /// Test-only: ignore platform focus-in/out/configure focus refresh so a
+    /// fixture can drive activation explicitly. Background windows do not
+    /// reliably retain OS key focus, and an inactive tree conservatively
+    /// requires a full repaint. Returns false when the view is not open.
+    static bool suppress_platform_focus(
+        StandaloneWindow& window, bool suppressed) noexcept;
+
     static bool inject_scene_fault(StandaloneWindow& window,
                                    SceneFaultStage stage) noexcept;
     [[nodiscard]] static SceneDiagnostics scene_diagnostics(

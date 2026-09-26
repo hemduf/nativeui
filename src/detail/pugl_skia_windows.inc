@@ -644,6 +644,12 @@ detail::PlatformTestAccess::take_gpu_readback_region(
     return window.impl_->core->take_gpu_readback_region();
 }
 
+bool detail::PlatformTestAccess::suppress_platform_focus(
+    StandaloneWindow& window, bool suppressed) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->suppress_platform_focus(suppressed);
+}
+
 bool detail::PlatformTestAccess::inject_scene_fault(
     StandaloneWindow& window,
     detail::SceneFaultStage stage) noexcept {

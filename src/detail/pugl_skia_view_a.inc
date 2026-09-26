@@ -288,6 +288,12 @@ public:
     take_gpu_readback_region() noexcept {
         return renderer_.take_readback_region();
     }
+
+    [[nodiscard]] bool suppress_platform_focus(bool suppressed) noexcept {
+        if (!view_) return false;
+        suppress_platform_focus_ = suppressed;
+        return true;
+    }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 

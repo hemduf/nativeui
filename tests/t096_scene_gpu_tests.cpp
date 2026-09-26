@@ -172,6 +172,12 @@ bool settle(ui::Application& application, ui::StandaloneWindow& window) {
 bool activate_and_settle(ui::UI& retained,
                          ui::Application& application,
                          ui::StandaloneWindow& window) {
+    // Background windows do not reliably keep OS key focus, and an inactive
+    // tree conservatively requires a full repaint. Ignore platform focus events
+    // so explicit activation is authoritative for the fixture.
+    if (!PlatformTestAccess::suppress_platform_focus(window, true)) {
+        return false;
+    }
     retained.activate(window);
     return settle(application, window);
 }
