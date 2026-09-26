@@ -255,7 +255,11 @@ void reference_contract() {
 
 void tie_contract() {
     constexpr std::uint32_t seed = 0x12345678u;
-    // x == y makes x0 == y0 bit-exactly; equality must take the second branch.
+    // x == y makes x0 == y0 bit-exactly. At that exact tie the branch choice is
+    // not observable in the output: both branches give the two non-(i,j)/(i+1,j+1)
+    // corners the same displacement pair with q <= 0, so these fixtures pin the
+    // frozen tie value and determinism. The strict x0 > y0 rule for x0 != y0 is
+    // pinned by the discriminating reference_contract vectors.
     NUI_CHECK(std::abs(ui::detail::simplex_noise_reference(
         seed, 48.0, 24.0, 24.0) - 0.2828075463285771) < 1e-12);
     NUI_CHECK(std::abs(ui::detail::simplex_noise_reference(
@@ -263,8 +267,8 @@ void tie_contract() {
     NUI_CHECK(std::abs(ui::detail::simplex_noise_reference(
         0x31415926u, 72.0, -36.0, -36.0) - 0.5) < 1e-12);
 
-    // No-epsilon probes at 1e-9 around the tie: the lower probe flips to the
-    // strict first branch (x0 > y0), the upper probe stays on the second.
+    // No-epsilon probes at 1e-9 around the tie: the value changes smoothly
+    // across x0 == y0 (no epsilon or snap-to-tie tolerance participates).
     const double tie = ui::detail::simplex_noise_reference(
         seed, 48.0, 24.0, 24.0);
     const double up = ui::detail::simplex_noise_reference(
