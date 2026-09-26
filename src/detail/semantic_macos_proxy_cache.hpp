@@ -233,7 +233,7 @@ public:
     /// Virtual rows naturally resolve to their owning ListView as an ordinary
     /// parent; roots and unmapped parents fail closed.
     [[nodiscard]] NSAccessibilityElement* parent_from_projection(
-        const MacOSAccessibilityChildProjection& child_projection) noexcept {
+        const MacOSAccessibilityChildProjection& child_projection) noexcept override {
         try {
             const auto identity = child_projection.parent_identity();
             const auto semantic_role = child_projection.parent_role();

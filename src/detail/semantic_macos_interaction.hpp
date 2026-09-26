@@ -5,6 +5,7 @@
 #endif
 
 #import <AppKit/AppKit.h>
+#import <objc/runtime.h>
 
 #include <nativeui/detail/semantic_action.hpp>
 #include <nativeui/detail/semantic_macos_mapping.hpp>

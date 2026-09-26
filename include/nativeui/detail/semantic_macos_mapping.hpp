@@ -60,7 +60,7 @@ enum class MacOSAccessibilityInteraction {
 
 struct MacOSAccessibilityInteractionMapping final {
     MacOSAccessibilityInteraction interaction{};
-    std::optional<bool> boolean_value;
+    std::optional<bool> boolean_value{};
 
     bool operator==(const MacOSAccessibilityInteractionMapping&) const = default;
 };

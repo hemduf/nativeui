@@ -84,3 +84,19 @@ target_link_libraries(t068_semantic_action_router PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_action_view_binding PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_native_view_bridge PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_proxy_cache PRIVATE Threads::Threads)
+
+# The AppKit suites resolve the T065 Dispatcher used by the action router and
+# bridge; compile the real implementation directly exactly like the portable
+# dispatcher-backed suites above.
+if(APPLE)
+  foreach(_semantic_macos_dispatcher_test IN ITEMS
+      semantic_macos_appkit
+      semantic_macos_appkit_frame
+      semantic_macos_proxy_cache
+      semantic_macos_children_callbacks)
+    target_sources(${_semantic_macos_dispatcher_test} PRIVATE
+      ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+    )
+    target_link_libraries(${_semantic_macos_dispatcher_test} PRIVATE Threads::Threads)
+  endforeach()
+endif()
