@@ -479,6 +479,28 @@ if(NATIVEUI_BUILD_TESTS)
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_children_callbacks_tests.mm)
     nativeui_add_macos_accessibility_test(nativeui_semantic_macos_interaction
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_interaction_tests.mm)
+
+    # T068 Batch 3 production macOS bridge. The standalone suites compile the
+    # same per-consumer Objective-C++ source the real platform bridge uses,
+    # plus the real T065 dispatcher used by the action path.
+    set(_nativeui_t068_accessibility_bridge_impl
+      ${PROJECT_SOURCE_DIR}/src/detail/native_accessibility_macos.mm)
+    nativeui_add_macos_accessibility_test(nativeui_semantic_macos_production_bridge
+      ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_production_bridge_tests.mm)
+    nativeui_add_macos_accessibility_test(nativeui_semantic_macos_notifications
+      ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_notification_tests.mm)
+    nativeui_add_macos_accessibility_test(nativeui_t068_objc_runtime_prefix_probe
+      ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_runtime_prefix_probe_tests.mm)
+    foreach(_nativeui_t068_bridge_test IN ITEMS
+        nativeui_semantic_macos_production_bridge
+        nativeui_semantic_macos_notifications
+        nativeui_t068_objc_runtime_prefix_probe)
+      target_sources(${_nativeui_t068_bridge_test} PRIVATE
+        ${_nativeui_t068_accessibility_bridge_impl}
+        ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
+      )
+      target_link_libraries(${_nativeui_t068_bridge_test} PRIVATE Threads::Threads)
+    endforeach()
   endif()
 
   if(NATIVEUI_BUILD_PLATFORM)
@@ -565,6 +587,16 @@ if(NATIVEUI_BUILD_TESTS)
     )
     nativeui_enable_project_warnings(nativeui_smoke_accessibility)
     nativeui_enable_sanitizers(nativeui_smoke_accessibility)
+    if(APPLE)
+      # In-process AppKit query fixture for the production NSAccessibility
+      # bridge (root/children/value through a real view).
+      target_sources(nativeui_smoke_accessibility PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests/smoke_accessibility_appkit.mm)
+      set_target_properties(nativeui_smoke_accessibility PROPERTIES
+        OBJCXX_STANDARD 20
+        OBJCXX_STANDARD_REQUIRED YES
+        OBJCXX_EXTENSIONS NO)
+    endif()
 
     if(APPLE)
       enable_language(OBJCXX)

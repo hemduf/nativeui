@@ -280,6 +280,12 @@ function(_nativeui_prepare_package_platform out_var)
           "NativeUI package platform attachment supports macOS, Windows, Linux/X11 and WebAssembly")
       endif()
 
+      # Windows/Linux/WebAssembly keep the same accessibility C ABI as the
+      # macOS production bridge so the portable platform layer can call it
+      # unconditionally. Every entry point fails closed.
+      list(APPEND _nativeui_pugl_sources
+        "${_nativeui_root}/src/detail/native_accessibility_stub.c")
+
       add_library(_nativeui_package_pugl STATIC ${_nativeui_pugl_sources})
       set_target_properties(_nativeui_package_pugl PROPERTIES
         POSITION_INDEPENDENT_CODE ON
@@ -408,6 +414,7 @@ function(_nativeui_attach_consumer_platform)
         "${_pugl_root}/src/mac.m"
         "${_pugl_root}/src/mac_gl.m"
         "${_nativeui_root}/src/detail/native_ime_macos.m"
+        "${_nativeui_root}/src/detail/native_accessibility_macos.mm"
       )
       set_target_properties("${_nativeui_bridge}" PROPERTIES
         POSITION_INDEPENDENT_CODE ON
@@ -417,6 +424,11 @@ function(_nativeui_attach_consumer_platform)
         VISIBILITY_INLINES_HIDDEN YES
       )
       target_compile_features("${_nativeui_bridge}" PRIVATE c_std_99)
+      # The accessibility Objective-C++ bridge consumes NativeUI's internal
+      # semantic detail headers, so it needs the same include interface as the
+      # generic platform layer. Core exposes only public headers; no platform
+      # type crosses back into it.
+      target_link_libraries("${_nativeui_bridge}" PRIVATE NativeUI::Core)
       target_include_directories("${_nativeui_bridge}"
         PUBLIC "${_pugl_root}/include"
         PRIVATE "${_pugl_root}/src"

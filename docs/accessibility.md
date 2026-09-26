@@ -128,6 +128,10 @@ T067 owns key equality, dataset validation, token retention, finite fixed-height
 
 Virtual ListView children are exposed lazily through NSAccessibility children/index queries. Native proxies are per-view and lazy; no O(N) eager `NSAccessibilityElement` creation is allowed. Any runtime-visible Objective-C class added by T068 must use the T053 consumer-specific runtime prefix. Categories, swizzling, and `+load` are not permitted.
 
+Production attach: one lazily allocated subclass of the actual consumer-prefixed native wrapper view (`<consumer-view-class>_NativeUIAccessibilityView`) is created per native view class and reused by every view of that class. The wrapper view itself is not an accessibility element; it exposes the current semantic root as its single `accessibilityChildren` entry and the focused semantic node, when any, through `accessibilityFocusedUIElement`. Attribute/action callbacks stay on the existing lazy per-view proxies, so removed roots become defunct and foreign/superseded batches cannot notify. Attach or proxy allocation failure disables accessibility for that view only and leaves the native view fully functional.
+
+Committed batches map to the closed AppKit notification set on the main thread: `NSAccessibilityCreatedNotification` / `NSAccessibilityUIElementDestroyedNotification` for an announced root transition plus `NSAccessibilityLayoutChangedNotification` for the structure change (current SDKs no longer provide the historical children-changed constant), `NSAccessibilityFocusedUIElementChangedNotification` for focus, `NSAccessibilitySelectedChildrenChangedNotification` for selection, `NSAccessibilityValueChangedNotification` for values, and `NSAccessibilityLayoutChangedNotification` for bounds. A value-only update therefore never announces a root recreation and a bounds-only update never announces created/destroyed elements.
+
 ## 8. Windows — exact UI Automation mapping
 
 | SemanticRole | UIA ControlType / required primary pattern |

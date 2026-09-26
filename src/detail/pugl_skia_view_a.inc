@@ -8,6 +8,26 @@ enum class NativeViewConstructionFaultStage : std::uint8_t {
     AfterInvalidationCallback,
 };
 
+/// Per-view C++ sink that forwards one committed native publication batch to
+/// the platform accessibility bridge. The owning ViewCore detaches the bridge
+/// (and uninstalls this sink) before the raw bridge pointer could dangle; the
+/// bridge itself contains every failure and never throws into the pump.
+class NativeAccessibilityNotificationForwarder final
+    : public ui::detail::SemanticNativeNotificationSink {
+public:
+    explicit NativeAccessibilityNotificationForwarder(
+        NativeUIAccessibilityBridge* bridge) noexcept
+        : bridge_(bridge) {}
+
+    void on_native_publication(
+        const ui::detail::SemanticNativePublicationBatch& batch) override {
+        if (bridge_) (void)nativeuiAccessibilityDeliver(bridge_, &batch);
+    }
+
+private:
+    NativeUIAccessibilityBridge* bridge_{};
+};
+
 struct NativeViewConstructionFaultResult {
     bool injected_failure{};
     bool unexpected_failure{};
@@ -200,6 +220,7 @@ public:
             std::move(dispatcher),
             std::weak_ptr<const void>{ui_.lifetime_},
             ui_.tree_);
+        attach_accessibility();
     }
 
     [[nodiscard]] std::weak_ptr<const void> semantic_view_lifetime() const noexcept {
@@ -560,6 +581,7 @@ private:
     // while a leased semantic domain safely finishes the checkpoint stack.
     std::shared_ptr<int> semantic_view_lifetime_{std::make_shared<int>(0)};
     std::shared_ptr<SemanticRetainedViewDomain> semantic_domain_;
+    NativeUIAccessibilityBridge* accessibility_bridge_{};
 
     struct ConstructionCleanup {
         explicit ConstructionCleanup(ViewCore& owner,
@@ -674,10 +696,54 @@ private:
     }
 
     void retire_semantics() noexcept {
+        // Native accessibility delivery dies first: uninstall the per-view sink
+        // and detach the AppKit bridge before the semantic domain publishes
+        // endpoint death and before any retained/native teardown.
+        detach_accessibility();
         semantic_view_lifetime_.reset();
         if (!semantic_domain_) return;
         semantic_domain_->shutdown();
         semantic_domain_.reset();
+    }
+
+    /// Attach the platform accessibility bridge to this view's already-bound
+    /// semantic domain. Attach failure disables accessibility for this view
+    /// only; the native view and its retained semantics remain fully valid.
+    void attach_accessibility() noexcept {
+        if (!view_ || !semantic_domain_ || accessibility_bridge_) return;
+        const auto native_view = puglGetNativeView(view_);
+        if (!native_view) return;
+
+        const ui::detail::NativeAccessibilityAttachBinding binding{
+            semantic_domain_->bridge().native_reader_source(),
+            semantic_domain_->bridge().native_action_endpoint()};
+        accessibility_bridge_ = nativeuiAccessibilityCreate(
+            reinterpret_cast<void*>(static_cast<std::uintptr_t>(native_view)),
+            &binding);
+        if (!accessibility_bridge_) return;
+
+        try {
+            auto sink = std::make_shared<NativeAccessibilityNotificationForwarder>(
+                accessibility_bridge_);
+            if (!semantic_domain_->set_native_notification_sink(std::move(sink))) {
+                nativeuiAccessibilityDestroy(accessibility_bridge_);
+                accessibility_bridge_ = nullptr;
+            }
+        } catch (...) {
+            nativeuiAccessibilityDestroy(accessibility_bridge_);
+            accessibility_bridge_ = nullptr;
+        }
+    }
+
+    /// Detach in dependency order: uninstall the C++ sink first so no later
+    /// delivery can reach the raw bridge pointer, then destroy the bridge.
+    void detach_accessibility() noexcept {
+        if (!accessibility_bridge_) return;
+        if (semantic_domain_) {
+            (void)semantic_domain_->set_native_notification_sink(nullptr);
+        }
+        nativeuiAccessibilityDestroy(accessibility_bridge_);
+        accessibility_bridge_ = nullptr;
     }
 
     void remember_teardown_error(const char* message) noexcept {

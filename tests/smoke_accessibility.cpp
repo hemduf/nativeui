@@ -1,4 +1,5 @@
 #include "src/detail/platform_test_access.hpp"
+#include "smoke_accessibility_appkit.hpp"
 
 #include <nativeui/nativeui.hpp>
 
@@ -379,6 +380,16 @@ int main() {
 
         stage = "embedded";
         if (const int result = run_embedded()) return result;
+
+#if defined(__APPLE__)
+        // Automatable VoiceOver-representative fixture: a real Application
+        // window queried through the production NSAccessibility bridge.
+        stage = "appkit";
+        if (const int result =
+                nativeui_smoke_accessibility::run_appkit_query_fixture()) {
+            return result;
+        }
+#endif
         return 0;
     } catch (const std::exception& error) {
         return fail(stage, error.what());

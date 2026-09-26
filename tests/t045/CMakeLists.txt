@@ -52,23 +52,43 @@ if(APPLE)
   nativeui_add_semantics_test(semantic_macos_proxy_cache semantic_macos_proxy_cache_tests.mm)
   nativeui_add_semantics_test(semantic_macos_children_callbacks semantic_macos_children_callbacks_tests.mm)
   nativeui_add_semantics_test(semantic_macos_interaction semantic_macos_interaction_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_production_bridge semantic_macos_production_bridge_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_notifications semantic_macos_notification_tests.mm)
+  nativeui_add_semantics_test(t068_objc_runtime_prefix_probe semantic_macos_runtime_prefix_probe_tests.mm)
   set_target_properties(
     semantic_macos_appkit
     semantic_macos_appkit_frame
     semantic_macos_proxy_cache
     semantic_macos_children_callbacks
     semantic_macos_interaction
+    semantic_macos_production_bridge
+    semantic_macos_notifications
+    t068_objc_runtime_prefix_probe
     PROPERTIES
       OBJCXX_STANDARD 20
       OBJCXX_STANDARD_REQUIRED YES
       OBJCXX_EXTENSIONS NO
   )
+  # T068 Batch 3 production macOS bridge implementation. The standalone suites
+  # compile the same per-consumer source the real platform bridge uses; it is a
+  # plain Objective-C++ translation unit with no Pugl dependency.
+  set(_t068_accessibility_bridge_impl
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/detail/native_accessibility_macos.mm)
+  target_sources(semantic_macos_production_bridge PRIVATE
+    ${_t068_accessibility_bridge_impl})
+  target_sources(semantic_macos_notifications PRIVATE
+    ${_t068_accessibility_bridge_impl})
+  target_sources(t068_objc_runtime_prefix_probe PRIVATE
+    ${_t068_accessibility_bridge_impl})
   find_library(T045_APPKIT_FRAMEWORK AppKit REQUIRED)
   target_link_libraries(semantic_macos_appkit PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_appkit_frame PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_proxy_cache PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_children_callbacks PRIVATE "${T045_APPKIT_FRAMEWORK}")
   target_link_libraries(semantic_macos_interaction PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_production_bridge PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_notifications PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(t068_objc_runtime_prefix_probe PRIVATE "${T045_APPKIT_FRAMEWORK}")
 endif()
 
 target_sources(t068_semantic_action_router PRIVATE
@@ -93,7 +113,10 @@ if(APPLE)
       semantic_macos_appkit
       semantic_macos_appkit_frame
       semantic_macos_proxy_cache
-      semantic_macos_children_callbacks)
+      semantic_macos_children_callbacks
+      semantic_macos_production_bridge
+      semantic_macos_notifications
+      t068_objc_runtime_prefix_probe)
     target_sources(${_semantic_macos_dispatcher_test} PRIVATE
       ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
     )

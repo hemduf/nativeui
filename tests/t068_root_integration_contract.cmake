@@ -105,6 +105,9 @@ set(_accessibility_tests
   "nativeui_semantic_macos_proxy_cache|tests/t045/semantic_macos_proxy_cache_tests.mm|nativeui_add_macos_accessibility_test"
   "nativeui_semantic_macos_children_callbacks|tests/t045/semantic_macos_children_callbacks_tests.mm|nativeui_add_macos_accessibility_test"
   "nativeui_semantic_macos_interaction|tests/t045/semantic_macos_interaction_tests.mm|nativeui_add_macos_accessibility_test"
+  "nativeui_semantic_macos_production_bridge|tests/t045/semantic_macos_production_bridge_tests.mm|nativeui_add_macos_accessibility_test"
+  "nativeui_semantic_macos_notifications|tests/t045/semantic_macos_notification_tests.mm|nativeui_add_macos_accessibility_test"
+  "nativeui_t068_objc_runtime_prefix_probe|tests/t045/semantic_macos_runtime_prefix_probe_tests.mm|nativeui_add_macos_accessibility_test"
 )
 
 foreach(_entry IN LISTS _accessibility_tests)
@@ -167,6 +170,30 @@ if(NOT EXISTS "${SOURCE_DIR}/tests/smoke_accessibility.cpp")
   message(FATAL_ERROR
     "T068 root integration contract: missing accessibility smoke source: tests/smoke_accessibility.cpp")
 endif()
+
+# T068 Batch 3 production macOS bridge: the per-consumer Objective-C++ source
+# must remain discoverable by the consumer platform helper, and the smoke must
+# include the automatable in-process AppKit query fixture.
+file(READ "${SOURCE_DIR}/cmake/NativeUIConsumerPlatform.cmake" _consumer_platform)
+require_text("${_consumer_platform}"
+  "native_accessibility_macos.mm"
+  "per-consumer macOS accessibility bridge source")
+if(NOT EXISTS "${SOURCE_DIR}/src/detail/native_accessibility_bridge.h")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing accessibility C ABI header")
+endif()
+if(NOT EXISTS "${SOURCE_DIR}/src/detail/native_accessibility_macos.mm")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing macOS accessibility bridge source")
+endif()
+require_text("${_tests_cmake}" "smoke_accessibility_appkit.mm"
+  "in-process AppKit accessibility query fixture")
+require_text("${_tests_cmake}"
+  "nativeui_semantic_macos_production_bridge"
+  "production macOS bridge test registration")
+require_text("${_tests_cmake}"
+  "nativeui_t068_objc_runtime_prefix_probe"
+  "Objective-C runtime prefix probe registration")
 
 # Deliberately no examples/features/t068_accessibility.cpp assertion here yet:
 # the dedicated feature example is a later T068 batch. When it lands, extend
