@@ -1,4 +1,6 @@
-class TextAreaComponent final : public Component, public detail::ThemeBinding {
+class TextAreaComponent final : public Component,
+                                public detail::ThemeBinding,
+                                public detail::SemanticActionHandler {
 public:
     TextAreaComponent(
         std::string label,
@@ -15,6 +17,28 @@ public:
     }
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::text_edit_semantic_info(label_, model_.text(), true);
+    }
+
+    /// Semantic writes follow the ordinary committed-edit policy: multiline
+    /// normalization and the configured maximum length. The application State
+    /// remains the single value owner.
+    [[nodiscard]] bool perform_semantic_action(
+        const detail::SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::SetValue ||
+            !effective_enabled() || effective_read_only() ||
+            !request.text_value) {
+            return false;
+        }
+
+        auto incoming = normalize_multiline(*request.text_value);
+        incoming = text::truncate_codepoints(incoming, model_.max_length());
+        auto state = state_;
+        if (state.get() != incoming) state.set(incoming);
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);

@@ -5,6 +5,7 @@
 #include <nativeui/detail/semantic_rules.hpp>
 #include <nativeui/detail/semantic_virtual_source.hpp>
 
+#include <functional>
 #include <optional>
 
 namespace ui::detail {
@@ -106,12 +107,26 @@ namespace semantic_live_action_detail {
     return item_info;
 }
 
+/// UI-thread focus requester supplied by the owning retained tree. It resolves
+/// one exposed semantic node to the nearest retained focusable and fails closed
+/// when the tree has no active platform focus domain.
+using SemanticFocusRequester = std::function<bool(SemanticId)>;
+
 /// Re-resolve and execute one built-in semantic action on the UI thread.
 /// Eligibility is recomputed from the current component semantics and effective
 /// availability immediately before dispatch. No Node/Component pointer survives
 /// this call and no retained-tree state is accessed after a handler begins, so
 /// a normal widget callback may synchronously remove its subtree according to
 /// the existing widget action policy.
+///
+/// `request_focus` is supplied by the owning retained tree. `SemanticAction::Focus`
+/// is owned by the retained focus manager, not by widget value/state handlers:
+/// ordinary identities request focus for the exposed node (resolved by the tree
+/// to the nearest retained focusable, so composite widgets keep one keyboard Tab
+/// stop) and virtual identities delegate to `VirtualSemanticActionHandler` so
+/// the logical item can be revealed through normal T067 scroll/materialization
+/// after the owner accepted focus. A missing requester therefore fails Focus
+/// closed.
 ///
 /// Virtual identities are resolved through the owning logical collection using
 /// their stable T067 token and are dispatched only to VirtualSemanticActionHandler.
@@ -122,7 +137,8 @@ namespace semantic_live_action_detail {
     Node& root,
     const SemanticIdentity& identity,
     const SemanticActionRequest& request,
-    NodeId focused_node_id = kInvalidNodeId) {
+    NodeId focused_node_id = kInvalidNodeId,
+    const SemanticFocusRequester& request_focus = {}) {
     if (identity.node_id == kInvalidSemanticId) {
         return false;
     }
@@ -188,6 +204,14 @@ namespace semantic_live_action_detail {
 
     if (!semantic_action_allowed(container_info, request.action)) {
         return false;
+    }
+
+    if (request.action == SemanticAction::Focus) {
+        // Keyboard focus belongs to the retained focus manager. Widgets never
+        // implement Focus as a value/state mutation, so the tree resolves the
+        // exposed identity to its nearest retained focusable owner (composite
+        // widgets expose semantic children that remain one keyboard Tab stop).
+        return request_focus && request_focus(static_cast<SemanticId>(node->id));
     }
 
     auto* handler = dynamic_cast<SemanticActionHandler*>(node->component.get());

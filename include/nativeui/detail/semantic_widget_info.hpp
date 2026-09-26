@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace ui::detail {
 
@@ -134,6 +136,114 @@ namespace ui::detail {
     info.name = title;
     info.focusable = true;
     info.actions = {SemanticAction::Focus};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo list_view_semantic_info() {
+    SemanticInfo info;
+    info.role = SemanticRole::ListView;
+    info.focusable = true;
+    info.actions = {SemanticAction::Focus};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo list_item_semantic_info(
+    std::string_view name,
+    bool selected,
+    bool activatable) {
+    SemanticInfo info;
+    info.role = SemanticRole::ListItem;
+    info.name = name;
+    info.selected = selected;
+    info.focusable = true;
+    info.actions = {SemanticAction::Select, SemanticAction::Focus};
+    if (activatable) info.actions.push_back(SemanticAction::Activate);
+    return info;
+}
+
+/// Best-effort accessible name for an ordinary ListView row key. Key types that
+/// can be viewed as text keep their exact logical value; arithmetic keys are
+/// rendered deterministically. Other key types contribute no invented name and
+/// rely on the row's own exposed content.
+template <class Key>
+[[nodiscard]] inline std::string list_item_key_name(const Key& key) {
+    if constexpr (std::is_convertible_v<const Key&, std::string_view>) {
+        return std::string{std::string_view{key}};
+    } else if constexpr (std::is_arithmetic_v<Key>) {
+        return std::to_string(key);
+    } else {
+        return {};
+    }
+}
+
+[[nodiscard]] inline SemanticInfo tabs_semantic_info() {
+    SemanticInfo info;
+    info.role = SemanticRole::Tabs;
+    info.focusable = true;
+    info.actions = {SemanticAction::Focus};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo tab_semantic_info(
+    std::string_view label,
+    bool selected) {
+    SemanticInfo info;
+    info.role = SemanticRole::Tab;
+    info.name = label;
+    info.selected = selected;
+    info.focusable = true;
+    info.actions = {SemanticAction::Select, SemanticAction::Focus};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo tab_panel_semantic_info() {
+    SemanticInfo info;
+    info.role = SemanticRole::TabPanel;
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo popup_menu_semantic_info() {
+    SemanticInfo info;
+    info.role = SemanticRole::PopupMenu;
+    info.focusable = true;
+    info.actions = {SemanticAction::Focus};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo menu_item_semantic_info(
+    std::string_view label,
+    bool enabled,
+    bool selected,
+    bool activatable) {
+    SemanticInfo info;
+    info.role = SemanticRole::MenuItem;
+    info.name = label;
+    info.enabled = enabled;
+    info.selected = selected;
+    if (enabled && activatable) info.actions = {SemanticAction::Activate};
+    return info;
+}
+
+[[nodiscard]] inline SemanticInfo range_slider_handle_semantic_info(
+    float value,
+    float minimum,
+    float maximum,
+    float step) {
+    SemanticInfo info;
+    info.role = SemanticRole::RangeSliderHandle;
+    info.numeric_value = static_cast<double>(std::clamp(value, minimum, maximum));
+    info.value_range = SemanticValueRange{
+        static_cast<double>(minimum),
+        static_cast<double>(maximum),
+        static_cast<double>(step),
+    };
+    info.focusable = true;
+    info.actions = {
+        SemanticAction::Increment,
+        SemanticAction::Decrement,
+        SemanticAction::SetValue,
+        SemanticAction::Focus,
+    };
     return info;
 }
 

@@ -201,6 +201,40 @@ struct MenuPopupSession final {
     bool completion_queued{};
 };
 
+/// One retained semantic MenuItem child of an open menu popup.
+///
+/// MenuPopupComponent keeps all painting, pointer handling and keyboard
+/// traversal, so the open menu stays one focusable overlay element; these
+/// children only own the exposed MenuItem role/name/enabled/selected state.
+class MenuPopupItemComponent final : public Component {
+public:
+    MenuPopupItemComponent(
+        std::shared_ptr<MenuPopupSession> session,
+        std::size_t index)
+        : session_(std::move(session)), index_(index) {}
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        if (index_ >= session_->items.size()) return {};
+        const auto& item = session_->items[index_];
+        if (item.kind != PopupMenuItem::Kind::Action) return {};
+        return menu_item_semantic_info(
+            item.label,
+            item.actionable(),
+            index_ == session_->highlighted,
+            item.actionable());
+    }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    std::shared_ptr<MenuPopupSession> session_;
+    std::size_t index_{};
+};
+
 template <class T>
 class ComboPopupComponent final : public Component,
                                   public ThemeBinding,
@@ -460,6 +494,10 @@ public:
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return popup_menu_semantic_info();
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto base = base_item_style();
         float width = current_theme().controls.minimum_width;
@@ -478,6 +516,28 @@ public:
             height += std::max(0.0f, resolved.row_height);
         }
         return {width, std::max(height, std::max(0.0f, base.row_height))};
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        // Mirror the paint/index geometry so retained MenuItem semantic children
+        // expose the same rows the user sees and clicks.
+        const auto base = base_item_style();
+        float y = bounds.y;
+        for (std::size_t index = 0; index < placements.size(); ++index) {
+            float height = 0.0f;
+            if (index < session_->items.size()) {
+                if (session_->items[index].kind == PopupMenuItem::Kind::Separator) {
+                    height = std::max(0.0f, base.separator_height);
+                } else {
+                    height = std::max(0.0f, resolved_item_style(index).row_height);
+                }
+            }
+            placements[index].bounds = Rect{bounds.x, y, bounds.w, height};
+            y += height;
+        }
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -998,6 +1058,15 @@ public:
     [[nodiscard]] bool dismiss_overlay_on_tab() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return false; }
 
+    /// The persistent PopupMenu anchor is the widget's semantic surface. While
+    /// a popup is open, the retained menu overlay contributes its own PopupMenu
+    /// node with ordered MenuItem children.
+    [[nodiscard]] SemanticInfo semantics() const override {
+        auto info = popup_menu_semantic_info();
+        info.name = label_;
+        return info;
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);
         const auto text = TextService::measure(label_, combo_anchor_text_style(resolved));
@@ -1129,6 +1198,16 @@ private:
         session->items = std::move(snapshot);
         session->item_style = item_style_;
 
+        std::vector<Spec> item_children;
+        item_children.reserve(session->items.size());
+        for (std::size_t index = 0; index < session->items.size(); ++index) {
+            item_children.push_back(Spec{
+                [session, index] {
+                    return std::make_unique<MenuPopupItemComponent>(session, index);
+                },
+                {}});
+        }
+
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
         overlay.anchor = runtime_->node_id;
@@ -1137,7 +1216,7 @@ private:
         overlay.dismiss_on_outside_pointer_down = true;
         overlay.content = Spec{
             [session] { return std::make_unique<MenuPopupComponent>(session); },
-            {}};
+            std::move(item_children)};
 
         if (opening_key != Key::None) runtime_->suppress_until_key_up = opening_key;
         pending_command_ = OverlayComponentCommand::show(
