@@ -218,6 +218,10 @@ Additional rules:
 - macOS runner hardware varied between campaigns (absolute medians varied by
   roughly 2x while compiler metadata stayed identical), so cross-campaign
   absolute values are not comparable; only within-job A/B pairs are.
+- The pinned and experimental macOS archives were built six days apart on
+  different `macos-15` image snapshots and no same-toolchain control archive was
+  built, so part of the macOS K=1 swing may be toolchain/codegen drift rather
+  than the flag.
 
 ## Evidence
 
@@ -249,8 +253,8 @@ complete 5+30 runs per variant per platform) with
 | --- | --- | --- | --- |
 | [36204371658](https://github.com/hemduf/nativeui/actions/runs/36204371658) | `e0cf018` | macOS, Linux | first campaign; Windows failed on MinGW portability |
 | [36205522658](https://github.com/hemduf/nativeui/actions/runs/36205522658) | `b1acf4d` | macOS, Linux | after MINOR-finding corrections |
-| [36206377715](https://github.com/hemduf/nativeui/actions/runs/36206377715) | `5d4d7c8` | macOS, Linux, sanitizers | first clean sanitizer campaign |
-| [36209142850](https://github.com/hemduf/nativeui/actions/runs/36209142850) | `366f8bc` | macOS, Linux, Windows, sanitizers | final same-commit cross-platform campaign |
+| [36206377715](https://github.com/hemduf/nativeui/actions/runs/36206377715) | `5d4d7c8` | macOS, Linux, Linux sanitizers | first clean sanitizer campaign |
+| [36209142850](https://github.com/hemduf/nativeui/actions/runs/36209142850) | `366f8bc` | macOS, Linux, Windows, Linux sanitizers | final same-commit cross-platform campaign |
 
 ### Final campaign results (commit `366f8bc`)
 
@@ -306,12 +310,14 @@ runs in the same job/machine.
 | `5d4d7c8` | pass (churn K=8 +29.2/+53.8, p95 +46.3/+51.1) | pass | fail (text +13.3%, churn +11.2%) |
 | `366f8bc` | no (churn K=8 p95 +33.6/+17.5) | pass | fail (churn +5.5%) |
 
-Linux never satisfied threshold 1 or 2 in any campaign (largest latency
-improvement 8.50%, some small `font_size_churn` regressions); its K=1
-precondition failed in one campaign (`b1acf4d`, `text_layout_paint` +5.43%
-run 1) and held in the others.
+Linux never satisfied threshold 1 or 2 in any campaign (largest
+median-latency improvement 7.85% and largest throughput improvement 8.51%,
+some small `font_size_churn` regressions); its K=1 precondition failed in one
+campaign (`b1acf4d`, `text_layout_paint` +5.43% run 1) and held in the others.
 
-### Sanitizers
+### Sanitizers (Linux x64 only)
+
+No sanitizer job ran on macOS or Windows; those campaigns were measurement-only.
 
 - Linux ASan+UBSan (`-fsanitize=address,undefined -fno-sanitize=vptr`, the vptr
   check disabled because the pinned Skia archives have no RTTI): probe self-test
@@ -330,9 +336,9 @@ run 1) and held in the others.
 
 | Platform | Threshold 1 (two runs) | Threshold 2 + K=1 precondition | Threshold 3 memory | Threshold 4 isolation/staleness | Threshold 5 sanitizers |
 | --- | --- | --- | --- | --- | --- |
-| Windows x64 | **pass** (text K=4/8 and churn K=4/8, +53..70%) | **pass** (K=8 throughput +128..235%, precondition clean) | pass (max 119,367 B < 2 MiB) | pass | ASan/UBSan clean |
-| macOS arm64 | fail (2 of 4 campaigns passed; final campaign K=8 p95 +17.5% in run 2) | throughput passes; precondition fails (4 of 4 campaigns) | pass (max 150,154 B < 2 MiB) | pass | ASan/UBSan clean; LSan retention finding |
-| Linux x64 | fail | fail | pass (max 130,250 B < 2 MiB) | pass | ASan/UBSan clean |
+| Windows x64 | **pass** (text K=4/8 and churn K=4/8, +53..70%) | **pass** (K=4/8 throughput +120..237%, precondition clean) | pass (max 119,367 B < 2 MiB) | pass | not run (measurement only) |
+| macOS arm64 | fail (2 of 4 campaigns passed; final campaign K=8 p95 +17.5% in run 2) | throughput passes; precondition fails (4 of 4 campaigns) | pass (max 150,154 B < 2 MiB) | pass | not run (measurement only) |
+| Linux x64 | fail | fail | pass (max 130,250 B < 2 MiB) | pass | ASan/UBSan clean; LSan variant-B thread-exit retention finding (861,984 B / 1,083 allocations) |
 
 Interpretation used for this decision: the qualification thresholds are
 evaluated **per platform**, because a shared builder flag changes every
@@ -351,12 +357,12 @@ Rationale:
 
 1. The tested flag is a single builder-level switch that would apply to every
    published archive. Only Windows x64 satisfies the pre-registered
-   qualification gates reproducibly (thresholds 1 and 2, the K=1 precondition,
-   bounded memory, clean isolation staleness, clean sanitizers). Linux x64 shows
-   no qualifying improvement in any campaign, including small `font_size_churn`
-   regressions. macOS ARM64 shows large K>=4 gains but fails the threshold-1
-   latency pair in half of the campaigns and fails the threshold-2 single-thread
-   precondition in four of four campaigns.
+   qualification gates reproducibly: thresholds 1 and 2, the K=1 precondition,
+   bounded memory, and clean isolation/staleness (sanitizers were
+   Linux-only). Linux x64 shows no qualifying improvement in any campaign,
+   including small `font_size_churn` regressions. macOS ARM64 shows large K>=4
+   gains but fails the threshold-1 latency pair in half of the campaigns and
+   fails the threshold-2 single-thread precondition in four of four campaigns.
 2. The upstream per-thread caches are never freed at thread exit. LSan measured
    861,984 bytes retained in 1,083 allocations after the instrumented variant-B
    worker threads stopped. Enabling the flag by default would trade a
@@ -388,8 +394,8 @@ does not create or perform that implementation.
   `2f4578c` and the final revision. Only instrumentation/documentation wording
   moved in the correction commit; no gate changed after measurements began.
 - Final CI campaign: NativeUI run 36209142850 at commit `366f8bc` (macOS,
-  Linux, Windows, sanitizers) on top of reproduction campaigns `e0cf018`,
-  `b1acf4d` and `5d4d7c8`.
+  Linux, Windows, Linux x64 sanitizers) on top of reproduction campaigns
+  `e0cf018`, `b1acf4d` and `5d4d7c8`.
 - The temporary measurement workflow was removed from the branch before merge;
   its historical copy is at commit `366f8bc` and the procedure is reproducible
   from this document.
