@@ -1,6 +1,6 @@
 # T440 — Skia thread-local strike cache evaluation (research)
 
-**Status: methodology frozen; measurements pending.**
+**Status: research complete; terminal decision recorded.**
 
 This document is the pre-registered methodology for evaluating Skia M153's
 `skia_enable_threadlocal_strikecache` build option
@@ -47,7 +47,7 @@ upstream behavior in `src/core/SkStrikeCache.cpp` at that revision:
 | Variant | Skia archive | Runtime selector | Notes |
 | --- | --- | --- | --- |
 | **A** | pinned `chrome/m153` archive (flag OFF) | default (`false`) | Baseline. |
-| **B** | experimental skia-builder archive built with the flag ON | default (`true`) | Not buildable in this ticket; a later skia-builder phase produces the archive. |
+| **B** | experimental skia-builder archive built with the flag ON | default (`true`) | Built in the skia-builder phase; published as the `experiment/tls-strikecache-m153` prerelease (provenance below). |
 | **C** | pinned `chrome/m153` archive (flag OFF) | forced `true` before any text operation | Exploratory only. Never sole `ADOPT` evidence. |
 
 Variant C exists so the pinned archive can provide an early signal without
@@ -199,26 +199,195 @@ Additional rules:
   evidence missing, sanitizer evidence missing, or memory/isolation checks
   inconclusive.
 
-## Environment limits for this phase
+## Environment limits
 
-- macOS ARM64 local measurements only.
+- Cross-platform CI Release evidence was produced headlessly on GitHub-hosted
+  macOS ARM64 (`macos-15`), Linux x64 (`ubuntu-24.04`) and Windows x64
+  (`windows-latest`, MSVC 19.51, `/MD`) runners. Local validation used
+  macOS ARM64 only.
 - Headless CPU raster (`HeadlessRenderer`) only; no native
   compositor/GPU presentation latency is measured.
-- No local GN/depot_tools: the variant B archive is delegated to a later
-  skia-builder phase; no Skia build happens in this repository.
-- Windows/Linux Release runs and the sanitizer pass are still pending and are
-  required before a terminal `ADOPT`.
+- No local GN/depot_tools: variant B was built by the skia-builder CI. No Skia
+  build happens in this repository, and no production builder/package or
+  dependency pin changes.
+- The temporary cross-platform measurement workflow lived on the research
+  branch only and was removed before merge; its historical copy is at commit
+  `366f8bcb73a7...` (the commit that produced the final campaign). The workflow
+  used a `[t440-run]`-guarded push trigger because `workflow_dispatch` requires
+  the file on the default branch.
+- macOS runner hardware varied between campaigns (absolute medians varied by
+  roughly 2x while compiler metadata stayed identical), so cross-campaign
+  absolute values are not comparable; only within-job A/B pairs are.
 
-## Evidence log
+## Evidence
 
-| Run | Variant | Command | Result document | Result |
+### Variant B provenance (skia-builder phase)
+
+| Item | Value |
+| --- | --- |
+| Builder branch | `experiment/tls-strikecache-m153` at `9a05575`, based on the pinned builder commit `f21749b1` |
+| GN delta vs production package | `skia_enable_threadlocal_strikecache = true` in `RELEASE_GN_ARGS` |
+| Build run | skia-builder `Build Skia` [run 36201387398](https://github.com/hemduf/skia-builder/actions/runs/36201387398), `skip_release=true` |
+| Production impact | none: `chrome/m153` tag/release untouched (tag still `f21749b1`); Linux arm64 job failed in a cold-cache `tools/git-sync-deps` sync and its rerun succeeded |
+| Published archive set | prerelease `experiment/tls-strikecache-m153` (not consumed by any pin) |
+| macOS universal SHA256 | `702c06a9f5f378a6d8d83a3dcb3cae610c348bb53df9ac90989524d207cab4ed` |
+| Linux x64 SHA256 | `76dc54ef8d8d8cee260d40275d4437aed08f864bf11ec388392b92a93a3ce034` |
+| Windows x64 gpu-md SHA256 | `43d06d61b6edf67fcc3e3a621cea391602540076d4f63fabb4ae8f7f00c9935a` |
+| Milestone | `chrome/m153` (same builder commit as the pinned archive) |
+
+Local provenance check before publication: a probe linked against the extracted
+macOS archive reports `runtime_threadlocal_default=true` with `--variant B`, and
+the probe rejects a variant label that does not match the archive.
+
+### Measurement campaigns
+
+All runs used the frozen protocol (A1 B1 A2 B2, `--threads 1,2,4,8`, two
+complete 5+30 runs per variant per platform) with
+`--skia-archive-sha256` supplied for both variants.
+
+| NativeUI run | Commit | Platforms | Purpose |
+| --- | --- | --- | --- |
+| [36204371658](https://github.com/hemduf/nativeui/actions/runs/36204371658) | `e0cf018` | macOS, Linux | first campaign; Windows failed on MinGW portability |
+| [36205522658](https://github.com/hemduf/nativeui/actions/runs/36205522658) | `b1acf4d` | macOS, Linux | after MINOR-finding corrections |
+| [36206377715](https://github.com/hemduf/nativeui/actions/runs/36206377715) | `5d4d7c8` | macOS, Linux, sanitizers | first clean sanitizer campaign |
+| [36209142850](https://github.com/hemduf/nativeui/actions/runs/36209142850) | `366f8bc` | macOS, Linux, Windows, sanitizers | final same-commit cross-platform campaign |
+
+### Final campaign results (commit `366f8bc`)
+
+Deltas are improvement percentages `1 - B/A` for latency metrics and
+`throughput_B/throughput_A - 1` for throughput; `r1`/`r2` are the two complete
+runs in the same job/machine.
+
+**macOS ARM64**
+
+| workload | K | median Δ r1/r2 | p95 Δ r1/r2 | throughput Δ r1/r2 |
 | --- | --- | --- | --- | --- |
-| pending | A | pending | outside repository | pending |
-| pending | B | pending (skia-builder phase) | outside repository | pending |
-| pending | C | pending | outside repository | pending |
+| text_layout_paint | 1 | +2.3 / +1.1 | +14.0 / −2.3 | +2.3 / +1.1 |
+| text_layout_paint | 2 | +32.1 / −15.1 | +28.0 / −29.4 | +47.3 / −13.1 |
+| text_layout_paint | 4 | +51.3 / +10.2 | +51.4 / +9.8 | +105.5 / +11.4 |
+| text_layout_paint | 8 | +46.2 / +13.8 | +39.3 / +11.1 | +85.9 / +16.0 |
+| font_size_churn | 1 | −5.5 / +6.9 | +1.5 / +0.5 | −5.2 / +7.4 |
+| font_size_churn | 2 | +20.0 / −4.1 | +27.3 / +2.9 | +25.0 / −3.9 |
+| font_size_churn | 4 | +26.5 / +6.8 | +41.6 / +6.5 | +36.0 / +7.3 |
+| font_size_churn | 8 | +31.6 / +22.4 | +33.6 / +17.5 | +46.3 / +28.8 |
+
+**Linux x64**
+
+| workload | K | median Δ r1/r2 | p95 Δ r1/r2 | throughput Δ r1/r2 |
+| --- | --- | --- | --- | --- |
+| text_layout_paint | 1 | +0.1 / +1.4 | −1.3 / +3.6 | +0.1 / +1.4 |
+| text_layout_paint | 2 | +4.2 / +7.8 | +3.7 / +7.7 | +4.4 / +8.5 |
+| text_layout_paint | 4 | +2.6 / +3.3 | +2.9 / +2.5 | +2.7 / +3.4 |
+| text_layout_paint | 8 | +0.9 / +1.2 | +1.3 / +1.0 | +1.0 / +1.2 |
+| font_size_churn | 1 | +0.1 / +0.9 | −2.4 / +0.4 | +0.1 / +0.9 |
+| font_size_churn | 2 | −3.1 / −3.2 | −2.4 / −1.5 | −3.0 / −3.1 |
+| font_size_churn | 4 | −3.5 / +1.5 | −3.6 / +2.7 | −3.4 / +1.5 |
+| font_size_churn | 8 | −1.9 / −1.1 | −1.3 / −0.3 | −1.9 / −1.1 |
+
+**Windows x64 (MSVC 19.51, `/MD`)**
+
+| workload | K | median Δ r1/r2 | p95 Δ r1/r2 | throughput Δ r1/r2 |
+| --- | --- | --- | --- | --- |
+| text_layout_paint | 1 | +11.1 / −0.8 | +58.2 / −11.5 | +12.4 / −0.8 |
+| text_layout_paint | 2 | −18.2 / −27.5 | −45.1 / −25.9 | −15.4 / −21.6 |
+| text_layout_paint | 4 | +70.3 / +56.1 | +65.1 / +58.1 | +236.7 / +128.0 |
+| text_layout_paint | 8 | +70.0 / +70.1 | +69.8 / +68.6 | +232.9 / +234.6 |
+| font_size_churn | 1 | +21.5 / +0.4 | +35.6 / +4.7 | +27.4 / +0.4 |
+| font_size_churn | 2 | +44.8 / −2.6 | +38.9 / +11.5 | +81.2 / −2.5 |
+| font_size_churn | 4 | +54.5 / +54.9 | +53.0 / +54.3 | +119.6 / +121.5 |
+| font_size_churn | 8 | +62.5 / +64.7 | +66.7 / +60.2 | +166.4 / +183.6 |
+
+### macOS reproduction across campaigns
+
+| Campaign commit | Threshold 1 | Threshold 2 | K=1 precondition |
+| --- | --- | --- | --- |
+| `e0cf018` | no (K=8 p95 +17.4/+23.8) | pass | fail (+10.0/+6.4 text, +31.4/+15.1 churn) |
+| `b1acf4d` | pass (text K=8 +31.5/+31.1, p95 +29.2/+29.6) | pass | fail (text pair 2 +5.8%) |
+| `5d4d7c8` | pass (churn K=8 +29.2/+53.8, p95 +46.3/+51.1) | pass | fail (text +13.3%, churn +11.2%) |
+| `366f8bc` | no (churn K=8 p95 +33.6/+17.5) | pass | fail (churn +5.5%) |
+
+Linux never satisfied threshold 1 or 2 in any campaign (all deltas within ±8%
+and some small `font_size_churn` regressions); the K=1 precondition always held.
+
+### Sanitizers
+
+- Linux ASan+UBSan (`-fsanitize=address,undefined -fno-sanitize=vptr`, the vptr
+  check disabled because the pinned Skia archives have no RTTI): probe self-test
+  and lifecycle/staleness checks pass; no memory-safety or UB findings.
+- LSan with `detect_leaks=1` on variant B reports
+  `SUMMARY: AddressSanitizer: 861984 byte(s) leaked in 1083 allocation(s)`.
+  Every reported allocation is an indirect leak rooted in
+  `SkStrikeCache::internalCreateStrike`, `SkStrike::addGlyphAndDigest`,
+  `SkGlyphDigest` hash storage and `SkTypeface` scaler contexts created on the
+  worker threads; the thread-local caches become unreachable when those threads
+  exit. This is upstream `static thread_local auto* cache = new SkStrikeCache`
+  retention, not a NativeUI allocation, and it is the lifecycle hazard this
+  ticket was required to measure for plugin hosts.
+
+## Pre-registered threshold evaluation
+
+| Platform | Threshold 1 (two runs) | Threshold 2 + K=1 precondition | Threshold 3 memory | Threshold 4 isolation/staleness | Threshold 5 sanitizers |
+| --- | --- | --- | --- | --- | --- |
+| Windows x64 | **pass** (text K=4/8 and churn K=4/8, +53..70%) | **pass** (K=8 throughput +128..235%, precondition clean) | pass (max 119,367 B < 2 MiB) | pass | ASan/UBSan clean |
+| macOS arm64 | fail (2 of 4 campaigns passed; final campaign K=8 p95 +17.5% in run 2) | throughput passes; precondition fails (3 of 4 campaigns) | pass (max 150,154 B < 2 MiB) | pass | ASan/UBSan clean; LSan retention finding |
+| Linux x64 | fail | fail | pass (max 130,250 B < 2 MiB) | pass | ASan/UBSan clean |
+
+Interpretation used for this decision: the qualification thresholds are
+evaluated **per platform**, because a shared builder flag changes every
+published archive and the additional rule forbids extrapolating one platform's
+evidence to another. Under that reading only Windows satisfies the gates, and a
+shared default changes Linux/macOS without qualifying evidence. The `ADOPT`
+condition is therefore not met for a common builder configuration. The same
+rule means the Windows result cannot be used to qualify the other two.
+
+## Terminal decision
+
+**REJECT — no change to the production Skia builder/package, no NativeUI
+dependency-pin change, no default enablement.**
+
+Rationale:
+
+1. The tested flag is a single builder-level switch that would apply to every
+   published archive. Only Windows x64 satisfies the pre-registered
+   qualification gates reproducibly (thresholds 1 and 2, the K=1 precondition,
+   bounded memory, clean isolation staleness, clean sanitizers). Linux x64 shows
+   no qualifying improvement in any campaign, including small `font_size_churn`
+   regressions. macOS ARM64 shows large K>=4 gains but fails the threshold-1
+   latency pair in half of the campaigns and fails the threshold-2 single-thread
+   precondition in three of four campaigns.
+2. The upstream per-thread caches are never freed at thread exit. LSan measured
+   861,984 bytes retained in 1,083 allocations after the instrumented variant-B
+   worker threads stopped. Enabling the flag by default would trade a
+   platform-specific throughput gain for process-lifetime memory retention in
+   plugin hosts that create/destroy rendering threads, which conflicts with the
+   ticket's isolation/lifecycle requirements.
+3. No public API or installed header exposes the build detail, and no
+   NativeUI-owned mutable renderer-specific `thread_local`/global state was
+   introduced. The isolation contract test enforces that separation.
+4. `ADOPT` would also build on a repeated evidence pattern that is not present
+   on all three required platforms; per the pre-registered rules a terminal
+   `NEEDS_MORE_EVIDENCE` is not applicable any more because the variant-B
+   archive, cross-platform runs and sanitizer evidence now exist.
+
+Positive-but-not-qualifying signal for a possible future ticket: Windows and
+macOS K>=4/K=8 show real contention relief (up to ~2.3x aggregate throughput on
+Windows). If the project wants that benefit, a separate ticket would need to
+scope platform-conditional builder enablement and thread-lifetime management for
+the per-thread caches; per the issue's scope-change rule this research ticket
+does not create or perform that implementation.
 
 ## Decision record
 
-No terminal decision yet. The decision, its thresholds, and the two-run
-reproduction evidence will be recorded here and in issue #440 before the
-research ticket closes.
+- Terminal decision: `REJECT` (recorded on issue #440).
+- Variant C was exercised only for early local smoke checks; it never carried
+  decision weight, as pre-registered.
+- The pre-registered thresholds and protocol were not changed after any
+  measurement; this document only adds results and the decision.
+- Final CI campaign: NativeUI run 36209142850 at commit `366f8bc` (macOS,
+  Linux, Windows, sanitizers) on top of reproduction campaigns `e0cf018`,
+  `b1acf4d` and `5d4d7c8`.
+- The temporary measurement workflow was removed from the branch before merge;
+  its historical copy is at commit `366f8bc` and the procedure is reproducible
+  from this document.
+
+
