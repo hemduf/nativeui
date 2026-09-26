@@ -155,12 +155,22 @@ bool wait_for_presentations(ui::Application& application,
     });
 }
 
-bool settle(ui::Application& application, ui::StandaloneWindow& window) {
-    for (int attempt = 0; attempt < 32; ++attempt) {
-        (void)application.poll(0.0);
+// Drain platform events with a short real timeout so slow CI window servers can
+// deliver the first configure/expose before a fixture baselines.
+bool wait_until_settled(ui::Application& application,
+                        ui::StandaloneWindow& window,
+                        int attempts = 4,
+                        int polls_per_attempt = 64) {
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        for (int poll = 0; poll < polls_per_attempt; ++poll) {
+            const auto diagnostics = PlatformTestAccess::scene_diagnostics(window);
+            if (diagnostics.scene_valid && !diagnostics.full_repaint_required) {
+                return true;
+            }
+            (void)application.poll(0.005);
+        }
     }
-    const auto diagnostics = PlatformTestAccess::scene_diagnostics(window);
-    return diagnostics.scene_valid && !diagnostics.full_repaint_required;
+    return false;
 }
 
 // Retained UI activation is explicit for every fixture in this file: headless
@@ -178,8 +188,20 @@ bool activate_and_settle(ui::UI& retained,
     if (!PlatformTestAccess::suppress_platform_focus(window, true)) {
         return false;
     }
-    retained.activate(window);
-    return settle(application, window);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        retained.activate(window);
+        (void)PlatformTestAccess::request_expose(window);
+        if (wait_until_settled(application, window, 1, 64)) return true;
+    }
+    const auto diagnostics = PlatformTestAccess::scene_diagnostics(window);
+    std::cerr << "T096 settle diagnostics: scene_valid=" << diagnostics.scene_valid
+              << " full_repaint_required=" << diagnostics.full_repaint_required
+              << " failed_exposes=" << diagnostics.failed_exposes
+              << " scene_builds=" << diagnostics.scene_builds
+              << " presentations=" << diagnostics.presentations
+              << " scene=" << diagnostics.scene_width << "x"
+              << diagnostics.scene_height << '\n';
+    return false;
 }
 
 // A configurable retained paint probe. `measure` reports a fixed size, the
@@ -720,7 +742,9 @@ bool run_localized_partial_fixture(ui::Application& application,
     // Deterministic warm-frame counters. No hardware FPS claims and no
     // production readback/GPU wait: the readbacks above exist only behind
     // NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS.
-    if (!settle(application, window)) return failure("benchmark fixture did not settle");
+    if (!wait_until_settled(application, window)) {
+        return failure("benchmark fixture did not settle");
+    }
     const auto benchmark_before = PlatformTestAccess::scene_diagnostics(window);
 
     const int full_left = left->paints;
@@ -1414,7 +1438,7 @@ bool run_sibling_destruction_isolation_fixture(ui::Application& application) {
          b_partial->last_update_height == b_partial->scene_height)) {
         return failure("sibling isolation view B partial update was not localized");
     }
-    if (!settle(application, *window_b)) {
+    if (!wait_until_settled(application, *window_b)) {
         return failure("sibling isolation view B did not settle after its partial update");
     }
 
@@ -1447,7 +1471,7 @@ bool run_sibling_destruction_isolation_fixture(ui::Application& application) {
     // for the partial path (an inactive tree conservatively requires a full
     // repaint). Plain fills keep the surviving view effect-free.
     retained_b->activate(*window_b);
-    if (!settle(application, *window_b)) {
+    if (!wait_until_settled(application, *window_b)) {
         return failure("sibling isolation view B did not settle after activation");
     }
     const auto b_marker_after = read_pixel(application, *window_b, {8.0f, 8.0f});
