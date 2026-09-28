@@ -181,11 +181,42 @@ Focused references are [`t025_text_edit_model`](../examples/features/t025_text_e
 
 ## Overlays
 
-[`include/nativeui/overlay.hpp`](../include/nativeui/overlay.hpp) defines the generic retained overlay model. An `OverlaySpec` selects modal/non-modal behavior, pointer policy, optional retained anchor, placement policy and dismissal policy. Overlay content remains owned by the same UI domain; the overlay stack is not a second native-window model.
+[`include/nativeui/overlay.hpp`](../include/nativeui/overlay.hpp) defines the generic retained overlay model and [`UI::show_overlay()` / `close_overlay()`](../include/nativeui/ui.hpp) own publication. Overlays remain retained content inside one `UI`; they are not native popup windows and they do not create process-global modal state.
 
-Stable placement modes include anchor-relative below/above/right/left, centered and automatic placement. Placement is resolved in logical coordinates and constrained to the owning viewport. Modal overlays participate in retained focus/input policy rather than installing an unrelated process-global modal loop.
+### Overlay specification and lifetime
 
-[`t061_overlay_portal`](../examples/features/t061_overlay_portal.cpp) is the focused overlay example.
+`OverlaySpec` owns the overlay content specification plus its presentation policy:
+
+- `OverlayMode::NonModal` leaves ordinary root keyboard focus active. `Modal` creates an active trapping focus scope and blocks pointer input to lower retained content.
+- `OverlayPointerPolicy::Normal` participates in pointer hit testing. `Ignore` makes the overlay and its descendants pointer-transparent. `Modal + Ignore` is invalid and `show_overlay()` returns an invalid handle for that combination.
+- `anchor` is an optional `NodeId` from the **same UI**. Without an anchor, presentation is centered. If an anchored node disappears or becomes unresolvable, the UI dismisses that overlay rather than keeping stale anchor state.
+- `placement` is resolved in logical UI coordinates. Anchor-relative sides may flip to their opposite side when that fits better and are then clamped to the viewport. `Auto` considers below, above, right and left deterministically in that order.
+- Escape and outside-pointer dismissal are opt-in through `dismiss_on_escape` and `dismiss_on_outside_pointer_down`.
+
+`OverlayHandle` is a non-owning per-UI identity token. It becomes stale after explicit close, policy dismissal, anchor loss or UI teardown; keeping the handle does not keep the overlay alive. Passing an empty, stale, already-closed or cross-UI handle to `close_overlay()` returns `false`.
+
+Publication/close are transactional around retained structural invalidation. If structural notification throws while opening, the provisional entry is rolled back before the exception escapes. If it throws while closing, the logical entry remains live so the same handle can be retried instead of exposing a half-closed overlay.
+
+`overlay_entries()` is diagnostics only: it returns creation-order policy plus resolved bounds in **logical coordinates**. `resolved == false` means retained layout has not produced final bounds yet.
+
+```cpp
+ui::OverlaySpec popup;
+popup.anchor = button_node_id;
+popup.placement = ui::OverlayPlacement::Auto;
+popup.dismiss_on_escape = true;
+popup.dismiss_on_outside_pointer_down = true;
+popup.content = ui::make_spec(ui::Label{"Actions"});
+
+ui::OverlayHandle handle = screen.show_overlay(std::move(popup));
+if (handle) {
+    // Later, still on the UI thread.
+    (void)screen.close_overlay(handle);
+}
+```
+
+Overlay presentation, dismissal and inspection are UI/main-thread operations. A handle is not a synchronization primitive and does not permit cross-thread retained mutation.
+
+[`t061_overlay_portal`](../examples/features/t061_overlay_portal.cpp) exercises non-modal, modal, pointer-transparent, anchored/dismissal and handle-lifetime behavior.
 
 ## Tooltip
 
@@ -203,11 +234,52 @@ At a public-contract level:
 
 ## Dialog
 
-[`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp) defines the retained dialog contract. A dialog is composed from NativeUI content/actions and presented through the existing overlay/modal stack; it does not introduce a second platform modal-window hierarchy.
+[`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp) defines a UI-scoped retained dialog controller. A dialog is ordinary NativeUI retained content presented through the overlay/modal stack; it does not introduce a second platform modal-window hierarchy.
 
-The public model distinguishes dialog actions (including default/cancel roles), a shown/busy/invalid/unavailable presentation result, and action-versus-dismissed completion. The dialog panel is a focus scope so keyboard focus remains within the active modal content while it is presented. The owning UI remains responsible for dialog lifetime and retained focus restoration.
+### Specification and validation
 
-[`t063_dialog`](../examples/features/t063_dialog.cpp) is the focused dialog example.
+`DialogSpec::body` must contain a valid component factory. Action IDs must be non-empty and unique, and a spec may contain at most one `Default` action and one `Cancel` action. Disabled actions remain visible but cannot activate.
+
+`Dialog::show()` reports contract-level failures without inventing platform exceptions:
+
+- `Shown`: the per-UI dialog slot and modal overlay were published;
+- `Busy`: this controller or another dialog already owns the UI's single active dialog slot;
+- `InvalidSpec`: body/action invariants are invalid;
+- `Unavailable`: the UI is tearing down/unavailable or the backing overlay cannot publish.
+
+Allocation or retained structural-notification failures can still throw. A failed publication rolls back ownership so the UI is not stranded in `Busy`.
+
+### Completion, keyboard policy and lifetime
+
+An enabled `Default` action handles Enter. Escape completes the enabled `Cancel` action when present; otherwise it produces `DialogResultKind::Dismissed`. `Dialog::close()` is the programmatic dismissed path.
+
+Completion runs only after the retained overlay close/reconciliation reaches its safe commit point and the per-UI dialog slot is released. Application completion code can therefore re-enter and present another dialog. If a normal completion callback throws, NativeUI has already made the completed dialog terminal before the exception propagates. Destructor cleanup is `noexcept` and contains failures.
+
+`Dialog` is bound to one `UI`, is non-copyable/non-movable and is UI/main-thread confined. `active()` observes whether that controller still owns the active generation; it does not extend UI lifetime. UI deactivation/teardown may abandon active presentation as part of UI lifecycle cleanup rather than preserving a native modal session outside the UI.
+
+```cpp
+ui::Dialog confirm{screen};
+
+ui::DialogSpec spec;
+spec.title = "Delete preset?";
+spec.body = ui::make_spec(ui::Label{"This cannot be undone."});
+spec.actions = {
+    {"delete", "Delete", true, ui::DialogActionRole::Default},
+    {"cancel", "Cancel", true, ui::DialogActionRole::Cancel},
+};
+
+const auto shown = confirm.show(
+    std::move(spec),
+    [](ui::DialogResult result) {
+        if (result.kind == ui::DialogResultKind::Action) {
+            // result.action_id is "delete" or "cancel".
+        }
+    });
+```
+
+The dialog panel is a focus scope; modal pointer/keyboard ownership and focus restoration remain part of the same retained `UI`. The implementation uses logical viewport geometry and bounded body scrolling, not a separate native coordinate/window model.
+
+[`t063_dialog`](../examples/features/t063_dialog.cpp) is the focused executable reference for Default/Cancel behavior, exactly-once completion, focus trapping, bounded scrolling and close-before-callback semantics.
 
 ## Choosing static, dynamic and virtualized composition
 

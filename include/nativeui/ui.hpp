@@ -342,22 +342,30 @@ public:
         tree_.paint(canvas, platform);
     }
 
-    /// Queue one in-view overlay through the same T058 structural checkpoint
-    /// used by explicit dynamic containers. show/close never splice retained
-    /// nodes synchronously on the caller's callback stack.
+    /// Publish one retained in-view overlay owned by this UI.
     ///
-    /// Opening a T061 overlay is a global dismissal event for transient
-    /// presentations (pending/visible Tooltip) in the same UI. The Tooltip's
-    /// own non-hit-test presentation uses OverlayService directly and is
-    /// therefore not self-dismissing.
+    /// The request is consumed in the UI/main-thread domain and never creates a
+    /// native popup window. Opening an application/widget overlay first dismisses
+    /// transient presentations such as pending/visible tooltips. A valid handle
+    /// identifies the exact per-UI entry; `Modal + Ignore` is rejected and
+    /// returns an invalid handle. Allocation or structural-invalidation failures
+    /// may throw; provisional publication is rolled back before propagation.
+    ///
+    /// Anchored geometry and `OverlayEntryInfo::bounds` use logical coordinates.
+    /// Anchorless overlays are centered; an anchored overlay is dismissed if its
+    /// retained anchor can no longer be resolved.
     [[nodiscard]] OverlayHandle show_overlay(OverlaySpec overlay) {
         tree_.dismiss_transient_presentations();
         return overlay_state_->show(std::move(overlay));
     }
 
-    /// Close an overlay handle owned by this UI. Stale, cross-UI and already
-    /// closed handles are deterministic no-ops; retained teardown is deferred
-    /// through T058 even though the handle becomes stale immediately.
+    /// Close one live overlay owned by this UI.
+    ///
+    /// Returns true only when the exact handle was accepted for close. Empty,
+    /// stale, already-closing/already-closed and cross-UI handles return false.
+    /// Retained teardown is scheduled through the structural checkpoint; if
+    /// structural invalidation throws, the logical entry and handle remain live
+    /// so the caller can retry rather than observing a half-committed close.
     bool close_overlay(OverlayHandle handle) {
         return overlay_state_->close(std::move(handle));
     }

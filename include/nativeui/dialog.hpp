@@ -19,42 +19,73 @@
 
 namespace ui {
 
+/// Stable application-defined identifier for a dialog action.
+///
+/// IDs are owned strings. Every action in one DialogSpec must have a non-empty,
+/// unique ID before `Dialog::show()` can succeed.
 using DialogActionId = std::string;
 
+/// Classifies why a dialog completion was produced.
 enum class DialogResultKind {
+    /// An enabled action completed the dialog; `action_id` identifies it.
     Action,
+    /// The dialog closed without selecting an action; `action_id` is empty.
     Dismissed,
 };
 
+/// Owned result delivered to a Dialog completion callback.
 struct DialogResult {
     DialogResultKind kind{DialogResultKind::Dismissed};
     DialogActionId action_id;
 };
 
+/// Semantic keyboard role of a dialog action.
 enum class DialogActionRole {
+    /// Ordinary action with no implicit Enter/Escape behavior.
     Normal,
+    /// At most one action may be Default; enabled Default handles Enter.
     Default,
+    /// At most one action may be Cancel; enabled Cancel handles Escape.
     Cancel,
 };
 
+/// One visible dialog action.
 struct DialogAction {
+    /// Non-empty ID unique within the containing DialogSpec.
     DialogActionId id;
+    /// Display label owned by the dialog specification.
     std::string label;
+    /// Disabled actions remain present but cannot be activated.
     bool enabled{true};
     DialogActionRole role{DialogActionRole::Normal};
 };
 
+/// Complete retained specification for one modal dialog.
+///
+/// `body` must contain a valid component factory. At most one Default and one
+/// Cancel action are allowed, and action IDs must be non-empty and unique.
+/// `backdrop_color` is rendered in the owning UI; it does not create a native
+/// modal window.
 struct DialogSpec {
+    /// Optional title. An empty title omits the title row.
     std::string title;
+    /// Required owned retained body content.
     Spec body;
+    /// Ordered visible actions.
     std::vector<DialogAction> actions;
+    /// RGBA backdrop color drawn over the owning UI behind the dialog panel.
     Color backdrop_color{0.0f, 0.0f, 0.0f, 0.48f};
 };
 
+/// Result of attempting to present a Dialog.
 enum class DialogShowResult {
+    /// The dialog acquired the per-UI slot and its modal overlay was published.
     Shown,
+    /// This controller or another Dialog already owns the single active slot.
     Busy,
+    /// The DialogSpec violates required body/action invariants.
     InvalidSpec,
+    /// The UI is tearing down/unavailable or the backing overlay cannot publish.
     Unavailable,
 };
 
@@ -371,10 +402,24 @@ private:
 
 } // namespace detail
 
+/// UI-scoped controller for one retained modal dialog transaction.
+///
+/// A Dialog is bound to one UI, is non-copyable/non-movable, and all operations
+/// are UI/main-thread work. At most one Dialog can be active per UI. The
+/// controller owns no native window: presentation is implemented through the
+/// owning UI's retained overlay stack.
+///
+/// Normal action/Escape/programmatic completion closes and reconciles retained
+/// content before invoking application code. Completion is therefore allowed to
+/// re-enter and present another dialog. If completion throws on a normal call,
+/// the exception propagates only after NativeUI has made the completed dialog
+/// terminal; destructor cleanup contains exceptions.
 class Dialog {
 public:
+    /// Application callback receiving the terminal action/dismissal result.
     using Completion = std::function<void(DialogResult)>;
 
+    /// Bind this controller to one UI. The UI owns the underlying dialog slot.
     explicit Dialog(UI& ui)
         : ui_(&ui), state_(ui.dialog_state_), lifetime_(std::make_shared<int>(0)) {}
 
@@ -383,6 +428,10 @@ public:
     Dialog(Dialog&&) = delete;
     Dialog& operator=(Dialog&&) = delete;
 
+    /// Tear down an active dialog without allowing exceptions to escape.
+    ///
+    /// The retained overlay/slot is made terminal before any best-effort
+    /// completion callback is invoked.
     ~Dialog() noexcept {
         // Invalidate retained callbacks first. Normal close stays retryable for
         // ordinary callers, but a dying controller has no legal retry owner:
@@ -401,6 +450,15 @@ public:
         finish_destructor_close_noexcept();
     }
 
+    /// Present one modal dialog in the bound UI.
+    ///
+    /// `spec` and the completion are owned by the active transaction. Returns
+    /// Busy when the per-UI dialog slot is already occupied, InvalidSpec for an
+    /// absent body factory / empty-or-duplicate action ID / duplicate Default or
+    /// Cancel role, and Unavailable during UI teardown or overlay publication
+    /// failure. Allocation or retained-structure notification exceptions may
+    /// propagate; publication is rolled back so a failed show does not strand
+    /// the UI in Busy.
     [[nodiscard]] DialogShowResult show(DialogSpec spec, Completion completion) {
         auto state = state_.lock();
         if (!state || state->ui_tearing_down || !ui_) return DialogShowResult::Unavailable;
@@ -455,14 +513,22 @@ public:
         return DialogShowResult::Shown;
     }
 
+    /// Return whether this controller still owns the active generation.
+    ///
+    /// Becomes false after successful completion, deactivation/teardown, or UI
+    /// loss. This is an observation only; it does not extend UI lifetime.
     [[nodiscard]] bool active() const noexcept {
         if (generation_ == 0) return false;
         const auto state = state_.lock();
         return state && !state->ui_tearing_down && state->owns(generation_);
     }
 
-    /// Explicit controller/programmatic close follows the same exactly-once
-    /// teardown path as an action but reports Dismissed.
+    /// Programmatically complete the active dialog as Dismissed.
+    ///
+    /// Returns true when the close transaction is accepted/completed and false
+    /// when this controller no longer owns a live dialog. Retained reconciliation
+    /// or the application completion may throw; internal ownership remains
+    /// recoverable or terminal according to the commit point before propagation.
     bool close() {
         return complete(DialogResult{DialogResultKind::Dismissed, {}});
     }
