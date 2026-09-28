@@ -228,6 +228,49 @@ void factory_failure_does_not_mutate_cache() {
     NUI_CHECK(recovered && recovered.retained);
 }
 
+void factory_failure_preserves_full_cache_and_lru() {
+    Cache cache{{.max_entries = 2, .max_accounted_bytes = 16}};
+
+    auto one = cache.acquire(1, 8, [] {
+        return std::make_shared<Resource>(1);
+    });
+    auto two = cache.acquire(2, 8, [] {
+        return std::make_shared<Resource>(2);
+    });
+    NUI_CHECK(one && two && one.retained && two.retained);
+    one.resource.reset();
+    two.resource.reset();
+
+    auto touch_one = cache.acquire(1, 8, [] {
+        return std::make_shared<Resource>(101);
+    });
+    NUI_CHECK(touch_one && touch_one.hit);
+    touch_one.resource.reset();
+
+    bool threw = false;
+    try {
+        static_cast<void>(cache.acquire(3, 8, []() -> std::shared_ptr<Resource> {
+            throw std::runtime_error("injected full-cache creation failure");
+        }));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(cache.retained_entries() == 2);
+    NUI_CHECK(cache.retained_accounted_bytes() == 16);
+    NUI_CHECK(cache.contains(1));
+    NUI_CHECK(cache.contains(2));
+    NUI_CHECK(!cache.contains(3));
+
+    auto three = cache.acquire(3, 8, [] {
+        return std::make_shared<Resource>(3);
+    });
+    NUI_CHECK(three && three.retained && !three.hit);
+    NUI_CHECK(cache.contains(1));
+    NUI_CHECK(!cache.contains(2));
+    NUI_CHECK(cache.contains(3));
+}
+
 void cache_instances_are_lifetime_independent() {
     Cache a{{.max_entries = 2, .max_accounted_bytes = 32}};
     Cache b{{.max_entries = 2, .max_accounted_bytes = 32}};
@@ -259,6 +302,7 @@ int main() {
     active_entries_are_pinned_and_new_resource_stays_transient();
     hash_collision_still_uses_full_key_equality();
     factory_failure_does_not_mutate_cache();
+    factory_failure_preserves_full_cache_and_lru();
     cache_instances_are_lifetime_independent();
     return 0;
 }
