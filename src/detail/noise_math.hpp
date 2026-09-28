@@ -178,4 +178,79 @@ constexpr double kSimplexG2 = 0.211324865405187117745425609749021;
     return value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
 }
 
+
+/// Frozen T091 Worley feature salts and normalization.
+constexpr std::uint32_t kWorleyXSeedSalt = 0xA511E9B3u;
+constexpr std::uint32_t kWorleyYSeedSalt = 0x63D83595u;
+constexpr double kWorleySqrt8 = 2.8284271247461900976033774484194;
+
+struct WorleyNoiseReference {
+    double f1{0.5};
+    double f2{0.5};
+};
+
+[[nodiscard]] constexpr double worley_u24_reference(
+    std::uint32_t hash) noexcept {
+    return static_cast<double>(hash >> 8) / 16777216.0;
+}
+
+inline void worley_update_best(double distance_squared,
+                               double& best1,
+                               double& best2) noexcept {
+    if (distance_squared < best1) {
+        best2 = best1;
+        best1 = distance_squared;
+    } else if (distance_squared < best2) {
+        best2 = distance_squared;
+    }
+}
+
+/// Frozen T091 bounded 3x3 Worley oracle. Distance arithmetic is center-cell
+/// local so large lattice origins never participate in feature subtraction.
+[[nodiscard]] inline WorleyNoiseReference worley_noise_reference(
+    std::uint32_t seed,
+    double feature_size,
+    double x,
+    double y) noexcept {
+    const double nx = x / feature_size;
+    const double ny = y / feature_size;
+    if (!(std::isfinite(nx) && std::isfinite(ny))) return {};
+
+    const double ix_d = std::floor(nx);
+    const double iy_d = std::floor(ny);
+    constexpr double lower = -2147483647.0;
+    constexpr double upper = 2147483646.0;
+    if (!(ix_d >= lower && ix_d <= upper &&
+          iy_d >= lower && iy_d <= upper)) {
+        return {};
+    }
+
+    const auto ix = static_cast<std::int32_t>(ix_d);
+    const auto iy = static_cast<std::int32_t>(iy_d);
+    const double fx = nx - ix_d;
+    const double fy = ny - iy_d;
+    double best1 = 8.0;
+    double best2 = 8.0;
+
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const auto cx = static_cast<std::int32_t>(ix + dx);
+            const auto cy = static_cast<std::int32_t>(iy + dy);
+            const double ux = worley_u24_reference(
+                noise_hash2(seed ^ kWorleyXSeedSalt, cx, cy));
+            const double uy = worley_u24_reference(
+                noise_hash2(seed ^ kWorleyYSeedSalt, cx, cy));
+            const double rx = double(dx) + ux - fx;
+            const double ry = double(dy) + uy - fy;
+            worley_update_best(rx * rx + ry * ry, best1, best2);
+        }
+    }
+
+    const auto normalize = [](double distance_squared) noexcept {
+        const double value = std::sqrt(distance_squared) / kWorleySqrt8;
+        return value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
+    };
+    return {normalize(best1), normalize(best2)};
+}
+
 } // namespace ui::detail

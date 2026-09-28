@@ -350,6 +350,18 @@ coordinates before `floor` because it cannot represent the tighter integer
 bound. The same double-precision oracle and the same documented tolerance pair
 cover CPU, raster and GPU.
 
+
+T091 adds bounded cellular/Worley F1 and F2 variants without changing the
+immutable procedural-source ownership model. Each scalar evaluation hashes
+exactly one feature point for each of the fixed row-major 3x3 neighbor cells,
+using salts `0xA511E9B3` and `0x63D83595` with the frozen T088 hash/high-24
+mapping. Distances are evaluated in center-cell-local coordinates, the two
+smallest squared Euclidean distances use strict insertion order, and both F1/F2
+normalize by `sqrt(8)`. Center lattice coordinates are range-checked before
+signed conversion or byte-lane +/-1. The ES2 path performs candidate lattice
+steps on exact byte lanes, never by adding/subtracting one from a large float
+lattice index.
+
 ---
 
 ## 7. Logical coordinates and high DPI
