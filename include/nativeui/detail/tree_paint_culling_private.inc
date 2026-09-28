@@ -233,9 +233,28 @@
         ensure_layout();
 
         auto snapshot = inspector_snapshot();
-        Painter painter{canvas, private_hooks};
-        paint_node(*root_, painter, platform, viewport_rect());
+
+        // Consume only damage that existed before entering application paint.
+        // Any invalidation raised reentrantly by paint callbacks belongs to the
+        // next frame and must survive this inspector-enabled traversal too.
+        Rect pending_dirty[DirtyRegion::kMaxRects]{};
+        const auto pending_dirty_count = paint_dirty_.rects().size();
+        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+            pending_dirty[index] = paint_dirty_.rects()[index];
+        }
         paint_dirty_.clear();
+
+        try {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            Painter painter{canvas, private_hooks};
+            paint_node(*root_, painter, platform, viewport_rect());
+        } catch (...) {
+            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+                (void)retain_dirty(pending_dirty[index]);
+            }
+            throw;
+        }
         return snapshot;
     }
 #endif
