@@ -86,21 +86,46 @@ foreach(_path IN LISTS _production_files)
     "${_content}")
   if(NOT _implicit_compile STREQUAL "")
     if(_name STREQUAL "skia_noise.cpp")
-      # T088 explicitly compiles its built-in source at creation time. Keep the
-      # T079 no-implicit-paint-compilation rule for every other production file.
+      # Built-in noise programs may compile only at explicit NoiseSource
+      # creation boundaries. T088 owns create(); T092 adds create_fractal().
+      # Neither path may defer source compilation to as_brush()/paint.
       string(REGEX MATCHALL
         "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _noise_compile_calls "${_content}")
       list(LENGTH _noise_compile_calls _noise_compile_count)
-      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create" _noise_create)
-      string(FIND "${_content}" "ShaderProgram::compile(source)" _noise_compile)
+      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create(" _noise_create)
+      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create_fractal(" _fractal_create)
       string(FIND "${_content}" "Brush NoiseSource::as_brush" _noise_brush)
-      if(NOT _noise_compile_count EQUAL 1 OR _noise_create EQUAL -1 OR
-         _noise_compile EQUAL -1 OR _noise_brush EQUAL -1 OR
-         _noise_compile LESS _noise_create OR
-         _noise_compile GREATER _noise_brush)
+
+      if(_noise_create EQUAL -1 OR _fractal_create EQUAL -1 OR
+         _noise_brush EQUAL -1 OR
+         _fractal_create LESS _noise_create OR
+         _noise_brush LESS _fractal_create)
         message(FATAL_ERROR
-          "T079: T088 built-in shader must compile exactly once in NoiseSource::create")
+          "T079/T092: NoiseSource creation/materialization boundaries are missing or reordered")
+      endif()
+
+      math(EXPR _base_region_length "${_fractal_create} - ${_noise_create}")
+      string(SUBSTRING "${_content}" ${_noise_create} ${_base_region_length}
+        _base_create_region)
+      math(EXPR _fractal_region_length "${_noise_brush} - ${_fractal_create}")
+      string(SUBSTRING "${_content}" ${_fractal_create} ${_fractal_region_length}
+        _fractal_create_region)
+
+      string(REGEX MATCHALL
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+        _base_compile_calls "${_base_create_region}")
+      string(REGEX MATCHALL
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+        _fractal_compile_calls "${_fractal_create_region}")
+      list(LENGTH _base_compile_calls _base_compile_count)
+      list(LENGTH _fractal_compile_calls _fractal_compile_count)
+
+      if(NOT _noise_compile_count EQUAL 2 OR
+         NOT _base_compile_count EQUAL 1 OR
+         NOT _fractal_compile_count EQUAL 1)
+        message(FATAL_ERROR
+          "T079/T092: built-in noise shaders must compile exactly once in each explicit creation path")
       endif()
     else()
       message(FATAL_ERROR

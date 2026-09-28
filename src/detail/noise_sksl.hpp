@@ -197,4 +197,191 @@ half4 main(float2 p) {
 }
 )";
 
+// Frozen T090 simplex kernel. Same hash and gradient table as T089; one exact
+// skew (F2) into a simplex lattice, the x0 > y0 triangle branch (equality takes
+// the second branch), q > 0 corner kernel with q^4 * dot, scale 70 and
+// clamp(0.5 + 0.5 * raw, 0, 1). ES2-safe: gradient_of is duplicated
+// byte-identically from the frozen T089 kernel, all lattice conversion goes
+// through the existing byte-lane helpers, and the lattice guard runs before
+// floor/bytes_of_int. The guard literal must stay < 2147483648.0: writing
+// 2147483646.0/2147483647.0 rounds to 2^31 in ES2 float and would admit an
+// out-of-range lattice lane.
+inline constexpr std::string_view kSimplexNoiseKernelSkSL = R"(
+uniform float feature_size;
+uniform float4 seed_bytes;
+layout(color) uniform float4 low_color;
+layout(color) uniform float4 high_color;
+float2 gradient_of(float4 h) {
+    float gi = mod(h.x, 8.0);
+    if (gi < 0.5) return float2(1.0, 0.0);
+    if (gi < 1.5) return float2(-1.0, 0.0);
+    if (gi < 2.5) return float2(0.0, 1.0);
+    if (gi < 3.5) return float2(0.0, -1.0);
+    if (gi < 4.5) return float2(0.707106781186547524400844362104849,
+                               0.707106781186547524400844362104849);
+    if (gi < 5.5) return float2(-0.707106781186547524400844362104849,
+                                0.707106781186547524400844362104849);
+    if (gi < 6.5) return float2(0.707106781186547524400844362104849,
+                                -0.707106781186547524400844362104849);
+    return float2(-0.707106781186547524400844362104849,
+                  -0.707106781186547524400844362104849);
+}
+float simplex_corner(float2 g, float cx, float cy) {
+    float q = 0.5 - cx * cx - cy * cy;
+    if (q <= 0.0) return 0.0;
+    return q * q * q * q * dot(g, float2(cx, cy));
+}
+float simplex_noise(float2 p) {
+    float x = p.x / feature_size;
+    float y = p.y / feature_size;
+    if (!(x >= -2147483648.0 && x < 2147483648.0 &&
+          y >= -2147483648.0 && y < 2147483648.0)) return 0.5;
+    float s = (x + y) * 0.366025403784438646763723170752936;
+    float u = x + s;
+    float v = y + s;
+    if (!(u >= -2147483648.0 && u < 2147483648.0 &&
+          v >= -2147483648.0 && v < 2147483648.0)) return 0.5;
+    float fi = floor(u);
+    float fj = floor(v);
+    float t = (fi + fj) * 0.211324865405187117745425609749021;
+    float x0 = x - (fi - t);
+    float y0 = y - (fj - t);
+    float4 xb = bytes_of_int(fi);
+    float4 yb = bytes_of_int(fj);
+    float4 xb1 = add_one(xb);
+    float4 yb1 = add_one(yb);
+    float i1 = 0.0;
+    float j1 = 1.0;
+    float4 c1x = xb;
+    float4 c1y = yb1;
+    if (x0 > y0) {
+        i1 = 1.0;
+        j1 = 0.0;
+        c1x = xb1;
+        c1y = yb;
+    }
+    float x1 = x0 - i1 + 0.211324865405187117745425609749021;
+    float y1 = y0 - j1 + 0.211324865405187117745425609749021;
+    float x2 = x0 - 1.0 + 2.0 * 0.211324865405187117745425609749021;
+    float y2 = y0 - 1.0 + 2.0 * 0.211324865405187117745425609749021;
+    float n0 = simplex_corner(gradient_of(hash2(seed_bytes, xb, yb)), x0, y0);
+    float n1 = simplex_corner(gradient_of(hash2(seed_bytes, c1x, c1y)), x1, y1);
+    float n2 = simplex_corner(gradient_of(hash2(seed_bytes, xb1, yb1)), x2, y2);
+    return clamp(0.5 + 0.5 * (70.0 * (n0 + n1 + n2)), 0.0, 1.0);
+}
+)";
+
+inline constexpr std::string_view kSimplexNoiseMainSkSL = R"(
+half4 main(float2 p) {
+    float v = simplex_noise(p);
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
+
+// Frozen T091 bounded cellular kernel. The center cell is guarded before
+// byte-lane +/-1, then exactly nine candidates are evaluated in row-major
+// dy=-1..1 / dx=-1..1 order. Feature distances stay local to the center cell.
+inline constexpr std::string_view kWorleyNoiseKernelSkSL = R"(
+uniform float feature_size;
+uniform float4 seed_bytes;
+layout(color) uniform float4 low_color;
+layout(color) uniform float4 high_color;
+float4 subtract_one(float4 v) {
+    v.x -= 1.0;
+    if (v.x < 0.0) {
+        v.x += 256.0;
+        v.y -= 1.0;
+        if (v.y < 0.0) {
+            v.y += 256.0;
+            v.z -= 1.0;
+            if (v.z < 0.0) {
+                v.z += 256.0;
+                v.w = low_byte(v.w + 255.0);
+            }
+        }
+    }
+    return v;
+}
+float2 worley_insert(float2 best, float d2) {
+    if (d2 < best.x) return float2(d2, best.x);
+    if (d2 < best.y) return float2(best.x, d2);
+    return best;
+}
+float worley_candidate(float4 seed_x, float4 seed_y,
+                       float4 xb, float4 yb,
+                       float dx, float dy, float fx, float fy) {
+    float ux = u24(hash2(seed_x, xb, yb));
+    float uy = u24(hash2(seed_y, xb, yb));
+    float rx = dx + ux - fx;
+    float ry = dy + uy - fy;
+    return rx * rx + ry * ry;
+}
+float2 worley_noise(float2 p) {
+    float x = p.x / feature_size;
+    float y = p.y / feature_size;
+    // At int32 magnitude ES2 float spacing is coarse. Strictly excluding
+    // -2^31 and +2^31 keeps every representable center cell safe for +/-1.
+    if (!(x > -2147483648.0 && x < 2147483648.0 &&
+          y > -2147483648.0 && y < 2147483648.0)) {
+        return float2(0.5, 0.5);
+    }
+    float ix = floor(x);
+    float iy = floor(y);
+    float fx = x - ix;
+    float fy = y - iy;
+
+    float4 xb = bytes_of_int(ix);
+    float4 yb = bytes_of_int(iy);
+    float4 xm = subtract_one(xb);
+    float4 xp = add_one(xb);
+    float4 ym = subtract_one(yb);
+    float4 yp = add_one(yb);
+    float4 seed_x = xor32(seed_bytes, float4(179.0, 233.0, 17.0, 165.0));
+    float4 seed_y = xor32(seed_bytes, float4(149.0, 53.0, 216.0, 99.0));
+
+    float2 best = float2(8.0, 8.0);
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, ym,
+                                                -1.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, ym,
+                                                 0.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, ym,
+                                                 1.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, yb,
+                                                -1.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, yb,
+                                                 0.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, yb,
+                                                 1.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, yp,
+                                                -1.0, 1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, yp,
+                                                 0.0, 1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, yp,
+                                                 1.0, 1.0, fx, fy));
+
+    return float2(clamp(sqrt(best.x) / 2.8284271247461900976033774484194,
+                        0.0, 1.0),
+                  clamp(sqrt(best.y) / 2.8284271247461900976033774484194,
+                        0.0, 1.0));
+}
+)";
+
+inline constexpr std::string_view kWorleyF1MainSkSL = R"(
+half4 main(float2 p) {
+    float v = worley_noise(p).x;
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
+inline constexpr std::string_view kWorleyF2MainSkSL = R"(
+half4 main(float2 p) {
+    float v = worley_noise(p).y;
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
 } // namespace ui::detail
