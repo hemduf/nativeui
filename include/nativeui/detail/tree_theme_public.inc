@@ -12,6 +12,7 @@
         if (root_) bind_theme(*root_);
         if (!mounted_ || !root_) return;
 
+        mark_all_raster_cache_content_stale();
         if (invalidation == ThemeInvalidation::Layout) {
             invalidate_layout_from(*root_);
         } else {

@@ -214,7 +214,9 @@
         bounds.h = std::isfinite(bounds.h) ? std::max(0.0f, bounds.h) : 0.0f;
 
         if (node.component->effective_visibility() == VisibilityMode::Collapsed) {
-            node.bounds = Rect{bounds.x, bounds.y, 0.0f, 0.0f};
+            const Rect collapsed{bounds.x, bounds.y, 0.0f, 0.0f};
+            note_raster_cache_layout_size(node, collapsed);
+            node.bounds = collapsed;
             for (auto& child : node.children) {
                 layout_node_transactional(*child, node.bounds);
             }
@@ -222,6 +224,7 @@
             return;
         }
 
+        note_raster_cache_layout_size(node, bounds);
         node.bounds = bounds;
         const auto constraints = Constraints::tight({bounds.w, bounds.h});
         const auto child_metrics = measure_children(node, constraints);

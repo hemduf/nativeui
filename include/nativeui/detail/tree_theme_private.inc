@@ -46,6 +46,7 @@
         bind_theme(*node);
         if (!mounted_) return;
 
+        mark_raster_cache_subtree_and_ancestors_stale(*node);
         if (invalidation == ThemeInvalidation::Layout) {
             invalidate_layout_from(*node);
         } else {

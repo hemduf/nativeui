@@ -197,6 +197,8 @@ if(NATIVEUI_BUILD_TESTS)
     COMMENT "Explicitly update NativeUI golden image baselines"
   )
   nativeui_add_core_test(nativeui_invalidation_tests ${PROJECT_SOURCE_DIR}/tests/invalidation_tests.cpp)
+  nativeui_add_core_test(nativeui_raster_cache_boundary_tests
+    ${PROJECT_SOURCE_DIR}/tests/raster_cache_boundary_tests.cpp)
   nativeui_add_core_test(nativeui_paint_culling_tests ${PROJECT_SOURCE_DIR}/tests/paint_culling_tests.cpp)
   nativeui_add_core_test(nativeui_t096_damage_mapping_tests
     ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)

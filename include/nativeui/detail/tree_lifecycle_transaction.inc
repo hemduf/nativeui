@@ -283,6 +283,7 @@
     }
 
     void retire_mount_identity(NodeId id) noexcept {
+        unregister_raster_cache_boundary(id);
         const auto live = std::lower_bound(retained_invalidation_live_nodes_.begin(),
                                            retained_invalidation_live_nodes_.end(), id);
         if (live != retained_invalidation_live_nodes_.end() && *live == id) {
