@@ -12,6 +12,7 @@ This page is the navigation entry point for the NativeUI 1.0 documentation set t
 | Customize drawing, styling and animation | [Rendering, styling and animation](v1-rendering-styling-and-animation.md) | Theme/style resolution, retained invalidation, custom painting and animation ownership |
 | Consume NativeUI from CMake | [Packaging and CMake](v1-packaging-and-cmake.md) | Installed/build-tree package concepts, public targets/helpers, platform attachment and binary resources |
 | Use services, tests and platform-specific limits | [Services, testing and limits](v1-services-testing-and-limits.md) | Resources, Dispatcher, DesktopServices, inspector/testing paths, supported/deferred platform scope |
+| Understand release status and qualification evidence | [Release and validation](v1-release-and-validation.md) | Active validation sources, exact-head evidence, retired release gates and remaining reference-app/Getting Started work |
 | Build NativeUI itself on Linux | [Linux build notes](linux-build.md) | Linux/X11 development dependencies and build commands |
 | Understand performance gates | [Performance benchmarks](performance-benchmarks.md) | Benchmark workloads, allocation/timing expectations and CI performance evidence |
 | Understand accessibility scope | [Accessibility](accessibility.md) | Current semantic surface and the boundary between 1.0 semantics and deferred native accessibility bridges |
