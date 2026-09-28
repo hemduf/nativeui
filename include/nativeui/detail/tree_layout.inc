@@ -116,6 +116,7 @@
         for (const auto& change : pending) {
             const auto old = change.node->component->effective_availability();
             if (old == change.value) continue;
+            invalidate_raster_cache_ancestry(change.node);
 
             const bool old_collapsed = old.visibility == VisibilityMode::Collapsed;
             const bool new_collapsed = change.value.visibility == VisibilityMode::Collapsed;
@@ -138,10 +139,6 @@
             }
             paint_changed = paint_changed ||
                 old.visibility != change.value.visibility || style_paint_changed;
-            if (old_collapsed != new_collapsed || style_layout_changed ||
-                old.visibility != change.value.visibility || style_paint_changed) {
-                mark_raster_cache_content_stale_from(*change.node);
-            }
             change.node->component->set_effective_availability(change.value);
         }
     }
@@ -259,8 +256,8 @@
     }
 
     void invalidate_node_paint(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         mark_paint_culling_dirty();
-        mark_raster_cache_content_stale_from(node);
         if (layout_transaction_active_ || !node.visual_bounds_published) {
             // Candidate geometry is not publication authority. A state change
             // during layout keeps a conservative repaint pending; successful
@@ -293,8 +290,8 @@
     }
 
     void invalidate_layout_from(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         mark_paint_culling_dirty();
-        mark_raster_cache_content_stale_from(node);
         for (Node* current = &node; current; current = current->parent) {
             current->layout_dirty = true;
         }
@@ -343,6 +340,7 @@
     }
 
     void deactivate_node_untracked(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             try {

@@ -288,7 +288,6 @@
     }
 
     void mark_dynamic_structure_dirty(Node& owner) noexcept {
-        mark_raster_cache_content_stale_from(owner);
         for (auto* current = &owner; current; current = current->parent) {
             current->layout_dirty = true;
         }

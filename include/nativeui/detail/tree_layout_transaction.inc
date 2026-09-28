@@ -209,22 +209,27 @@
     }
 
     void layout_node_transactional(Node& node, Rect bounds) {
+        layout_node_transactional(node, bounds, RasterCachePlacementDelta{});
+    }
+
+    void layout_node_transactional(
+        Node& node, Rect bounds, RasterCachePlacementDelta parent_delta) {
         checkpoint_layout_node(node);
         bounds.w = std::isfinite(bounds.w) ? std::max(0.0f, bounds.w) : 0.0f;
         bounds.h = std::isfinite(bounds.h) ? std::max(0.0f, bounds.h) : 0.0f;
 
         if (node.component->effective_visibility() == VisibilityMode::Collapsed) {
             const Rect collapsed{bounds.x, bounds.y, 0.0f, 0.0f};
-            note_raster_cache_layout_size(node, collapsed);
+            const auto delta = note_raster_cache_geometry(node, collapsed, parent_delta);
             node.bounds = collapsed;
             for (auto& child : node.children) {
-                layout_node_transactional(*child, node.bounds);
+                layout_node_transactional(*child, node.bounds, delta);
             }
             node.layout_dirty = false;
             return;
         }
 
-        note_raster_cache_layout_size(node, bounds);
+        const auto delta = note_raster_cache_geometry(node, bounds, parent_delta);
         node.bounds = bounds;
         const auto constraints = Constraints::tight({bounds.w, bounds.h});
         const auto child_metrics = measure_children(node, constraints);
@@ -234,7 +239,7 @@
 
         for (std::size_t i = 0; i < node.children.size(); ++i) {
             layout_node_transactional(
-                *node.children[i], sanitize_placement(placements[i].bounds, bounds));
+                *node.children[i], sanitize_placement(placements[i].bounds, bounds), delta);
         }
         node.layout_dirty = false;
     }
