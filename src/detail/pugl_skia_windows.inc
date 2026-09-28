@@ -246,6 +246,15 @@ private:
 struct ApplicationWindowRecord final {
     bool open{true};
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
+    std::weak_ptr<int> lifetime;
+    void* close_control_context{};
+    void (*close_control_checkpoint)(void*){};
+};
+
+struct WindowControlCheckpoint final {
+    std::weak_ptr<int> lifetime;
+    void* context{};
+    void (*checkpoint)(void*){};
 };
 
 [[nodiscard]] double bound_dispatch_timeout(
@@ -329,9 +338,32 @@ struct Application::Impl final {
         return owners;
     }
 
+    [[nodiscard]] std::vector<platform_detail::WindowControlCheckpoint>
+    close_control_snapshot() const {
+        std::vector<platform_detail::WindowControlCheckpoint> controls;
+        controls.reserve(open_window_count);
+        for (const auto& [id, record] : windows) {
+            (void)id;
+            if (record.open && record.close_control_context &&
+                record.close_control_checkpoint) {
+                controls.push_back({
+                    record.lifetime,
+                    record.close_control_context,
+                    record.close_control_checkpoint});
+            }
+        }
+        return controls;
+    }
+
     std::uint64_t register_window(
-        const std::shared_ptr<detail::DispatcherOwner>& dispatcher_owner) {
-        if (!runnable() || !dispatcher_owner || next_window_id == 0) return 0;
+        const std::shared_ptr<detail::DispatcherOwner>& dispatcher_owner,
+        std::weak_ptr<int> lifetime,
+        void* close_control_context,
+        void (*close_control_checkpoint)(void*)) {
+        if (!runnable() || !dispatcher_owner || !close_control_context ||
+            !close_control_checkpoint || next_window_id == 0) {
+            return 0;
+        }
         if (!wake_backend || !wake_backend->ensure_view()) {
             terminal_error = true;
             quit_requested = true;
@@ -344,7 +376,12 @@ struct Application::Impl final {
         const auto id = next_window_id++;
         windows.emplace(
             id,
-            platform_detail::ApplicationWindowRecord{true, dispatcher_owner});
+            platform_detail::ApplicationWindowRecord{
+                true,
+                dispatcher_owner,
+                std::move(lifetime),
+                close_control_context,
+                close_control_checkpoint});
         ++open_window_count;
         return id;
     }
@@ -375,6 +412,14 @@ struct Application::Impl final {
         }
     }
 
+    void drain_close_controls() {
+        const auto controls = close_control_snapshot();
+        for (const auto& control : controls) {
+            if (!control.checkpoint || !control.context || control.lifetime.expired()) continue;
+            control.checkpoint(control.context);
+        }
+    }
+
     bool pump(double timeout_seconds) {
         if (!runnable()) return false;
         if (!std::isfinite(timeout_seconds)) {
@@ -401,8 +446,11 @@ struct Application::Impl final {
         // Snapshot after native dispatch: a native close may have destroyed a
         // logical owner, while another callback may have created a new one.
         // DispatcherOwner::checkpoint itself is reentrancy-safe if a callback
-        // destroys its own window or a sibling.
+        // destroys its own window or a sibling. Lifecycle controls run only
+        // after dispatcher callbacks have unwound and never depend on a free
+        // user-queue slot.
         drain_dispatchers();
+        drain_close_controls();
         return !quit_requested;
     }
 };
@@ -457,7 +505,8 @@ struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     std::function<CloseDecision()> close_request_callback;
     std::function<void()> closed_callback;
     std::shared_ptr<int> lifetime_token;
-    bool close_completion_posted{};
+    detail::WindowControlPostState close_request_post;
+    detail::WindowControlPostState close_completion_post;
     bool close_request_callback_active{};
 
     [[nodiscard]] Dispatcher dispatcher() const noexcept override {
@@ -502,8 +551,26 @@ StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc 
             0,
             application.impl_->world,
             [this] { handle_native_close_request(); });
-        impl_->registration_id =
-            application.impl_->register_window(impl_->dispatcher_owner);
+        const std::weak_ptr<int> lifetime = impl_->lifetime_token;
+        impl_->registration_id = application.impl_->register_window(
+            impl_->dispatcher_owner,
+            lifetime,
+            this,
+            [](void* context) {
+                auto* self = static_cast<StandaloneWindow*>(context);
+                if (!self || !self->impl_ || !self->impl_->core) return;
+
+                const std::weak_ptr<int> window_lifetime = self->impl_->lifetime_token;
+                if (self->impl_->close_state.requesting()) {
+                    self->impl_->close_request_post.cancel();
+                    self->process_native_close_request();
+                    if (window_lifetime.expired()) return;
+                }
+                if (self->impl_->close_state.pending()) {
+                    self->impl_->close_completion_post.cancel();
+                    self->complete_close();
+                }
+            });
         if (!impl_->registration_id) {
             impl_->construction_error = application.last_error().empty()
                 ? "Application rejected window registration"
@@ -537,6 +604,8 @@ StandaloneWindow::StandaloneWindow(UI& ui, WindowDesc desc)
 StandaloneWindow::~StandaloneWindow() {
     if (!impl_) return;
     impl_->close_state.begin_teardown();
+    impl_->close_request_post.cancel();
+    impl_->close_completion_post.cancel();
     impl_->lifetime_token.reset();
     impl_->close_request_callback = {};
     impl_->closed_callback = {};
@@ -557,18 +626,28 @@ void StandaloneWindow::handle_native_close_request() {
         : Dispatcher{};
     const std::weak_ptr<int> lifetime = impl_->lifetime_token;
     auto* self = this;
-    if (!dispatcher.post([lifetime, self] {
+    const bool posted = impl_->close_request_post.try_post([&] {
+        return dispatcher.post([lifetime, self] {
             if (lifetime.expired()) return;
+            self->impl_->close_request_post.callback_started();
             self->process_native_close_request();
-        })) {
-        if (lifetime.expired()) return;
-        impl_->close_state.finish_user_request(false);
+        });
+    });
+
+    // Rejection/exception leaves Requesting as durable lifecycle work. The
+    // Application checkpoint runs after native dispatch and Dispatcher drain;
+    // request a platform wake only for the direct-call case where no user task
+    // was accepted to provide one.
+    if (!posted && impl_->application && impl_->application->impl_ &&
+        impl_->application->impl_->wake_backend) {
+        impl_->application->impl_->wake_backend->request_wake();
     }
 }
 
 void StandaloneWindow::process_native_close_request() {
     if (!impl_ || !impl_->core || !impl_->close_state.requesting()) return;
 
+    impl_->close_request_post.cancel();
     impl_->close_request_callback_active = true;
     const std::weak_ptr<int> lifetime = impl_->lifetime_token;
     const auto callback = impl_->close_request_callback;
@@ -592,12 +671,7 @@ void StandaloneWindow::process_native_close_request() {
 
 void StandaloneWindow::schedule_close_completion() {
     if (!impl_ || !impl_->core || !impl_->close_state.pending() ||
-        impl_->close_completion_posted) {
-        return;
-    }
-
-    if (!impl_->application && !impl_->close_request_callback_active) {
-        complete_close();
+        impl_->close_completion_post.posted()) {
         return;
     }
 
@@ -606,19 +680,26 @@ void StandaloneWindow::schedule_close_completion() {
         : Dispatcher{};
     const std::weak_ptr<int> lifetime = impl_->lifetime_token;
     auto* self = this;
-    impl_->close_completion_posted = true;
-    if (!dispatcher.post([lifetime, self] {
+    const bool posted = impl_->close_completion_post.try_post([&] {
+        return dispatcher.post([lifetime, self] {
             if (lifetime.expired()) return;
+            self->impl_->close_completion_post.callback_started();
             self->complete_close();
-        })) {
-        impl_->close_completion_posted = false;
-        if (!impl_->close_request_callback_active) complete_close();
+        });
+    });
+
+    // Never fall back to synchronous teardown on an active callback stack.
+    // Pending is durable and will be consumed by the owner/platform checkpoint.
+    if (!posted && impl_->application && impl_->application->impl_ &&
+        impl_->application->impl_->wake_backend) {
+        impl_->application->impl_->wake_backend->request_wake();
     }
 }
 
 void StandaloneWindow::complete_close() {
     if (!impl_ || !impl_->core) return;
-    impl_->close_completion_posted = false;
+    impl_->close_request_post.cancel();
+    impl_->close_completion_post.cancel();
     if (!impl_->close_state.complete_accepted_close()) return;
 
     (void)impl_->core->close_native_view();
@@ -653,8 +734,10 @@ void StandaloneWindow::unregister_from_application() noexcept {
 int StandaloneWindow::run() {
     if (!impl_) return 1;
     if (impl_->application) return impl_->application->run();
-    while (!should_close()) poll(-1.0);
-    return valid() ? 0 : 1;
+    while (impl_ && impl_->core && !is_closed() && !impl_->core->should_close()) {
+        (void)poll(-1.0);
+    }
+    return valid() || is_closed() ? 0 : 1;
 }
 bool StandaloneWindow::poll(double timeout_seconds) {
     if (!impl_) return false;
@@ -662,14 +745,30 @@ bool StandaloneWindow::poll(double timeout_seconds) {
     if (!impl_->core) return false;
 
     const auto owner = impl_->dispatcher_owner;
+    const std::weak_ptr<int> lifetime = impl_->lifetime_token;
     std::vector<std::shared_ptr<detail::DispatcherOwner>> owners;
     if (owner) owners.push_back(owner);
-    const double requested = timeout_seconds < 0.0 ? -1.0 : timeout_seconds;
+    const bool close_control_ready =
+        impl_->close_state.requesting() || impl_->close_state.pending();
+    const double requested = close_control_ready
+        ? 0.0
+        : (timeout_seconds < 0.0 ? -1.0 : timeout_seconds);
     const double pugl_timeout =
         platform_detail::bound_dispatch_timeout(requested, owners);
     const bool alive = impl_->core->poll(pugl_timeout);
     if (owner) (void)owner->checkpoint();
-    if (impl_->close_state.pending() && !impl_->close_completion_posted) complete_close();
+    if (lifetime.expired()) return false;
+
+    if (impl_->close_state.requesting()) {
+        impl_->close_request_post.cancel();
+        process_native_close_request();
+        if (lifetime.expired()) return false;
+    }
+    if (impl_->close_state.pending()) {
+        impl_->close_completion_post.cancel();
+        complete_close();
+        if (lifetime.expired()) return false;
+    }
     return alive && !is_closed();
 }
 void StandaloneWindow::request_close() {

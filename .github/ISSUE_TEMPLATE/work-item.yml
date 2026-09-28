@@ -80,7 +80,7 @@ body:
     id: scope
     attributes:
       label: Scope
-      description: Define what is included, important architectural constraints, and explicit exclusions when useful.
+      description: Define what is included, important architectural constraints, failure/recovery behavior, and explicit exclusions when useful.
       value: |
         - ...
         - ...
@@ -91,7 +91,7 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Use observable and testable completion criteria.
+      description: Use observable and testable completion criteria, including relevant failure-path recovery semantics.
       value: |
         - [ ] ...
         - [ ] ...
@@ -102,12 +102,15 @@ body:
     id: tests
     attributes:
       label: Required tests
-      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering check. Remote execution cadence follows CI_POLICY.md.
+      description: Specify the smallest targeted tests plus every applicable integration/platform/rendering/fault-injection check. Remote execution cadence follows CI_POLICY.md.
       value: |
         - [ ] Targeted regression/unit tests.
+        - [ ] Deterministic callback-throw / queue-rejection / allocation-failure / partial-construction fault tests when applicable.
+        - [ ] Recovery test proving the next normal operation succeeds after the injected failure.
+        - [ ] Two-instance survivor/isolation test when lifetime/platform state is affected.
         - [ ] Full relevant test suite before final qualification.
         - [ ] Dedicated feature executable + `--self-test` when applicable.
-        - [ ] Platform/headless/golden tests when applicable.
+        - [ ] Platform/headless/golden/sanitizer tests when applicable.
         - [ ] Relevant path-scoped CI plus final-candidate qualification from `CI_POLICY.md`.
     validations:
       required: true
@@ -116,23 +119,28 @@ body:
     id: implementation
     attributes:
       label: Implementation / scheduling note
-      description: Record the intended technical direction, important constraints, dependency rationale, blocker, or parallelization note when useful.
+      description: Record the intended technical direction, important constraints, dependency rationale, failure/transaction boundaries, blocker, or parallelization note when useful.
 
   - type: textarea
     id: completion
     attributes:
       label: Completion protocol
       value: |
-        - [ ] Run targeted tests.
+        - [ ] Run targeted tests, including deterministic failure/fault tests where applicable.
         - [ ] Run the full relevant test suite.
-        - [ ] Run required platform/headless/golden tests.
+        - [ ] Run required platform/headless/golden/sanitizer tests.
         - [ ] Keep active implementation PR Draft; mark the frozen candidate Ready for review to launch heavyweight final qualification per `CI_POLICY.md`.
         - [ ] If source/tests/build/workflows change after final qualification, return the PR to Draft and requalify.
         - [ ] Perform all applicable review passes from `AGENTS.md`.
         - [ ] Perform the mandatory final review against `CODE_REVIEW.md` and record the result in the issue/PR.
         - [ ] Explicitly assess multi-instance isolation and mutable globals/statics.
         - [ ] Explicitly assess threading/RT boundaries and lifetime/reentrancy.
+        - [ ] Explicitly assess transactional prepare/commit/recovery boundaries for changed state machines.
+        - [ ] Explicitly assess scheduling/queue rejection/throw semantics for deferred work when applicable.
+        - [ ] Explicitly assess exception/unwind behavior, `noexcept` paths, destructor safety and foreign ABI containment.
+        - [ ] Explicitly assess partial construction/resource cleanup when native/registered resources are acquired.
         - [ ] Assess Objective-C runtime names/prefixing plus category/ARC/AppKit rules when applicable.
+        - [ ] Confirm no personal information was added to tests/examples/code/generated metadata.
         - [ ] Resolve every blocking `CODE_REVIEW.md` finding before merge/Done.
         - [ ] Update issue status/labels and milestone metadata.
         - [ ] Update `CONTEXT.md` with current state and next recommended ticket.
@@ -144,15 +152,21 @@ body:
     id: review_record
     attributes:
       label: Mandatory code review record
-      description: Complete before merge/Done. Follow CODE_REVIEW.md and record applicable evidence/findings/corrections.
+      description: Complete before merge/Done. Follow CODE_REVIEW.md and record applicable evidence/findings/corrections for every field.
       value: |
         - **CODE_REVIEW.md:** pending
         - **Instance isolation:** pending
         - **Globals/statics:** pending
         - **Threading/RT:** pending
         - **Lifetime/reentrancy:** pending
+        - **Transactional state:** pending / not applicable
+        - **Scheduling/queue failure:** pending / not applicable
+        - **Exception/unwind:** pending
+        - **Partial construction:** pending / not applicable
         - **Objective-C runtime:** pending / not applicable
-        - **Platform integration:** pending
+        - **Platform integration:** pending / not applicable
+        - **Performance/allocation:** pending
+        - **Privacy:** pending
         - **Tests:** pending
         - **Remaining blocking findings:** pending
     validations:

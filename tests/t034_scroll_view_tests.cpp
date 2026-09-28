@@ -219,6 +219,104 @@ void scrollbar_geometry_and_capture_contract() {
     NUI_CHECK_NEAR(state.offset().y, 100.0f, 0.001f);
 }
 
+void retained_scroll_state_teardown_before_realization_is_safe() {
+    auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+    auto spec = std::move(
+        ui::ScrollView{*state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)).spec();
+    NUI_CHECK(spec.children.size() == 3);
+    NUI_CHECK(spec.children[0].children.size() == 1);
+
+    state.reset();
+
+    NUI_CHECK(spec.factory() != nullptr);
+    for (auto& child : spec.children) NUI_CHECK(child.factory() != nullptr);
+    NUI_CHECK(spec.children[0].children[0].factory() != nullptr);
+}
+
+void retained_scroll_state_teardown_after_realization_is_safe() {
+    auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+    ui::UI tree{
+        ui::ScrollView{*state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)};
+    test::MockPlatform platform;
+    ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+    tree.resize({100.0f, 100.0f});
+    tree.activate(platform);
+    NUI_CHECK(renderer.render(tree));
+
+    state.reset();
+
+    NUI_CHECK(tree.dispatch(wheel(20.0f, 20.0f, 0.0f, 40.0f), platform) ==
+              ui::EventResult::Ignored);
+    renderer.resize({100.0f, 120.0f});
+    NUI_CHECK(renderer.render(tree));
+}
+
+void scrollbar_capture_releases_after_scroll_state_teardown() {
+    auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+    ui::UI tree{
+        ui::ScrollView{*state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)};
+    test::MockPlatform platform;
+    ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+    tree.resize({100.0f, 100.0f});
+    tree.activate(platform);
+    NUI_CHECK(renderer.render(tree));
+    state->set_offset({0.0f, 100.0f});
+
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerDown, 96.0f, 30.0f), platform) ==
+              ui::EventResult::Handled);
+    state.reset();
+
+    NUI_CHECK(tree.cancel_pointer(platform) == ui::EventResult::Handled);
+    NUI_CHECK(tree.dispatch(
+                  test::pointer(ui::InputType::PointerMove, 96.0f, 80.0f), platform) ==
+              ui::EventResult::Ignored);
+    NUI_CHECK(renderer.render(tree));
+}
+
+void scroll_view_callback_driven_state_teardown_is_safe() {
+    {
+        auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+        ui::UI tree{
+            ui::ScrollView{*state, ui::Spacer{100.0f, 400.0f}}.pointer_pan(true)};
+        test::MockPlatform platform;
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        tree.resize({100.0f, 100.0f});
+        tree.activate(platform);
+        NUI_CHECK(renderer.render(tree));
+
+        auto destroyer = state->observe([&](ui::Point) { state.reset(); });
+        NUI_CHECK(tree.dispatch(wheel(20.0f, 20.0f, 0.0f, 40.0f), platform) ==
+                  ui::EventResult::Handled);
+        NUI_CHECK(!state);
+        NUI_CHECK(!destroyer.active());
+        NUI_CHECK(renderer.render(tree));
+    }
+
+    {
+        auto state = std::make_unique<ui::ScrollState>(ui::ScrollAxis::Vertical);
+        ui::UI tree{ui::ScrollView{*state, ui::Spacer{100.0f, 400.0f}}};
+        ui::HeadlessRenderer renderer{{100.0f, 100.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        state->set_offset({0.0f, 250.0f});
+
+        bool destroyed = false;
+        auto destroyer = state->observe([&](ui::Point value) {
+            if (value.y == 100.0f) {
+                destroyed = true;
+                state.reset();
+            }
+        });
+
+        renderer.resize({100.0f, 300.0f});
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(destroyed);
+        NUI_CHECK(!state);
+        NUI_CHECK(!destroyer.active());
+        NUI_CHECK(renderer.render(tree));
+    }
+}
+
 void t059_availability_contract() {
     test::MockPlatform platform;
 
@@ -468,6 +566,10 @@ void suite() {
     nested_wheel_bubbles_at_boundary();
     pointer_pan_is_opt_in_and_cancellable();
     scrollbar_geometry_and_capture_contract();
+    retained_scroll_state_teardown_before_realization_is_safe();
+    retained_scroll_state_teardown_after_realization_is_safe();
+    scrollbar_capture_releases_after_scroll_state_teardown();
+    scroll_view_callback_driven_state_teardown_is_safe();
     t059_availability_contract();
     t059_mid_interaction_unavailability_cancels_capture();
     scrollbar_overlay_wins_over_interactive_content();

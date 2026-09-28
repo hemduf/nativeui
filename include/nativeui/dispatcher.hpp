@@ -15,6 +15,7 @@ namespace detail {
 struct DispatcherOwnerToken;
 struct DispatcherState;
 class DispatcherOwner;
+struct DispatcherTestAccess;
 } // namespace detail
 
 using DispatcherDuration = std::chrono::duration<double>;
@@ -83,6 +84,7 @@ private:
 
     friend class AnimationContext;
     friend class detail::DispatcherOwner;
+    friend struct detail::DispatcherTestAccess;
 };
 
 /// Optional platform capability exposing the T065 dispatcher that owns a

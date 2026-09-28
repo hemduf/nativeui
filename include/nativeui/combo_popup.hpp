@@ -167,7 +167,7 @@ void invalidate_resolved_popup_style_transition(const Resolved& before,
 
 template <class T>
 struct ComboAnchorRuntime final {
-    State<T>* selection{};
+    std::optional<Binding<T>> selection;
     NodeId node_id{kInvalidNodeId};
     OverlayHandle handle;
     Key suppress_until_key_up{Key::None};
@@ -747,22 +747,20 @@ public:
     using OptionsProvider = std::function<std::vector<ComboBoxOption<T>>() >;
 
     ComboBoxComponent(
-        State<T>& selection,
+        Binding<T> selection,
         OptionsProvider options_provider,
         std::vector<ComboBoxOption<T>> display_options,
         std::string placeholder,
         ComboBoxStyle style,
         MenuItemStyle item_style,
         std::shared_ptr<ComboAnchorRuntime<T>> runtime)
-        : selection_(&selection),
+        : selection_(std::move(selection)),
           options_provider_(std::move(options_provider)),
           display_options_(std::move(display_options)),
           placeholder_(std::move(placeholder)),
           style_(std::move(style)),
           item_style_(std::move(item_style)),
-          runtime_(std::move(runtime)) {
-        runtime_->selection = selection_;
-    }
+          runtime_(std::move(runtime)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_on_tab() const noexcept override { return true; }
@@ -781,9 +779,10 @@ public:
     void mount(MountContext& context) override {
         runtime_->node_id = context.node_id();
         runtime_->mounted = true;
+        runtime_->selection = selection_;
         auto invalidate = context.invalidator();
         auto invalidate_layout = context.layout_invalidator();
-        subscription_ = selection_->observe(
+        subscription_ = selection_.observe(
             [invalidate = std::move(invalidate),
              invalidate_layout = std::move(invalidate_layout)](const T&) {
                 invalidate_layout();
@@ -793,6 +792,7 @@ public:
 
     void unmount(LifecycleContext&) override {
         subscription_.reset();
+        runtime_->selection.reset();
         runtime_->mounted = false;
         runtime_->node_id = kInvalidNodeId;
         runtime_->handle = {};
@@ -905,7 +905,7 @@ private:
     }
 
     [[nodiscard]] std::string display_text() const {
-        const auto& selected = selection_->get();
+        const auto& selected = selection_.get();
         const auto found = std::find_if(
             display_options_.begin(), display_options_.end(),
             [&](const ComboBoxOption<T>& option) { return option.value == selected; });
@@ -914,7 +914,7 @@ private:
 
     [[nodiscard]] std::size_t initial_highlight(
         const std::vector<ComboBoxOption<T>>& options) const {
-        const auto& selected = selection_->get();
+        const auto& selected = selection_.get();
         for (std::size_t i = 0; i < options.size(); ++i) {
             if (options[i].enabled && options[i].value == selected) return i;
         }
@@ -958,14 +958,14 @@ private:
         return EventResult::Handled;
     }
 
-    State<T>* selection_{};
+    Binding<T> selection_;
     OptionsProvider options_provider_;
     std::vector<ComboBoxOption<T>> display_options_;
     std::string placeholder_;
     ComboBoxStyle style_;
     MenuItemStyle item_style_;
     std::shared_ptr<ComboAnchorRuntime<T>> runtime_;
-    typename State<T>::Subscription subscription_;
+    typename Binding<T>::Subscription subscription_;
     PressActivationState interaction_;
     std::optional<OverlayComponentCommand> pending_command_;
     bool focused_{};
@@ -1164,15 +1164,21 @@ class ComboBox {
 public:
     using OptionsProvider = std::function<std::vector<ComboBoxOption<T>>() >;
 
-    ComboBox(State<T>& selection, std::vector<ComboBoxOption<T>> options)
-        : selection_(&selection),
+    ComboBox(Binding<T> selection, std::vector<ComboBoxOption<T>> options)
+        : selection_(std::move(selection)),
           initial_options_(options),
           options_provider_([options = std::move(options)] { return options; }) {}
 
-    ComboBox(State<T>& selection, OptionsProvider options_provider)
-        : selection_(&selection), options_provider_(std::move(options_provider)) {
+    ComboBox(State<T>& selection, std::vector<ComboBoxOption<T>> options)
+        : ComboBox(selection.binding(), std::move(options)) {}
+
+    ComboBox(Binding<T> selection, OptionsProvider options_provider)
+        : selection_(std::move(selection)), options_provider_(std::move(options_provider)) {
         if (options_provider_) initial_options_ = options_provider_();
     }
+
+    ComboBox(State<T>& selection, OptionsProvider options_provider)
+        : ComboBox(selection.binding(), std::move(options_provider)) {}
 
     ComboBox&& placeholder(std::string value) && {
         placeholder_ = std::move(value);
@@ -1190,7 +1196,7 @@ public:
     }
 
     Spec spec() && {
-        auto* selection = selection_;
+        auto selection = std::move(selection_);
         auto provider = std::move(options_provider_);
         auto initial_options = std::move(initial_options_);
         auto placeholder = std::move(placeholder_);
@@ -1198,7 +1204,7 @@ public:
         auto item_style = std::move(item_style_);
         auto runtime = std::make_shared<detail::ComboAnchorRuntime<T>>();
         return Spec{
-            [selection,
+            [selection = std::move(selection),
              provider = std::move(provider),
              initial_options = std::move(initial_options),
              placeholder = std::move(placeholder),
@@ -1206,7 +1212,7 @@ public:
              item_style = std::move(item_style),
              runtime = std::move(runtime)]() mutable {
                 return std::make_unique<detail::ComboBoxComponent<T>>(
-                    *selection,
+                    std::move(selection),
                     std::move(provider),
                     std::move(initial_options),
                     std::move(placeholder),
@@ -1218,7 +1224,7 @@ public:
     }
 
 private:
-    State<T>* selection_{};
+    Binding<T> selection_;
     std::vector<ComboBoxOption<T>> initial_options_;
     OptionsProvider options_provider_;
     std::string placeholder_{"No selection"};

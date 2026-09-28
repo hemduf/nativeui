@@ -4,14 +4,14 @@ public:
 
     TextInputComponent(
         std::string label,
-        State<std::string>& state,
+        Binding<std::string> state,
         std::string placeholder,
         std::size_t max_length,
         SubmitCallback on_submit,
         TextInputStyle style)
         : label_(std::move(label)),
-          state_(state),
-          model_(state.get(), max_length),
+          state_(std::move(state)),
+          model_(state_.get(), max_length),
           placeholder_(std::move(placeholder)),
           on_submit_(std::move(on_submit)),
           style_(std::move(style)) {}
@@ -758,7 +758,7 @@ private:
     }
 
     std::string label_;
-    State<std::string>& state_;
+    Binding<std::string> state_;
     TextEditModel model_;
     std::string placeholder_;
     SubmitCallback on_submit_;
@@ -772,5 +772,5 @@ private:
     float scroll_x_{};
     std::string focus_snapshot_;
     std::string pending_ime_commit_;
-    State<std::string>::Subscription subscription_;
+    Binding<std::string>::Subscription subscription_;
 };

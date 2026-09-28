@@ -2,10 +2,59 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <cmath>
 #include <initializer_list>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace ui {
+
+namespace detail {
+struct EffectTestAccess;
+}
+
+class Effect {
+public:
+    [[nodiscard]] static Effect gaussian_blur(float sigma_x, float sigma_y) noexcept {
+        return Effect{Kind::GaussianBlur,
+                      canonical_sigma(sigma_x),
+                      canonical_sigma(sigma_y)};
+    }
+
+    Effect(const Effect&) noexcept = default;
+    Effect& operator=(const Effect&) noexcept = default;
+    Effect(Effect&&) noexcept = default;
+    Effect& operator=(Effect&&) noexcept = default;
+    ~Effect() noexcept = default;
+
+private:
+    enum class Kind : unsigned char {
+        GaussianBlur,
+    };
+
+    Effect(Kind kind, float sigma_x, float sigma_y) noexcept
+        : kind_(kind), sigma_x_(sigma_x), sigma_y_(sigma_y) {}
+
+    [[nodiscard]] static float canonical_sigma(float sigma) noexcept {
+        if (!std::isfinite(sigma) || sigma <= 0.0f) return 0.0f;
+        return sigma > 64.0f ? 64.0f : sigma;
+    }
+
+    friend class Painter;
+    friend struct detail::EffectTestAccess;
+
+    Kind kind_{Kind::GaussianBlur};
+    float sigma_x_{};
+    float sigma_y_{};
+};
+
+static_assert(std::is_nothrow_copy_constructible_v<Effect>);
+static_assert(std::is_nothrow_copy_assignable_v<Effect>);
+static_assert(std::is_nothrow_move_constructible_v<Effect>);
+static_assert(std::is_nothrow_move_assignable_v<Effect>);
+static_assert(std::is_nothrow_destructible_v<Effect>);
 
 struct GradientStop {
     float offset{};
@@ -68,5 +117,73 @@ private:
     float radius_{};
     std::vector<GradientStop> stops_;
 };
+
+class Painter;
+
+class Brush {
+public:
+    Brush(Color color) noexcept : value_(color) {}
+    Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
+    Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
+
+    Brush(const Brush&) = default;
+
+    Brush& operator=(const Brush& other) {
+        if (this == &other) return *this;
+        Brush replacement{other};
+        *this = std::move(replacement);
+        return *this;
+    }
+
+    Brush(Brush&& other) noexcept : value_(std::move(other.value_)) {
+        other.reset_to_transparent();
+    }
+
+    Brush& operator=(Brush&& other) noexcept {
+        if (this == &other) {
+            reset_to_transparent();
+            return *this;
+        }
+        value_ = std::move(other.value_);
+        other.reset_to_transparent();
+        return *this;
+    }
+
+    ~Brush() noexcept = default;
+
+private:
+    using Storage = std::variant<Color, LinearGradient, RadialGradient>;
+
+    static_assert(std::is_nothrow_constructible_v<Storage, Color>);
+    static_assert(std::is_nothrow_move_constructible_v<Storage>);
+    static_assert(std::is_nothrow_move_assignable_v<Storage>);
+    static_assert(std::is_nothrow_destructible_v<Storage>);
+
+    [[nodiscard]] static constexpr Color transparent() noexcept {
+        return Color{0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
+    void reset_to_transparent() noexcept {
+        Storage replacement{transparent()};
+        value_ = std::move(replacement);
+    }
+
+    template <class Visitor>
+    decltype(auto) visit(Visitor&& visitor) const {
+        return std::visit(std::forward<Visitor>(visitor), value_);
+    }
+
+    friend class Painter;
+    Storage value_;
+};
+
+static_assert(std::is_nothrow_move_constructible_v<LinearGradient>);
+static_assert(std::is_nothrow_move_assignable_v<LinearGradient>);
+static_assert(std::is_nothrow_move_constructible_v<RadialGradient>);
+static_assert(std::is_nothrow_move_assignable_v<RadialGradient>);
+static_assert(std::is_nothrow_constructible_v<Brush, Color>);
+static_assert(std::is_nothrow_move_constructible_v<Brush>);
+static_assert(std::is_nothrow_move_assignable_v<Brush>);
+static_assert(std::is_nothrow_destructible_v<Brush>);
 
 } // namespace ui

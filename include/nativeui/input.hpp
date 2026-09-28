@@ -2,6 +2,7 @@
 
 #include <nativeui/geometry.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -31,7 +32,31 @@ enum class Key {
     X,
     Y,
     Z,
-    Quit
+    Quit,
+    // The remaining printable ASCII letters were appended after Quit so every
+    // pre-existing public enumerator keeps its numeric value. Letter values are
+    // therefore intentionally not contiguous; never derive Key values with
+    // arithmetic on the enum representation.
+    B,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    W
 };
 
 enum class Command {
@@ -139,6 +164,37 @@ struct InputEvent {
 }
 
 namespace detail {
+
+inline constexpr std::array<Key, 26> kAsciiLetterKeys{
+    Key::A, Key::B, Key::C, Key::D, Key::E, Key::F, Key::G,
+    Key::H, Key::I, Key::J, Key::K, Key::L, Key::M, Key::N,
+    Key::O, Key::P, Key::Q, Key::R, Key::S, Key::T, Key::U,
+    Key::V, Key::W, Key::X, Key::Y, Key::Z};
+
+/// Translate the ASCII portion of a native key event after platform-specific
+/// special keys have been handled. `primary` preserves NativeUI's existing
+/// Primary+Q window-close shortcut; otherwise every ASCII letter A-Z maps to
+/// its public Key value regardless of case. Text/IME input remains separate.
+[[nodiscard]] constexpr Key translate_ascii_key(std::uint32_t key, bool primary) noexcept {
+    if (key == static_cast<std::uint32_t>(' ')) return Key::Space;
+    if (primary &&
+        (key == static_cast<std::uint32_t>('q') ||
+         key == static_cast<std::uint32_t>('Q'))) {
+        return Key::Quit;
+    }
+
+    if (key >= static_cast<std::uint32_t>('A') &&
+        key <= static_cast<std::uint32_t>('Z')) {
+        key += static_cast<std::uint32_t>('a' - 'A');
+    }
+    if (key < static_cast<std::uint32_t>('a') ||
+        key > static_cast<std::uint32_t>('z')) {
+        return Key::None;
+    }
+
+    return kAsciiLetterKeys[static_cast<std::size_t>(
+        key - static_cast<std::uint32_t>('a'))];
+}
 
 [[nodiscard]] constexpr std::pair<Rect, float> scale_text_input_geometry(
     Rect logical_area, float logical_cursor_offset, float scale_factor) noexcept {

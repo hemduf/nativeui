@@ -214,8 +214,8 @@ public:
     explicit StyleScopeComponent(StyleScopeOverrides overrides)
         : overrides_(std::move(overrides)), resolved_(default_theme()) {}
 
-    explicit StyleScopeComponent(State<StyleScopeOverrides>& state)
-        : state_(&state), overrides_(state.get()), resolved_(default_theme()) {}
+    explicit StyleScopeComponent(Binding<StyleScopeOverrides> state)
+        : state_(std::move(state)), overrides_(state_->get()), resolved_(default_theme()) {}
 
     void bind_theme(const Theme& theme) noexcept override {
         ThemeBinding::bind_theme(theme);
@@ -259,7 +259,7 @@ public:
     }
 
     void mount(MountContext&) override {
-        if (!state_) return;
+        if (!state_ || !state_->valid()) return;
         observer_ = std::make_shared<ObserverState>();
         observer_->apply = [this](const StyleScopeOverrides& value) {
             replace_overrides(value);
@@ -300,20 +300,21 @@ private:
         }
     }
 
-    State<StyleScopeOverrides>* state_{};
+    std::optional<Binding<StyleScopeOverrides>> state_;
     StyleScopeOverrides overrides_;
     const Theme* inherited_theme_{};
     Theme resolved_;
     std::function<void(ThemeInvalidation)> change_invalidator_;
     std::shared_ptr<ObserverState> observer_;
-    State<StyleScopeOverrides>::Subscription subscription_;
+    Binding<StyleScopeOverrides>::Subscription subscription_;
 };
 
 } // namespace detail
 
 /// One explicit lexical style scope. The value form is immutable for the
-/// retained lifetime; the State-backed form supports UI-thread replacement with
-/// exact effective no-op/paint/layout invalidation classification.
+/// retained lifetime; the Binding-backed form supports UI-thread replacement
+/// with exact effective no-op/paint/layout invalidation classification. Legacy
+/// State syntax delegates through State::binding() and never retains State*.
 class StyleScope {
 public:
     template <class Child>
@@ -323,16 +324,20 @@ public:
     }
 
     template <class Child>
-    StyleScope(State<StyleScopeOverrides>& overrides, Child&& child)
-        : state_(&overrides) {
+    StyleScope(Binding<StyleScopeOverrides> overrides, Child&& child)
+        : state_(std::move(overrides)) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+    template <class Child>
+    StyleScope(State<StyleScopeOverrides>& overrides, Child&& child)
+        : StyleScope(overrides.binding(), std::forward<Child>(child)) {}
+
     Spec spec() && {
         if (state_) {
-            auto* state = state_;
+            auto state = *state_;
             return Spec{
-                [state] { return std::make_unique<detail::StyleScopeComponent>(*state); },
+                [state] { return std::make_unique<detail::StyleScopeComponent>(state); },
                 std::move(children_)};
         }
         auto overrides = std::move(overrides_);
@@ -344,7 +349,7 @@ public:
     }
 
 private:
-    State<StyleScopeOverrides>* state_{};
+    std::optional<Binding<StyleScopeOverrides>> state_;
     StyleScopeOverrides overrides_;
     std::vector<Spec> children_;
 };

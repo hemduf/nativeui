@@ -3,7 +3,7 @@
 NativeUI does not vendor binary dependency outputs in this source package. They are acquired by CPM at configure time.
 
 - **Pugl** — `hemduf/pugl`, pinned to `195f79b22644010c81a5e0c3231c591856787ec6`, ISC license. NativeUI compiles the Pugl core and OpenGL backend statically. This fork retains the upstream Pugl codebase and carries reviewed desktop drag-and-drop fixes plus the X11 empty-selection guard required by NativeUI.
-- **Skia** — binary static libraries from `olilarkin/skia-builder`, release `chrome/m149`. The builder project is MIT-licensed; Skia itself uses its upstream BSD-style license and bundled third-party licenses.
+- **Skia** — binary static libraries from `hemduf/skia-builder`, release `chrome/m149`, forked from `olilarkin/skia-builder`. The builder project is MIT-licensed; Skia itself uses its upstream BSD-style license and bundled third-party licenses.
 - **CPM.cmake** — dependency manager bootstrap pinned to 0.43.1 and distributed under its upstream MIT licence.
 
 ## Licensing boundary

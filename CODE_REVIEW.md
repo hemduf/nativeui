@@ -4,19 +4,21 @@ This document is a **mandatory review gate** for NativeUI changes. It exists bec
 
 The rules below apply even though NativeUI itself does not implement VST3, CLAP, AU or DSP APIs. Any implementation in NativeUI must remain safe when called by an adapter for those formats.
 
-A ticket that changes code is not complete until the applicable checks in this document have been performed and blocking findings have been corrected. The issue or PR must record the review result.
+A ticket that changes code is not complete until the applicable checks in this document have been performed and every Blocking/Important finding has been corrected. The issue or PR must record the review result.
+
+The normal-path result is not sufficient evidence. **Every state transition that invokes user/component code, allocates, schedules work, crosses a native boundary or acquires a resource must be reviewed at each failure point between prepare and commit.**
 
 ## 1. Review priorities
 
 Review findings are classified as:
 
-- **Blocking** — can cause cross-instance state corruption, host/process crashes, undefined behavior, real-time violations, use-after-free, data races, Objective-C runtime collisions, ABI violations or broken attach/detach lifecycle. Must be fixed before merge.
+- **Blocking** — can cause cross-instance state corruption, host/process crashes, undefined behavior, real-time violations, use-after-free, data races, Objective-C runtime collisions, ABI violations, broken attach/detach lifecycle, destructor-time termination, leaked registered/native resources after partial construction, poisoned guard/state-machine flags after an exception, silent loss/duplication of accepted work, partially published retained state, or an unsafe synchronous fallback when a contract requires deferred execution. Must be fixed before merge.
 - **Important** — correctness, performance, ownership or maintainability defect that is likely to become a production issue. Fix before merge unless explicitly split into a tracked follow-up with no current correctness risk.
 - **Advisory** — style or non-critical improvement.
 
 An unapproved compiler warning from NativeUI-owned code is a **Blocking** finding. NativeUI-owned targets must pass with the default empty `NATIVEUI_ALLOWED_WARNINGS`; an exception is valid only when the exact diagnostic is documented in the ticket/PR and explicitly enabled through that CMake cache setting. Target/source-local suppression (`-Wno-*`, `/wd*`, diagnostic pragmas, `COMPILE_WARNING_AS_ERROR=OFF`, or equivalent) is not an acceptable substitute for the explicit warning policy.
 
-Plugin-host safety takes precedence over convenience. "It works in the standalone example" is not sufficient validation.
+Plugin-host safety takes precedence over convenience. "It works in the standalone example" and "the CI happy path is green" are not sufficient validation.
 
 ## 2. Per-instance isolation — mandatory
 
@@ -55,7 +57,7 @@ For every mutable process-wide object, the review must answer:
 4. Is construction/destruction safe when plug-in modules are loaded/unloaded?
 5. Is the sharing behavior part of a documented API contract?
 
-If any answer is unclear, treat the global as a blocking finding.
+If any answer is unclear, treat the global as a Blocking finding.
 
 ### 2.3 Caches and resource managers
 
@@ -77,8 +79,8 @@ Review all changed code for:
 - parent attach -> detach -> reattach where supported;
 - destruction while focus, pointer capture, text input, timers, drag/drop or callbacks are active;
 - host destruction immediately after the last callback;
-- partial construction failure;
-- exceptions/errors during platform setup;
+- partial construction failure at **every** acquisition step;
+- exceptions/errors during platform setup and retained mount/layout;
 - module unload/reload behavior where the format/host supports it.
 
 Requirements:
@@ -90,7 +92,48 @@ Requirements:
 - no hidden dependence on static destruction order;
 - teardown is idempotent where host call sequences may repeat benignly;
 - native handles are treated as borrowed unless ownership is explicitly documented;
-- a child view must never destroy the host-owned parent window/view.
+- a child view must never destroy the host-owned parent window/view;
+- every resource becomes cleanup-capable **before the next operation that can throw**;
+- partial construction must be tested after each meaningful resource acquisition, not only before the first and after the last.
+
+### 3.1 Top-level owner destruction during callbacks
+
+Do not assume that a callback may synchronously destroy the object, `UI`, window or view that invoked it.
+
+If synchronous self/owner destruction is intentionally supported, the complete caller chain must prove all of the following:
+
+- an independent lifetime/control token is acquired before user code begins;
+- after user code returns, no access to `this`, `impl_`, `Tree`, `ViewCore`, native handles or other destroyed-owner state occurs unless the token proves the owner still exists;
+- nested/reentrant callers satisfy the same rule;
+- platform/native code that called into the callback is not left with a dangling handle;
+- tests destroy the owner from the callback under ASan/UBSan.
+
+If any caller cannot prove this, synchronous top-level destruction is unsupported at that callback boundary and must be deferred to an owner/Dispatcher/platform safe checkpoint. Component **subtree** removal may still use the retained-tree safe reconciliation mechanism.
+
+A comment stating "the callback may destroy the owner" is a Blocking finding if code later touches owner state on the same stack.
+
+### 3.2 Retained callbacks, invalidators and borrowed contexts
+
+A callback documented or used as long-lived must not capture a raw `Tree*`, `Node&`, stack callback context, transient native event pointer, or other borrow that can expire before the callback object.
+
+For retained callbacks:
+
+- prefer a weak owner lifetime token plus stable monotonic identity/handle;
+- stale invocation after node removal or whole-owner destruction must be a deterministic safe no-op unless another behavior is explicitly documented;
+- retaining the callback must not keep a removed node/tree/window alive solely to avoid a dangling reference;
+- stale identity must never resolve to a replacement object through address or ID reuse;
+- explicit disconnect on unmount is desirable, but safety must not depend solely on every consumer remembering to disconnect.
+
+`PaintContext`, `InputContext`, `FocusContext`, `LifecycleContext` and equivalent callback contexts are borrowed for callback duration unless explicitly documented otherwise. Review copy/move support if it makes accidental retention possible.
+
+### 3.3 Destructor callback policy
+
+Destructors and destructor-driven teardown are no-throw.
+
+- Ordinary direct destruction should not call application callbacks unless the public contract explicitly requires destructor-time notification.
+- If a contract deliberately requires a destructor to invoke application code, internal ownership/state must be terminal before the callback starts, the callback must be at-most-once, exceptions from it must be contained, and cleanup must continue.
+- One throwing child/component must not stop sibling/parent/native resource teardown.
+- Never depend on a scope-guard destructor that calls arbitrary user/component code while another exception is already unwinding.
 
 VST3 initialization/de-initialization is normally performed on the UI/main thread. CLAP `init`, `activate`, `deactivate` and `destroy` have explicit main-thread/lifecycle preconditions in the CLAP headers. NativeUI adapters must preserve those contracts.
 
@@ -98,7 +141,7 @@ VST3 initialization/de-initialization is normally performed on the UI/main threa
 
 ### 4.1 NativeUI is UI-thread confined unless an API explicitly says otherwise
 
-The retained component tree, focus/input routing, window/view operations and ordinary `State<T>` mutation are treated as **UI/main-thread-only** facilities unless an API explicitly documents thread safety.
+The retained component tree, focus/input routing, window/view operations and ordinary `State<T>`/`ScrollState` mutation are treated as **UI/main-thread-only** facilities unless an API explicitly documents thread safety.
 
 Do not infer thread safety from the absence of crashes in tests.
 
@@ -142,12 +185,31 @@ Review for:
 - user callbacks deleting/replacing the object that invoked them;
 - callbacks triggering layout/invalidation while dispatch/layout/paint is already active;
 - observer lists modified from inside an observer callback;
+- recursive state writes from an observer;
+- callbacks that throw after mutating subscriptions/state;
 - host callbacks that synchronously call back into the plug-in/UI;
-- stale callbacks queued after detach/destruction.
+- stale callbacks queued after detach/destruction;
+- callbacks that open/close overlays, windows, dialogs or other lifecycle objects reentrantly.
 
 Do not hold a lock while calling user code or host code unless the API contract explicitly requires it and deadlock has been ruled out.
 
-## 6. Exceptions and ABI boundaries
+### 5.1 Callback iteration and observer rules
+
+Any observer/callback dispatcher must define and test:
+
+- whether a callback added during a pass can run in that same pass;
+- whether removing a not-yet-run callback suppresses it immediately;
+- the stable value/snapshot visible to one pass;
+- recursive mutation/coalescing semantics;
+- what happens to not-yet-started callbacks when an earlier callback throws;
+- what happens to recursive/pending writes when a callback throws;
+- whether a callback that already started can ever be retried.
+
+Default rule unless an API explicitly says otherwise: **a callback whose invocation started is never automatically retried solely because it threw**.
+
+Observer/dispatcher state must remain usable after the caller catches an exception. A `notifying`, dispatch-depth, iterator-generation or equivalent busy flag left active after unwind is a Blocking finding.
+
+## 6. Exceptions, transactions and ABI boundaries
 
 C++, C, VST3/COM-style, CLAP C ABI and Objective-C callbacks are different exception domains.
 
@@ -155,8 +217,121 @@ Requirements:
 
 - never let a C++ exception escape through a C callback, CLAP function pointer, Objective-C runtime callback, Pugl callback, Win32 callback or other foreign ABI boundary;
 - boundary thunks should be `noexcept` where practical and convert failures to the target API's error/result mechanism;
-- destructors used during plug-in teardown must not throw;
+- ordinary direct C++ APIs may propagate user/component exceptions only **after framework invariants are restored**;
+- no function declared `noexcept` may reach potentially throwing user/virtual/application code without an explicit local containment rule;
+- destructors used during plug-in/UI/native teardown must not throw;
 - partial construction must leave no registered callback/native resource behind.
+
+### 6.1 Guard and bookkeeping restoration
+
+Every flag/counter used as a temporary guard must be reviewed as an unwind-sensitive resource, including patterns such as:
+
+- dispatch/reentrancy depth;
+- `syncing_*`, `reconciling_*`, `cancelling_*`, `notifying_*`;
+- pointer interaction/capture state;
+- `*_posted`, `*_pending`, `*_active`, completion flags;
+- transient borrowed native pointers;
+- temporary callback/offer/delegate state.
+
+Rules:
+
+- restore the **exact previous state**, not merely a hard-coded default, so nested/reentrant usage remains correct;
+- restoration runs on every return/throw path;
+- a cleanup guard may restore framework-owned bookkeeping, but must not invoke arbitrary user/component callbacks during exception unwind;
+- if semantic cleanup requires user callbacks, leave durable pending/dirty work for the next normal safe checkpoint;
+- after catching an exception, the next valid operation must not be silently ignored because a stale busy/posted/cancelling flag remains set.
+
+Any boolean guard set before a user/virtual callback and reset only on the normal tail is presumed unsafe until proven otherwise.
+
+### 6.2 Transactional state machines and publication order
+
+For every multi-step state transition — retained reconciliation, overlay show/close, dialog completion, window close, focus transfer, lifecycle phase, state notification, layout publication, resource registration — identify:
+
+1. **Prepare:** allocation/validation/callback construction that may fail before publication.
+2. **Commit point:** the exact moment the new externally observable logical state becomes authoritative.
+3. **Recovery/rollback:** how every failure before/after commit leaves one coherent state.
+
+Blocking patterns include:
+
+- clearing/moving the only handle, generation, callback or owner reference before later fallible work is durably recoverable;
+- mutating a public/logical registry, then running a throwing invalidator with no rollback or pending reconciliation;
+- erasing logical state while retained/native state still requires work, without a durable dirty/pending marker;
+- publishing a lifecycle phase or generation and then allowing allocation failure to lose the work needed to finish it;
+- using address reuse or recycled IDs to "recover" a stale retained callback.
+
+A failed operation must leave the object either coherently in the old state, coherently in the new state with required follow-up durably queued/marked, or in an explicitly terminal failure state. Ambiguous half-commit is Blocking.
+
+### 6.3 Accepted work, queues and scheduling failure
+
+Review both **callback execution failure** and **enqueue failure**.
+
+For accepted queued work:
+
+- a task whose callback began is not automatically retried unless the API explicitly documents retry;
+- work accepted earlier but not yet started must not be silently destroyed merely because a neighboring callback threw, except under an explicit owner-shutdown contract;
+- original ordering/fairness must be preserved when unstarted work is restored;
+- timers/one-shots/repeating work must not duplicate or resurrect because recovery requeues tasks.
+
+For enqueue/post/schedule operations:
+
+- review `false`/rejection, capacity/full, owner-closing and exception-before-enqueue separately;
+- setting a `posted` flag before a fallible enqueue requires rollback or another durable execution path;
+- entering a lifecycle phase such as `Requesting` before a fallible enqueue requires recovery if enqueue fails;
+- **if the contract requires execution at a later safe checkpoint, enqueue failure must never fall back to synchronous execution on the currently active callback stack**;
+- lifecycle/control-plane correctness must not depend on ordinary user queue capacity; use a bounded owner-local pending flag/reserved control slot/existing pump checkpoint when needed;
+- do not introduce unbounded retry queues or busy loops as recovery.
+
+Tests must be able to deterministically force queue full/rejection and exception-before-enqueue; relying on natural OOM or rare saturation is insufficient.
+
+### 6.4 Partial construction and native resource acquisition
+
+From the first acquired resource onward, every subsequent throw point must be covered.
+
+Audit constructors/factories that acquire:
+
+- native windows/views/worlds/contexts;
+- callback registrations/handles/delegates;
+- Objective-C runtime attachment/associated state;
+- IME bridges;
+- timers/Dispatcher registrations;
+- renderer/context resources;
+- retained invalidation callbacks or owner registrations.
+
+Rules:
+
+- each resource becomes RAII/scoped-cleanup-owned before the next throwing call;
+- cleanup distinguishes borrowed/shared resources from owned resources;
+- a failed child must not free a shared Application/host resource;
+- cleanup unregisters callbacks/handles before backing storage disappears;
+- constructor failure after user-controlled layout/measure/mount is treated exactly like platform failure;
+- fault tests should fail after each meaningful acquisition stage and verify zero leak/stale registration.
+
+A manual `cleanup_and_throw()` helper is not sufficient evidence if a later arbitrary exception can bypass it.
+
+### 6.5 No-throw teardown
+
+Destructor-driven teardown must continue best-effort after individual callback failures.
+
+Review all destructor call chains, not only the destructor body. If a destructor calls a helper that invokes `PointerCancel`, `focus_changed`, `deactivate`, `unmount`, completion code, platform cleanup or user callbacks, that entire path is part of the no-throw requirement.
+
+Required order is generally:
+
+1. make future external callbacks impossible or harmless;
+2. mark state terminal enough to prevent duplicate entry;
+3. contain failures from user/component teardown hooks;
+4. continue releasing remaining retained/native resources;
+5. unregister from owner/application last as required by ownership.
+
+### 6.6 Layout and paint failure publication
+
+For retained layout/paint:
+
+- failed layout must not be published as a complete geometry frame used by input/paint;
+- layout dirtiness must remain/re-become set after failure so a later pass can recompute;
+- clearing dirty regions before fallible layout requires rollback/recovery;
+- framework-owned Painter/SkCanvas save/clip/transform scopes must use RAII/equivalent balancing;
+- failed paint must not clear dirty state as if a frame succeeded;
+- a later successful paint must start from balanced renderer/canvas state.
 
 ## 7. Symbol visibility and process coexistence
 
@@ -201,7 +376,7 @@ Therefore reusable/static NativeUI platform code must follow one of these strate
 
 1. **Preferred:** avoid defining Objective-C runtime classes entirely; use Objective-C++ functions/RAII wrappers around existing Cocoa objects when possible.
 2. If a runtime class is genuinely required, its real runtime name must include a **consumer/plugin-specific unique prefix**, not merely a NativeUI library prefix.
-3. The consumer-specific prefix should be derived from a unique bundle identifier (for example `com.hemduf.product` -> `ComHemdufProduct...`) or an equivalently collision-resistant build-time identifier.
+3. The consumer-specific prefix should be derived from a unique bundle identifier (for example `com.vendor.product` -> `ComVendorProduct...`) or an equivalently collision-resistant build-time identifier.
 4. Code generation must require that prefix as input/configuration. It must not silently fall back to a generic class name.
 
 If NativeUI later introduces generated Objective-C classes, the build/API must expose an explicit consumer prefix mechanism before that code is accepted.
@@ -217,7 +392,7 @@ If a category is unavoidable:
 - never use the category to override an existing framework method;
 - add a collision review/test.
 
-**Method swizzling of host/AppKit/framework classes is prohibited** unless an explicit architecture ticket demonstrates there is no viable alternative and the process-wide effect is acceptable. For normal NativeUI work, treat swizzling as a blocking finding.
+**Method swizzling of host/AppKit/framework classes is prohibited** unless an explicit architecture ticket demonstrates there is no viable alternative and the process-wide effect is acceptable. For normal NativeUI work, treat swizzling as a Blocking finding.
 
 ### 8.4 `+load`, `+initialize`, constructors and process-global initialization
 
@@ -258,10 +433,14 @@ Check every change for:
 - justified `shared_ptr` ownership rather than convenience sharing;
 - weak references for non-owning callbacks where necessary;
 - absence of dangling `string_view`, `span`, raw pointer or callback captures;
+- explicit lifetime for every retained callback/invalidator/reference accepted by public or semi-public API;
+- stable monotonic identity/generation when stale handles must not resolve to replacements;
 - move operations leaving valid destructible objects;
 - stable addresses where native APIs store a callback handle;
-- no virtual call into a partially constructed/destructed object;
+- no virtual call into a partially constructed/destructed object unless explicitly contained and safe;
 - no ABI dependence on compiler-specific layout across a C/plugin boundary.
+
+For public APIs taking references or returning callback handles, the review must state whether ownership is borrowed, shared, transferred or lifetime-token-backed and how stale use behaves.
 
 Public headers must not leak Pugl, Skia, AppKit, Win32, Xlib or plug-in SDK types except through an explicitly approved low-level boundary.
 
@@ -276,7 +455,11 @@ For rendering or windowing changes verify:
 - embedded polling stays non-blocking;
 - a window/view does not start its own nested event loop inside a plug-in host;
 - timers are stopped before view destruction;
-- clipboard/drag/drop pointers are not retained past their documented callback lifetime.
+- clipboard/drag/drop pointers are not retained past their documented callback lifetime and are cleared on exceptional unwind;
+- native-view constructors protect every acquired world/view/context/IME/callback registration before calling retained/user-controlled layout or mount code;
+- close/request lifecycle remains deferred when the contract requires a safe checkpoint even if ordinary Dispatcher enqueue is rejected or throws;
+- direct C++ destruction remains callback-silent where the window/view contract says so;
+- native callback thunks contain C++ exceptions **and** leave the retained/platform state recoverable rather than merely preventing ABI unwind.
 
 ## 11. Mandatory validation matrix
 
@@ -290,20 +473,53 @@ Every code ticket must run the smallest applicable subset plus the full relevant
 - [ ] ownership/lifetime review;
 - [ ] global/static mutable-state review;
 - [ ] callback/reentrancy review;
+- [ ] exception/unwind and transaction-commit review;
+- [ ] scheduling/queue rejection/throw review where work is deferred;
 - [ ] thread-domain review;
-- [ ] multi-instance impact explicitly assessed.
+- [ ] multi-instance impact explicitly assessed;
+- [ ] no personal information introduced in tests/examples/code/generated metadata.
 
-### 11.2 If view/platform/lifecycle code changes
+### 11.2 If callbacks, observers, retained state or lifecycle transitions change
+
+Use deterministic fault seams; do not depend on rare OOM/queue saturation occurring naturally.
+
+- [ ] throw from the first, middle and last relevant user/component callback where ordering matters;
+- [ ] callback removes/adds another observer/subscriber and then throws;
+- [ ] callback recursively mutates the same state/structure and then throws;
+- [ ] after the exception is caught, perform the next normal operation and prove all guard/depth/busy flags recovered;
+- [ ] callback destroys/removes another retained target before its turn;
+- [ ] stale retained invalidator/handle is invoked after target node removal and after whole-owner destruction;
+- [ ] prepare/commit failure is injected between logical mutation and invalidation/reconciliation publication;
+- [ ] accepted but not-yet-started work survives a neighboring callback throw without duplication unless owner shutdown explicitly permits discard;
+- [ ] queue full/rejection and exception-before-enqueue are both tested for deferred work;
+- [ ] when the contract requires a later safe checkpoint, failed enqueue proves there is **no synchronous callback-stack fallback**;
+- [ ] destructor-driven path contains throwing user/component code and still completes remaining cleanup;
+- [ ] failure in instance A leaves independent instance B operational.
+
+### 11.3 If view/platform/lifecycle code changes
 
 - [ ] at least two simultaneous independent instances;
 - [ ] destroy instance A and confirm instance B remains functional;
 - [ ] repeated create/destroy loop;
 - [ ] repeated attach/detach/open/close as applicable;
 - [ ] active focus/capture/text-input teardown;
+- [ ] partial-construction fault after each meaningful acquired native resource/callback registration;
+- [ ] retained layout/measure throw during native-view construction leaves no stale native resource/registration;
+- [ ] teardown callback throw still releases renderer/IME/view/world/Dispatcher/Application registration as applicable;
 - [ ] ASan/UBSan where available;
+- [ ] LSan where supported for acquisition/teardown changes;
 - [ ] TSan when the changed code introduces or modifies shared cross-thread state and a supported configuration is available.
 
-### 11.3 If macOS Objective-C/Objective-C++ code changes
+### 11.4 If layout or paint changes
+
+- [ ] layout throws after at least one earlier node was visited; no partial geometry frame is treated as committed;
+- [ ] failed layout followed by successful recovery;
+- [ ] dirty layout/paint state survives failure;
+- [ ] descendant paint throws inside framework clipping/save scope; renderer/canvas depth is balanced;
+- [ ] failed paint followed by successful repaint from clean canvas state;
+- [ ] normal successful hot path is benchmarked if rollback/staging adds material cost.
+
+### 11.5 If macOS Objective-C/Objective-C++ code changes
 
 - [ ] audit every runtime-visible Objective-C name;
 - [ ] verify consumer-specific prefixing for generated/static-library runtime classes;
@@ -313,14 +529,14 @@ Every code ticket must run the smallest applicable subset plus the full relevant
 - [ ] verify no `+load`, swizzling or host-wide application mutation was introduced without an explicit approved exception;
 - [ ] inspect linked symbols/runtime classes where practical (`nm`, `otool`, runtime probe or an equivalent CI check).
 
-### 11.4 If code can touch a plug-in audio callback through an adapter
+### 11.6 If code can touch a plug-in audio callback through an adapter
 
 - [ ] prove the path performs no allocation/deallocation;
 - [ ] prove it does not take contended/blocking locks;
 - [ ] prove it performs no I/O/UI/runtime initialization;
 - [ ] verify cross-thread state handoff is bounded and race-free.
 
-### 11.5 CI qualification cadence
+### 11.7 CI qualification cadence
 
 - During active TDD, keep the PR Draft and use normal CI plus only path-scoped dedicated workflows relevant to the changed subsystem.
 - Do not interpret this validation matrix as a requirement to run unrelated historical ticket matrices on every commit.
@@ -336,13 +552,19 @@ Before a ticket is marked Done, add a review record containing at least:
 - **Instance isolation:** pass / findings corrected / not applicable with reason;
 - **Globals/statics:** pass / list of intentionally shared objects and justification;
 - **Threading/RT:** pass / not applicable with reason;
-- **Lifetime/reentrancy:** pass;
+- **Lifetime/reentrancy:** pass, including owner destruction and retained callback lifetime;
+- **Transactional state:** pass / identify prepare, commit and rollback/recovery points for changed state machines;
+- **Scheduling/queue failure:** pass / not applicable; cover capacity/rejection, owner closing and exception-before-enqueue where relevant;
+- **Exception/unwind:** pass; ordinary C++ propagation, `noexcept` paths, destructor behavior and foreign ABI containment explicitly assessed;
+- **Partial construction:** pass / not applicable; list acquired native/registered resources and cleanup on each failure stage when relevant;
 - **Objective-C runtime:** pass / not applicable; if applicable list prefix strategy;
 - **Platform integration:** pass / not applicable;
-- **Tests:** exact targeted/full/multi-instance/platform checks run;
+- **Performance/allocation:** pass / measured or reasoned hot-path impact;
+- **Privacy:** pass; no personal information in tests/examples/code/generated metadata;
+- **Tests:** exact targeted/fault/full/multi-instance/platform checks run;
 - **Remaining findings:** none, or links to explicitly non-blocking follow-ups.
 
-A bare "reviewed" is not sufficient.
+A bare "reviewed" is not sufficient. Omitting an applicable failure-domain field is itself an incomplete review.
 
 ## 13. Current NativeUI-specific invariants
 
@@ -356,7 +578,18 @@ During review, preserve these project-specific rules in addition to the checks a
 - public geometry is logical coordinates; framebuffer geometry is physical pixels;
 - component/view/focus/capture state is per instance;
 - process-shared mutable registries are exceptional and require explicit justification;
-- `State<T>` is UI-thread confined unless replaced/extended by an explicitly thread-safe abstraction.
+- `State<T>` and `ScrollState` are UI-thread confined unless replaced/extended by an explicitly thread-safe abstraction;
+- State/ScrollState observer dispatch remains usable after a throwing observer; started callbacks are not implicitly retried;
+- retained invalidators/callbacks intentionally allowed to outlive a component are lifetime-safe after node removal and whole-Tree/UI destruction;
+- top-level `UI`/window/view destruction from an active callback is deferred unless the complete caller chain explicitly proves self-destruction safety;
+- ordinary C++ user/component exceptions may propagate only after NativeUI invariants are restored;
+- C/Pugl/Objective-C/Win32/X11/other foreign callback boundaries contain all C++ exceptions;
+- destructor-driven retained/native teardown is no-throw and best-effort complete;
+- accepted queued work is not silently lost because a previously running callback throws, except under explicit owner shutdown semantics;
+- deferred lifecycle/control operations never fall back to unsafe synchronous teardown merely because ordinary queue enqueue was rejected or threw;
+- retained/lifecycle/overlay/window state machines have explicit prepare/commit/recovery boundaries;
+- native partial construction leaves no stale callback/IME/view/world/renderer resource behind;
+- failed layout does not publish partial geometry and failed paint does not publish a clean frame or leak framework-owned canvas state.
 
 ## 14. External normative references
 

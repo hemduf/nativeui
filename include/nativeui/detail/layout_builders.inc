@@ -1,18 +1,27 @@
 class Scroll {
 public:
     template <class Child>
-    Scroll(ScrollState& state, Child&& child) : state_(&state) {
+    Scroll(ScrollState& state, Child&& child)
+        : state_(&state), axis_(state.axis()), lifetime_(state.lifetime_token()) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
     Spec spec() && {
         auto* state = state_;
-        return Spec{[state] { return std::make_unique<ScrollComponent>(*state); },
-                    std::move(children_)};
+        const auto axis = axis_;
+        const auto lifetime = lifetime_;
+        return Spec{
+            [state, axis, lifetime] {
+                return std::make_unique<detail::RetainedScrollComponent>(
+                    state, axis, lifetime);
+            },
+            std::move(children_)};
     }
 
 private:
     ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
     std::vector<Spec> children_;
 };
 

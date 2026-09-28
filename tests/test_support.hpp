@@ -12,6 +12,18 @@
 #include <utility>
 #include <vector>
 
+namespace ui {
+
+// Test-only pass-through for fixtures that deliberately handcraft a raw Spec.
+// Production consumers still use the public builder/.spec() contract; this
+// specialization exists only in translation units that include test_support.hpp.
+template <>
+inline Spec make_spec<Spec>(Spec&& value) {
+    return std::move(value);
+}
+
+} // namespace ui
+
 namespace test {
 
 class Failure final : public std::runtime_error {

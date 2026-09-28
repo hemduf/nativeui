@@ -7,6 +7,92 @@ enum class ScrollAlignment {
 
 namespace detail {
 
+// Retained scroll trees borrow the application-owned ScrollState. The weak
+// lifetime token lets deferred factories and realized components become inert
+// after owner teardown without adding a synthetic observer or extending the
+// ScrollState lifetime. All post-callback reads re-check the token because
+// update_metrics() may synchronously notify an observer that destroys the state.
+class RetainedScrollComponent final : public Component {
+public:
+    RetainedScrollComponent(
+        ScrollState* state,
+        ScrollAxis axis,
+        ScrollState::LifetimeToken lifetime)
+        : state_(state), axis_(axis), lifetime_(std::move(lifetime)) {}
+
+    [[nodiscard]] bool clips_children() const noexcept override { return true; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
+        return children.empty() ? Size{} : children.front().preferred;
+    }
+
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
+        if (children.empty()) return {};
+        auto minimum = children.front().minimum;
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) minimum.w = 0.0f;
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) minimum.h = 0.0f;
+        return minimum;
+    }
+
+    [[nodiscard]] Constraints child_constraints(
+        const Constraints& constraints, std::size_t, std::size_t) const override {
+        Size maximum = constraints.max;
+        if (axis_ == ScrollAxis::Horizontal || axis_ == ScrollAxis::Both) {
+            maximum.w = kUnboundedExtent;
+        }
+        if (axis_ == ScrollAxis::Vertical || axis_ == ScrollAxis::Both) {
+            maximum.h = kUnboundedExtent;
+        }
+        return Constraints::loose(maximum);
+    }
+
+    void mount(MountContext& context) override {
+        if (!alive()) return;
+        subscription_ = state_->observe(
+            [invalidate = context.layout_invalidator()](Point) { invalidate(); });
+    }
+
+    void unmount(LifecycleContext&) override { subscription_.reset(); }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>& children,
+        std::vector<ChildPlacement>& placements) const override {
+        if (placements.empty() || children.empty()) {
+            if (alive()) state_->update_metrics({bounds.w, bounds.h}, {});
+            return;
+        }
+
+        Size content = children.front().preferred;
+        if (axis_ == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
+        if (axis_ == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
+
+        if (alive()) {
+            state_->update_metrics({bounds.w, bounds.h}, content);
+            if (alive()) {
+                const auto offset = state_->offset();
+                placements.front().bounds = Rect{
+                    bounds.x - offset.x, bounds.y - offset.y, content.w, content.h};
+                return;
+            }
+        }
+
+        placements.front().bounds = Rect{bounds.x, bounds.y, content.w, content.h};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    [[nodiscard]] bool alive() const noexcept {
+        return state_ != nullptr && lifetime_.active();
+    }
+
+    ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
+    ScrollState::Subscription subscription_;
+};
+
 [[nodiscard]] inline bool scroll_axis_horizontal(ScrollAxis axis) noexcept {
     return axis == ScrollAxis::Horizontal || axis == ScrollAxis::Both;
 }
@@ -206,8 +292,18 @@ enum class ScrollbarAxis {
 
 class ScrollbarComponent final : public Component, public ThemeBinding {
 public:
+    ScrollbarComponent(
+        ScrollState* state,
+        ScrollState::LifetimeToken lifetime,
+        ScrollbarAxis axis,
+        ScrollbarStyle style)
+        : state_(state),
+          lifetime_(std::move(lifetime)),
+          axis_(axis),
+          style_(std::move(style)) {}
+
     ScrollbarComponent(ScrollState& state, ScrollbarAxis axis, ScrollbarStyle style)
-        : state_(&state), axis_(axis), style_(std::move(style)) {}
+        : ScrollbarComponent(&state, state.lifetime_token(), axis, std::move(style)) {}
 
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
@@ -217,6 +313,20 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        if (!alive()) {
+            if (drag_active_ &&
+                (event.type == InputType::PointerMove ||
+                 event.type == InputType::PointerUp ||
+                 event.type == InputType::PointerCancel ||
+                 event.type == InputType::PointerLeave)) {
+                drag_active_ = false;
+                hovered_ = false;
+                context.release_pointer();
+                return EventResult::Handled;
+            }
+            return EventResult::Ignored;
+        }
+
         switch (event.type) {
         case InputType::PointerDown: {
             const auto before = resolved_style();
@@ -257,7 +367,15 @@ public:
             const auto before = resolved_style();
             const bool was_dragging = drag_active_;
             hovered_ = context.bounds().contains(event.position);
-            if (was_dragging) update_drag(event.position);
+            if (was_dragging) {
+                update_drag(event.position);
+                if (!alive()) {
+                    drag_active_ = false;
+                    hovered_ = false;
+                    context.release_pointer();
+                    return EventResult::Handled;
+                }
+            }
             const bool layout_changed = invalidate_style_transition(context, before);
             return was_dragging || layout_changed
                 ? EventResult::Handled
@@ -306,6 +424,7 @@ public:
     }
 
     void paint(PaintContext& context) const override {
+        if (!alive()) return;
         const auto resolved = resolved_style();
         const auto geometry = scrollbar_for_track(
             *state_, axis_, context.bounds(), resolved.minimum_thumb);
@@ -317,6 +436,10 @@ public:
     }
 
 private:
+    [[nodiscard]] bool alive() const noexcept {
+        return state_ != nullptr && lifetime_.active();
+    }
+
     [[nodiscard]] VisualState current_visual_state() const noexcept {
         return VisualState{
             .enabled = effective_enabled(),
@@ -355,7 +478,7 @@ private:
     }
 
     void update_drag(Point position) {
-        if (!(travel_ > 0.0f) || !(maximum_ > 0.0f)) return;
+        if (!alive() || !(travel_ > 0.0f) || !(maximum_ > 0.0f)) return;
         const float pointer = axis_ == ScrollbarAxis::Horizontal ? position.x : position.y;
         if (!std::isfinite(pointer)) return;
         const double delta = static_cast<double>(pointer) - static_cast<double>(pointer_origin_);
@@ -373,6 +496,7 @@ private:
     }
 
     ScrollState* state_{};
+    ScrollState::LifetimeToken lifetime_;
     ScrollbarAxis axis_{ScrollbarAxis::Vertical};
     ScrollbarStyle style_;
     bool drag_active_{};
@@ -389,28 +513,44 @@ private:
     ScrollState& state,
     Rect descendant_bounds,
     ScrollAlignment alignment = ScrollAlignment::Nearest) {
+    const auto lifetime = state.lifetime_token();
+    if (!lifetime.active()) return false;
+
     const auto before = state.offset();
     auto target = before;
     const auto viewport = state.viewport_size();
+    const auto axis = state.axis();
 
-    if (detail::scroll_axis_horizontal(state.axis())) {
+    if (detail::scroll_axis_horizontal(axis)) {
         target.x = detail::ensure_visible_axis(
             before.x, viewport.w, descendant_bounds.x, descendant_bounds.w, alignment);
     }
-    if (detail::scroll_axis_vertical(state.axis())) {
+    if (detail::scroll_axis_vertical(axis)) {
         target.y = detail::ensure_visible_axis(
             before.y, viewport.h, descendant_bounds.y, descendant_bounds.h, alignment);
     }
 
     state.set_offset(target);
+    if (!lifetime.active()) return true;
     const auto after = state.offset();
     return after.x != before.x || after.y != before.y;
 }
 
 class ScrollViewComponent final : public Component {
 public:
+    ScrollViewComponent(
+        ScrollState* state,
+        ScrollAxis axis,
+        ScrollState::LifetimeToken lifetime,
+        bool pointer_pan)
+        : state_(state),
+          axis_(axis),
+          lifetime_(std::move(lifetime)),
+          pointer_pan_(pointer_pan) {}
+
     ScrollViewComponent(ScrollState& state, bool pointer_pan)
-        : state_(&state), pointer_pan_(pointer_pan) {}
+        : ScrollViewComponent(
+              &state, state.axis(), state.lifetime_token(), pointer_pan) {}
 
     // Pointer targetability is independent from keyboard focus in the retained
     // tree. ScrollView stays out of Tab traversal while receiving bubbled wheel
@@ -430,8 +570,8 @@ public:
         const Constraints& constraints, std::size_t index, std::size_t) const override {
         if (index != 0) return constraints.loosen();
         auto child = constraints.loosen();
-        if (detail::scroll_axis_horizontal(state_->axis())) child.max.w = kUnboundedExtent;
-        if (detail::scroll_axis_vertical(state_->axis())) child.max.h = kUnboundedExtent;
+        if (detail::scroll_axis_horizontal(axis_)) child.max.w = kUnboundedExtent;
+        if (detail::scroll_axis_vertical(axis_)) child.max.h = kUnboundedExtent;
         return child;
     }
 
@@ -441,17 +581,16 @@ public:
         std::vector<ChildPlacement>& placements) const override {
         if (placements.empty()) return;
 
-        // Child 0 is the existing T012 Scroll component. Measure it naturally
-        // here so scrollbar overlays can be placed from the same content
-        // dimensions before the child updates ScrollState during its own layout.
+        // Child 0 is the retained scroll component. Measure it naturally here
+        // so scrollbar overlays can be placed from the same content dimensions.
         Size content = children.empty() ? Size{} : children.front().preferred;
-        if (state_->axis() == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
-        if (state_->axis() == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
+        if (axis_ == ScrollAxis::Vertical) content.w = std::max(content.w, bounds.w);
+        if (axis_ == ScrollAxis::Horizontal) content.h = std::max(content.h, bounds.h);
 
         placements[0].bounds = bounds;
-        const bool horizontal_visible = detail::scroll_axis_horizontal(state_->axis()) &&
+        const bool horizontal_visible = detail::scroll_axis_horizontal(axis_) &&
                                         content.w > bounds.w;
-        const bool vertical_visible = detail::scroll_axis_vertical(state_->axis()) &&
+        const bool vertical_visible = detail::scroll_axis_vertical(axis_) &&
                                       content.h > bounds.h;
         const float horizontal_thickness = horizontal_visible && children.size() > 1
             ? normalized_thickness(children[1].preferred.h)
@@ -481,9 +620,22 @@ public:
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
+        if (!alive()) {
+            if (pan_active_ &&
+                (event.type == InputType::PointerMove ||
+                 event.type == InputType::PointerUp ||
+                 event.type == InputType::PointerCancel)) {
+                pan_active_ = false;
+                context.release_pointer();
+                return EventResult::Handled;
+            }
+            return EventResult::Ignored;
+        }
+
         if (event.type == InputType::PointerWheel) {
             const auto before = state_->offset();
             state_->scroll_by(event.delta);
+            if (!alive()) return EventResult::Handled;
             return same(before, state_->offset()) ? EventResult::Ignored : EventResult::Handled;
         }
 
@@ -501,6 +653,10 @@ public:
             state_->set_offset(Point{
                 offset_origin_.x - (event.position.x - pan_origin_.x),
                 offset_origin_.y - (event.position.y - pan_origin_.y)});
+            if (!alive()) {
+                pan_active_ = false;
+                context.release_pointer();
+            }
             return EventResult::Handled;
 
         case InputType::PointerUp:
@@ -516,6 +672,7 @@ public:
     }
 
     void descendant_focus_changed(Rect descendant_bounds) override {
+        if (!alive()) return;
         const auto offset = state_->offset();
         descendant_bounds.x += offset.x;
         descendant_bounds.y += offset.y;
@@ -527,6 +684,10 @@ public:
     void paint(PaintContext&) const override {}
 
 private:
+    [[nodiscard]] bool alive() const noexcept {
+        return state_ != nullptr && lifetime_.active();
+    }
+
     [[nodiscard]] static bool same(Point a, Point b) noexcept {
         return a.x == b.x && a.y == b.y;
     }
@@ -536,6 +697,8 @@ private:
     }
 
     ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
     bool pointer_pan_{};
     bool pan_active_{};
     Point pan_origin_{};
@@ -546,7 +709,10 @@ class ScrollView {
 public:
     template <class Child>
     ScrollView(ScrollState& state, Child&& child)
-        : state_(&state), content_(make_spec(std::forward<Child>(child))) {}
+        : state_(&state),
+          axis_(state.axis()),
+          lifetime_(state.lifetime_token()),
+          content_(make_spec(std::forward<Child>(child))) {}
 
     ScrollView&& pointer_pan(bool enabled = true) && {
         pointer_pan_ = enabled;
@@ -560,11 +726,16 @@ public:
 
     Spec spec() && {
         auto* state = state_;
+        const auto axis = axis_;
+        const auto lifetime = lifetime_;
 
         std::vector<Spec> scroll_children;
         scroll_children.push_back(std::move(content_));
         Spec scroll{
-            [state] { return std::make_unique<ScrollComponent>(*state); },
+            [state, axis, lifetime] {
+                return std::make_unique<detail::RetainedScrollComponent>(
+                    state, axis, lifetime);
+            },
             std::move(scroll_children)};
 
         auto style = std::move(style_);
@@ -574,28 +745,31 @@ public:
         // scrollbar tracks win over interactive content without a global router.
         children.push_back(std::move(scroll));
         children.push_back(Spec{
-            [state, style] {
+            [state, lifetime, style] {
                 return std::make_unique<detail::ScrollbarComponent>(
-                    *state, detail::ScrollbarAxis::Horizontal, style);
+                    state, lifetime, detail::ScrollbarAxis::Horizontal, style);
             },
             {}});
         children.push_back(Spec{
-            [state, style] {
+            [state, lifetime, style] {
                 return std::make_unique<detail::ScrollbarComponent>(
-                    *state, detail::ScrollbarAxis::Vertical, style);
+                    state, lifetime, detail::ScrollbarAxis::Vertical, style);
             },
             {}});
 
         const bool pointer_pan = pointer_pan_;
         return Spec{
-            [state, pointer_pan] {
-                return std::make_unique<ScrollViewComponent>(*state, pointer_pan);
+            [state, axis, lifetime, pointer_pan] {
+                return std::make_unique<ScrollViewComponent>(
+                    state, axis, lifetime, pointer_pan);
             },
             std::move(children)};
     }
 
 private:
     ScrollState* state_{};
+    ScrollAxis axis_{ScrollAxis::Vertical};
+    ScrollState::LifetimeToken lifetime_;
     Spec content_;
     bool pointer_pan_{};
     ScrollbarStyle style_;

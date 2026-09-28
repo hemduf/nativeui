@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <functional>
+#include <stdexcept>
 
 namespace {
 
@@ -251,6 +252,21 @@ ui::OverlaySpec centered(ui::Spec content) {
     return overlay;
 }
 
+ui::InputEvent key_up(ui::Key key) {
+    ui::InputEvent event{};
+    event.type = ui::InputType::KeyUp;
+    event.key = key;
+    return event;
+}
+
+ui::DialogSpec dismissal_dialog_spec() {
+    ui::DialogSpec spec;
+    spec.body = ui::make_spec(ui::Spacer{80.0f, 40.0f});
+    spec.actions.push_back(ui::DialogAction{
+        "confirm", "Confirm", true, ui::DialogActionRole::Default});
+    return spec;
+}
+
 void anchor_visibility_contract() {
     test::MockPlatform platform;
 
@@ -450,6 +466,201 @@ void middle_removal_contract() {
     NUI_CHECK(first->unmounts == 1);
 }
 
+void throwing_show_is_transactional_contract() {
+    auto state = std::make_shared<ui::detail::OverlayState>();
+    ui::detail::OverlayHostComponent host{state};
+    state->structural_invalidator = [] { throw std::runtime_error{"show invalidation"}; };
+
+    auto modal = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    modal.mode = ui::OverlayMode::Modal;
+    bool threw = false;
+    try {
+        (void)state->show(std::move(modal));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+
+    NUI_CHECK(threw);
+    NUI_CHECK(state->entries.empty());
+    NUI_CHECK(state->next_id == 2);
+    const auto failed_keys = host.desired_keys();
+    NUI_CHECK(failed_keys.size() == 1);
+    NUI_CHECK(failed_keys.front() == "root");
+
+    state->structural_invalidator = [] {};
+    auto recovered_modal = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    recovered_modal.mode = ui::OverlayMode::Modal;
+    const auto recovered = state->show(std::move(recovered_modal));
+    NUI_CHECK(recovered.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    NUI_CHECK(state->entries.front().id == 2);
+    const auto recovered_keys = host.desired_keys();
+    NUI_CHECK(recovered_keys.size() == 3);
+    NUI_CHECK(recovered_keys[1] == "modal-barrier:2");
+    NUI_CHECK(recovered_keys[2] == "overlay:2");
+    NUI_CHECK(state->close(recovered));
+}
+
+void throwing_close_is_transactional_contract() {
+    auto state = std::make_shared<ui::detail::OverlayState>();
+    ui::detail::OverlayHostComponent host{state};
+    state->structural_invalidator = [] {};
+
+    auto first_overlay = centered(ui::make_spec(ui::Spacer{24.0f, 16.0f}));
+    first_overlay.mode = ui::OverlayMode::Modal;
+    const auto first = state->show(std::move(first_overlay));
+    NUI_CHECK(first.valid());
+    NUI_CHECK(state->entries.size() == 1);
+
+    state->structural_invalidator = [] { throw std::runtime_error{"close invalidation"}; };
+    bool handle_close_threw = false;
+    try {
+        (void)state->close(first);
+    } catch (const std::runtime_error&) {
+        handle_close_threw = true;
+    }
+    NUI_CHECK(handle_close_threw);
+    NUI_CHECK(first.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    NUI_CHECK(host.desired_keys().size() == 3);
+
+    state->structural_invalidator = [] {};
+    NUI_CHECK(state->close(first));
+    NUI_CHECK(!first.valid());
+    NUI_CHECK(!state->close(first));
+    NUI_CHECK(state->entries.empty());
+
+    const auto second = state->show(centered(ui::make_spec(ui::Spacer{24.0f, 16.0f})));
+    NUI_CHECK(second.valid());
+    NUI_CHECK(state->entries.size() == 1);
+    const auto second_id = state->entries.front().id;
+
+    state->structural_invalidator = [] { throw std::runtime_error{"close id invalidation"}; };
+    bool id_close_threw = false;
+    try {
+        (void)state->close_id(second_id);
+    } catch (const std::runtime_error&) {
+        id_close_threw = true;
+    }
+    NUI_CHECK(id_close_threw);
+    NUI_CHECK(second.valid());
+    NUI_CHECK(state->entries.size() == 1);
+
+    state->structural_invalidator = [] {};
+    NUI_CHECK(state->close_id(second_id));
+    NUI_CHECK(!second.valid());
+    NUI_CHECK(!state->close_id(second_id));
+}
+
+void throwing_overlay_state_is_per_ui_contract() {
+    auto failing = std::make_shared<ui::detail::OverlayState>();
+    auto healthy = std::make_shared<ui::detail::OverlayState>();
+    failing->structural_invalidator = [] { throw std::runtime_error{"isolated invalidation"}; };
+    healthy->structural_invalidator = [] {};
+
+    bool threw = false;
+    try {
+        (void)failing->show(centered(ui::make_spec(ui::Spacer{8.0f, 8.0f})));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(failing->entries.empty());
+
+    const auto healthy_handle =
+        healthy->show(centered(ui::make_spec(ui::Spacer{8.0f, 8.0f})));
+    NUI_CHECK(healthy_handle.valid());
+    NUI_CHECK(healthy->entries.size() == 1);
+    NUI_CHECK(healthy->close(healthy_handle));
+}
+
+void dialog_completion_may_destroy_controller_contract() {
+    test::MockPlatform platform;
+    ui::UI tree{ui::Spacer{160.0f, 96.0f}};
+    tree.resize({160.0f, 96.0f});
+    tree.activate(platform);
+
+    std::unique_ptr<ui::Dialog> dialog = std::make_unique<ui::Dialog>(tree);
+    int completions = 0;
+    NUI_CHECK(dialog->show(dismissal_dialog_spec(), [&](ui::DialogResult result) {
+        NUI_CHECK(result.kind == ui::DialogResultKind::Dismissed);
+        ++completions;
+        dialog.reset();
+    }) == ui::DialogShowResult::Shown);
+    tree.resize({160.0f, 96.0f});
+
+    auto* close_target = dialog.get();
+    NUI_CHECK(close_target->close());
+    NUI_CHECK(!dialog);
+    NUI_CHECK(completions == 1);
+    NUI_CHECK(tree.overlay_entries().empty());
+
+    ui::Dialog recovered{tree};
+    int recovered_completions = 0;
+    NUI_CHECK(recovered.show(dismissal_dialog_spec(), [&](ui::DialogResult) {
+        ++recovered_completions;
+    }) == ui::DialogShowResult::Shown);
+    tree.resize({160.0f, 96.0f});
+    NUI_CHECK(recovered.close());
+    NUI_CHECK(recovered_completions == 1);
+    NUI_CHECK(!recovered.active());
+}
+
+void dialog_completion_may_destroy_ui_and_throw_contract() {
+    test::MockPlatform platform;
+    auto tree = std::make_unique<ui::UI>(ui::Spacer{160.0f, 96.0f});
+    tree->resize({160.0f, 96.0f});
+    tree->activate(platform);
+
+    ui::Dialog dialog{*tree};
+    int completions = 0;
+    NUI_CHECK(dialog.show(dismissal_dialog_spec(), [&](ui::DialogResult result) {
+        NUI_CHECK(result.kind == ui::DialogResultKind::Action);
+        NUI_CHECK(result.action_id == "confirm");
+        ++completions;
+        tree.reset();
+        throw std::runtime_error{"completion destroyed UI"};
+    }) == ui::DialogShowResult::Shown);
+    tree->resize({160.0f, 96.0f});
+
+    auto* dispatch_target = tree.get();
+    bool threw = false;
+    try {
+        (void)dispatch_target->dispatch(test::key(ui::Key::Enter), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(!tree);
+    NUI_CHECK(completions == 1);
+    NUI_CHECK(!dialog.active());
+}
+
+void popup_action_may_destroy_ui_contract() {
+    test::MockPlatform platform;
+    std::unique_ptr<ui::UI> tree;
+    int actions = 0;
+    tree = std::make_unique<ui::UI>(ui::PopupMenu{
+        "Actions",
+        {ui::PopupMenuItem::action("Run", [&] {
+            ++actions;
+            tree.reset();
+        })}});
+    tree->resize({160.0f, 96.0f});
+    tree->activate(platform);
+
+    (void)tree->dispatch(test::key(ui::Key::Enter), platform);
+    (void)tree->dispatch(key_up(ui::Key::Enter), platform);
+    NUI_CHECK(tree);
+    NUI_CHECK(tree->overlay_entries().size() == 1);
+
+    auto* dispatch_target = tree.get();
+    const auto result = dispatch_target->dispatch(test::key(ui::Key::Enter), platform);
+    NUI_CHECK(result == ui::EventResult::Handled);
+    NUI_CHECK(!tree);
+    NUI_CHECK(actions == 1);
+}
+
 void suite() {
     anchor_visibility_contract();
     stale_focus_restoration_contract();
@@ -457,6 +668,12 @@ void suite() {
     per_ui_handle_isolation_contract();
     reentrant_show_contract();
     middle_removal_contract();
+    throwing_show_is_transactional_contract();
+    throwing_close_is_transactional_contract();
+    throwing_overlay_state_is_per_ui_contract();
+    dialog_completion_may_destroy_controller_contract();
+    dialog_completion_may_destroy_ui_and_throw_contract();
+    popup_action_may_destroy_ui_contract();
 }
 
 } // namespace

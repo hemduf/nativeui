@@ -34,15 +34,15 @@ template <class T>
 struct ListViewRuntime final {
     using ActivationCallback = std::function<void(const T&)>;
 
-    ListViewRuntime(State<std::optional<T>>& selection, ListViewStyle style)
-        : selection(&selection), scroll(ScrollAxis::Vertical), style(std::move(style)) {}
+    ListViewRuntime(Binding<std::optional<T>> selection, ListViewStyle style)
+        : selection(std::move(selection)), scroll(ScrollAxis::Vertical), style(std::move(style)) {}
 
     [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
         return index < enabled.size() && enabled[index];
     }
 
     [[nodiscard]] std::optional<std::size_t> selected_index() const {
-        const auto& selected = selection->get();
+        const auto& selected = selection.get();
         if (!selected) return std::nullopt;
         for (std::size_t index = 0; index < keys.size(); ++index) {
             if (enabled_at(index) && keys[index] == *selected) return index;
@@ -84,8 +84,7 @@ struct ListViewRuntime final {
         if (index < row_bounds.size()) {
             (void)ensure_visible(scroll, row_bounds[index], ScrollAlignment::Nearest);
         }
-        auto* const selected = selection;
-        selected->set(std::optional<T>{key});
+        selection.set(std::optional<T>{key});
         return true;
     }
 
@@ -98,7 +97,7 @@ struct ListViewRuntime final {
         return true;
     }
 
-    State<std::optional<T>>* selection{};
+    Binding<std::optional<T>> selection;
     ScrollState scroll;
     ListViewStyle style;
     std::vector<T> keys;
@@ -140,7 +139,7 @@ public:
         auto invalidate = context.invalidator();
         auto runtime = runtime_;
         const auto index = index_;
-        subscription_ = runtime_->selection->observe(
+        subscription_ = runtime_->selection.observe(
             [runtime = std::move(runtime), index, invalidate = std::move(invalidate)](
                 const std::optional<T>& selected) {
                 if (selected && index < runtime->keys.size() &&
@@ -160,8 +159,8 @@ public:
         if (index_ >= runtime_->keys.size()) return;
         const auto bounds = context.bounds();
         auto& painter = context.painter();
-        const bool selected = runtime_->selection->get() &&
-            *runtime_->selection->get() == runtime_->keys[index_];
+        const bool selected = runtime_->selection.get() &&
+            *runtime_->selection.get() == runtime_->keys[index_];
         const auto resolved = resolved_style(selected);
 
         const Rect highlight{
@@ -218,7 +217,7 @@ private:
 
     std::shared_ptr<ListViewRuntime<T>> runtime_;
     std::size_t index_{};
-    typename State<std::optional<T>>::Subscription subscription_;
+    typename Binding<std::optional<T>>::Subscription subscription_;
 };
 
 template <class T>
@@ -434,8 +433,8 @@ private:
     [[nodiscard]] std::optional<ResolvedListViewStyle> row_style(
         std::optional<std::size_t> index) const {
         if (!index || *index >= runtime_->keys.size()) return std::nullopt;
-        const bool selected = runtime_->selection->get() &&
-            *runtime_->selection->get() == runtime_->keys[*index];
+        const bool selected = runtime_->selection.get() &&
+            *runtime_->selection.get() == runtime_->keys[*index];
         const bool hovered = !selected && runtime_->hovered_index &&
             *runtime_->hovered_index == *index;
         const bool pressed = !selected && runtime_->pressed_index &&
@@ -497,8 +496,8 @@ private:
 
 template <class T>
 struct TabsRuntime final {
-    TabsRuntime(State<T>& selection, TabsStyle style)
-        : selection(&selection), style(std::move(style)) {}
+    TabsRuntime(Binding<T> selection, TabsStyle style)
+        : selection(std::move(selection)), style(std::move(style)) {}
 
     [[nodiscard]] bool enabled_at(std::size_t index) const noexcept {
         return index < enabled.size() && enabled[index];
@@ -506,7 +505,7 @@ struct TabsRuntime final {
 
     [[nodiscard]] std::optional<std::size_t> selected_index() const {
         for (std::size_t index = 0; index < keys.size(); ++index) {
-            if (enabled_at(index) && keys[index] == selection->get()) return index;
+            if (enabled_at(index) && keys[index] == selection.get()) return index;
         }
         return std::nullopt;
     }
@@ -545,13 +544,11 @@ struct TabsRuntime final {
 
     bool select(std::size_t index) {
         if (index >= keys.size() || !enabled_at(index)) return false;
-        const T key = keys[index];
-        auto* const selected = selection;
-        selected->set(key);
+        selection.set(keys[index]);
         return true;
     }
 
-    State<T>* selection{};
+    Binding<T> selection;
     TabsStyle style;
     std::vector<T> keys;
     std::vector<std::string> labels;
@@ -587,7 +584,7 @@ public:
 
     void mount(MountContext& context) override {
         auto invalidate_availability = context.availability_invalidator();
-        subscription_ = runtime_->selection->observe(
+        subscription_ = runtime_->selection.observe(
             [invalidate_availability = std::move(invalidate_availability)](const T&) {
                 invalidate_availability();
             });
@@ -598,12 +595,12 @@ public:
 
 private:
     [[nodiscard]] bool selected() const noexcept {
-        return index_ < runtime_->keys.size() && runtime_->selection->get() == runtime_->keys[index_];
+        return index_ < runtime_->keys.size() && runtime_->selection.get() == runtime_->keys[index_];
     }
 
     std::shared_ptr<TabsRuntime<T>> runtime_;
     std::size_t index_{};
-    typename State<T>::Subscription subscription_;
+    typename Binding<T>::Subscription subscription_;
 };
 
 template <class T>
@@ -657,7 +654,7 @@ public:
 
     void mount(MountContext& context) override {
         auto invalidate = context.invalidator();
-        subscription_ = runtime_->selection->observe(
+        subscription_ = runtime_->selection.observe(
             [invalidate = std::move(invalidate)](const T&) { invalidate(); });
     }
 
@@ -802,7 +799,7 @@ public:
                     ? std::max(0.0f, bounds.x + bounds.w - (bounds.x + width * static_cast<float>(index)))
                     : width,
                 header_height};
-            const bool selected = runtime_->selection->get() == runtime_->keys[index];
+            const bool selected = runtime_->selection.get() == runtime_->keys[index];
             const bool enabled = runtime_->enabled_at(index);
             const bool hovered = effective_enabled() && enabled && !selected &&
                 hovered_index_ && *hovered_index_ == index;
@@ -875,7 +872,7 @@ private:
             !runtime_->enabled_at(*hovered_index_) || !effective_enabled()) {
             return false;
         }
-        return runtime_->selection->get() != runtime_->keys[*hovered_index_];
+        return runtime_->selection.get() != runtime_->keys[*hovered_index_];
     }
 
     [[nodiscard]] bool pressed_visual_active() const {
@@ -964,7 +961,7 @@ private:
     std::optional<std::size_t> pointer_armed_;
     std::optional<std::size_t> hovered_index_;
     bool focused_{};
-    typename State<T>::Subscription subscription_;
+    typename Binding<T>::Subscription subscription_;
 };
 
 } // namespace detail
@@ -974,9 +971,12 @@ class ListView {
 public:
     using ActivationCallback = std::function<void(const T&)>;
 
-    explicit ListView(State<std::optional<T>>& selection) : selection_(&selection) {}
+    explicit ListView(Binding<std::optional<T>> selection)
+        : selection_(std::move(selection)) {}
+    explicit ListView(State<std::optional<T>>& selection)
+        : ListView(selection.binding()) {}
     explicit ListView(VirtualListState<T>& state)
-        : selection_(&state.selection()), virtual_state_(&state) {}
+        : selection_(state.selection().binding()), virtual_state_(&state) {}
 
     template <class Child>
     ListView&& item(T key, Child&& child, bool enabled = true) && {
@@ -1007,7 +1007,7 @@ public:
         }
 
         auto runtime = std::make_shared<detail::ListViewRuntime<T>>(
-            *selection_, std::move(style_));
+            selection_, std::move(style_));
         runtime->keys.reserve(items_.size());
         runtime->enabled.reserve(items_.size());
         runtime->activation_callback = std::move(activation_callback_);
@@ -1057,7 +1057,7 @@ private:
         }
     }
 
-    State<std::optional<T>>* selection_{};
+    Binding<std::optional<T>> selection_;
     VirtualListState<T>* virtual_state_{};
     std::vector<Item> items_;
     ActivationCallback activation_callback_;
@@ -1067,7 +1067,8 @@ private:
 template <class T>
 class Tabs {
 public:
-    explicit Tabs(State<T>& selection) : selection_(&selection) {}
+    explicit Tabs(Binding<T> selection) : selection_(std::move(selection)) {}
+    explicit Tabs(State<T>& selection) : Tabs(selection.binding()) {}
 
     template <class Child>
     Tabs&& tab(T key, std::string label, Child&& panel, bool enabled = true) && {
@@ -1085,7 +1086,7 @@ public:
 
     Spec spec() && {
         auto runtime = std::make_shared<detail::TabsRuntime<T>>(
-            *selection_, std::move(style_));
+            selection_, std::move(style_));
         runtime->keys.reserve(tabs_.size());
         runtime->labels.reserve(tabs_.size());
         runtime->enabled.reserve(tabs_.size());
@@ -1128,7 +1129,7 @@ private:
         }
     }
 
-    State<T>* selection_{};
+    Binding<T> selection_;
     std::vector<Tab> tabs_;
     TabsStyle style_;
 };

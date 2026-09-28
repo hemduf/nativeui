@@ -23,6 +23,7 @@ Current examples:
 | T025 | `nativeui_example_t025_text_edit_model` | reusable headless text editing model |
 | T041 | `nativeui_example_t041_smoke_harness` | real standalone parent + embedded Pugl module lifecycle |
 | T049 | `nativeui_example_t049_gallery` | single-window public-API component gallery and deterministic aggregate self-test |
+| T173 | `nativeui_example_t173_letter_keys` | complete public ASCII letter-key A-Z routing and modifier preservation |
 
 ## Component gallery
 

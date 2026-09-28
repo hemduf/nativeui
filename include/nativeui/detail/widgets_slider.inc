@@ -129,14 +129,14 @@ public:
     using Formatter = std::function<std::string(float)>;
 
     SliderComponent(
-        State<float>& state,
+        Binding<float> state,
         float minimum,
         float maximum,
         float step,
         SliderOrientation orientation,
         Formatter formatter,
         SliderStyle style)
-        : state_(state),
+        : state_(std::move(state)),
           domain_(minimum, maximum, step),
           orientation_(orientation),
           formatter_(std::move(formatter)),
@@ -382,12 +382,12 @@ private:
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
         const auto before = resolved_style(focused_);
         const float target = value_from_pointer(event, context);
-        auto* state = &state_;
+        auto state = state_;
         dragging_ = true;
         hovered_ = true;
         context.capture_pointer();
         invalidate_style_transition(before, resolved_style(focused_), context);
-        if (state->get() != target) state->set(target);
+        if (state.get() != target) state.set(target);
         return EventResult::Handled;
     }
 
@@ -409,19 +409,20 @@ private:
         const ResolvedSliderStyle& before = {}) {
         const auto effective_before = release ? resolved_style(focused_) : before;
         const float target = value_from_pointer(event, context);
-        auto* state = &state_;
+        auto state = state_;
         if (release) {
             hovered_ = context.bounds().contains(event.position);
             dragging_ = false;
             context.release_pointer();
         }
         invalidate_style_transition(effective_before, resolved_style(focused_), context);
-        if (state->get() != target) state->set(target);
+        if (state.get() != target) state.set(target);
         return EventResult::Handled;
     }
 
     EventResult key_down(const InputEvent& event, InputContext&) {
-        float target = state_.get();
+        auto state = state_;
+        float target = state.get();
         const float effective = domain_.effective_external(target);
         const double increment = domain_.keyboard_increment(event.shift);
 
@@ -444,17 +445,16 @@ private:
                 return EventResult::Ignored;
         }
 
-        auto* state = &state_;
-        if (state->get() != target) state->set(target);
+        if (state.get() != target) state.set(target);
         return EventResult::Handled;
     }
 
-    State<float>& state_;
+    Binding<float> state_;
     SliderDomain domain_;
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     Formatter formatter_;
     SliderStyle style_;
-    State<float>::Subscription subscription_;
+    Binding<float>::Subscription subscription_;
     bool focused_{};
     bool dragging_{};
     bool hovered_{};
@@ -466,7 +466,8 @@ class Slider {
 public:
     using Formatter = detail::SliderComponent::Formatter;
 
-    explicit Slider(State<float>& state) : state_(&state) {}
+    explicit Slider(Binding<float> state) : state_(std::move(state)) {}
+    explicit Slider(State<float>& state) : Slider(state.binding()) {}
 
     Slider&& range(float minimum, float maximum) && {
         minimum_ = minimum;
@@ -495,7 +496,7 @@ public:
     }
 
     Spec spec() && {
-        auto* state = state_;
+        auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
         const float step = step_;
@@ -503,10 +504,10 @@ public:
         auto formatter = std::move(formatter_);
         auto style = std::move(style_);
         return Spec{
-            [state, minimum, maximum, step, orientation,
+            [state = std::move(state), minimum, maximum, step, orientation,
              formatter = std::move(formatter), style = std::move(style)]() mutable {
                 return std::make_unique<detail::SliderComponent>(
-                    *state,
+                    std::move(state),
                     minimum,
                     maximum,
                     step,
@@ -518,7 +519,7 @@ public:
     }
 
 private:
-    State<float>* state_{};
+    Binding<float> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
     float step_{};

@@ -186,45 +186,47 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
             });
     }
 
-    void deliver_file(DesktopRequestId id, FileDialogResult result) {
-        auto request = take(id);
-        if (!request || request->kind == RequestKind::OpenUrl) return;
-        auto callback = std::get<FileDialogCallback>(std::move(request->callback));
-        if (!callback_gate->load(std::memory_order_acquire)) return;
-        callback(normalize_file_result(request->kind, std::move(result)));
-    }
+    void queue_file_completion(DesktopRequestId id, FileDialogResult result) noexcept {
+        try {
+            // Native/backend completion is terminal before UI marshalling. This
+            // releases chooser capacity even if Dispatcher::post rejects or the
+            // callable allocation throws.
+            auto request = take(id);
+            if (!request || request->kind == RequestKind::OpenUrl) return;
+            auto callback = std::get<FileDialogCallback>(std::move(request->callback));
+            if (!callback || !callback_gate->load(std::memory_order_acquire)) return;
 
-    void deliver_status(DesktopRequestId id, DesktopServiceStatus status) {
-        auto request = take(id);
-        if (!request || request->kind != RequestKind::OpenUrl) return;
-        auto callback = std::get<StatusCallback>(std::move(request->callback));
-        if (!callback_gate->load(std::memory_order_acquire)) return;
-        callback(status);
-    }
-
-    void queue_file_completion(DesktopRequestId id, FileDialogResult result) {
-        const std::weak_ptr<Impl> weak = this->shared_from_this();
-        const bool posted = dispatcher.post(
-            [weak, id, result = std::move(result)]() mutable {
-                if (const auto self = weak.lock()) {
-                    self->deliver_file(id, std::move(result));
-                }
-            });
-        if (!posted) {
-            // Dispatcher rejection is terminal. Release capacity without ever
-            // falling back to invoking application code on the backend thread.
-            (void)take(id);
+            auto gate = callback_gate;
+            result = normalize_file_result(request->kind, std::move(result));
+            (void)dispatcher.post(
+                [gate = std::move(gate), callback = std::move(callback),
+                 result = std::move(result)]() mutable {
+                    if (!gate || !gate->load(std::memory_order_acquire)) return;
+                    callback(std::move(result));
+                });
+        } catch (...) {
+            // Completion marshalling is a backend/native callback boundary.
+            // The request was already made terminal before any throwing work,
+            // so failure drops UI delivery without a backend-thread fallback.
         }
     }
 
-    void queue_status_completion(DesktopRequestId id, DesktopServiceStatus status) {
-        const std::weak_ptr<Impl> weak = this->shared_from_this();
-        const bool posted = dispatcher.post(
-            [weak, id, status]() {
-                if (const auto self = weak.lock()) self->deliver_status(id, status);
-            });
-        if (!posted) {
-            (void)take(id);
+    void queue_status_completion(DesktopRequestId id,
+                                 DesktopServiceStatus status) noexcept {
+        try {
+            auto request = take(id);
+            if (!request || request->kind != RequestKind::OpenUrl) return;
+            auto callback = std::get<StatusCallback>(std::move(request->callback));
+            if (!callback || !callback_gate->load(std::memory_order_acquire)) return;
+
+            auto gate = callback_gate;
+            (void)dispatcher.post(
+                [gate = std::move(gate), callback = std::move(callback), status]() mutable {
+                    if (!gate || !gate->load(std::memory_order_acquire)) return;
+                    callback(status);
+                });
+        } catch (...) {
+            // See queue_file_completion(): terminal-drop is deliberate.
         }
     }
 
@@ -278,7 +280,7 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
         try {
             start_status = starter(
                 *backend, id, options,
-                [weak, id](FileDialogResult result) mutable {
+                [weak, id](FileDialogResult result) mutable noexcept {
                     if (const auto self = weak.lock()) {
                         self->queue_file_completion(id, std::move(result));
                     }
@@ -289,7 +291,10 @@ struct DesktopServices::Impl final : std::enable_shared_from_this<DesktopService
 
         if (start_status == DesktopServiceStatus::Accepted) {
             std::lock_guard lock{mutex};
-            return !closing && active.contains(id) ? id : kInvalidDesktopRequestId;
+            // A backend is allowed to complete synchronously. The completion
+            // may already have made the request terminal, but a successful
+            // backend start still returns its allocated owner-local ID.
+            return closing ? kInvalidDesktopRequestId : id;
         }
 
         auto request = take(id);
@@ -421,7 +426,7 @@ DesktopRequestId DesktopServices::open_url(std::string url,
     try {
         start_status = state->backend->start_open_url(
             id, std::move(url),
-            [weak, id](DesktopServiceStatus status) {
+            [weak, id](DesktopServiceStatus status) noexcept {
                 if (const auto self = weak.lock()) self->queue_status_completion(id, status);
             });
     } catch (...) {
@@ -430,9 +435,7 @@ DesktopRequestId DesktopServices::open_url(std::string url,
 
     if (start_status == DesktopServiceStatus::Accepted) {
         std::lock_guard lock{state->mutex};
-        return !state->closing && state->active.contains(id)
-            ? id
-            : kInvalidDesktopRequestId;
+        return state->closing ? kInvalidDesktopRequestId : id;
     }
 
     auto request = state->take(id);

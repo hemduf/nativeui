@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -154,8 +156,6 @@ bool smoke_dialog(ui::DesktopServicesBackend& backend,
     if (!wait_until([&] { return dialog_visible(parent, native_title); }, 5s)) {
         std::fprintf(stderr, "T064 Windows native smoke: request %llu dialog did not become visible\n",
                      static_cast<unsigned long long>(id));
-        // Best-effort cleanup keeps a failed smoke from leaving a modal worker
-        // alive until the outer CTest timeout. The failure is still reported.
         if (backend.cancel(id)) {
             (void)wait_until([&] { return callbacks.load(std::memory_order_acquire) == 1; }, 5s);
         }
@@ -307,6 +307,24 @@ int main(int argc, char** argv) {
         accepted.paths.size() != 1 ||
         claim_cancellation(worker_wins) ||
         !worker_wins.worker_finished.load(std::memory_order_acquire)) {
+        return EXIT_FAILURE;
+    }
+
+    auto throwing_boundary = std::make_shared<RequestState>();
+    throwing_boundary->cancel_requested.store(true, std::memory_order_release);
+    bool throwing_completion_called = false;
+    run_open_dialog(
+        throwing_boundary,
+        nullptr,
+        OpenDialogKind::SingleFile,
+        {},
+        {},
+        [&](ui::FileDialogResult) {
+            throwing_completion_called = true;
+            throw std::runtime_error{"T064 injected Windows completion failure"};
+        });
+    if (!throwing_completion_called ||
+        !throwing_boundary->worker_finished.load(std::memory_order_acquire)) {
         return EXIT_FAILURE;
     }
 

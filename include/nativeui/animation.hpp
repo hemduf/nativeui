@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -158,9 +159,15 @@ public:
         state->entries.push_back(std::move(entry));
 
         const AnimationHandle handle{state->token, id};
-        if (!ensure_wake(state)) {
+        try {
+            if (!ensure_wake(state)) {
+                (void)erase_entry(state, id);
+                return {};
+            }
+        } catch (...) {
             (void)erase_entry(state, id);
-            return {};
+            cancel_idle_wake(state);
+            throw;
         }
         return handle;
     }
@@ -205,9 +212,15 @@ public:
         state->entries.push_back(std::move(entry));
 
         const AnimationHandle handle{state->token, id};
-        if (!ensure_wake(state)) {
+        try {
+            if (!ensure_wake(state)) {
+                (void)erase_entry(state, id);
+                return {};
+            }
+        } catch (...) {
             (void)erase_entry(state, id);
-            return {};
+            cancel_idle_wake(state);
+            throw;
         }
         return handle;
     }
@@ -228,38 +241,58 @@ public:
         if (!state || state->closing || state->reduced_motion == enabled) return;
         state->reduced_motion = enabled;
         if (!enabled) {
-            if (!state->entries.empty() && !ensure_wake(state)) state->entries.clear();
+            if (!state->entries.empty()) {
+                try {
+                    if (!ensure_wake(state)) state->entries.clear();
+                } catch (...) {
+                    state->entries.clear();
+                    cancel_wake_noexcept(state);
+                    throw;
+                }
+            }
             return;
         }
 
-        if (state->wake.valid()) {
-            (void)state->dispatcher.cancel(state->wake);
-            state->wake = {};
-        }
+        cancel_wake_noexcept(state);
 
-        std::vector<std::uint64_t> ids;
-        ids.reserve(state->entries.size());
-        for (const auto& entry : state->entries) ids.push_back(entry.id);
+        try {
+            std::vector<std::uint64_t> ids;
+            ids.reserve(state->entries.size());
+            for (const auto& entry : state->entries) ids.push_back(entry.id);
 
-        for (const auto id : ids) {
-            auto* entry = find_entry(state, id);
-            if (!entry) continue;
-            const float target = entry->target;
-            const auto invalidation = entry->invalidation;
-            auto target_invalidation = entry->target_invalidation;
-            auto write = entry->write;
-            auto completion = entry->completion;
-            entry->value = target;
-            entry->velocity = 0.0f;
+            for (const auto id : ids) {
+                auto* entry = find_entry(state, id);
+                if (!entry) continue;
+                const float target = entry->target;
+                const auto invalidation = entry->invalidation;
+                auto target_invalidation = entry->target_invalidation;
+                auto write = entry->write;
+                auto completion = entry->completion;
+                entry->value = target;
+                entry->velocity = 0.0f;
 
-            write(target);
-            if (state->closing) return;
-            target_invalidation.invalidate(invalidation);
-            if (state->closing) return;
+                write(target);
+                if (state->closing) return;
+                target_invalidation.invalidate(invalidation);
+                if (state->closing) return;
 
-            if (!erase_entry(state, id)) continue;
-            if (completion) completion();
-            if (state->closing) return;
+                if (!erase_entry(state, id)) continue;
+                if (completion) completion();
+                if (state->closing) return;
+            }
+
+            if (state->entries.empty()) {
+                cancel_idle_wake(state);
+            } else if (!state->reduced_motion) {
+                if (!ensure_wake(state)) state->entries.clear();
+            }
+        } catch (...) {
+            // The outer request to enable reduced motion owns the failure
+            // contract: no partially completed entry or reentrant wake survives.
+            state->reduced_motion = true;
+            state->entries.clear();
+            cancel_wake_noexcept(state);
+            throw;
         }
     }
 
@@ -375,10 +408,22 @@ private:
         return true;
     }
 
-    static void cancel_idle_wake(const std::shared_ptr<State>& state) noexcept {
-        if (!state->entries.empty() || !state->wake.valid()) return;
-        (void)state->dispatcher.cancel(state->wake);
+    static void cancel_wake_noexcept(const std::shared_ptr<State>& state) noexcept {
+        if (!state->wake.valid()) return;
+        auto wake = std::move(state->wake);
         state->wake = {};
+        try {
+            (void)state->dispatcher.cancel(wake);
+        } catch (...) {
+            // Cleanup/destruction paths are terminal and no-throw. If the
+            // Dispatcher itself cannot cancel, the weak timer callback still
+            // observes closing/reduced/empty state and cannot invoke user code.
+        }
+    }
+
+    static void cancel_idle_wake(const std::shared_ptr<State>& state) noexcept {
+        if (!state->entries.empty()) return;
+        cancel_wake_noexcept(state);
     }
 
     [[nodiscard]] static bool ensure_wake(const std::shared_ptr<State>& state) {
@@ -395,6 +440,54 @@ private:
         if (!handle.valid()) return false;
         state->wake = std::move(handle);
         return true;
+    }
+
+    static void recover_after_step_failure(const std::shared_ptr<State>& state,
+                                           std::uint64_t id) noexcept {
+        if (state->closing) return;
+
+        // The failing step has begun. It is terminal and is never retried.
+        (void)erase_entry(state, id);
+        if (state->reduced_motion) {
+            state->entries.clear();
+            cancel_wake_noexcept(state);
+            return;
+        }
+        if (state->entries.empty()) {
+            cancel_idle_wake(state);
+            return;
+        }
+
+        try {
+            if (!ensure_wake(state)) {
+                state->entries.clear();
+                cancel_wake_noexcept(state);
+            }
+        } catch (...) {
+            // Preserve the original application/framework exception. If the
+            // recovery wake itself cannot be scheduled, terminalize the rest so
+            // no logically active animation is left permanently unscheduled.
+            state->entries.clear();
+            cancel_wake_noexcept(state);
+        }
+    }
+
+    static void recover_snapshot_failure(const std::shared_ptr<State>& state) noexcept {
+        if (state->closing || state->entries.empty()) return;
+        if (state->reduced_motion) {
+            state->entries.clear();
+            cancel_wake_noexcept(state);
+            return;
+        }
+        try {
+            if (!ensure_wake(state)) {
+                state->entries.clear();
+                cancel_wake_noexcept(state);
+            }
+        } catch (...) {
+            state->entries.clear();
+            cancel_wake_noexcept(state);
+        }
     }
 
     static void apply_immediate(const std::shared_ptr<State>& state, float target,
@@ -414,77 +507,93 @@ private:
         const auto now = state->dispatcher.current_time();
 
         std::vector<std::uint64_t> ids;
-        ids.reserve(state->entries.size());
-        for (const auto& entry : state->entries) ids.push_back(entry.id);
-
-        for (const auto id : ids) {
-            auto* entry = find_entry(state, id);
-            if (!entry) continue;
-
-            float next_value = entry->value;
-            bool completed = false;
-            if (entry->kind == EntryKind::Tween) {
-                const double elapsed = std::max(
-                    0.0, std::chrono::duration_cast<DispatcherDuration>(
-                             now - entry->start_time).count());
-                const double duration = entry->duration.count();
-                const float t = duration > 0.0
-                    ? static_cast<float>(std::clamp(elapsed / duration, 0.0, 1.0))
-                    : 1.0f;
-                completed = t >= 1.0f;
-                next_value = completed
-                    ? entry->target
-                    : entry->from + (entry->target - entry->from) *
-                          easing_value(entry->easing, t);
-            } else {
-                const double elapsed = std::max(
-                    0.0, std::chrono::duration_cast<DispatcherDuration>(
-                             now - entry->previous_time).count());
-                const float dt = static_cast<float>(
-                    std::min(elapsed, entry->spring.max_dt.count()));
-                const float acceleration =
-                    entry->spring.stiffness * (entry->target - entry->value) -
-                    entry->spring.damping * entry->velocity;
-                entry->velocity += acceleration * dt;
-                next_value = entry->value + entry->velocity * dt;
-                if (std::fabs(entry->target - next_value) <= entry->spring.distance_epsilon &&
-                    std::fabs(entry->velocity) <= entry->spring.velocity_epsilon) {
-                    next_value = entry->target;
-                    entry->velocity = 0.0f;
-                    completed = true;
-                }
-                entry->previous_time = now;
-            }
-
-            entry->value = next_value;
-            const auto invalidation = entry->invalidation;
-            auto target_invalidation = entry->target_invalidation;
-            auto write = entry->write;
-            auto completion = entry->completion;
-
-            write(next_value);
-            if (state->closing) return;
-            target_invalidation.invalidate(invalidation);
-            if (state->closing) return;
-
-            if (!completed || !find_entry(state, id)) continue;
-            (void)erase_entry(state, id);
-            if (completion) completion();
-            if (state->closing) return;
+        try {
+            ids.reserve(state->entries.size());
+            for (const auto& entry : state->entries) ids.push_back(entry.id);
+        } catch (...) {
+            recover_snapshot_failure(state);
+            throw;
         }
 
-        if (!state->entries.empty() && !ensure_wake(state)) {
-            state->entries.clear();
+        for (const auto id : ids) {
+            if (!find_entry(state, id)) continue;
+
+            try {
+                auto* entry = find_entry(state, id);
+                if (!entry) continue;
+
+                float next_value = entry->value;
+                bool completed = false;
+                if (entry->kind == EntryKind::Tween) {
+                    const double elapsed = std::max(
+                        0.0, std::chrono::duration_cast<DispatcherDuration>(
+                                 now - entry->start_time).count());
+                    const double duration = entry->duration.count();
+                    const float t = duration > 0.0
+                        ? static_cast<float>(std::clamp(elapsed / duration, 0.0, 1.0))
+                        : 1.0f;
+                    completed = t >= 1.0f;
+                    next_value = completed
+                        ? entry->target
+                        : entry->from + (entry->target - entry->from) *
+                              easing_value(entry->easing, t);
+                } else {
+                    const double elapsed = std::max(
+                        0.0, std::chrono::duration_cast<DispatcherDuration>(
+                                 now - entry->previous_time).count());
+                    const float dt = static_cast<float>(
+                        std::min(elapsed, entry->spring.max_dt.count()));
+                    const float acceleration =
+                        entry->spring.stiffness * (entry->target - entry->value) -
+                        entry->spring.damping * entry->velocity;
+                    entry->velocity += acceleration * dt;
+                    next_value = entry->value + entry->velocity * dt;
+                    if (std::fabs(entry->target - next_value) <= entry->spring.distance_epsilon &&
+                        std::fabs(entry->velocity) <= entry->spring.velocity_epsilon) {
+                        next_value = entry->target;
+                        entry->velocity = 0.0f;
+                        completed = true;
+                    }
+                    entry->previous_time = now;
+                }
+
+                entry->value = next_value;
+                const auto invalidation = entry->invalidation;
+                auto target_invalidation = entry->target_invalidation;
+                auto write = entry->write;
+                auto completion = entry->completion;
+
+                write(next_value);
+                if (state->closing) return;
+                target_invalidation.invalidate(invalidation);
+                if (state->closing) return;
+
+                if (!completed || !find_entry(state, id)) continue;
+                (void)erase_entry(state, id);
+                if (completion) completion();
+                if (state->closing) return;
+            } catch (...) {
+                const auto failure = std::current_exception();
+                recover_after_step_failure(state, id);
+                std::rethrow_exception(failure);
+            }
+        }
+
+        if (!state->entries.empty()) {
+            try {
+                if (!ensure_wake(state)) state->entries.clear();
+            } catch (...) {
+                state->entries.clear();
+                cancel_wake_noexcept(state);
+                throw;
+            }
         }
     }
 
     static void shutdown(const std::shared_ptr<State>& state) noexcept {
         if (!state || state->closing) return;
         state->closing = true;
-        if (state->wake.valid()) {
-            (void)state->dispatcher.cancel(state->wake);
-            state->wake = {};
-        }
+        cancel_wake_noexcept(state);
         state->entries.clear();
     }
 

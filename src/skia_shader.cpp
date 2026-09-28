@@ -1,0 +1,228 @@
+#include <nativeui/shader.hpp>
+
+#include "include/core/SkString.h"
+#include "include/effects/SkRuntimeEffect.h"
+
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <new>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+namespace ui::detail {
+
+struct ShaderProgramData final {
+    // Keep the compiled backend object structurally immutable. T079/T080 only
+    // consume const SkRuntimeEffect APIs, and the pinned m149 converting move
+    // into sk_sp<const T> is not declared noexcept, so this constructor remains
+    // potentially throwing rather than terminating the host.
+    explicit ShaderProgramData(sk_sp<SkRuntimeEffect>&& effect_in)
+        : effect(std::move(effect_in)) {}
+
+    sk_sp<const SkRuntimeEffect> effect;
+};
+
+static_assert(std::is_nothrow_destructible_v<SkRuntimeEffect>,
+              "ShaderProgram noexcept teardown requires nothrow SkRuntimeEffect destruction");
+static_assert(std::is_nothrow_destructible_v<sk_sp<const SkRuntimeEffect>>,
+              "ShaderProgram noexcept teardown requires nothrow sk_sp destruction");
+static_assert(std::is_nothrow_destructible_v<ShaderProgramData>,
+              "ShaderProgramData must remain nothrow destructible");
+
+namespace {
+
+constexpr size_t kMaxSkSLSourceBytes =
+    static_cast<size_t>(std::numeric_limits<uint32_t>::max());
+
+[[nodiscard]] ShaderCompileResult oversized_source_result() {
+    std::vector<ShaderDiagnostic> diagnostics;
+    diagnostics.reserve(1);
+    diagnostics.push_back(ShaderDiagnostic{
+        ShaderCompileError::CompileError,
+        0,
+        0,
+        "SkSL source exceeds the backend size limit",
+    });
+    return ShaderCompileResult{nullptr, std::move(diagnostics)};
+}
+
+[[nodiscard]] ShaderDiagnostic compiler_diagnostic(const SkString& error_text) {
+    std::string message{error_text.data(), error_text.size()};
+    if (message.empty()) {
+        message = "SkSL runtime-shader compilation failed";
+    }
+    return ShaderDiagnostic{
+        ShaderCompileError::CompileError,
+        0,
+        0,
+        std::move(message),
+    };
+}
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+
+enum class CompileFailurePoint {
+    None,
+    BeforeDiagnosticOwnership,
+    AfterDiagnosticOwnership,
+    ProgramDataAllocation,
+    BeforeProgramWrapperAllocation,
+    ProgramPublicationAllocation,
+    EmptyBackendDiagnostic,
+    OversizedSource,
+};
+
+[[nodiscard]] CompileFailurePoint test_failure_point(std::string_view sksl) noexcept {
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_DIAGNOSTIC__*/") != std::string_view::npos) {
+        return CompileFailurePoint::BeforeDiagnosticOwnership;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_AFTER_DIAGNOSTIC__*/") != std::string_view::npos) {
+        return CompileFailurePoint::AfterDiagnosticOwnership;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_PROGRAM_DATA__*/") != std::string_view::npos) {
+        return CompileFailurePoint::ProgramDataAllocation;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_WRAPPER__*/") != std::string_view::npos) {
+        return CompileFailurePoint::BeforeProgramWrapperAllocation;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_FAIL_PUBLICATION__*/") != std::string_view::npos) {
+        return CompileFailurePoint::ProgramPublicationAllocation;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_EMPTY_DIAGNOSTIC__*/") != std::string_view::npos) {
+        return CompileFailurePoint::EmptyBackendDiagnostic;
+    }
+    if (sksl.find("/*__NATIVEUI_T079_OVERSIZED_SOURCE__*/") != std::string_view::npos) {
+        return CompileFailurePoint::OversizedSource;
+    }
+    return CompileFailurePoint::None;
+}
+
+template <class T>
+class FaultAllocator {
+public:
+    using value_type = T;
+
+    explicit FaultAllocator(bool fail_allocation = false) noexcept
+        : fail_allocation_(fail_allocation) {}
+
+    template <class U>
+    FaultAllocator(const FaultAllocator<U>& other) noexcept
+        : fail_allocation_(other.fail_allocation_) {}
+
+    [[nodiscard]] T* allocate(std::size_t count) {
+        if (fail_allocation_) throw std::bad_alloc{};
+        return std::allocator<T>{}.allocate(count);
+    }
+
+    void deallocate(T* pointer, std::size_t count) noexcept {
+        std::allocator<T>{}.deallocate(pointer, count);
+    }
+
+    template <class U>
+    [[nodiscard]] bool operator==(const FaultAllocator<U>& other) const noexcept {
+        return fail_allocation_ == other.fail_allocation_;
+    }
+
+private:
+    template <class>
+    friend class FaultAllocator;
+
+    bool fail_allocation_{};
+};
+
+[[nodiscard]] std::shared_ptr<const ShaderProgram> publish_fault_program(
+    std::unique_ptr<ShaderProgram> candidate,
+    bool fail_control_block_allocation) {
+    auto* raw = candidate.release();
+
+    // shared_ptr(Y*, D, A) invokes D(raw) if control-block allocation throws.
+    return std::shared_ptr<const ShaderProgram>{
+        raw,
+        std::default_delete<ShaderProgram>{},
+        FaultAllocator<ShaderProgram>{fail_control_block_allocation},
+    };
+}
+
+#endif
+
+} // namespace
+
+} // namespace ui::detail
+
+namespace ui {
+
+ShaderProgram::ShaderProgram(
+    std::unique_ptr<const detail::ShaderProgramData> data) noexcept
+    : data_(std::move(data)) {}
+
+ShaderProgram::~ShaderProgram() noexcept = default;
+
+ShaderCompileResult ShaderProgram::compile(std::string_view sksl) {
+    if (sksl.size() > detail::kMaxSkSLSourceBytes) {
+        return detail::oversized_source_result();
+    }
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    const auto failure = detail::test_failure_point(sksl);
+    if (failure == detail::CompileFailurePoint::OversizedSource) {
+        return detail::oversized_source_result();
+    }
+#endif
+
+    auto backend = SkRuntimeEffect::MakeForShader(SkString{sksl});
+
+    if (!backend.effect) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+        if (failure == detail::CompileFailurePoint::BeforeDiagnosticOwnership) {
+            throw std::bad_alloc{};
+        }
+        if (failure == detail::CompileFailurePoint::EmptyBackendDiagnostic) {
+            backend.errorText.reset();
+        }
+#endif
+
+        auto diagnostic = detail::compiler_diagnostic(backend.errorText);
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+        if (failure == detail::CompileFailurePoint::AfterDiagnosticOwnership) {
+            throw std::bad_alloc{};
+        }
+#endif
+
+        std::vector<ShaderDiagnostic> diagnostics;
+        diagnostics.reserve(1);
+        diagnostics.push_back(std::move(diagnostic));
+        return ShaderCompileResult{nullptr, std::move(diagnostics)};
+    }
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    if (failure == detail::CompileFailurePoint::ProgramDataAllocation) {
+        throw std::bad_alloc{};
+    }
+#endif
+    std::unique_ptr<const detail::ShaderProgramData> data =
+        std::make_unique<detail::ShaderProgramData>(std::move(backend.effect));
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    if (failure == detail::CompileFailurePoint::BeforeProgramWrapperAllocation) {
+        throw std::bad_alloc{};
+    }
+#endif
+
+    auto candidate =
+        std::unique_ptr<ShaderProgram>{new ShaderProgram{std::move(data)}};
+
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+    auto program = detail::publish_fault_program(
+        std::move(candidate),
+        failure == detail::CompileFailurePoint::ProgramPublicationAllocation);
+#else
+    std::shared_ptr<const ShaderProgram> program{std::move(candidate)};
+#endif
+    return ShaderCompileResult{std::move(program), {}};
+}
+
+} // namespace ui

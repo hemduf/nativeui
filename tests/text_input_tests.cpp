@@ -226,6 +226,39 @@ void read_only_preserves_navigation_and_copy_but_blocks_mutations() {
     NUI_CHECK(value.get() == "hello");
 }
 
+void binding_text_input_entry_point_contract() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"hello"};
+    int writes = 0;
+    auto observer = value.observe([&](const std::string&) { ++writes; });
+    ui::UI tree{ui::TextInput{"Name", value.binding()}};
+
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+
+    ui::HeadlessRenderer renderer{{320.0f, 90.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(!tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+
+    tree.dispatch(test::text("!"), platform);
+    NUI_CHECK(value.get() == "hello!");
+    NUI_CHECK(writes == 1);
+
+    tree.dispatch(test::key(ui::Key::Backspace), platform);
+    NUI_CHECK(value.get() == "hello");
+    NUI_CHECK(writes == 2);
+
+    NUI_CHECK(renderer.render(tree));
+    int invalidations = 0;
+    tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
+    value.set("external");
+    NUI_CHECK(writes == 3);
+    NUI_CHECK(invalidations == 1);
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(!tree.layout_dirty());
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -297,6 +330,7 @@ void suite() {
     composition_candidate_tracks_preedit_cursor();
     composition_candidate_geometry_scales_at_platform_boundary();
     read_only_preserves_navigation_and_copy_but_blocks_mutations();
+    binding_text_input_entry_point_contract();
 }
 
 } // namespace

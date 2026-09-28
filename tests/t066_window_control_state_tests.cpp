@@ -3,6 +3,7 @@
 
 #include <limits>
 #include <optional>
+#include <stdexcept>
 
 namespace {
 
@@ -75,6 +76,44 @@ void test_runtime_constraint_updates_preserve_old_pair_on_failure() {
     NUI_CHECK(same(*constraints.max_size(), {300.0f, 240.0f}));
 }
 
+void test_close_control_post_state_recovers_rejection_and_exception() {
+    ui::detail::WindowControlPostState post_state;
+
+    NUI_CHECK(!post_state.posted());
+    NUI_CHECK(!post_state.try_post([] { return false; }));
+    NUI_CHECK(!post_state.posted());
+
+    int throwing_attempts = 0;
+    NUI_CHECK(!post_state.try_post([&]() -> bool {
+        ++throwing_attempts;
+        throw std::runtime_error{"injected close-control enqueue failure"};
+    }));
+    NUI_CHECK(throwing_attempts == 1);
+    NUI_CHECK(!post_state.posted());
+
+    int accepted_attempts = 0;
+    NUI_CHECK(post_state.try_post([&] {
+        ++accepted_attempts;
+        return true;
+    }));
+    NUI_CHECK(accepted_attempts == 1);
+    NUI_CHECK(post_state.posted());
+
+    // A duplicate scheduling attempt must not enqueue a second callback while
+    // the accepted one is still outstanding.
+    NUI_CHECK(post_state.try_post([&] {
+        ++accepted_attempts;
+        return true;
+    }));
+    NUI_CHECK(accepted_attempts == 1);
+
+    post_state.callback_started();
+    NUI_CHECK(!post_state.posted());
+    NUI_CHECK(post_state.try_post([] { return true; }));
+    post_state.cancel();
+    NUI_CHECK(!post_state.posted());
+}
+
 void test_close_state_accept_cancel_and_exactly_once_completion() {
     ui::detail::WindowCloseState state;
     NUI_CHECK(state.phase() == ui::detail::WindowClosePhase::Open);
@@ -127,6 +166,7 @@ void suite() {
     test_size_constraints_validate_and_clamp_atomically();
     test_size_constraints_reject_non_finite_or_non_positive_values();
     test_runtime_constraint_updates_preserve_old_pair_on_failure();
+    test_close_control_post_state_recovers_rejection_and_exception();
     test_close_state_accept_cancel_and_exactly_once_completion();
     test_programmatic_close_inside_veto_wins_over_cancel();
     test_destructor_teardown_suppresses_pending_completion();

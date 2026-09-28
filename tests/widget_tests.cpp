@@ -406,6 +406,62 @@ void progress_meter_visual_and_idle_contract() {
     }
 }
 
+void binding_value_toggle_entry_points_contract() {
+    test::MockPlatform platform;
+
+    {
+        ui::State<float> value{0.50f};
+        int writes = 0;
+        auto observer = value.observe([&](const float&) { ++writes; });
+        ui::UI tree{ui::Knob{"Drive", value.binding()}};
+        tree.resize({220.0f, 220.0f});
+        tree.activate(platform);
+
+        ui::HeadlessRenderer renderer{{220.0f, 220.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        NUI_CHECK(!tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
+
+        tree.dispatch(test::key(ui::Key::Right), platform);
+        NUI_CHECK_NEAR(value.get(), 0.51f, 0.0001f);
+        NUI_CHECK(writes == 1);
+
+        NUI_CHECK(renderer.render(tree));
+        int invalidations = 0;
+        tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
+        value.set(0.75f);
+        NUI_CHECK(writes == 2);
+        NUI_CHECK(invalidations == 1);
+        NUI_CHECK(tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
+    }
+
+    {
+        ui::State<bool> value{false};
+        int writes = 0;
+        auto observer = value.observe([&](const bool&) { ++writes; });
+        ui::UI tree{ui::Toggle{"Bypass", value.binding()}};
+        tree.resize({240.0f, 80.0f});
+        tree.activate(platform);
+
+        ui::HeadlessRenderer renderer{{240.0f, 80.0f}, 1.0f};
+        NUI_CHECK(renderer.render(tree));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown, 20.0f, 20.0f), platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp, 20.0f, 20.0f), platform);
+        NUI_CHECK(value.get());
+        NUI_CHECK(writes == 1);
+
+        NUI_CHECK(renderer.render(tree));
+        int invalidations = 0;
+        tree.set_invalidation_callback([&invalidations](ui::Rect) { ++invalidations; });
+        value.set(false);
+        NUI_CHECK(writes == 2);
+        NUI_CHECK(invalidations == 1);
+        NUI_CHECK(tree.paint_dirty());
+        NUI_CHECK(!tree.layout_dirty());
+    }
+}
+
 void suite() {
     ui::State<float> drive{0.50f};
     ui::State<float> tone{0.25f};
@@ -461,6 +517,7 @@ void suite() {
     progress_meter_numeric_contract();
     progress_meter_contract();
     progress_meter_visual_and_idle_contract();
+    binding_value_toggle_entry_points_contract();
 }
 
 } // namespace

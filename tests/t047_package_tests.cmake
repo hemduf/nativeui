@@ -41,6 +41,7 @@ function(_t047_write_consumer source_dir platform)
     # rather than merely compiling an otherwise dead static archive.
     file(WRITE "${source_dir}/main.cpp" [=[
 #include <nativeui/headless.hpp>
+#include <nativeui/shader.hpp>
 #include <nativeui/window.hpp>
 
 using PollMember = bool (ui::EmbeddedView::*)();
@@ -48,17 +49,25 @@ volatile PollMember t047_platform_link_anchor = &ui::EmbeddedView::poll;
 
 int main() {
     ui::HeadlessRenderer renderer({4.0f, 3.0f});
+    const auto shader = ui::ShaderProgram::compile(
+        "half4 main(float2 p) { return half4(0.25, 0.5, 0.75, 1.0); }");
     const bool core_ok = renderer.pixel_width() == 4 && renderer.pixel_height() == 3;
+    const bool shader_ok = shader.ok() && shader.program && shader.diagnostics.empty();
     const bool platform_linked = t047_platform_link_anchor != nullptr;
-    return (core_ok && platform_linked) ? 0 : 1;
+    return (core_ok && shader_ok && platform_linked) ? 0 : 1;
 }
 ]=])
   else()
     file(WRITE "${source_dir}/main.cpp" [=[
 #include <nativeui/headless.hpp>
+#include <nativeui/shader.hpp>
 int main() {
     ui::HeadlessRenderer renderer({4.0f, 3.0f});
-    return (renderer.pixel_width() == 4 && renderer.pixel_height() == 3) ? 0 : 1;
+    const auto shader = ui::ShaderProgram::compile(
+        "half4 main(float2 p) { return half4(0.25, 0.5, 0.75, 1.0); }");
+    const bool core_ok = renderer.pixel_width() == 4 && renderer.pixel_height() == 3;
+    const bool shader_ok = shader.ok() && shader.program && shader.diagnostics.empty();
+    return (core_ok && shader_ok) ? 0 : 1;
 }
 ]=])
   endif()

@@ -49,16 +49,16 @@ public:
 
 class IfComponent final : public DynamicHostComponent, public DynamicChildrenSource {
 public:
-    IfComponent(State<bool>& state, std::shared_ptr<const Spec> child)
-        : state_(&state), child_(std::move(child)) {}
+    IfComponent(Binding<bool> state, std::shared_ptr<const Spec> child)
+        : state_(std::move(state)), child_(std::move(child)) {}
 
     [[nodiscard]] std::vector<std::string> desired_keys() const override {
-        if (!state_->get()) return {};
+        if (!state_.get()) return {};
         return {"if:true"};
     }
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
-        if (!state_->get()) return {};
+        if (!state_.get()) return {};
         return {DynamicChildSpec{"if:true", *child_}};
     }
 
@@ -67,7 +67,7 @@ public:
     }
 
     void mount(MountContext&) override {
-        subscription_ = state_->observe([this](const bool&) {
+        subscription_ = state_.observe([this](const bool&) {
             if (structure_invalidator_) structure_invalidator_();
         });
     }
@@ -78,9 +78,9 @@ public:
     }
 
 private:
-    State<bool>* state_{};
+    Binding<bool> state_;
     std::shared_ptr<const Spec> child_;
-    State<bool>::Subscription subscription_;
+    Binding<bool>::Subscription subscription_;
     std::function<void()> structure_invalidator_;
 };
 
@@ -94,10 +94,12 @@ struct SwitchBranch {
 template <class T>
 class SwitchComponent final : public DynamicHostComponent, public DynamicChildrenSource {
 public:
-    SwitchComponent(State<T>& state,
+    SwitchComponent(Binding<T> state,
                     std::vector<SwitchBranch<T>> branches,
                     std::shared_ptr<const Spec> fallback)
-        : state_(&state), branches_(std::move(branches)), fallback_(std::move(fallback)) {}
+        : state_(std::move(state)),
+          branches_(std::move(branches)),
+          fallback_(std::move(fallback)) {}
 
     [[nodiscard]] std::vector<std::string> desired_keys() const override {
         if (const auto* branch = selected_branch()) return {branch->key};
@@ -118,7 +120,7 @@ public:
     }
 
     void mount(MountContext&) override {
-        subscription_ = state_->observe([this](const T&) {
+        subscription_ = state_.observe([this](const T&) {
             if (structure_invalidator_) structure_invalidator_();
         });
     }
@@ -130,17 +132,17 @@ public:
 
 private:
     [[nodiscard]] const SwitchBranch<T>* selected_branch() const noexcept {
-        const auto& selected = state_->get();
+        const auto& selected = state_.get();
         const auto it = std::find_if(branches_.begin(), branches_.end(), [&](const auto& branch) {
             return branch.value == selected;
         });
         return it == branches_.end() ? nullptr : &*it;
     }
 
-    State<T>* state_{};
+    Binding<T> state_;
     std::vector<SwitchBranch<T>> branches_;
     std::shared_ptr<const Spec> fallback_;
-    typename State<T>::Subscription subscription_;
+    typename Binding<T>::Subscription subscription_;
     std::function<void()> structure_invalidator_;
 };
 
@@ -151,22 +153,22 @@ public:
     using KeyFunction = std::function<std::string(const T&)>;
     using ChildFunction = std::function<Spec(const T&)>;
 
-    ForEachComponent(State<Items>& state, KeyFunction key_function, ChildFunction child_function)
-        : state_(&state),
+    ForEachComponent(Binding<Items> state, KeyFunction key_function, ChildFunction child_function)
+        : state_(std::move(state)),
           key_function_(std::move(key_function)),
           child_function_(std::move(child_function)) {}
 
     [[nodiscard]] std::vector<std::string> desired_keys() const override {
         std::vector<std::string> result;
-        result.reserve(state_->get().size());
-        for (const auto& item : state_->get()) result.push_back(key_function_(item));
+        result.reserve(state_.get().size());
+        for (const auto& item : state_.get()) result.push_back(key_function_(item));
         return result;
     }
 
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children() const override {
         std::vector<DynamicChildSpec> result;
-        result.reserve(state_->get().size());
-        for (const auto& item : state_->get()) {
+        result.reserve(state_.get().size());
+        for (const auto& item : state_.get()) {
             result.push_back(DynamicChildSpec{key_function_(item), child_function_(item)});
         }
         return result;
@@ -177,7 +179,7 @@ public:
     }
 
     void mount(MountContext&) override {
-        subscription_ = state_->observe([this](const Items&) {
+        subscription_ = state_.observe([this](const Items&) {
             if (structure_invalidator_) structure_invalidator_();
         });
     }
@@ -188,10 +190,10 @@ public:
     }
 
 private:
-    State<Items>* state_{};
+    Binding<Items> state_;
     KeyFunction key_function_;
     ChildFunction child_function_;
-    typename State<Items>::Subscription subscription_;
+    typename Binding<Items>::Subscription subscription_;
     std::function<void()> structure_invalidator_;
 };
 
@@ -200,28 +202,33 @@ private:
 class If {
 public:
     template <class Child>
+    If(Binding<bool> state, Child&& child)
+        : state_(std::move(state)), child_(make_spec(std::forward<Child>(child))) {}
+
+    template <class Child>
     If(State<bool>& state, Child&& child)
-        : state_(&state), child_(make_spec(std::forward<Child>(child))) {}
+        : If(state.binding(), std::forward<Child>(child)) {}
 
     Spec spec() && {
         auto child = std::make_shared<const Spec>(std::move(child_));
         std::vector<Spec> initial_children;
-        if (state_->get()) initial_children.push_back(*child);
-        auto* state = state_;
+        if (state_.get()) initial_children.push_back(*child);
+        auto state = state_;
         return Spec{
-            [state, child] { return std::make_unique<detail::IfComponent>(*state, child); },
+            [state, child] { return std::make_unique<detail::IfComponent>(state, child); },
             std::move(initial_children)};
     }
 
 private:
-    State<bool>* state_{};
+    Binding<bool> state_;
     Spec child_;
 };
 
 template <class T>
 class Switch {
 public:
-    explicit Switch(State<T>& state) : state_(&state) {}
+    explicit Switch(Binding<T> state) : state_(std::move(state)) {}
+    explicit Switch(State<T>& state) : Switch(state.binding()) {}
 
     template <class Child>
     Switch& when(T value, Child&& child) & {
@@ -253,7 +260,7 @@ public:
 
     Spec spec() && {
         std::vector<Spec> initial_children;
-        const auto& selected = state_->get();
+        const auto& selected = state_.get();
         const auto selected_it = std::find_if(
             branches_.begin(), branches_.end(), [&](const auto& branch) {
                 return branch.value == selected;
@@ -264,19 +271,19 @@ public:
             initial_children.push_back(*fallback_);
         }
 
-        auto* state = state_;
+        auto state = state_;
         auto branches = std::move(branches_);
         auto fallback = std::move(fallback_);
         return Spec{
             [state, branches = std::move(branches), fallback = std::move(fallback)]() mutable {
                 return std::make_unique<detail::SwitchComponent<T>>(
-                    *state, std::move(branches), std::move(fallback));
+                    state, std::move(branches), std::move(fallback));
             },
             std::move(initial_children)};
     }
 
 private:
-    State<T>* state_{};
+    Binding<T> state_;
     std::vector<detail::SwitchBranch<T>> branches_;
     std::shared_ptr<const Spec> fallback_;
 };
@@ -287,8 +294,8 @@ public:
     using Items = std::vector<T>;
 
     template <class KeyFunction, class ChildFunction>
-    ForEach(State<Items>& state, KeyFunction key_function, ChildFunction child_function)
-        : state_(&state),
+    ForEach(Binding<Items> state, KeyFunction key_function, ChildFunction child_function)
+        : state_(std::move(state)),
           key_function_([function = std::move(key_function)](const T& item) mutable {
               return detail::encode_dynamic_key(std::invoke(function, item));
           }),
@@ -296,10 +303,14 @@ public:
               return detail::dynamic_make_spec(std::invoke(function, item));
           }) {}
 
+    template <class KeyFunction, class ChildFunction>
+    ForEach(State<Items>& state, KeyFunction key_function, ChildFunction child_function)
+        : ForEach(state.binding(), std::move(key_function), std::move(child_function)) {}
+
     Spec spec() && {
         std::vector<std::string> initial_keys;
-        initial_keys.reserve(state_->get().size());
-        for (const auto& item : state_->get()) initial_keys.push_back(key_function_(item));
+        initial_keys.reserve(state_.get().size());
+        for (const auto& item : state_.get()) initial_keys.push_back(key_function_(item));
 
         bool duplicate_keys = false;
         for (std::size_t i = 0; i < initial_keys.size() && !duplicate_keys; ++i) {
@@ -311,13 +322,13 @@ public:
 
         std::vector<Spec> initial_children;
         if (!duplicate_keys) {
-            initial_children.reserve(state_->get().size());
-            for (const auto& item : state_->get()) {
+            initial_children.reserve(state_.get().size());
+            for (const auto& item : state_.get()) {
                 initial_children.push_back(child_function_(item));
             }
         }
 
-        auto* state = state_;
+        auto state = state_;
         auto key_function = std::move(key_function_);
         auto child_function = std::move(child_function_);
         return Spec{
@@ -325,13 +336,13 @@ public:
              key_function = std::move(key_function),
              child_function = std::move(child_function)]() mutable {
                 return std::make_unique<detail::ForEachComponent<T>>(
-                    *state, std::move(key_function), std::move(child_function));
+                    state, std::move(key_function), std::move(child_function));
             },
             std::move(initial_children)};
     }
 
 private:
-    State<Items>* state_{};
+    Binding<Items> state_;
     typename detail::ForEachComponent<T>::KeyFunction key_function_;
     typename detail::ForEachComponent<T>::ChildFunction child_function_;
 };

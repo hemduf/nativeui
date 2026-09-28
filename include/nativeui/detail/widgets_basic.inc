@@ -155,8 +155,12 @@ private:
 
 class KnobComponent final : public Component {
 public:
-    KnobComponent(std::string label, State<float>& state, float minimum, float maximum)
-        : label_(std::move(label)), state_(state), value_(state.get()), minimum_(minimum), maximum_(maximum) {
+    KnobComponent(std::string label, Binding<float> state, float minimum, float maximum)
+        : label_(std::move(label)),
+          state_(std::move(state)),
+          value_(state_.get()),
+          minimum_(minimum),
+          maximum_(maximum) {
         if (maximum_ <= minimum_) maximum_ = minimum_ + 1.0f;
     }
 
@@ -267,20 +271,20 @@ public:
 
 private:
     std::string label_;
-    State<float>& state_;
+    Binding<float> state_;
     float value_{};
     float minimum_{};
     float maximum_{1.0f};
     float drag_start_value_{};
     DragGesture drag_gesture_{};
-    State<float>::Subscription subscription_;
+    Binding<float>::Subscription subscription_;
 };
 
 
 class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
-    ToggleComponent(std::string label, State<bool>& state, ToggleStyle style)
-        : label_(std::move(label)), state_(state), style_(std::move(style)) {}
+    ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style)
+        : label_(std::move(label)), state_(std::move(state)), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
@@ -345,9 +349,8 @@ public:
             const auto after_interaction = presentation_signature(focused_);
             invalidate_style_transition(before, after_interaction, ctx);
             if (event.type == InputType::PointerDown && !effective_read_only()) {
-                auto* state = &state_;
-                const bool next = !state->get();
-                state->set(next);
+                const bool next = !state_.get();
+                state_.set(next);
                 return outcome.result;
             }
             return outcome.result;
@@ -359,9 +362,8 @@ public:
                 space_pressed_ = true;
                 const auto after_interaction = presentation_signature(focused_);
                 invalidate_style_transition(before, after_interaction, ctx);
-                auto* state = &state_;
-                const bool next = !state->get();
-                state->set(next);
+                const bool next = !state_.get();
+                state_.set(next);
                 return EventResult::Handled;
             }
             return EventResult::Handled;
@@ -372,9 +374,8 @@ public:
                 enter_pressed_ = true;
                 const auto after_interaction = presentation_signature(focused_);
                 invalidate_style_transition(before, after_interaction, ctx);
-                auto* state = &state_;
-                const bool next = !state->get();
-                state->set(next);
+                const bool next = !state_.get();
+                state_.set(next);
                 return EventResult::Handled;
             }
             return EventResult::Handled;
@@ -638,11 +639,11 @@ private:
     }
 
     std::string label_;
-    State<bool>& state_;
+    Binding<bool> state_;
     ToggleStyle style_;
     detail::PressActivationState interaction_;
     bool focused_{};
     bool space_pressed_{};
     bool enter_pressed_{};
-    State<bool>::Subscription subscription_;
+    Binding<bool>::Subscription subscription_;
 };

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <utility>
 
 namespace ui::detail {
 
@@ -64,6 +65,34 @@ private:
 
     std::optional<Size> min_size_;
     std::optional<Size> max_size_;
+};
+
+/// Bookkeeping for one best-effort Dispatcher post used only as an optimization
+/// for window lifecycle control. Rejection or exception-before-enqueue clears
+/// the posted bit and leaves the close phase itself as the durable source of
+/// truth for the next owner/platform checkpoint.
+class WindowControlPostState final {
+public:
+    template <class Post>
+    [[nodiscard]] bool try_post(Post&& post) noexcept {
+        if (posted_) return true;
+        posted_ = true;
+        try {
+            if (std::forward<Post>(post)()) return true;
+        } catch (...) {
+            // Lifecycle control must never unwind through a native/input callback
+            // merely because ordinary Dispatcher enqueue allocated and failed.
+        }
+        posted_ = false;
+        return false;
+    }
+
+    void callback_started() noexcept { posted_ = false; }
+    void cancel() noexcept { posted_ = false; }
+    [[nodiscard]] bool posted() const noexcept { return posted_; }
+
+private:
+    bool posted_{};
 };
 
 enum class WindowClosePhase {
