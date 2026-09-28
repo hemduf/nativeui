@@ -79,25 +79,11 @@ void benchmark() {
               << " ms\n";
 }
 
-void compare_type(ui::Application& app, ui::NoiseType type, bool second) {
+void compare_window(ui::Application& app,
+                    ui::StandaloneWindow& window,
+                    const ui::HeadlessRenderer& reference,
+                    bool second) {
     constexpr std::uint32_t seed = 0x12345678u;
-    const auto source = ui::NoiseSource::create(
-        type, {.feature_size = 48.0f, .seed = seed});
-    check(source.ok(), "Worley source did not compile");
-    const auto brush = source.noise.as_brush();
-
-    auto reference_ui = make_ui(brush);
-    ui::HeadlessRenderer reference{{64, 64}, 1.0f};
-    check(reference.render(reference_ui), "Worley raster reference failed");
-
-    auto gpu_ui = make_ui(brush);
-    ui::StandaloneWindow window{
-        app, gpu_ui,
-        ui::WindowDesc{.title = second ? "NativeUI T091 Worley F2"
-                                       : "NativeUI T091 Worley F1",
-                       .size = {64, 64}, .resizable = false}};
-    check(window.valid() && window.native_handle(), "Worley GPU window invalid");
-
     constexpr std::array<std::array<int, 2>, 4> samples{{
         {0, 0}, {8, 8}, {31, 23}, {52, 45}
     }};
@@ -134,10 +120,41 @@ int main(int argc, char** argv) {
             benchmark();
             return 0;
         }
+        constexpr std::uint32_t seed = 0x12345678u;
+        const auto f1 = ui::NoiseSource::create(
+            ui::NoiseType::WorleyF1,
+            {.feature_size = 48.0f, .seed = seed});
+        const auto f2 = ui::NoiseSource::create(
+            ui::NoiseType::WorleyF2,
+            {.feature_size = 48.0f, .seed = seed});
+        check(f1.ok() && f2.ok(), "Worley sources did not compile");
+
+        auto reference_ui_f1 = make_ui(f1.noise.as_brush());
+        auto reference_ui_f2 = make_ui(f2.noise.as_brush());
+        ui::HeadlessRenderer reference_f1{{64, 64}, 1.0f};
+        ui::HeadlessRenderer reference_f2{{64, 64}, 1.0f};
+        check(reference_f1.render(reference_ui_f1) &&
+                  reference_f2.render(reference_ui_f2),
+              "Worley raster reference failed");
+
         ui::Application app;
         check(app.valid(), "platform application invalid");
-        compare_type(app, ui::NoiseType::WorleyF1, false);
-        compare_type(app, ui::NoiseType::WorleyF2, true);
+        auto gpu_ui_f1 = make_ui(f1.noise.as_brush());
+        auto gpu_ui_f2 = make_ui(f2.noise.as_brush());
+        ui::StandaloneWindow window_f1{
+            app, gpu_ui_f1,
+            ui::WindowDesc{.title = "NativeUI T091 Worley F1",
+                           .size = {64, 64}, .resizable = false}};
+        ui::StandaloneWindow window_f2{
+            app, gpu_ui_f2,
+            ui::WindowDesc{.title = "NativeUI T091 Worley F2",
+                           .size = {64, 64}, .resizable = false}};
+        check(window_f1.valid() && window_f1.native_handle() &&
+                  window_f2.valid() && window_f2.native_handle(),
+              "Worley GPU windows invalid");
+
+        compare_window(app, window_f1, reference_f1, false);
+        compare_window(app, window_f2, reference_f2, true);
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "FAIL T091 Worley GPU reference: " << e.what() << '\n';
