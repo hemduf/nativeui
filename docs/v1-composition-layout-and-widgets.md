@@ -24,7 +24,7 @@ Normal application code composes public builders and components. It should not i
 
 `ForEach<T>` keys are retained identity. Reordering items while preserving keys preserves their retained identity; changing a key replaces that item. Duplicate-key snapshots are rejected rather than partially mutating the currently valid retained tree. The maintained [`t058_dynamic_composition`](../examples/features/t058_dynamic_composition.cpp) example exercises conditional composition, branch switching, keyed reordering, duplicate-key rejection and recovery.
 
-These helpers currently observe `State<T>` to request structural reconciliation. This chapter intentionally does not specify the final nested-observer, recursive-write, equality or subscription-destruction semantics of `State<T>` / `Binding<T>`; T123/T124 own that contract and this documentation must be reconciled against their frozen result.
+These helpers observe `State<T>` to request structural reconciliation. The nested-observer, recursive-write, equality and subscription-destruction semantics are now part of the landed T123/T124 contract; this chapter relies on that contract and leaves the detailed rules to [`v1-state-and-binding.md`](v1-state-and-binding.md).
 
 ## Availability and read-only state
 
@@ -38,7 +38,7 @@ Every retained component has effective availability derived from its local state
 
 Availability is a retained-tree concern rather than a platform-widget flag. Focus, pointer targeting, overlays and widget behavior consume the effective retained availability so an unavailable descendant cannot continue acting as an interactive target merely because a native event arrives later.
 
-The exact State/Binding notification ordering that can drive availability is still deferred to T123/T124. The stable 1.0 rule documented here is only the effective component behavior, not unfinished observer internals.
+The State/Binding notification ordering that can drive availability is defined by the landed T123/T124 contract. The stable 1.0 rule documented here focuses on effective component behavior; detailed observer semantics remain centralized in [`v1-state-and-binding.md`](v1-state-and-binding.md).
 
 ## Layout model
 
@@ -117,7 +117,7 @@ Focus is retained per UI. Focus scopes establish local traversal/containment bou
 
 [`t014_focus_scopes`](../examples/features/t014_focus_scopes.cpp) is the focused example for scope/traversal behavior.
 
-The current T123 work touches the precise interaction between reentrant state notification and availability-driven focus restoration. This chapter therefore does not freeze that observer-ordering detail until T123/T124 are complete.
+The landed T123/T124 work defines the interaction between reentrant state notification and availability-driven focus restoration. This chapter documents the resulting component behavior and delegates the observer-ordering details to [`v1-state-and-binding.md`](v1-state-and-binding.md).
 
 ### Pointer capture and gestures
 
@@ -192,7 +192,7 @@ For application code and reviews, keep these rules visible:
 - layout and interaction callbacks must respect retained lifecycle/reentrancy boundaries rather than mutating private tree structures directly;
 - normal application code stays on public NativeUI headers and abstractions.
 
-The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and callback-exception wording is intentionally omitted until T123/T124 freeze it.
+The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and callback-exception contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md); this chapter does not duplicate it.
 
 ## Public reference map for this chapter
 
