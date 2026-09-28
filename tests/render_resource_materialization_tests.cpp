@@ -1,3 +1,4 @@
+#include "src/detail/painter_private_hooks.hpp"
 #include "src/detail/render_resource_materialization.hpp"
 #include "test_support.hpp"
 
