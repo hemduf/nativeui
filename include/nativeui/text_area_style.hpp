@@ -6,87 +6,158 @@
 #include <string>
 #include <vector>
 
+/// \file
+/// Multiline TextArea style values; float geometry uses logical UI units.
+/// Patch values are stored verbatim; resolution may allocate for font data.
 namespace ui {
 
 /// Typed multiline text-area presentation and measurement overrides.
 /// Empty fields inherit from the already-resolved theme/inherited recipe.
 struct TextAreaStylePatch {
+    /// Editor field background color.
     std::optional<Color> field_fill;
+    /// Field border color.
     std::optional<Color> border;
+    /// Label color.
     std::optional<Color> label;
+    /// Body and preedit text color.
     std::optional<Color> text;
+    /// Placeholder color.
     std::optional<Color> placeholder;
+    /// Selection highlight color.
     std::optional<Color> selection;
+    /// Caret color.
     std::optional<Color> caret;
+    /// IME/preedit underline color.
     std::optional<Color> composition_underline;
+    /// Border stroke width in logical UI units.
     std::optional<float> border_width;
+    /// Field corner radius in logical UI units.
     std::optional<float> corner_radius;
+    /// Preferred measured control width in logical UI units.
     std::optional<float> control_width;
+    /// Preferred measured control height in logical UI units.
     std::optional<float> control_height;
+    /// Field top offset from control top in logical UI units.
     std::optional<float> field_top;
+    /// Minimum field height in logical UI units.
     std::optional<float> minimum_field_height;
+    /// Left/right content inset in logical UI units.
     std::optional<float> horizontal_padding;
+    /// Top/bottom content inset in logical UI units.
     std::optional<float> vertical_padding;
+    /// Label center-Y offset from control top.
     std::optional<float> label_offset_y;
+    /// Label font size in logical UI units.
     std::optional<float> label_size;
+    /// Body font size in logical UI units.
     std::optional<float> text_size;
+    /// Vertical advance per logical text line.
     std::optional<float> line_height;
+    /// Selection highlight radius.
     std::optional<float> selection_corner_radius;
+    /// Selection vertical inset within each line.
     std::optional<float> selection_vertical_inset;
+    /// Extra highlight width when selection includes a newline.
     std::optional<float> newline_selection_width;
+    /// Caret stroke width.
     std::optional<float> caret_width;
+    /// Caret top/bottom inset within a line.
     std::optional<float> caret_vertical_inset;
+    /// IME underline stroke width.
     std::optional<float> composition_underline_width;
+    /// IME underline distance from line bottom.
     std::optional<float> composition_underline_inset;
+    /// Label/body font weight.
     std::optional<FontWeight> text_weight;
+    /// Label/body font slant.
     std::optional<FontSlant> text_slant;
+    /// Preferred font family.
     std::optional<std::string> font_family;
+    /// Ordered fallback font families.
     std::optional<std::vector<std::string>> fallback_families;
 };
 
 /// Complete multiline TextArea recipe. Patches may alter paint, typography and
 /// measurement fields.
 struct TextAreaStyle {
+    /// Base patch applied before all state-specific patches.
     TextAreaStylePatch base;
+    /// Hover interaction patch.
     TextAreaStylePatch hovered;
+    /// Pressed interaction patch.
     TextAreaStylePatch pressed;
+    /// Disabled interaction patch; wins over pressed/hovered.
     TextAreaStylePatch disabled;
+    /// Read-only orthogonal patch applied after interaction.
     TextAreaStylePatch read_only;
+    /// Focused orthogonal patch applied last.
     TextAreaStylePatch focused;
 };
 
 /// Concrete multiline editor presentation/measurement values after resolution.
 struct ResolvedTextAreaStyle {
+    /// Resolved Editor field background color.
     Color field_fill{};
+    /// Resolved Field border color.
     Color border{};
+    /// Resolved Label color.
     Color label{};
+    /// Resolved Body and preedit text color.
     Color text{};
+    /// Resolved Placeholder color.
     Color placeholder{};
+    /// Resolved Selection highlight color.
     Color selection{};
+    /// Resolved Caret color.
     Color caret{};
+    /// Resolved IME/preedit underline color.
     Color composition_underline{};
+    /// Resolved Border stroke width in logical UI units.
     float border_width{};
+    /// Resolved Field corner radius in logical UI units.
     float corner_radius{};
+    /// Resolved Preferred measured control width in logical UI units.
     float control_width{};
+    /// Resolved Preferred measured control height in logical UI units.
     float control_height{};
+    /// Resolved Field top offset from control top in logical UI units.
     float field_top{};
+    /// Resolved Minimum field height in logical UI units.
     float minimum_field_height{};
+    /// Resolved Left/right content inset in logical UI units.
     float horizontal_padding{};
+    /// Resolved Top/bottom content inset in logical UI units.
     float vertical_padding{};
+    /// Resolved Label center-Y offset from control top.
     float label_offset_y{};
+    /// Resolved Label font size in logical UI units.
     float label_size{};
+    /// Resolved Body font size in logical UI units.
     float text_size{};
+    /// Resolved Vertical advance per logical text line.
     float line_height{};
+    /// Resolved Selection highlight radius.
     float selection_corner_radius{};
+    /// Resolved Selection vertical inset within each line.
     float selection_vertical_inset{};
+    /// Resolved Extra highlight width when selection includes a newline.
     float newline_selection_width{};
+    /// Resolved Caret stroke width.
     float caret_width{};
+    /// Resolved Caret top/bottom inset within a line.
     float caret_vertical_inset{};
+    /// Resolved IME underline stroke width.
     float composition_underline_width{};
+    /// Resolved IME underline distance from line bottom.
     float composition_underline_inset{};
+    /// Resolved Label/body font weight.
     FontWeight text_weight{FontWeight::Regular};
+    /// Resolved Label/body font slant.
     FontSlant text_slant{FontSlant::Upright};
+    /// Resolved Preferred font family.
     std::string font_family;
+    /// Resolved Ordered fallback font families.
     std::vector<std::string> fallback_families;
 };
 
@@ -147,6 +218,7 @@ inline void apply_text_area_interaction_patch(ResolvedTextAreaStyle& target,
 
 } // namespace detail
 
+/// Build the default TextArea recipe from one Theme snapshot; returned data is owned.
 [[nodiscard]] inline TextAreaStyle default_text_area_style(const Theme& theme) {
     TextAreaStyle style;
     style.base.field_fill = theme.palette.control_background;
@@ -194,6 +266,9 @@ inline void apply_text_area_interaction_patch(ResolvedTextAreaStyle& target,
     return style;
 }
 
+/// Resolve inherited then explicit base, interaction, read-only and focused patches.
+/// Interaction precedence is disabled > pressed > hovered > normal; focused is last.
+/// The returned value owns its font strings/vectors and borrows no input data.
 [[nodiscard]] inline ResolvedTextAreaStyle resolve_text_area_style(
     const TextAreaStyle& inherited,
     const TextAreaStyle& explicit_style,

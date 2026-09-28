@@ -59,11 +59,15 @@ Thumb diameter and focus-ring width currently affect intrinsic cross-axis measur
 
 ## TextInput
 
-`TextInputStylePatch` covers field/border, label/text/placeholder, selection/caret/composition underline, control/field geometry, padding/insets and typography. These include measurement-affecting fields, so state/local changes may require layout.
+`TextInputStylePatch` covers field/border, label/text/placeholder, selection/caret/composition underline, control/field geometry, padding/insets and typography. All float geometry is in logical UI units. `control_width` / `control_height` are the preferred measured size; `field_top` and `field_height` locate the editable field. `horizontal_padding` and `content_vertical_inset` define the clipped editable-content rectangle. Selection, caret and IME underline widths/insets are paint geometry inside that field.
+
+Patch values are stored verbatim rather than sanitized by the style layer. `default_text_input_style(theme)` returns owned recipe data. `resolve_text_input_style()` applies inherited base, explicit base, one interaction branch (`disabled > pressed > hovered > normal`), read-only, then focused; explicit fields win inside each layer. The returned `ResolvedTextInputStyle` owns its font-family/fallback strings and borrows nothing from the input recipes.
 
 ## TextArea
 
-`TextAreaStylePatch` is the multiline equivalent, adding minimum field height, vertical padding, line height and newline-selection width.
+`TextAreaStylePatch` is the multiline counterpart. `control_width` / `control_height` are preferred measured bounds; `field_top` begins the field and `minimum_field_height` prevents it from collapsing below the configured height. `horizontal_padding` / `vertical_padding` define the multiline content viewport, `line_height` is the per-line vertical advance, and `newline_selection_width` extends a selection highlight when the selected range includes a line break.
+
+TextArea patch values are likewise stored verbatim. `resolve_text_area_style()` uses the same inherited/explicit and interaction/read-only/focused precedence and returns a fully owned `ResolvedTextAreaStyle`. Both text-style resolvers may allocate while copying font-family/fallback data and are not audio-real-time operations.
 
 ## Example
 
