@@ -95,9 +95,6 @@ bool semantic_same_color(Color a, Color b) noexcept {
     return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
 
-std::size_t semantic_brush_hash(const Brush& brush) noexcept;
-bool semantic_brush_equal(const Brush& a, const Brush& b) noexcept;
-
 std::size_t semantic_shader_hash(
     const ShaderProgram* program,
     std::span<const std::byte> bindings,
@@ -110,7 +107,7 @@ std::size_t semantic_shader_hash(
     semantic_hash_combine(seed, children.size());
     for (const auto& child : children) {
         semantic_hash_combine(seed, static_cast<bool>(child));
-        if (child) semantic_hash_combine(seed, semantic_brush_hash(*child));
+        if (child) semantic_hash_combine(seed, ShaderBrushAccess::semantic_hash(*child));
     }
     return seed;
 }
@@ -545,7 +542,7 @@ bool ShaderBrushAccess::semantic_equal(
         const auto& left = a->children[index];
         const auto& right = b->children[index];
         if (static_cast<bool>(left) != static_cast<bool>(right)) return false;
-        if (left && !semantic_brush_equal(*left, *right)) return false;
+        if (left && !ShaderBrushAccess::semantic_equal(*left, *right)) return false;
     }
     return true;
 }
@@ -573,7 +570,7 @@ std::size_t ShaderInstanceAccess::depth(
 
 namespace {
 
-std::size_t semantic_brush_hash(const Brush& brush) noexcept {
+std::size_t ShaderBrushAccess::semantic_hash(const Brush& brush) noexcept {
     return std::visit(
         [](const auto& source) noexcept -> std::size_t {
             using Source = std::decay_t<decltype(source)>;
@@ -613,7 +610,7 @@ std::size_t semantic_brush_hash(const Brush& brush) noexcept {
         brush.value_);
 }
 
-bool semantic_brush_equal(const Brush& a, const Brush& b) noexcept {
+bool ShaderBrushAccess::semantic_equal(const Brush& a, const Brush& b) noexcept {
     if (a.value_.index() != b.value_.index()) return false;
     return std::visit(
         [](const auto& left, const auto& right) noexcept -> bool {

@@ -30,6 +30,13 @@ struct ShaderBrushAccess {
     [[nodiscard]] static bool semantic_equal(
         const std::shared_ptr<const ShaderBrushSnapshot>& a,
         const std::shared_ptr<const ShaderBrushSnapshot>& b) noexcept;
+
+    [[nodiscard]] static std::size_t semantic_hash(
+        const Brush& brush) noexcept;
+
+    [[nodiscard]] static bool semantic_equal(
+        const Brush& a,
+        const Brush& b) noexcept;
 };
 
 } // namespace ui::detail
