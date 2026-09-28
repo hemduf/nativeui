@@ -166,9 +166,9 @@ macro(nativeui_attach_platform)
 
   # Linux standalone consumers need the single private T072 implementation that
   # backs Application-owned Portal/accessibility clients. This remains below
-  # the public API: macOS/Windows never discover libdbus and no D-Bus type leaks
-  # through nativeui_attach_platform().
-  if(UNIX AND NOT APPLE)
+  # the public API: macOS/Windows/WebAssembly never discover libdbus and no
+  # D-Bus type leaks through nativeui_attach_platform().
+  if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
     _nativeui_attach_linux_dbus_transport()
   endif()
 

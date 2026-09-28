@@ -271,8 +271,8 @@ public:
           platform_(platform),
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)),
-          capture_(std::move(capture)),
-          release_(std::move(release)) {}
+          legacy_capture_(std::move(capture)),
+          legacy_release_(std::move(release)) {}
 
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
@@ -294,16 +294,52 @@ public:
     void invalidate() const { invalidate_(); }
     /// Recompute layout from this component through its ancestors, then repaint.
     void invalidate_layout() const { invalidate_layout_(); }
-    void capture_pointer() const { capture_(); }
-    void release_pointer() const { release_(); }
+    void capture_pointer() const {
+        if (capture_) {
+            if (pointer_action_.capture_allowed) capture_(pointer_action_);
+        } else if (legacy_capture_) {
+            legacy_capture_();
+        }
+    }
+    void release_pointer() const {
+        if (release_) release_(pointer_action_);
+        else if (legacy_release_) legacy_release_();
+    }
 
 private:
+    friend class Tree;
+
+    struct PointerAction {
+        PointerId id{};
+        std::uint64_t interaction_token{};
+        bool capture_allowed{};
+    };
+
+    InputContext(
+        Rect bounds,
+        PlatformServices& platform,
+        std::function<void()> invalidate,
+        std::function<void()> invalidate_layout,
+        PointerAction pointer_action,
+        std::function<void(const PointerAction&)> capture,
+        std::function<void(const PointerAction&)> release)
+        : bounds_(bounds),
+          platform_(platform),
+          invalidate_(std::move(invalidate)),
+          invalidate_layout_(std::move(invalidate_layout)),
+          pointer_action_(pointer_action),
+          capture_(std::move(capture)),
+          release_(std::move(release)) {}
+
     Rect bounds_{};
     PlatformServices& platform_;
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
-    std::function<void()> capture_;
-    std::function<void()> release_;
+    PointerAction pointer_action_{};
+    std::function<void(const PointerAction&)> capture_;
+    std::function<void(const PointerAction&)> release_;
+    std::function<void()> legacy_capture_;
+    std::function<void()> legacy_release_;
 };
 
 class CanvasInputContext {
@@ -514,6 +550,11 @@ public:
     /// component itself is still painted under its inherited ancestor clip.
     [[nodiscard]] virtual bool clips_children() const noexcept { return false; }
 
+    /// Conservative continuous logical extension of this component's painted
+    /// pixels beyond its retained layout bounds. It affects paint invalidation
+    /// only; layout, measurement, focus and hit testing remain unchanged.
+    [[nodiscard]] virtual VisualOutset visual_outset() const noexcept { return {}; }
+
     /// Existing intrinsic preferred-size hook. Kept source-compatible for
     /// custom components while constrained measurement is layered around it.
     [[nodiscard]] virtual Size measure(const std::vector<ChildMetrics>& children) const = 0;
@@ -606,6 +647,8 @@ struct Node {
     std::unique_ptr<Component> component;
     std::vector<std::unique_ptr<Node>> children;
     Rect bounds{};
+    Rect published_visual_bounds{};
+    bool visual_bounds_published{};
     bool layout_dirty{true};
     bool focus_scope_active_cached{};
     NodeId focus_restore{kInvalidNodeId};

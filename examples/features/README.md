@@ -34,23 +34,27 @@ Current examples:
 - `nativeui_example_t035_combo_popup` and `nativeui_example_t036_list_tabs` for collections and navigation;
 - `nativeui_example_t038_widget_styles` for typed visual-state style resolution.
 
-Desktop mode:
+Desktop build:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-./build/nativeui_example_t015_pointer_capture
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
 ```
+
+Launch `./build/nativeui_example_t015_pointer_capture` on Linux (append `.exe`
+on Windows). On
+macOS, `nativeui_add_application` creates an app bundle; launch its executable at
+`./build/nativeui_example_t015_pointer_capture.app/Contents/MacOS/nativeui_example_t015_pointer_capture`.
 
 Automated executable check:
 
 ```bash
-./build/nativeui_example_t015_pointer_capture --self-test
 ctest --test-dir build -R nativeui_example_ --output-on-failure
 ```
 
-For a real macOS file-drop check, launch `./build/nativeui_example_t018_drop
---trace-drops`, then drag `/tmp/hello.txt` from Finder onto the panel without
+For a real macOS file-drop check, launch
+`./build/nativeui_example_t018_drop.app/Contents/MacOS/nativeui_example_t018_drop --trace-drops`,
+then drag `/tmp/hello.txt` from Finder onto the panel without
 first clicking the destination window. The status should become `Received
 hello.txt` and its text should appear. The diagnostic option prints only the
 acceptance result, drop byte count and preview byte count, never file contents. Restart any

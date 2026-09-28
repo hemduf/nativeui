@@ -15,4 +15,8 @@ static_assert(requires(ui::CanvasContext2D& canvas,
     canvas.stroke_path(path, brush, style, options);
 });
 
+static_assert(requires(const ui::Component& component) {
+    component.visual_outset();
+});
+
 void nativeui_header_compile_component() {}

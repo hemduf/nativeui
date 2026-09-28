@@ -75,7 +75,7 @@ When allocation metrics are comparable, allocation count **or** bytes/op more th
 
 ## Baseline ownership
 
-T051 does not commit machine-specific nanosecond values as universal repository constants. CI produces immutable JSON result artifacts keyed by exact commit/run metadata. T052 selects and records the approved v0.1 baseline artifact on its controlled environment; later gates compare against that approved artifact using the T051 metadata and threshold rules. Baseline replacement requires explicit review rationale and never happens from the benchmark executable itself.
+T051 does not commit machine-specific nanosecond values as universal repository constants. Benchmark runs produce JSON results keyed by exact commit/run metadata. A release process may select an approved baseline from comparable runs; baseline replacement requires explicit review rationale and never happens from the benchmark executable itself.
 
 ## `idle_invalidation`
 
@@ -83,4 +83,4 @@ T051 does not commit machine-specific nanosecond values as universal repository 
 
 ## Scope boundary
 
-These are headless/core microbenchmarks. They intentionally exclude native compositor/window-server presentation latency, user-facing FPS claims, comparisons with other frameworks and audio/DSP workloads. T067 may add versioned virtual-list workloads later; T052/T071 consume T051 artifacts for release qualification.
+These are headless/core microbenchmarks. They intentionally exclude native compositor/window-server presentation latency, user-facing FPS claims, comparisons with other frameworks and audio/DSP workloads. T067 may add versioned virtual-list workloads later; release qualification can consume T051 artifacts.

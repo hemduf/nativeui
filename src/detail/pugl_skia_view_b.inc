@@ -13,33 +13,85 @@
                 static_cast<float>(puglGetScaleFactor(view_)),
                 [this](Size viewport) { ui_.resize(viewport); });
             record_scale_observation(geometry_.last_scale_observation_valid());
-            if (!logical) return PUGL_SUCCESS;
+            if (!logical) {
+                renderer_.invalidate_content();
+                return PUGL_SUCCESS;
+            }
 
             if (geometry_.last_valid_scale() != previous_scale &&
                 !apply_size_constraints()) {
                 last_error_ = "Failed to refresh logical window size constraints";
+                scene_error_active_ = false;
             }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            // Fixtures may drive activation explicitly; background windows do
+            // not reliably retain OS key focus across the test process.
+            if (!suppress_platform_focus_) ui_.refresh_focus(services_);
+#else
             ui_.refresh_focus(services_);
+#endif
             preferred_measure_dirty_ = true;
             flush_preferred_size_notification();
             return PUGL_SUCCESS;
         }
-
         case PUGL_UPDATE:
             nativeuiImeFlushPendingCancel(ime_bridge_);
             flush_preferred_size_notification();
+            if (deferred_scene_redraw_) {
+                deferred_scene_redraw_ = false;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++deferred_redraw_attempts_;
+                if (std::exchange(reject_deferred_redraw_once_, false)) {
+                    ++deferred_redraw_rejections_;
+                    return PUGL_SUCCESS;
+                }
+#endif
+                const auto logical = geometry_.logical_size();
+                request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+            }
             return PUGL_SUCCESS;
 
         case PUGL_EXPOSE:
             if (!geometry_.renderable()) return PUGL_SUCCESS;
-            if (!renderer_.render(ui_,
-                                  services_,
-                                  geometry_.physical_size(),
-                                  geometry_.last_valid_scale())) {
-                last_error_ = "Failed to initialize Skia Ganesh/OpenGL renderer";
-                should_close_ = true;
-                return PUGL_CREATE_CONTEXT_FAILED;
+            try {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                if (recreate_renderer_on_expose_) {
+                    recreate_renderer_on_expose_ = false;
+                    renderer_.reset();
+                }
+                const float render_scale = scene_scale_override_.value_or(
+                    geometry_.last_valid_scale());
+#else
+                const float render_scale = geometry_.last_valid_scale();
+#endif
+                if (!renderer_.render(ui_,
+                                      services_,
+                                      geometry_.physical_size(),
+                                      render_scale)) {
+                    deferred_scene_redraw_ |= renderer_.take_deferred_redraw();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                    ++failed_scene_exposes_;
+#endif
+                    record_scene_error("NativeUI scene build or presentation failed; waiting for a later expose");
+                    return PUGL_SUCCESS;
+                }
+                deferred_scene_redraw_ |= renderer_.take_deferred_redraw();
+                clear_scene_error();
+            } catch (const std::exception& error) {
+                renderer_.invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++failed_scene_exposes_;
+#endif
+                record_scene_error(error.what());
+                return PUGL_SUCCESS;
+            } catch (...) {
+                renderer_.invalidate();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+                ++failed_scene_exposes_;
+#endif
+                record_scene_error("Unknown NativeUI scene paint failure");
+                return PUGL_SUCCESS;
             }
             return PUGL_SUCCESS;
 
@@ -52,11 +104,18 @@
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_IN:
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (suppress_platform_focus_) return PUGL_SUCCESS;
+#endif
             ui_.activate(services_);
             ui_.refresh_focus(services_);
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_OUT:
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (suppress_platform_focus_) return PUGL_SUCCESS;
+#endif
+            clear_raw_pointer_positions();
             ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
             return PUGL_SUCCESS;
@@ -95,6 +154,26 @@
             return PUGL_SUCCESS;
         }
 
+        case PUGL_POINTER_DOWN:
+        case PUGL_POINTER_MOVE:
+        case PUGL_POINTER_UP:
+        case PUGL_POINTER_CANCEL: {
+            if (event->pointer.id == PUGL_POINTER_ID_NONE) return PUGL_SUCCESS;
+
+            InputEvent input{};
+            input.type = detail::translate_pugl_pointer_event(event->type);
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(event->pointer.x),
+                 static_cast<float>(event->pointer.y)},
+                geometry_.last_valid_scale());
+            input.pointer = detail::translate_pugl_pointer_contact(
+                event->pointer, geometry_.last_valid_scale());
+            apply_modifiers(input, event->pointer.state);
+            update_raw_pointer_position(input);
+            (void)ui_.dispatch(input, services_);
+            return PUGL_SUCCESS;
+        }
+
         case PUGL_POINTER_IN:
         case PUGL_POINTER_OUT: {
             InputEvent input{};
@@ -105,6 +184,7 @@
                 {static_cast<float>(event->crossing.x),
                  static_cast<float>(event->crossing.y)},
                 geometry_.last_valid_scale());
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->crossing.state);
             last_pointer_position_ = input.position;
             have_pointer_position_ = event->type == PUGL_POINTER_IN;
@@ -114,15 +194,17 @@
 
         case PUGL_BUTTON_PRESS:
         case PUGL_BUTTON_RELEASE: {
-            if (event->button.button != 0) return PUGL_SUCCESS;
             InputEvent input{};
-            input.type = event->type == PUGL_BUTTON_PRESS ? InputType::PointerDown : InputType::PointerUp;
+            input.type = detail::translate_pugl_button(
+                event->button.button, event->type == PUGL_BUTTON_PRESS);
+            if (input.type == InputType::None) return PUGL_SUCCESS;
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->button.x), static_cast<float>(event->button.y)},
                 geometry_.last_valid_scale());
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->button.state);
 
-            if (event->type == PUGL_BUTTON_PRESS) {
+            if (input.type == InputType::PointerDown) {
                 const double now = puglGetTime(world_);
                 const float dx = input.position.x - last_click_position_.x;
                 const float dy = input.position.y - last_click_position_.y;
@@ -132,7 +214,7 @@
                 last_click_time_ = now;
                 last_click_position_ = input.position;
             }
-            input.clicks = click_count_;
+            input.clicks = input.type == InputType::ContextMenu ? 1 : click_count_;
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }
@@ -149,6 +231,7 @@
             }
             last_pointer_position_ = input.position;
             have_pointer_position_ = true;
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->motion.state);
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
@@ -162,6 +245,7 @@
                 geometry_.last_valid_scale());
             input.delta = Point{static_cast<float>(event->scroll.dx),
                                 static_cast<float>(event->scroll.dy)};
+            input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->scroll.state);
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
@@ -259,6 +343,57 @@
         }
     }
 
+    struct RawPointerPosition {
+        PointerId id{};
+        Point position{};
+    };
+
+    void update_raw_pointer_position(InputEvent& event) noexcept {
+        std::size_t index = raw_pointer_position_count_;
+        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
+            if (raw_pointer_positions_[i].id == event.pointer.id) {
+                index = i;
+                break;
+            }
+        }
+
+        const bool terminal =
+            event.type == InputType::PointerUp ||
+            event.type == InputType::PointerCancel;
+
+        if (index != raw_pointer_position_count_) {
+            if (event.type != InputType::PointerDown) {
+                event.delta = {
+                    event.position.x - raw_pointer_positions_[index].position.x,
+                    event.position.y - raw_pointer_positions_[index].position.y};
+            }
+
+            if (terminal) {
+                --raw_pointer_position_count_;
+                if (index != raw_pointer_position_count_) {
+                    raw_pointer_positions_[index] =
+                        raw_pointer_positions_[raw_pointer_position_count_];
+                }
+                raw_pointer_positions_[raw_pointer_position_count_] = {};
+            } else {
+                raw_pointer_positions_[index].position = event.position;
+            }
+            return;
+        }
+
+        if (!terminal && raw_pointer_position_count_ < raw_pointer_positions_.size()) {
+            raw_pointer_positions_[raw_pointer_position_count_++] = {
+                event.pointer.id, event.position};
+        }
+    }
+
+    void clear_raw_pointer_positions() noexcept {
+        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
+            raw_pointer_positions_[i] = {};
+        }
+        raw_pointer_position_count_ = 0U;
+    }
+
     UI& ui_;
     PlatformServices& services_;
     PuglWorld* world_{};
@@ -273,6 +408,17 @@
     bool preferred_measure_dirty_{};
     bool should_close_{};
     bool visible_{};
+    bool deferred_scene_redraw_{};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t failed_scene_exposes_{};
+    std::uint64_t deferred_redraw_attempts_{};
+    std::uint64_t deferred_redraw_rejections_{};
+    std::uint64_t redraw_requests_during_render_{};
+    bool recreate_renderer_on_expose_{};
+    std::optional<float> scene_scale_override_;
+    bool reject_deferred_redraw_once_{};
+    bool suppress_platform_focus_{};
+#endif
     bool text_input_active_{};
     Rect text_input_logical_area_{};
     float text_input_logical_cursor_offset_{};
@@ -280,12 +426,15 @@
     float text_input_physical_cursor_offset_{};
     bool have_pointer_position_{};
     Point last_pointer_position_{};
+    std::array<RawPointerPosition, 16U> raw_pointer_positions_{};
+    std::size_t raw_pointer_position_count_{};
     double last_click_time_{-1000.0};
     Point last_click_position_{};
     int click_count_{};
     const PuglDataOfferEvent* active_drop_offer_{};
     bool drop_offer_decided_{};
     std::string last_error_;
+    bool scene_error_active_{};
     std::function<void()> close_callback_;
 };
 

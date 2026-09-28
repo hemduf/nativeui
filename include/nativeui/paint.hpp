@@ -16,6 +16,7 @@
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRRect.h"
+#include "include/core/SkShader.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkTileMode.h"
 #include "include/core/SkTypeface.h"
@@ -23,12 +24,15 @@
 #include "include/effects/SkImageFilters.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +44,13 @@ namespace detail {
 
 struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
+struct PainterTransformHistoryFaultAccess;
+struct ShaderBrushSnapshot;
+
+[[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot);
+[[nodiscard]] sk_sp<SkShader> materialize_image_texture(
+    const ImageTexture& texture);
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -87,6 +98,7 @@ class Painter {
 
     friend struct detail::PainterLayerFaultAccess;
     friend struct detail::PainterEffectFaultAccess;
+    friend struct detail::PainterTransformHistoryFaultAccess;
 
 public:
     class StateGuard {
@@ -105,7 +117,7 @@ public:
 
         struct AdoptFrameTag {};
 
-        explicit StateGuard(Painter& painter) noexcept
+        explicit StateGuard(Painter& painter)
             : painter_(&painter), frame_(painter.begin_scope()) {}
 
         StateGuard(Painter& painter, ScopeFrame frame, AdoptFrameTag) noexcept
@@ -131,8 +143,13 @@ public:
     }
 
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
-    [[nodiscard]] StateGuard scoped_state() noexcept { return StateGuard{*this}; }
+    [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    // Renderer-internal effect observability for scene update validation.
+    [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
+    [[nodiscard]] Transform2D current_transform() const noexcept {
+        return current_transform_;
+    }
 
     [[nodiscard]] StateGuard scoped_clip(Rect rect) {
         const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
@@ -217,14 +234,14 @@ public:
         // The saveLayer bounds remain only a backend sizing hint.
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         try {
-            canvas_.save();
-            ++save_depth_;
+            push_backend_frame([&] { canvas_.save(); });
             canvas_.clipRect(layer_bounds, SkClipOp::kIntersect, false);
             maybe_fail_layer(LayerFaultPoint::AfterHardClip);
 
-            [[maybe_unused]] const int previous_save_count =
-                canvas_.saveLayer(layer_bounds, &layer_paint);
-            ++save_depth_;
+            push_backend_frame([&] {
+                [[maybe_unused]] const int previous_save_count =
+                    canvas_.saveLayer(layer_bounds, &layer_paint);
+            });
             maybe_fail_layer(LayerFaultPoint::AfterSaveLayer);
 
             frame.guard_depth = save_depth_;
@@ -245,9 +262,16 @@ public:
         if (!valid_clip_rect(logical_bounds)) {
             return scoped_layer(logical_bounds, options);
         }
-        if (effect.kind_ != Effect::Kind::GaussianBlur ||
-            (effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f)) {
+        if (effect.kind_ == Effect::Kind::GaussianBlur &&
+            effect.sigma_x_ == 0.0f && effect.sigma_y_ == 0.0f) {
             return scoped_layer(logical_bounds, options);
+        }
+        if ((effect.kind_ == Effect::Kind::DropShadow ||
+             effect.kind_ == Effect::Kind::DropShadowOnly) &&
+            effect.color_.a <= 0.0f) {
+            return effect.kind_ == Effect::Kind::DropShadow
+                ? scoped_layer(logical_bounds, options)
+                : scoped_empty_device_output();
         }
 
         const SkRect source_bounds = to_sk_rect(logical_bounds);
@@ -261,11 +285,11 @@ public:
         // All fallible backend preparation happens before any private Painter
         // frame is entered or restore floor is published.
         maybe_fail_layer(LayerFaultPoint::BeforeEffectMaterialization);
-        auto image_filter = SkImageFilters::Blur(
-            effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+        auto image_filter = materialize_effect_filter(effect);
         if (!image_filter) {
             throw std::bad_alloc{};
         }
+        used_effects_ = true;
 
         SkIRect device_output_bounds;
         if (!effect_filter_output_bounds(
@@ -284,8 +308,7 @@ public:
         const auto entry_matrix = canvas_.getLocalToDevice();
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
         try {
-            canvas_.save();
-            ++save_depth_;
+            push_backend_frame([&] { canvas_.save(); });
 
             // The support clip is an axis-aligned conservative device-space
             // envelope. Existing parent clips already live in device space and
@@ -299,9 +322,10 @@ public:
             // saveLayer bounds are only a sizing hint in pinned Skia.
             // The real finite device clip above already bounds output/allocation,
             // so omit the optional hint and keep correctness independent of it.
-            [[maybe_unused]] const int previous_save_count =
-                canvas_.saveLayer(nullptr, &layer_paint);
-            ++save_depth_;
+            push_backend_frame([&] {
+                [[maybe_unused]] const int previous_save_count =
+                    canvas_.saveLayer(nullptr, &layer_paint);
+            });
             maybe_fail_layer(LayerFaultPoint::AfterEffectSaveLayer);
 
             canvas_.clipRect(source_bounds, SkClipOp::kIntersect, false);
@@ -318,8 +342,7 @@ public:
     }
 
     void save() {
-        canvas_.save();
-        ++save_depth_;
+        push_backend_frame([&] { canvas_.save(); });
     }
 
     void restore() {
@@ -328,16 +351,35 @@ public:
         restore_unchecked();
     }
 
-    void translate(float x, float y) { canvas_.translate(x, y); }
+    void translate(float x, float y) {
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        const Transform2D operation = Transform2D::translation(x, y);
+        apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
+    }
     void translate(Point offset) { translate(offset.x, offset.y); }
-    void scale(float x, float y) { canvas_.scale(x, y); }
+    void scale(float x, float y) {
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        const Transform2D operation = Transform2D::scaling(x, y);
+        apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
+    }
     void scale(float uniform) { scale(uniform, uniform); }
-    void rotate(float radians) { canvas_.rotate(radians * (180.0f / kPi)); }
+    void rotate(float radians) {
+        if (!std::isfinite(radians)) return;
+        const Transform2D operation = Transform2D::rotation(radians);
+        apply_logical_transform(operation, [&] {
+            canvas_.concat(SkMatrix::MakeAll(
+                operation.m00, operation.m01, operation.m02,
+                operation.m10, operation.m11, operation.m12,
+                0.0f, 0.0f, 1.0f));
+        });
+    }
     void concat(const Transform2D& transform) {
-        canvas_.concat(SkMatrix::MakeAll(
-            transform.m00, transform.m01, transform.m02,
-            transform.m10, transform.m11, transform.m12,
-            0.0f, 0.0f, 1.0f));
+        apply_logical_transform(transform, [&] {
+            canvas_.concat(SkMatrix::MakeAll(
+                transform.m00, transform.m01, transform.m02,
+                transform.m10, transform.m11, transform.m12,
+                0.0f, 0.0f, 1.0f));
+        });
     }
 
     void fill_rounded_rect(Rect rect, float radius, Color color) {
@@ -476,6 +518,8 @@ public:
     }
 
 private:
+    static constexpr int kInlineTransformSaveDepth = 32;
+
     [[nodiscard]] StateGuard scoped_empty_device_output() {
         const auto entry_matrix = canvas_.getLocalToDevice();
         const ScopeFrame frame = begin_scope();
@@ -490,10 +534,9 @@ private:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
-    [[nodiscard]] ScopeFrame begin_scope() noexcept {
+    [[nodiscard]] ScopeFrame begin_scope() {
         ScopeFrame frame{restore_floor_, save_depth_, save_depth_};
-        canvas_.save();
-        ++save_depth_;
+        push_backend_frame([&] { canvas_.save(); });
         frame.guard_depth = save_depth_;
         restore_floor_ = frame.guard_depth;
         return frame;
@@ -511,6 +554,76 @@ private:
         restore_floor_ = frame.previous_floor;
     }
 
+    template <class SaveOperation>
+    void push_backend_frame(SaveOperation&& save_operation) {
+        prepare_transform_snapshot();
+        try {
+            std::forward<SaveOperation>(save_operation)();
+        } catch (...) {
+            discard_prepared_transform_snapshot();
+            throw;
+        }
+        ++save_depth_;
+    }
+
+    void prepare_transform_snapshot() {
+        if (save_depth_ < kInlineTransformSaveDepth) {
+            transform_history_inline_[static_cast<std::size_t>(save_depth_)] =
+                current_transform_;
+            return;
+        }
+
+        // Deep nesting is rare. The ordinary path above is allocation-free;
+        // if this fallback needs to grow, allocation completes before the
+        // backend save so failure cannot desynchronize the two stacks.
+        if (fail_transform_history_overflow_) {
+            fail_transform_history_overflow_ = false;
+            throw std::bad_alloc{};
+        }
+        transform_history_overflow_.push_back(current_transform_);
+    }
+
+    void discard_prepared_transform_snapshot() noexcept {
+        if (save_depth_ >= kInlineTransformSaveDepth) {
+            assert(!transform_history_overflow_.empty());
+            transform_history_overflow_.pop_back();
+        }
+    }
+
+    [[nodiscard]] Transform2D transform_snapshot(int depth) const noexcept {
+        assert(depth >= 0);
+        if (depth < kInlineTransformSaveDepth) {
+            return transform_history_inline_[static_cast<std::size_t>(depth)];
+        }
+        const auto overflow_index =
+            static_cast<std::size_t>(depth - kInlineTransformSaveDepth);
+        assert(overflow_index < transform_history_overflow_.size());
+        return transform_history_overflow_[overflow_index];
+    }
+
+    [[nodiscard]] static bool finite_transform(const Transform2D& transform) noexcept {
+        return std::isfinite(transform.m00) &&
+               std::isfinite(transform.m01) &&
+               std::isfinite(transform.m02) &&
+               std::isfinite(transform.m10) &&
+               std::isfinite(transform.m11) &&
+               std::isfinite(transform.m12);
+    }
+
+    template <class BackendMutation>
+    void apply_logical_transform(const Transform2D& operation,
+                                 BackendMutation&& backend_mutation) {
+        if (!finite_transform(operation)) return;
+        const Transform2D composed = current_transform_ * operation;
+        if (!finite_transform(composed)) return;
+
+        // Publish NativeUI state only after the backend mutation completed.
+        // If a backend ever reports failure by throwing, both sides therefore
+        // remain at the previous logical transform.
+        std::forward<BackendMutation>(backend_mutation)();
+        current_transform_ = composed;
+    }
+
     void maybe_fail_layer(LayerFaultPoint point) {
         if (layer_fault_point_ != point) return;
         layer_fault_point_ = LayerFaultPoint::None;
@@ -519,6 +632,34 @@ private:
 
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
+    }
+
+    [[nodiscard]] static sk_sp<SkImageFilter> materialize_effect_filter(
+        const Effect& effect) {
+        switch (effect.kind_) {
+            case Effect::Kind::GaussianBlur:
+                return SkImageFilters::Blur(
+                    effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
+            case Effect::Kind::DropShadow:
+                return SkImageFilters::DropShadow(
+                    effect.offset_.x,
+                    effect.offset_.y,
+                    effect.sigma_x_,
+                    effect.sigma_y_,
+                    to_sk_color(effect.color_),
+                    nullptr,
+                    nullptr);
+            case Effect::Kind::DropShadowOnly:
+                return SkImageFilters::DropShadowOnly(
+                    effect.offset_.x,
+                    effect.offset_.y,
+                    effect.sigma_x_,
+                    effect.sigma_y_,
+                    to_sk_color(effect.color_),
+                    nullptr,
+                    nullptr);
+        }
+        return nullptr;
     }
 
     [[nodiscard]] bool effect_source_device_bounds(
@@ -684,6 +825,26 @@ private:
         });
     }
 
+    static void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
+        auto shader = detail::materialize_image_texture(texture);
+        if (!shader) {
+            throw std::runtime_error(
+                "NativeUI image texture materialization returned no shader");
+        }
+        paint.setShader(std::move(shader));
+    }
+
+    static void apply_fill_source(
+        SkPaint& paint,
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
+        auto shader = detail::materialize_shader_brush(snapshot);
+        if (!shader) {
+            throw std::runtime_error(
+                "NativeUI runtime shader materialization returned no shader");
+        }
+        paint.setShader(std::move(shader));
+    }
+
     [[nodiscard]] static SkPaint make_fill_paint(Color color, PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -712,6 +873,28 @@ private:
         paint.setAntiAlias(true);
         paint.setStyle(SkPaint::kFill_Style);
         apply_fill_source(paint, gradient);
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(
+        const ImageTexture& texture,
+        PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, texture);
+        apply_paint_options(paint, options);
+        return paint;
+    }
+
+    [[nodiscard]] static SkPaint make_fill_paint(
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot,
+        PaintOptions options) {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kFill_Style);
+        apply_fill_source(paint, snapshot);
         apply_paint_options(paint, options);
         return paint;
     }
@@ -848,14 +1031,29 @@ private:
 
     void restore_unchecked() {
         assert(save_depth_ > 0);
+        assert(static_cast<std::size_t>(save_depth_ > kInlineTransformSaveDepth
+                                           ? save_depth_ - kInlineTransformSaveDepth
+                                           : 0) == transform_history_overflow_.size());
+
+        const int snapshot_depth = save_depth_ - 1;
+        const Transform2D restored_transform = transform_snapshot(snapshot_depth);
         canvas_.restore();
         --save_depth_;
+        current_transform_ = restored_transform;
+        if (snapshot_depth >= kInlineTransformSaveDepth) {
+            transform_history_overflow_.pop_back();
+        }
     }
 
     SkCanvas& canvas_;
+    Transform2D current_transform_{};
+    std::array<Transform2D, kInlineTransformSaveDepth> transform_history_inline_{};
+    std::vector<Transform2D> transform_history_overflow_;
     int save_depth_{};
     int restore_floor_{};
     LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};
+    bool fail_transform_history_overflow_{};
+    bool used_effects_{};
 };
 
 class PlatformServices {

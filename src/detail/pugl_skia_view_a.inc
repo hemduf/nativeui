@@ -96,11 +96,20 @@ public:
                         to_pugl_span(initial_physical->w),
                         to_pugl_span(initial_physical->h));
         puglSetViewHint(view_, PUGL_RESIZABLE, desc.resizable ? PUGL_TRUE : PUGL_FALSE);
+#if defined(__EMSCRIPTEN__)
+        // Pugl's browser backend maps a 3.0 GLES request to WebGL2, which is
+        // what Skia's WebGL interface requires. Desktop core profiles and
+        // minor versions do not exist in the browser.
+        puglSetViewHint(view_, PUGL_CONTEXT_API, PUGL_OPENGL_ES_API);
+        puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MAJOR, 3);
+        puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MINOR, 0);
+#else
         // Request a portable modern baseline. On macOS this maps to the native
         // 3.2 Core profile instead of Pugl's legacy 2.0 default.
         puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MAJOR, 3);
         puglSetViewHint(view_, PUGL_CONTEXT_VERSION_MINOR, 2);
         puglSetViewHint(view_, PUGL_CONTEXT_PROFILE, PUGL_OPENGL_CORE_PROFILE);
+#endif
         puglSetViewHint(view_, PUGL_DOUBLE_BUFFER, PUGL_TRUE);
         puglSetViewHint(view_, PUGL_STENCIL_BITS, 8);
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
@@ -161,7 +170,7 @@ public:
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
-            request_redraw(rect);
+            if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
         maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);
@@ -181,6 +190,7 @@ public:
         const auto status = puglUpdate(world_, timeout);
         if (status && status != PUGL_SUCCESS) {
             last_error_ = puglStrerror(status);
+            scene_error_active_ = false;
             should_close_ = true;
         }
         if (!should_close_) flush_preferred_size_notification();
@@ -195,6 +205,96 @@ public:
     [[nodiscard]] NativeViewHandle native_handle() const noexcept {
         return view_ ? static_cast<NativeViewHandle>(puglGetNativeView(view_)) : 0;
     }
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    bool inject_scene_fault(detail::SceneFaultStage stage) noexcept {
+        if (!view_) return false;
+        renderer_.inject_fault(stage);
+        return true;
+    }
+
+    [[nodiscard]] detail::SceneDiagnostics scene_diagnostics() const noexcept {
+        auto result = renderer_.diagnostics();
+        result.failed_exposes = failed_scene_exposes_;
+        result.deferred_redraw_attempts = deferred_redraw_attempts_;
+        result.deferred_redraw_rejections = deferred_redraw_rejections_;
+        result.redraw_requests_during_render = redraw_requests_during_render_;
+        return result;
+    }
+
+    bool request_context_recreation() noexcept {
+        if (!view_) return false;
+        recreate_renderer_on_expose_ = true;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    bool override_scene_scale(std::optional<float> scale) noexcept {
+        if (!view_) return false;
+        scene_scale_override_ = scale;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    bool reject_next_deferred_redraw() noexcept {
+        if (!view_) return false;
+        reject_deferred_redraw_once_ = true;
+        return true;
+    }
+
+    bool request_expose() noexcept {
+        if (!view_) return false;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] bool request_gpu_readback(Point logical_point) noexcept {
+        if (!view_ ||
+            !std::isfinite(logical_point.x) ||
+            !std::isfinite(logical_point.y)) {
+            return false;
+        }
+        const float scale = geometry_.last_valid_scale();
+        const auto logical = geometry_.logical_size();
+        const float x_logical = std::clamp(logical_point.x, 0.0f, logical.w);
+        const float y_logical = std::clamp(logical_point.y, 0.0f, logical.h);
+        const int x = static_cast<int>(std::lround(x_logical * scale));
+        const int y = static_cast<int>(std::lround(y_logical * scale));
+        renderer_.request_readback(x, y);
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackPixel>
+    take_gpu_readback() noexcept {
+        return renderer_.take_readback();
+    }
+
+    [[nodiscard]] bool request_gpu_readback_region(int x,
+                                                   int y,
+                                                   int width,
+                                                   int height) noexcept {
+        if (!view_) return false;
+        if (!renderer_.request_readback_region(x, y, width, height)) return false;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackRegion>
+    take_gpu_readback_region() noexcept {
+        return renderer_.take_readback_region();
+    }
+
+    [[nodiscard]] bool suppress_platform_focus(bool suppressed) noexcept {
+        if (!view_) return false;
+        suppress_platform_focus_ = suppressed;
+        return true;
+    }
+#endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
     bool set_title(std::string_view title) {
@@ -283,6 +383,9 @@ public:
         // PUGL_UNREALIZE is the graphics-safe teardown point. Pugl enters the
         // backend context for this event before destroying the native GL context.
         (void)puglUnrealize(view_);
+        // If Pugl could not enter the context, PUGL_UNREALIZE did not reach
+        // the renderer. Abandon remaining Skia objects after native teardown.
+        renderer_.abandon();
         puglFreeView(view_);
         view_ = nullptr;
         visible_ = false;
@@ -299,6 +402,9 @@ public:
 
     void request_redraw(Rect logical_rect) {
         if (!view_ || logical_rect.empty()) return;
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        if (renderer_.rendering()) ++redraw_requests_during_render_;
+#endif
 
         const auto physical = detail::logical_to_physical_covering_rect(
             logical_rect, geometry_.last_valid_scale());
@@ -483,7 +589,23 @@ private:
     void record_scale_observation(bool accepted) {
         if (!accepted) {
             last_error_ = "NativeUI ignored invalid platform scale factor";
+            scene_error_active_ = false;
         }
+    }
+
+    void record_scene_error(const char* message) noexcept {
+        try {
+            last_error_ = message ? message : "NativeUI scene rendering failed";
+            scene_error_active_ = true;
+        } catch (...) {
+            // A diagnostic allocation must not close the native view.
+        }
+    }
+
+    void clear_scene_error() noexcept {
+        if (!scene_error_active_) return;
+        last_error_.clear();
+        scene_error_active_ = false;
     }
 
     void queue_preferred_size() {
@@ -507,6 +629,7 @@ private:
         if (!last_error_.empty()) return;
         try {
             last_error_ = message ? message : "NativeUI teardown failed";
+            scene_error_active_ = false;
         } catch (...) {
             // Teardown diagnostics must never compromise native cleanup.
         }
@@ -551,6 +674,7 @@ private:
         if (view_) {
             if (cleanup.realized) {
                 (void)puglUnrealize(view_);
+                renderer_.abandon();
                 cleanup.realized = false;
                 if (cleanup.fault_result) ++cleanup.fault_result->unrealize_released;
             }

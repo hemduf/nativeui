@@ -16,6 +16,7 @@ namespace ui {
 namespace detail {
 struct ApplicationPlatformState;
 struct ApplicationBackendAccess;
+struct PlatformTestAccess;
 } // namespace detail
 
 using NativeParentHandle = std::uintptr_t;
@@ -58,6 +59,10 @@ public:
     [[nodiscard]] bool valid() const noexcept;
     [[nodiscard]] std::string_view last_error() const noexcept;
 
+    /// Runs the standalone application loop. On Emscripten exactly one
+    /// Application::run() may own the module's browser main-loop slot at a time;
+    /// additional/external instances remain supported through non-blocking
+    /// poll().
     int run();
     bool poll(double timeout_seconds = 0.0);
 
@@ -150,6 +155,8 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    friend struct detail::PlatformTestAccess;
+
     void handle_native_close_request();
     void process_native_close_request();
     void schedule_close_completion();
@@ -206,6 +213,7 @@ public:
     void reject_drop(Rect region) override;
 
 private:
+    friend struct detail::PlatformTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::shared_ptr<DesktopServicesBackend> desktop_services_backend_;

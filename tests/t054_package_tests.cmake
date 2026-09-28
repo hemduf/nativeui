@@ -215,7 +215,7 @@ function(_t054_run_consumer label nativeui_dir out_contract out_plist)
 
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${_build}"
-      --config "${CONFIG}" --parallel 2
+      --config "${CONFIG}"
     RESULT_VARIABLE _build_result
     OUTPUT_VARIABLE _build_output
     ERROR_VARIABLE _build_error)
@@ -340,7 +340,7 @@ nativeui_add_application(T054IconApp
     # so this deterministic fixture does not depend on icon authoring tools.
     execute_process(
       COMMAND "${CMAKE_COMMAND}" --build "${_build}"
-        --target T054IconApp --config "${CONFIG}" --parallel 2
+        --target T054IconApp --config "${CONFIG}"
       RESULT_VARIABLE _icon_build_result
       OUTPUT_VARIABLE _icon_build_output
       ERROR_VARIABLE _icon_build_error)

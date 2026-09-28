@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -35,6 +37,12 @@ void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); 
 void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
 
 static_assert(noexcept(ui::Brush{ui::Color{}}));
+static_assert(noexcept(ui::Brush{ui::ImageTexture{}}));
+static_assert(std::is_nothrow_copy_constructible_v<ui::ImageTexture>);
+static_assert(std::is_nothrow_copy_assignable_v<ui::ImageTexture>);
+static_assert(std::is_nothrow_move_constructible_v<ui::ImageTexture>);
+static_assert(std::is_nothrow_move_assignable_v<ui::ImageTexture>);
+static_assert(std::is_nothrow_destructible_v<ui::ImageTexture>);
 static_assert(std::is_copy_constructible_v<ui::Brush>);
 static_assert(std::is_copy_assignable_v<ui::Brush>);
 static_assert(std::is_nothrow_move_constructible_v<ui::Brush>);
@@ -42,6 +50,22 @@ static_assert(std::is_nothrow_move_assignable_v<ui::Brush>);
 static_assert(std::is_nothrow_destructible_v<ui::Brush>);
 
 namespace {
+
+constexpr std::array<std::byte, 75> kT083TinyRgbaPng{
+    std::byte{137}, std::byte{80}, std::byte{78}, std::byte{71}, std::byte{13}, std::byte{10},
+    std::byte{26}, std::byte{10}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{13},
+    std::byte{73}, std::byte{72}, std::byte{68}, std::byte{82}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{2}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{2},
+    std::byte{8}, std::byte{6}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{114},
+    std::byte{182}, std::byte{13}, std::byte{36}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{18}, std::byte{73}, std::byte{68}, std::byte{65}, std::byte{84}, std::byte{120},
+    std::byte{218}, std::byte{99}, std::byte{248}, std::byte{207}, std::byte{192}, std::byte{240},
+    std::byte{31}, std::byte{12}, std::byte{129}, std::byte{52}, std::byte{24}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{200}, std::byte{9}, std::byte{247}, std::byte{3},
+    std::byte{217}, std::byte{100}, std::byte{241}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{69}, std::byte{78}, std::byte{68}, std::byte{174},
+    std::byte{66}, std::byte{96}, std::byte{130},
+};
 
 bool red_dominant(ui::Rgba8 pixel) {
     return pixel.r > 150 && pixel.r > pixel.g * 2 && pixel.r > pixel.b * 2;
@@ -282,6 +306,26 @@ void brush_noexcept_and_allocation_contract() {
     ui::Brush assigned{{0.0f, 1.0f, 0.0f, 1.0f}};
     before = allocation_probe::allocation_count;
     assigned = std::move(moved);
+    NUI_CHECK(allocation_probe::allocation_count == before);
+
+    const auto image = ui::Image::decode(kT083TinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    before = allocation_probe::allocation_count;
+    const ui::ImageTexture texture{image, {0.0f, 0.0f, 16.0f, 8.0f}};
+    NUI_CHECK(texture.valid());
+    NUI_CHECK(allocation_probe::allocation_count == before);
+
+    const ui::Brush image_brush{texture};
+    NUI_CHECK(allocation_probe::allocation_count == before);
+
+    const ui::Brush image_copy{image_brush};
+    NUI_CHECK(allocation_probe::allocation_count == before);
+    (void)image_copy;
+
+    ui::Brush image_moved{ui::Color{1.0f, 0.0f, 0.0f, 1.0f}};
+    before = allocation_probe::allocation_count;
+    image_moved = ui::Brush{texture};
     NUI_CHECK(allocation_probe::allocation_count == before);
 }
 

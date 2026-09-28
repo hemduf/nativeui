@@ -1,6 +1,9 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 
+#include "detail/pugl_button_translation.hpp"
+#include "detail/pugl_pointer_translation.hpp"
 #include "detail/scoped_borrow_state.hpp"
+#include "detail/scene_damage.hpp"
 #include "detail/window_control_state.hpp"
 
 #if defined(__APPLE__)
@@ -10,6 +13,8 @@
 #    define NOMINMAX
 #  endif
 #  include <windows.h>
+#elif defined(__EMSCRIPTEN__)
+#  include <emscripten.h>
 #elif defined(__linux__)
 #  include <X11/Xlib.h>
 #  include <poll.h>
@@ -17,13 +22,18 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <climits>
 #include <cmath>
+#include <cstdio>
 #include <mutex>
 #include <vector>
 
 #include "detail/application_platform_state.hpp"
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+#  include "detail/platform_test_access.hpp"
+#endif
 #if defined(__APPLE__)
 #  include "detail/macos_desktop_services.hpp"
 #elif defined(_WIN32)

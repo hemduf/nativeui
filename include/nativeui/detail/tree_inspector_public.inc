@@ -10,8 +10,6 @@
         if (focus_active_ && focused_index_ < focusables_.size()) {
             focused = focusables_[focused_index_];
         }
-        const NodeId capture_owner = pointer_capture_.node ? pointer_capture_.owner : kInvalidNodeId;
-
         const auto paint_intersects_dirty = [this](Rect bounds) noexcept {
             for (const auto& dirty : paint_dirty_.rects()) {
                 if (!intersect(bounds, dirty).empty()) return true;
@@ -35,7 +33,7 @@
             out.paint_dirty = paint_intersects_dirty(node.bounds);
             out.focusable = node.component->focusable();
             out.focused = focused == &node;
-            out.pointer_capture_owner = capture_owner == node.id;
+            out.pointer_capture_owner = node_has_pointer_capture(node.id);
             out.availability = node.component->effective_availability();
             out.child_order = child_order;
             out.depth = depth;

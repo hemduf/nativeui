@@ -7,6 +7,7 @@
             return;
         }
 
+        mark_paint_culling_dirty();
         theme_ = std::move(value);
         if (root_) bind_theme(*root_);
         if (!mounted_ || !root_) return;
@@ -14,6 +15,6 @@
         if (invalidation == ThemeInvalidation::Layout) {
             invalidate_layout_from(*root_);
         } else {
-            invalidate_paint(viewport_rect());
+            publish_all_visual_bounds_then_invalidate();
         }
     }

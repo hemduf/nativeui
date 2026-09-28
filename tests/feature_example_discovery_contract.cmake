@@ -16,15 +16,15 @@ nativeui_discover_feature_examples(_discovered_examples "${SOURCE_DIR}")
 
 file(GLOB _canonical_sources
   RELATIVE "${_features_dir}"
-  "${_features_dir}/t[0-9][0-9][0-9]_*.cpp"
+  "${_features_dir}/*.cpp"
 )
 list(SORT _canonical_sources)
 
 set(_expected_examples)
 foreach(_source IN LISTS _canonical_sources)
-  if(NOT _source MATCHES "^t[0-9][0-9][0-9]_[A-Za-z0-9_]+[.]cpp$")
+  if(NOT _source MATCHES "^((t[0-9][0-9][0-9]_)?[a-z][a-z0-9_]*)[.]cpp$")
     message(FATAL_ERROR
-      "Feature example discovery contract: canonical glob matched invalid filename ${_source}")
+      "Feature example discovery contract: discovery matched invalid filename ${_source}")
   endif()
   get_filename_component(_name "${_source}" NAME_WE)
   list(APPEND _expected_examples "${_name}")
@@ -48,6 +48,8 @@ foreach(_required IN ITEMS
 endforeach()
 
 file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/examples/CMakeLists.txt" _examples_cmake)
+file(READ "${_features_dir}/CMakeLists.txt" _features_cmake)
 file(READ "${_helper}" _helper_source)
 
 function(require_text haystack needle description)
@@ -59,22 +61,31 @@ function(require_text haystack needle description)
 endfunction()
 
 require_text("${_root_cmake}"
-  "include(cmake/NativeUIFeatureExamples.cmake)"
-  "root discovery helper include")
-require_text("${_root_cmake}"
+  "add_subdirectory(examples)"
+  "root example directory registration")
+require_text("${_examples_cmake}"
+  "add_subdirectory(features)"
+  "feature directory registration")
+require_text("${_features_cmake}"
+  [=[include("${PROJECT_SOURCE_DIR}/cmake/NativeUIFeatureExamples.cmake")]=]
+  "feature discovery helper include")
+require_text("${_features_cmake}"
   "nativeui_discover_feature_examples("
-  "root automatic discovery call")
-require_text("${_root_cmake}"
+  "feature automatic discovery call")
+require_text("${_features_cmake}"
   "NATIVEUI_FEATURE_EXAMPLES"
-  "root discovered example output")
+  "discovered example output")
+require_text("${_features_cmake}"
+  "nativeui_add_application(nativeui_example_"
+  "feature application registration")
 require_text("${_helper_source}"
   "CONFIGURE_DEPENDS"
   "automatic CMake reconfigure when feature sources change")
 
-string(FIND "${_root_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES\n  t" _manual_list_index)
+string(FIND "${_features_cmake}" "set(NATIVEUI_FEATURE_EXAMPLES" _manual_list_index)
 if(NOT _manual_list_index EQUAL -1)
   message(FATAL_ERROR
-    "Feature example discovery contract: root CMake still contains a manually maintained feature example list")
+    "Feature example discovery contract: feature CMake contains a manually maintained example list")
 endif()
 
 set(_gallery_source "${_features_dir}/t049_gallery.cpp")

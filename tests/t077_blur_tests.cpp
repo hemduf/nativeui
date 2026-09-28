@@ -840,7 +840,10 @@ void affine_transform_and_overflow_contract() {
     ui::Painter nonfinite{*nonfinite_canvas};
     {
         auto state = nonfinite.scoped_state();
-        nonfinite.scale(std::numeric_limits<float>::infinity(), 1.0f);
+        // T098 makes non-finite Painter transform mutations atomic no-ops. Keep
+        // this T077 fail-closed backend-matrix fixture by poisoning SkCanvas
+        // directly inside the protected state scope, then prove restore recovers it.
+        nonfinite_canvas->scale(std::numeric_limits<float>::infinity(), 1.0f);
         ui::detail::PainterEffectFaultAccess::fail_before_materialization(nonfinite);
         {
             auto empty = nonfinite.scoped_layer(
@@ -852,8 +855,8 @@ void affine_transform_and_overflow_contract() {
     NUI_CHECK(nonfinite.save_depth() == 0);
     NUI_CHECK(nonfinite_canvas->getSaveCount() == nonfinite_baseline);
 
-    // The seam must still be armed: non-finite transform rejection happened
-    // before backend filter materialization.
+    // The seam must still be armed: the invalid backend transform failed
+    // closed before backend filter materialization.
     bool seam_still_armed = false;
     try {
         auto should_fail = nonfinite.scoped_layer(

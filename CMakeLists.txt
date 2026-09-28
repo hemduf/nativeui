@@ -11,14 +11,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(NATIVEUI_BUILD_PLATFORM "Build Pugl/OpenGL windowing integration" ON)
-option(NATIVEUI_BUILD_EXAMPLES "Build NativeUI examples" ON)
-option(NATIVEUI_BUILD_TESTS "Build NativeUI core tests" ON)
+option(NATIVEUI_BUILD_EXAMPLES "Build the NativeUI demo and examples" ON)
+option(NATIVEUI_BUILD_FEATURE_EXAMPLES "Build examples/features executables when examples are enabled" ON)
+option(NATIVEUI_BUILD_TESTS "Build and register NativeUI tests" ON)
+option(NATIVEUI_BUILD_PACKAGE_TESTS "Register installed-package consumer tests" OFF)
 option(NATIVEUI_ENABLE_SANITIZERS "Enable ASan+UBSan on NativeUI-owned code/tests" OFF)
 option(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS "Register native standalone/embedded smoke tests with CTest" OFF)
 option(NATIVEUI_ENABLE_INSPECTOR "Enable the opt-in NativeUI debug inspector" OFF)
 
 if(NATIVEUI_BUILD_EXAMPLES AND NOT NATIVEUI_BUILD_PLATFORM)
   message(FATAL_ERROR "NATIVEUI_BUILD_EXAMPLES requires NATIVEUI_BUILD_PLATFORM=ON")
+endif()
+if(NATIVEUI_BUILD_PACKAGE_TESTS AND NOT NATIVEUI_BUILD_PLATFORM)
+  message(FATAL_ERROR "NATIVEUI_BUILD_PACKAGE_TESTS requires NATIVEUI_BUILD_PLATFORM=ON")
 endif()
 
 include(cmake/CPM.cmake)
@@ -31,28 +36,34 @@ include(cmake/NativeUIFeatureExamples.cmake)
 # Skia's SVG DOM references text shaping even for SVGs without text nodes, and
 # skshaper in turn references the packaged SkUnicode ICU implementation. Keep
 # the Unix static-link dependency order from users toward providers.
+# Emscripten's platform module sets CMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY, so
+# explicit package paths must opt out of the cross-compilation root re-writing.
 find_library(NATIVEUI_SKIA_SVG_LIBRARY
   NAMES svg
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_SHAPER_LIBRARY
   NAMES skshaper
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_UNICODE_ICU_LIBRARY
   NAMES skunicode_icu
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 find_library(NATIVEUI_SKIA_UNICODE_CORE_LIBRARY
   NAMES skunicode_core
   PATHS "${_skia_lib_dir}"
   NO_DEFAULT_PATH
+  NO_CMAKE_FIND_ROOT_PATH
   REQUIRED
 )
 add_library(SkiaBuilder::svg STATIC IMPORTED GLOBAL)
@@ -116,6 +127,7 @@ add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
   src/skia_shader.cpp
+  src/skia_noise.cpp
   src/skia_svg.cpp
   src/headless.cpp
   src/dispatcher.cpp
@@ -155,6 +167,13 @@ if(NATIVEUI_BUILD_PLATFORM)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(nativeui PUBLIC cxx_std_20)
   target_compile_definitions(nativeui PRIVATE SK_GL)
+  if(NATIVEUI_BUILD_TESTS)
+    # Source-private renderer readback used only by ImageTexture CPU/GPU parity tests.
+    # Installed/package platform sources compile without this seam.
+    target_compile_definitions(nativeui PRIVATE
+      NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS=1
+    )
+  endif()
   if(WIN32)
     # windows.h defines function-like min/max macros unless NOMINMAX is set.
     # The C++ platform bridge intentionally uses std::min/std::max throughout;
@@ -216,6 +235,7 @@ install(FILES
   cmake/NativeUIConsumerPlatform.cmake
   cmake/NativeUIAttachPlatform.cmake
   cmake/NativeUIApplication.cmake
+  cmake/NativeUIWebShell.html
   cmake/NativeUIBinaryData.cmake
   cmake/NativeUIEmbedResource.cmake
   DESTINATION "${NATIVEUI_INSTALL_CMAKE_DIR}"
@@ -286,6 +306,10 @@ configure_file(cmake/NativeUIApplication.cmake
   "${_nativeui_build_package_dir}/NativeUIApplication.cmake"
   COPYONLY
 )
+configure_file(cmake/NativeUIWebShell.html
+  "${_nativeui_build_package_dir}/NativeUIWebShell.html"
+  COPYONLY
+)
 configure_file(cmake/NativeUIBinaryData.cmake
   "${_nativeui_build_package_dir}/NativeUIBinaryData.cmake"
   COPYONLY
@@ -295,365 +319,83 @@ configure_file(cmake/NativeUIEmbedResource.cmake
   COPYONLY
 )
 
-nativeui_discover_feature_examples(
-  NATIVEUI_FEATURE_EXAMPLES
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-)
+enable_testing()
 
-if(NATIVEUI_BUILD_EXAMPLES)
-  add_executable(nativeui_demo examples/standalone.cpp)
-  _nativeui_attach_consumer_platform(
-    TARGET nativeui_demo
-    CONSUMER_ID org.nativeui.demo
-  )
-  nativeui_enable_sanitizers(nativeui_demo)
-
-  function(nativeui_add_feature_example name)
-    add_executable(nativeui_example_${name} examples/features/${name}.cpp)
-    target_include_directories(nativeui_example_${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
-    string(REPLACE "_" "-" _consumer_name "${name}")
-    _nativeui_attach_consumer_platform(
-      TARGET nativeui_example_${name}
-      CONSUMER_ID "org.nativeui.example.${_consumer_name}"
-    )
-    nativeui_enable_project_warnings(nativeui_example_${name})
-    nativeui_enable_sanitizers(nativeui_example_${name})
-  endfunction()
-
-  foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)
-    nativeui_add_feature_example(${_example})
-  endforeach()
+if(NATIVEUI_BUILD_EXAMPLES OR NATIVEUI_BUILD_TESTS)
+  add_subdirectory(examples)
 endif()
 
-if(NATIVEUI_BUILD_TESTS)
-  enable_testing()
-
-  add_test(
-    NAME nativeui_feature_example_discovery_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/feature_example_discovery_contract.cmake"
-  )
-  add_test(
-    NAME nativeui_t053_prefix_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t053_prefix_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t053_registration_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t053_registration_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t043_registration_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t043_registration_contract.cmake"
-  )
-  add_test(
-    NAME nativeui_t047_attach_contract_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t047_attach_contract_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t054_application_contract_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_application_contract_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t054_argument_boundary_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_argument_boundary_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t054_package_source_contract_tests
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t054_package_source_contract_tests.cmake"
-  )
-  add_test(
-    NAME nativeui_t064_root_integration_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t064_root_integration_contract.cmake"
-  )
-  add_test(
-    NAME nativeui_t065_root_integration_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t065_root_integration_contract.cmake"
-  )
-  add_test(
-    NAME nativeui_t067_root_integration_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
-  )
-  add_test(
-    NAME nativeui_t079_shader_contract
-    COMMAND ${CMAKE_COMMAND}
-      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/t079_shader_contract.cmake"
-  )
-  set_tests_properties(
-    nativeui_feature_example_discovery_contract
-    PROPERTIES LABELS "build;cmake;examples" TIMEOUT 20
-  )
-  set_tests_properties(
-    nativeui_t053_prefix_tests
-    nativeui_t053_registration_tests
-    PROPERTIES LABELS "build;cmake;t053" TIMEOUT 60
-  )
-  set_tests_properties(
-    nativeui_t043_registration_contract
-    PROPERTIES LABELS "build;cmake;t043" TIMEOUT 20
-  )
-  set_tests_properties(
-    nativeui_t047_attach_contract_tests
-    PROPERTIES LABELS "build;cmake;t047" TIMEOUT 60
-  )
-  set_tests_properties(
-    nativeui_t054_application_contract_tests
-    nativeui_t054_argument_boundary_tests
-    nativeui_t054_package_source_contract_tests
-    PROPERTIES LABELS "build;cmake;t054" TIMEOUT 60
-  )
-  set_tests_properties(
-    nativeui_t064_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t064" TIMEOUT 20
-  )
-  set_tests_properties(
-    nativeui_t065_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t065" TIMEOUT 20
-  )
-  set_tests_properties(
-    nativeui_t067_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t067" TIMEOUT 20
-  )
-  set_tests_properties(
-    nativeui_t079_shader_contract
-    PROPERTIES LABELS "build;cmake;t079;shader" TIMEOUT 20
-  )
-
-  function(nativeui_add_core_test name source)
-    add_executable(${name} ${source})
-    target_link_libraries(${name} PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(${name})
-    nativeui_enable_sanitizers(${name})
-    add_test(NAME ${name} COMMAND ${name})
-  endfunction()
-
-  nativeui_add_core_test(nativeui_dispatcher_tests tests/dispatcher_tests.cpp)
-  nativeui_add_core_test(nativeui_dispatcher_edge_tests tests/dispatcher_edge_tests.cpp)
-  nativeui_add_core_test(nativeui_state_tests tests/state_tests.cpp)
-  nativeui_add_core_test(nativeui_component_state_tests tests/component_state_tests.cpp)
-  nativeui_add_core_test(nativeui_focus_tests tests/focus_tests.cpp)
-  nativeui_add_core_test(nativeui_routing_tests tests/routing_tests.cpp)
-  nativeui_add_core_test(nativeui_pointer_capture_tests tests/pointer_capture_tests.cpp)
-  nativeui_add_core_test(nativeui_gesture_tests tests/gesture_tests.cpp)
-  nativeui_add_core_test(nativeui_command_tests tests/command_tests.cpp)
-  nativeui_add_core_test(nativeui_drop_tests tests/drop_tests.cpp)
-  nativeui_add_core_test(nativeui_transform_tests tests/transform_tests.cpp)
-  nativeui_add_core_test(nativeui_path_tests tests/path_tests.cpp)
-  nativeui_add_core_test(nativeui_paint_style_tests tests/paint_style_tests.cpp)
-  nativeui_add_core_test(nativeui_t077_blur_tests tests/t077_blur_tests.cpp)
-  nativeui_add_core_test(nativeui_t050_inspector_model_tests tests/t050_inspector_model_tests.cpp)
-  if(NATIVEUI_ENABLE_INSPECTOR)
-    nativeui_add_core_test(nativeui_t050_inspector_runtime_tests tests/t050_inspector_runtime_tests.cpp)
-  endif()
-  nativeui_add_core_test(nativeui_golden_tests tests/golden_tests.cpp)
-  nativeui_add_core_test(nativeui_gradient_golden_tests tests/gradient_golden_tests.cpp)
-  target_compile_definitions(nativeui_golden_tests PRIVATE
-    NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
-    NATIVEUI_GOLDEN_ARTIFACT_DIR="${CMAKE_CURRENT_BINARY_DIR}/golden-artifacts"
-  )
-  target_compile_definitions(nativeui_gradient_golden_tests PRIVATE
-    NATIVEUI_GOLDEN_BASELINE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/baselines"
-    NATIVEUI_GOLDEN_ARTIFACT_DIR="${CMAKE_CURRENT_BINARY_DIR}/golden-artifacts"
-  )
-  add_custom_target(nativeui_update_goldens
-    COMMAND $<TARGET_FILE:nativeui_golden_tests> --update-goldens
-    COMMAND $<TARGET_FILE:nativeui_gradient_golden_tests> --update-goldens
-    DEPENDS nativeui_golden_tests nativeui_gradient_golden_tests
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Explicitly update NativeUI golden image baselines"
-  )
-  nativeui_add_core_test(nativeui_invalidation_tests tests/invalidation_tests.cpp)
-  nativeui_add_core_test(nativeui_headless_tests tests/headless_tests.cpp)
-  nativeui_add_core_test(nativeui_t061_overlay_acceptance_tests tests/t061_overlay_acceptance_tests.cpp)
-  nativeui_add_core_test(nativeui_t062_tooltip_tests tests/t062_tooltip_tests.cpp)
-  nativeui_add_core_test(nativeui_image_tests tests/image_tests.cpp)
-  nativeui_add_core_test(nativeui_shader_tests tests/shader_tests.cpp)
-
-  # T079 allocation/fallback fault seams are compiled only into this isolated
-  # test executable. NativeUI::Core never contains the test-only entry point,
-  # even when the normal test suite is enabled.
-  add_executable(nativeui_shader_fault_tests
-    tests/shader_fault_tests.cpp
-    src/skia_shader.cpp
-  )
-  target_include_directories(nativeui_shader_fault_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  )
-  target_compile_features(nativeui_shader_fault_tests PRIVATE cxx_std_20)
-  target_compile_definitions(nativeui_shader_fault_tests PRIVATE
-    NATIVEUI_ENABLE_TEST_SEAMS=1
-  )
-  target_link_libraries(nativeui_shader_fault_tests PRIVATE SkiaBuilder::svg)
-  nativeui_enable_project_warnings(nativeui_shader_fault_tests)
-  nativeui_enable_sanitizers(nativeui_shader_fault_tests)
-  add_test(NAME nativeui_shader_fault_tests COMMAND nativeui_shader_fault_tests)
-
-  nativeui_add_core_test(nativeui_svg_tests tests/svg_tests.cpp)
-  nativeui_add_core_test(nativeui_resource_manager_tests tests/resource_manager_tests.cpp)
-  nativeui_add_core_test(nativeui_layout_constraints_tests tests/layout_constraints_tests.cpp)
-  nativeui_add_core_test(nativeui_layout_alignment_tests tests/layout_alignment_tests.cpp)
-  nativeui_add_core_test(nativeui_layout_flex_tests tests/layout_flex_tests.cpp)
-  nativeui_add_core_test(nativeui_grid_layout_tests tests/grid_layout_tests.cpp)
-  nativeui_add_core_test(nativeui_clipping_tests tests/clipping_tests.cpp)
-  nativeui_add_core_test(nativeui_t075_scoped_clipping_tests tests/t075_scoped_clipping_tests.cpp)
-  nativeui_add_core_test(nativeui_scroll_layout_tests tests/scroll_layout_tests.cpp)
-  nativeui_add_core_test(nativeui_t034_scroll_view_tests tests/t034_scroll_view_tests.cpp)
-  nativeui_add_core_test(nativeui_t035_combo_popup_tests tests/t035_combo_popup_tests.cpp)
-  nativeui_add_core_test(nativeui_t036_list_tabs_tests tests/t036_list_tabs_tests.cpp)
-  nativeui_add_core_test(nativeui_t067_virtual_list_contract tests/t067_virtual_list_contract.cpp)
-  nativeui_add_core_test(nativeui_t067_virtual_list_window_contract tests/t067_virtual_list_window_contract.cpp)
-  nativeui_add_core_test(nativeui_t067_retained_tests tests/t067_retained_tests.cpp)
-  nativeui_add_core_test(nativeui_t067_public_api_tests tests/t067_public_api_tests.cpp)
-  nativeui_add_core_test(nativeui_t067_semantic_api_tests tests/t067_semantic_api_tests.cpp)
-  nativeui_add_core_test(nativeui_t067_visual_tests tests/t067_visual_tests.cpp)
-  nativeui_add_core_test(nativeui_canvas_tests tests/canvas_tests.cpp)
-  nativeui_add_core_test(nativeui_lifecycle_tests tests/lifecycle_tests.cpp)
-  nativeui_add_core_test(nativeui_t043_view_geometry_tests tests/t043_view_geometry_tests.cpp)
-  nativeui_add_core_test(nativeui_dynamic_composition_tests tests/dynamic_composition_tests.cpp)
-  nativeui_add_core_test(nativeui_widget_tests tests/widget_tests.cpp)
-  nativeui_add_core_test(nativeui_button_tests tests/button_tests.cpp)
-  nativeui_add_core_test(nativeui_checkbox_radio_tests tests/checkbox_radio_tests.cpp)
-  nativeui_add_core_test(nativeui_t032_slider_value_contract tests/t032_slider_value_contract.cpp)
-  nativeui_add_core_test(nativeui_t032_slider_completion_tests tests/t032_slider_completion_tests.cpp)
-  nativeui_add_core_test(nativeui_t032_slider_visual_tests tests/t032_slider_visual_tests.cpp)
-  nativeui_add_core_test(nativeui_text_input_tests tests/text_input_tests.cpp)
-  nativeui_add_core_test(nativeui_text_area_tests tests/text_area_tests.cpp)
-  nativeui_add_core_test(nativeui_text_edit_model_tests tests/text_edit_model_tests.cpp)
-  nativeui_add_core_test(nativeui_label_tests tests/label_tests.cpp)
-  nativeui_add_core_test(nativeui_font_tests tests/font_tests.cpp)
-  target_compile_definitions(nativeui_font_tests PRIVATE
-    NATIVEUI_TEST_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/resources"
-  )
-
-  if(NATIVEUI_BUILD_PLATFORM)
-    add_executable(nativeui_smoke_standalone tests/smoke_standalone.cpp)
-    _nativeui_attach_consumer_platform(
-      TARGET nativeui_smoke_standalone
-      CONSUMER_ID org.nativeui.test.smoke-standalone
-      OUT_BRIDGE _nativeui_smoke_standalone_bridge
-    )
-    nativeui_enable_project_warnings(nativeui_smoke_standalone)
-    nativeui_enable_sanitizers(nativeui_smoke_standalone)
-
-    add_executable(nativeui_smoke_embedded tests/smoke_embedded.cpp)
-    _nativeui_attach_consumer_platform(
-      TARGET nativeui_smoke_embedded
-      CONSUMER_ID org.nativeui.test.smoke-embedded
-      OUT_BRIDGE _nativeui_smoke_embedded_bridge
-    )
-    nativeui_enable_project_warnings(nativeui_smoke_embedded)
-    nativeui_enable_sanitizers(nativeui_smoke_embedded)
-
-    if(APPLE)
-      enable_language(OBJCXX)
-      add_executable(nativeui_smoke_macos_drop tests/smoke_macos_drop.mm)
-      set_target_properties(nativeui_smoke_macos_drop PROPERTIES OBJCXX_STANDARD 20)
-      target_compile_options(nativeui_smoke_macos_drop PRIVATE -fobjc-arc)
-      _nativeui_attach_consumer_platform(
-        TARGET nativeui_smoke_macos_drop
-        CONSUMER_ID org.nativeui.test.macos-drop
-      )
-      get_target_property(_nativeui_drop_prefix nativeui_smoke_macos_drop NATIVEUI_OBJC_RUNTIME_PREFIX)
-      target_compile_definitions(nativeui_smoke_macos_drop PRIVATE
-        "NativeUIDropTestDraggingInfo=${_nativeui_drop_prefix}DropTestDraggingInfo")
-      nativeui_enable_project_warnings(nativeui_smoke_macos_drop)
-      nativeui_enable_sanitizers(nativeui_smoke_macos_drop)
-      add_test(NAME nativeui_smoke_macos_drop COMMAND nativeui_smoke_macos_drop)
-      set_tests_properties(nativeui_smoke_macos_drop PROPERTIES
-        LABELS "integration;platform;macos;drop"
-        TIMEOUT 20
-      )
-
-      nativeui_compute_objc_runtime_prefix(
-        _nativeui_smoke_embedded_prefix
-        org.nativeui.test.smoke-embedded
-      )
-      add_test(
-        NAME nativeui_objc_runtime_prefix
-        COMMAND ${CMAKE_COMMAND}
-          "-DARCHIVE=$<TARGET_FILE:${_nativeui_smoke_embedded_bridge}>"
-          "-DNM=${CMAKE_NM}"
-          "-DPREFIX=${_nativeui_smoke_embedded_prefix}"
-          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_objc_runtime_prefix.cmake"
-      )
-      set_tests_properties(nativeui_objc_runtime_prefix PROPERTIES
-        LABELS "integration;platform;macos;objc-runtime;t053"
-        TIMEOUT 20
-      )
-    endif()
-
-    if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
-      add_test(NAME nativeui_smoke_standalone COMMAND nativeui_smoke_standalone)
-      add_test(NAME nativeui_smoke_embedded COMMAND nativeui_smoke_embedded)
-      set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
-        LABELS "integration;platform;smoke"
-        TIMEOUT 20
-      )
-    endif()
-  endif()
-
-  # Each public header gets its own translation unit so missing direct includes
-  # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
-    add_library(nativeui_header_${_header}_compile OBJECT tests/headers/${_header}.cpp)
-    target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
-    nativeui_enable_sanitizers(nativeui_header_${_header}_compile)
-  endforeach()
-
-  # Every completed feature ships an executable example. In display-less builds
-  # compile every example source directly against Core so public API breakage is
-  # still caught. Platform builds already compile the same source into the real
-  # example executable, so do not compile it a second time as an OBJECT target.
-  foreach(_example IN LISTS NATIVEUI_FEATURE_EXAMPLES)
-    if(NOT NATIVEUI_BUILD_EXAMPLES)
-      add_library(nativeui_feature_example_${_example}_compile OBJECT examples/features/${_example}.cpp)
-      target_include_directories(nativeui_feature_example_${_example}_compile PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples/features)
-      target_link_libraries(nativeui_feature_example_${_example}_compile PRIVATE NativeUI::Core)
-      nativeui_enable_project_warnings(nativeui_feature_example_${_example}_compile)
-      nativeui_enable_sanitizers(nativeui_feature_example_${_example}_compile)
-    endif()
-
-    if(NATIVEUI_BUILD_EXAMPLES AND NATIVEUI_BUILD_PLATFORM)
-      add_test(NAME nativeui_example_${_example}_self_test
-               COMMAND nativeui_example_${_example} --self-test)
-    endif()
-  endforeach()
-
-  # The real demo executable already compiles standalone.cpp when examples are
-  # enabled. Keep the Core-only source contract only for display-less builds.
-  if(NOT NATIVEUI_BUILD_EXAMPLES)
-    add_library(nativeui_demo_consumer_compile OBJECT examples/standalone.cpp)
-    target_link_libraries(nativeui_demo_consumer_compile PRIVATE NativeUI::Core)
-    nativeui_enable_project_warnings(nativeui_demo_consumer_compile)
-    nativeui_enable_sanitizers(nativeui_demo_consumer_compile)
-  endif()
+if(NATIVEUI_BUILD_TESTS OR NATIVEUI_BUILD_PACKAGE_TESTS)
+  add_subdirectory(tests)
 endif()
 
 # T072 is Linux/X11-only infrastructure. macOS and Windows never discover or
 # link libdbus-1; Linux platform builds require the system development package.
-if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE)
+if(NATIVEUI_BUILD_PLATFORM AND UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
   include(cmake/NativeUILinuxDbus.cmake)
   nativeui_add_linux_dbus_transport()
+endif()
+
+# Throwaway WebAssembly spike target: validates that the pinned wasm32 Skia
+# package and the headless core compile, link and render under Emscripten.
+option(NATIVEUI_BUILD_WASM_SPIKE "Build the WebAssembly headless spike executable" OFF)
+if(EMSCRIPTEN AND NATIVEUI_BUILD_WASM_SPIKE)
+  add_executable(nativeui_wasm_spike wasm_spike/main.cpp)
+  target_link_libraries(nativeui_wasm_spike PRIVATE NativeUI::Core)
+  # Browser-consumer packaging spike: the font reaches the wasm heap through
+  # Emscripten's preload file system exactly like the demo assets would.
+  target_link_options(nativeui_wasm_spike PRIVATE
+    "--preload-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/resources/NativeUITestLatin.ttf@/nativeui/fonts/NativeUITestLatin.ttf")
+  nativeui_enable_project_warnings(nativeui_wasm_spike)
+
+  # Platform-level wasm qualification: one Node test owns/releases the single
+  # Emscripten main-loop slot, and one Chromium test exercises simultaneous
+  # NativeUI windows plus survivor teardown on real WebGL/DOM views.
+  if(NATIVEUI_BUILD_PLATFORM)
+    add_executable(nativeui_wasm_main_loop_smoke wasm_spike/main_loop.cpp)
+    target_link_libraries(nativeui_wasm_main_loop_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_main_loop_smoke PRIVATE "-sEXIT_RUNTIME=1")
+    nativeui_enable_project_warnings(nativeui_wasm_main_loop_smoke)
+
+    add_executable(nativeui_wasm_lifecycle_smoke wasm_spike/lifecycle.cpp)
+    target_link_libraries(nativeui_wasm_lifecycle_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_lifecycle_smoke PRIVATE
+      "-sEXIT_RUNTIME=0"
+      "-sALLOW_MEMORY_GROWTH=1"
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    set_target_properties(nativeui_wasm_lifecycle_smoke PROPERTIES SUFFIX ".html")
+    nativeui_enable_project_warnings(nativeui_wasm_lifecycle_smoke)
+
+    add_executable(nativeui_wasm_embedded_smoke wasm_spike/embedded.cpp)
+    target_link_libraries(nativeui_wasm_embedded_smoke PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_embedded_smoke PRIVATE
+      "-sEXIT_RUNTIME=0"
+      "-sALLOW_MEMORY_GROWTH=1"
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    set_target_properties(nativeui_wasm_embedded_smoke PROPERTIES SUFFIX ".html")
+    nativeui_enable_project_warnings(nativeui_wasm_embedded_smoke)
+
+    # First real browser window: the interactive standalone example proves the
+    # WebGL surface, DOM input translation and browser main loop end to end.
+    add_executable(nativeui_wasm_app examples/standalone.cpp)
+    target_link_libraries(nativeui_wasm_app PRIVATE NativeUI::NativeUI)
+    target_link_options(nativeui_wasm_app PRIVATE
+      "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/cmake/NativeUIWebShell.html")
+    # Browser builds have no system fonts: the platform registers every face
+    # preloaded into /nativeui/fonts automatically. Keep the repository build
+    # deterministic by defaulting to NativeUI's bundled Latin test face; a
+    # consumer/demo can override NATIVEUI_WASM_APP_FONT with its production face.
+    set(NATIVEUI_WASM_APP_FONT
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/resources/NativeUITestLatin.ttf"
+        CACHE FILEPATH "Font preloaded for the WebAssembly example")
+    if(EXISTS "${NATIVEUI_WASM_APP_FONT}")
+      get_filename_component(_nativeui_wasm_app_font_name "${NATIVEUI_WASM_APP_FONT}" NAME)
+      target_link_options(nativeui_wasm_app PRIVATE
+        "--preload-file=${NATIVEUI_WASM_APP_FONT}@/nativeui/fonts/${_nativeui_wasm_app_font_name}")
+    endif()
+    set_target_properties(nativeui_wasm_app PROPERTIES
+      SUFFIX ".html"
+      LINK_FLAGS "-sEXIT_RUNTIME=0 -sALLOW_MEMORY_GROWTH=1")
+    nativeui_enable_project_warnings(nativeui_wasm_app)
+  endif()
 endif()

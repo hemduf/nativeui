@@ -85,7 +85,26 @@ foreach(_path IN LISTS _production_files)
     _implicit_compile
     "${_content}")
   if(NOT _implicit_compile STREQUAL "")
-    message(FATAL_ERROR
-      "T079: implicit ShaderProgram::compile call found outside skia_shader.cpp: ${_path}")
+    if(_name STREQUAL "skia_noise.cpp")
+      # T088 explicitly compiles its built-in source at creation time. Keep the
+      # T079 no-implicit-paint-compilation rule for every other production file.
+      string(REGEX MATCHALL
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+        _noise_compile_calls "${_content}")
+      list(LENGTH _noise_compile_calls _noise_compile_count)
+      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create" _noise_create)
+      string(FIND "${_content}" "ShaderProgram::compile(source)" _noise_compile)
+      string(FIND "${_content}" "Brush NoiseSource::as_brush" _noise_brush)
+      if(NOT _noise_compile_count EQUAL 1 OR _noise_create EQUAL -1 OR
+         _noise_compile EQUAL -1 OR _noise_brush EQUAL -1 OR
+         _noise_compile LESS _noise_create OR
+         _noise_compile GREATER _noise_brush)
+        message(FATAL_ERROR
+          "T079: T088 built-in shader must compile exactly once in NoiseSource::create")
+      endif()
+    else()
+      message(FATAL_ERROR
+        "T079: implicit ShaderProgram::compile call found outside skia_shader.cpp: ${_path}")
+    endif()
   endif()
 endforeach()

@@ -17,6 +17,22 @@
 
 namespace {
 
+constexpr std::array<std::byte, 75> kT083SmokePng{
+    std::byte{137}, std::byte{80}, std::byte{78}, std::byte{71}, std::byte{13}, std::byte{10},
+    std::byte{26}, std::byte{10}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{13},
+    std::byte{73}, std::byte{72}, std::byte{68}, std::byte{82}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{2}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{2},
+    std::byte{8}, std::byte{6}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{114},
+    std::byte{182}, std::byte{13}, std::byte{36}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{18}, std::byte{73}, std::byte{68}, std::byte{65}, std::byte{84}, std::byte{120},
+    std::byte{218}, std::byte{99}, std::byte{248}, std::byte{207}, std::byte{192}, std::byte{240},
+    std::byte{31}, std::byte{12}, std::byte{129}, std::byte{52}, std::byte{24}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{200}, std::byte{9}, std::byte{247}, std::byte{3},
+    std::byte{217}, std::byte{100}, std::byte{241}, std::byte{0}, std::byte{0}, std::byte{0},
+    std::byte{0}, std::byte{73}, std::byte{69}, std::byte{78}, std::byte{68}, std::byte{174},
+    std::byte{66}, std::byte{96}, std::byte{130},
+};
+
 int fail(std::string_view stage, std::string_view message) {
     std::cerr << "[nativeui smoke standalone] " << stage << ": " << message << '\n';
     return 1;
@@ -241,11 +257,79 @@ int run_regular_smoke() {
             return fail(stage, "platform font manager could not resolve Latin text");
         }
 
+        stage = "shader-brush";
+        const auto leaf_program = ui::ShaderProgram::compile(R"(
+            uniform float gain;
+            half4 main(float2 p) {
+                return half4(gain, p.x / 320.0, 0.25, 1.0);
+            }
+        )");
+        const auto parent_program = ui::ShaderProgram::compile(R"(
+            uniform shader base;
+            uniform shader accent;
+            uniform shader optional;
+            half4 main(float2 p) {
+                return mix(base.eval(p), accent.eval(p * 0.75), 0.25) +
+                       optional.eval(p);
+            }
+        )");
+        if (!leaf_program.ok() || !parent_program.ok()) {
+            const auto& failed = leaf_program.ok() ? parent_program : leaf_program;
+            return fail(stage, failed.diagnostics.empty()
+                                   ? "runtime shader compilation failed without diagnostic"
+                                   : failed.diagnostics.front().message);
+        }
+
+        ui::ShaderInstance leaf_instance{leaf_program.program};
+        if (leaf_instance.set_float("gain", 0.65f) != ui::ShaderSetResult::Ok) {
+            return fail(stage, "runtime shader uniform binding failed");
+        }
+        const ui::Brush leaf_brush{leaf_instance};
+        const ui::Brush accent{ui::LinearGradient{
+            {0.0f, 0.0f},
+            {240.0f, 0.0f},
+            ui::Color{0.0f, 0.1f, 1.0f, 1.0f},
+            ui::Color{1.0f, 0.1f, 0.0f, 1.0f}}};
+
+        ui::ShaderInstance parent_instance{parent_program.program};
+        if (parent_instance.set_child("base", leaf_brush) != ui::ShaderSetResult::Ok ||
+            parent_instance.set_child("accent", accent) != ui::ShaderSetResult::Ok) {
+            return fail(stage, "runtime shader child binding failed");
+        }
+        const ui::Brush shader_brush{parent_instance};
+
+        stage = "image-texture-brush";
+        const auto texture_image = ui::Image::decode(kT083SmokePng);
+        if (!texture_image.valid()) {
+            return fail(stage, "ImageTexture smoke image did not decode");
+        }
+        const ui::Brush image_texture_brush{
+            ui::ImageTexture{
+                texture_image,
+                {0.10f, 0.10f, 0.30f, 0.30f},
+                {120.0f, 0.0f, 120.0f, 48.0f}}};
+
         stage = "construct-ui";
         ui::State<bool> enabled{true};
         ui::UI app_ui{
             ui::Column{
                 ui::Header{"NativeUI standalone smoke"},
+                ui::Canvas{240.0f, 48.0f,
+                    [shader_brush, image_texture_brush](ui::CanvasContext2D& g) {
+                    g.fill_rounded_rect(
+                        {0.0f, 0.0f, 120.0f, 48.0f},
+                        8.0f,
+                        shader_brush);
+                    g.fill_rounded_rect(
+                        {120.0f, 0.0f, 120.0f, 48.0f},
+                        8.0f,
+                        image_texture_brush);
+                    g.stroke_rounded_rect(
+                        {128.0f, 8.0f, 104.0f, 32.0f},
+                        6.0f,
+                        3.0f,
+                        image_texture_brush);
+                }},
                 ui::Toggle{"Enabled", enabled},
             }.padding(16.0f).gap(12.0f)};
 

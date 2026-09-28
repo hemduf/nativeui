@@ -1,14 +1,14 @@
 # NativeUI Design — C++20 Retained-Mode UI with Pugl + Skia
 
 **Status:** active architecture baseline  
-**Updated:** September 10, 2026  
+**Updated:** September 23, 2026
 **Targets:** Windows, macOS, Linux/X11  
 **Language:** C++20  
 **Distribution:** static libraries  
 **Windowing / embedding:** Pugl (Win32 / Cocoa / X11)  
 **Rendering:** Skia Ganesh/OpenGL for native views + Skia raster for headless rendering  
 
-This document records **durable architectural decisions** for NativeUI. Execution status, ticket dependencies and short-lived implementation notes belong in `CONTEXT.md`, `ROADMAP.md` and GitHub Issues.
+This document records **durable architectural decisions** for NativeUI. Execution status and ticket dependencies belong in GitHub Issues; `ROADMAP.md` summarizes milestones.
 
 ---
 
@@ -236,13 +236,13 @@ A second platform backend should be introduced only if a real second implementat
 
 ## 6. Rendering: Skia
 
-NativeUI uses Skia as the rendering engine and `olilarkin/skia-builder` as the binary distribution source.
+NativeUI uses Skia as the rendering engine and the pinned `hemduf/skia-builder` fork of `olilarkin/skia-builder` as the binary distribution source.
 
 Current pin:
 
 ```text
-repository: olilarkin/skia-builder
-release:    chrome/m149
+repository: hemduf/skia-builder (fork of olilarkin/skia-builder)
+release:    chrome/m153
 ```
 
 NativeUI does not run GN, Ninja or depot_tools and does not maintain parallel Skia build arguments.
@@ -264,7 +264,10 @@ current OpenGL context
 Skia Ganesh / OpenGL
       |
       v
-SkSurface / SkCanvas
+per-view persistent scene SkSurface / SkCanvas
+      |
+      v
+cached scene snapshot -> borrowed Pugl framebuffer SkSurface
 ```
 
 This avoids custom platform presenters such as:
@@ -274,7 +277,15 @@ This avoids custom platform presenters such as:
 - X11 `XImage` / MIT-SHM presentation;
 - NativeUI-owned platform OpenGL context creation.
 
-The Pugl expose callback is the normal render entry point. NativeUI renders into the current view framebuffer through Skia Ganesh and lets Pugl own platform context enter/leave/swap behavior.
+The Pugl expose callback is the normal render entry point. NativeUI owns one optional RGBA8888/sRGB scene target per view and wraps Pugl's current framebuffer only as a borrowed presentation target. Pugl still owns context enter/leave and platform swap. A clean expose copies the last complete scene to the current framebuffer without walking the retained tree. A localized paint invalidation can update a conservative device-pixel rectangle in the existing scene target; surface creation/recreation, size or scale changes, layout/structure preparation, overlays, inspector painting, invalid damage mapping and effect cases without proven input support use the full-scene path.
+
+For a partial update, NativeUI prepares layout and retained geometry before capturing the bounded Tree damage set. It maps the continuous logical bounds to an outward-rounded physical clip with an antialias guard, clears that clip to opaque black with source blending, and uses T094 to skip unrelated retained paint callbacks. The traversal query is the outward-rounded inverse of the actual device clip, including the antialias guard. Filtered painting encountered during a partial pass aborts that publication and retains the captured work for a full repaint; a scene already known to contain effects also stays on the full-scene path, so a filter's discrete fringe cannot be skipped by a partial traversal. The scene token commits only after checked Ganesh submission. Any earlier failure restores captured damage alongside later/reentrant invalidations and leaves the scene invalid for a full retry.
+
+Every full rebuild resets the offscreen scene to opaque black, restores the framework canvas state, scales logical geometry once, paints the retained tree and checks Ganesh scene submission before marking the scene complete. The snapshot used for presentation is cached across clean exposes and released before scene mutation to avoid retaining a copy-on-write reference. Skia may still materialize transient GPU storage internally. Presentation uses a full physical-pixel copy with source blending and nearest sampling. The renderer restores the borrowed framebuffer binding before Pugl leaves the expose callback.
+
+An allocation or paint/submission failure keeps full repaint pending; a failure after a valid scene commit but within the observable copy/submission path keeps presentation pending and can retry without retained painting. The view remains open and waits for a later expose. Invalidation raised during successful paint gets one coalesced redraw request at the next Pugl update checkpoint. No timer or failure retry loop runs at idle. Pugl may swap even after an expose callback reports an error, and an unreported OS swap failure cannot be detected by this renderer.
+
+Scene validation rejects zero, non-finite, unrepresentable or over-budget physical extents before narrowing or allocation. One RGBA8 scene is capped at 128 MiB; a replacement transaction may temporarily hold two scenes (256 MiB total scene storage), excluding Skia's internal cache and Pugl's owned buffers. A live context releases owned GPU resources at `PUGL_UNREALIZE`; a confirmed lost context is abandoned without calling stale GL resources.
 
 ### 6.2 Headless renderer
 
@@ -299,6 +310,45 @@ Linux   -> Vulkan / Dawn / Graphite
 ```
 
 That change must not require rewriting the component model, DSL, layout or widget APIs.
+
+### 6.4 Built-in procedural sources
+
+`NoiseSource` is a backend-neutral immutable value. Creating it explicitly
+compiles the built-in SkSL through the same `ShaderProgram` path used by user
+shaders. Turning it into a `Brush` binds uniforms and snapshots the compiled
+program; painting never recompiles source. Mutable GPU/context resources remain
+owned by the renderer and are not shared across independent views.
+
+The pinned Skia public runtime-effect API admits ES2 SkSL. The NativeUI 1.1
+value-noise hash therefore represents each 32-bit integer as four exact byte
+lanes in `float4`, including modulo arithmetic, rotation and shifts. It does
+not require SkSL `uint`, `#version 300`, or private runtime-effect options.
+The ticket freezes the complete hash, high-24-bit lattice value and quintic
+interpolation contract for later noise families. Raster and GPU paths use the
+same SkSL and are compared with an independent double-precision CPU oracle.
+
+T089 adds a frozen Perlin gradient kernel on the same hash and fade:
+`hash & 7` selects one of eight fixed gradients (four axis-aligned, four
+diagonal with `1/sqrt(2)` components), the four corner dot products are
+interpolated with the quintic fade, and the public scalar is exactly
+`clamp(0.5 + raw / (2 * sqrt(2)), 0, 1)`. The gradient table and
+normalization are normative, so CPU, raster and GPU cannot choose
+incompatible kernels; the double-precision CPU oracle implements the exact
+contract and raster/GPU float paths are compared with it within the single
+documented tolerance pair.
+
+T090 adds a simplex-style gradient kernel on the same hash and gradient table:
+local logical coordinates are scaled by `feature_size`, skewed with
+`F2 = (sqrt(3) - 1) / 2` and unskewed with `G2 = (3 - sqrt(3)) / 6` on one
+simplex lattice, and the exact `x0 > y0` branch (equality takes the second
+branch) selects the second and third lattice corners. Each corner contributes
+`q > 0 ? q^4 * dot(g, d) : 0` with `q = 0.5 - |d|^2`, and the public scalar is
+exactly `clamp(0.5 + 0.5 * 70 * (n0 + n1 + n2), 0, 1)`. Non-finite skew
+intermediates and lattice coordinates outside `[INT32_MIN, INT32_MAX - 1]`
+produce exactly 0.5 before any conversion; the ES2 float path checks the skewed
+coordinates before `floor` because it cannot represent the tighter integer
+bound. The same double-precision oracle and the same documented tolerance pair
+cover CPU, raster and GPU.
 
 ---
 
@@ -565,7 +615,7 @@ The internal bridge follows this conceptual mapping:
 ```text
 PUGL_KEY_PRESS/RELEASE -> KeyDown / KeyUp
 PUGL_TEXT              -> committed TextInput
-PUGL_BUTTON_*          -> PointerDown / PointerUp
+PUGL_BUTTON_*          -> PointerDown / PointerUp (left), ContextMenu (right press)
 PUGL_MOTION            -> PointerMove
 PUGL_SCROLL            -> PointerWheel
 PUGL_FOCUS_*           -> focus activation/deactivation
@@ -574,6 +624,12 @@ PUGL_EXPOSE            -> native frame render
 PUGL_TIMER             -> timer/animation work
 PUGL_DATA_*            -> clipboard / drop flow
 ```
+
+`InputType::ContextMenu` carries the same logical position and modifiers as a pointer
+press and is delivered to the pointer hit target without moving keyboard focus. If a
+pointer capture is active, its owner first receives `PointerCancel` and the capture is
+released; context-menu routing cannot establish a replacement capture. Ignored requests
+bubble through ancestors like other targeted input.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 
@@ -1266,6 +1322,5 @@ None of these currently justifies reimplementing Win32, Cocoa and X11 windowing 
 - Skia build documentation — https://skia.org/docs/user/build/
 - NativeUI workflow — `AGENTS.md`
 - NativeUI mandatory review policy — `CODE_REVIEW.md`
-- NativeUI current recovery context — `CONTEXT.md`
 - NativeUI execution roadmap — `ROADMAP.md`
 - NativeUI accessibility semantics and platform mapping — `docs/accessibility.md`

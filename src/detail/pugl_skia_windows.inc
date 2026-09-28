@@ -284,6 +284,36 @@ struct Application::Impl final {
     std::unordered_map<std::uint64_t, platform_detail::ApplicationWindowRecord> windows;
     std::string last_error;
 
+#if defined(__EMSCRIPTEN__)
+    // Emscripten exposes one main-loop slot per wasm module. Keep only the
+    // identity of the Application that currently owns that slot; all window,
+    // renderer, input and dispatcher state remains instance-owned.
+    static Impl*& browser_main_loop_owner() noexcept {
+        static Impl* owner{};
+        return owner;
+    }
+
+    void stop_browser_main_loop() noexcept {
+        if (browser_main_loop_owner() == this) {
+            browser_main_loop_owner() = nullptr;
+            emscripten_cancel_main_loop();
+        }
+    }
+
+    void fail_browser_main_loop(const char* message) noexcept {
+        terminal_error = true;
+        quit_requested = true;
+        last_error.clear();
+        try {
+            last_error = message ? message : "Unhandled exception in browser main loop";
+        } catch (...) {
+            // Error reporting must never let an allocation failure cross the
+            // browser callback boundary.
+        }
+        stop_browser_main_loop();
+    }
+#endif
+
     Impl() {
         // Dispatcher worker posts use the platform wake primitive captured by
         // PuglDispatcherWakeBackend. X11 requires XInitThreads before any other
@@ -295,10 +325,19 @@ struct Application::Impl final {
             return;
         }
         puglSetWorldString(world, PUGL_CLASS_NAME, "NativeUI");
+#if !defined(__EMSCRIPTEN__)
+        // The browser event loop never blocks inside puglUpdate, so no native
+        // wake primitive (and no extra hidden Pugl view) is needed.
         wake_backend = std::make_shared<platform_detail::PuglDispatcherWakeBackend>(world);
+#endif
     }
 
     ~Impl() {
+#if defined(__EMSCRIPTEN__)
+        // A retained browser callback must never outlive its Application.
+        stop_browser_main_loop();
+#endif
+
         // Application must outlive every explicitly attached StandaloneWindow.
         // Terminating here is deliberate: freeing the PROGRAM world while a
         // borrowed view is still alive would turn a clear lifetime violation
@@ -364,6 +403,7 @@ struct Application::Impl final {
             !close_control_checkpoint || next_window_id == 0) {
             return 0;
         }
+#if !defined(__EMSCRIPTEN__)
         if (!wake_backend || !wake_backend->ensure_view()) {
             terminal_error = true;
             quit_requested = true;
@@ -372,6 +412,7 @@ struct Application::Impl final {
                 : "dispatcher wake bridge initialization failed";
             return 0;
         }
+#endif
 
         const auto id = next_window_id++;
         windows.emplace(
@@ -467,10 +508,51 @@ std::string_view Application::last_error() const noexcept {
 }
 int Application::run() {
     if (!impl_ || !impl_->valid()) return 1;
+#if defined(__EMSCRIPTEN__)
+    // The browser owns one module-global main-loop slot. A second Application
+    // remains fully usable through non-blocking poll(); it simply cannot also
+    // claim run().
+    auto*& browser_owner = Application::Impl::browser_main_loop_owner();
+    if (browser_owner) {
+        try {
+            impl_->last_error = browser_owner == impl_.get()
+                ? "Application::run() already owns the Emscripten module main loop"
+                : "Another Application::run() owns the Emscripten module main loop; use poll() for additional instances";
+        } catch (...) {
+        }
+        return 1;
+    }
+
+    impl_->last_error.clear();
+    browser_owner = impl_.get();
+    emscripten_set_main_loop_arg(
+        [](void* data) {
+            auto* impl = static_cast<Application::Impl*>(data);
+            if (!impl) {
+                emscripten_cancel_main_loop();
+                return;
+            }
+
+            try {
+                if (!impl->pump(0.0)) {
+                    impl->stop_browser_main_loop();
+                }
+            } catch (const std::exception& error) {
+                impl->fail_browser_main_loop(error.what());
+            } catch (...) {
+                impl->fail_browser_main_loop("Unhandled exception in browser main loop");
+            }
+        },
+        impl_.get(),
+        0,
+        1);
+    return 0;
+#else
     while (!impl_->quit_requested && !impl_->terminal_error) {
         if (!impl_->pump(-1.0) && !impl_->quit_requested) return 1;
     }
     return impl_->terminal_error ? 1 : 0;
+#endif
 }
 bool Application::poll(double timeout_seconds) {
     return impl_ && impl_->pump(timeout_seconds);
@@ -530,6 +612,83 @@ struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
     }
 };
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool detail::PlatformTestAccess::request_gpu_readback(
+    StandaloneWindow& window,
+    Point logical_point) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_gpu_readback(logical_point);
+}
+
+std::optional<detail::PlatformReadbackPixel>
+detail::PlatformTestAccess::take_gpu_readback(
+    StandaloneWindow& window) noexcept {
+    if (!window.impl_ || !window.impl_->core) return std::nullopt;
+    return window.impl_->core->take_gpu_readback();
+}
+
+bool detail::PlatformTestAccess::request_gpu_readback_region(
+    StandaloneWindow& window,
+    int x,
+    int y,
+    int width,
+    int height) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_gpu_readback_region(x, y, width, height);
+}
+
+std::optional<detail::PlatformReadbackRegion>
+detail::PlatformTestAccess::take_gpu_readback_region(
+    StandaloneWindow& window) noexcept {
+    if (!window.impl_ || !window.impl_->core) return std::nullopt;
+    return window.impl_->core->take_gpu_readback_region();
+}
+
+bool detail::PlatformTestAccess::suppress_platform_focus(
+    StandaloneWindow& window, bool suppressed) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->suppress_platform_focus(suppressed);
+}
+
+bool detail::PlatformTestAccess::inject_scene_fault(
+    StandaloneWindow& window,
+    detail::SceneFaultStage stage) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->inject_scene_fault(stage);
+}
+
+detail::SceneDiagnostics detail::PlatformTestAccess::scene_diagnostics(
+    StandaloneWindow& window) noexcept {
+    if (!window.impl_ || !window.impl_->core) return {};
+    return window.impl_->core->scene_diagnostics();
+}
+
+bool detail::PlatformTestAccess::request_context_recreation(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_context_recreation();
+}
+
+bool detail::PlatformTestAccess::override_scene_scale(
+    StandaloneWindow& window,
+    std::optional<float> scale) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->override_scene_scale(scale);
+}
+
+bool detail::PlatformTestAccess::reject_next_deferred_redraw(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->reject_next_deferred_redraw();
+}
+
+bool detail::PlatformTestAccess::request_expose(
+    StandaloneWindow& window) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_expose();
+}
+
+#endif
 StandaloneWindow::StandaloneWindow(Application& application, UI& ui, WindowDesc desc)
     : impl_(std::make_unique<Impl>(
           application.impl_ ? application.impl_->wake_backend : nullptr)) {
@@ -777,7 +936,7 @@ void StandaloneWindow::request_close() {
 }
 bool StandaloneWindow::valid() const noexcept {
     return impl_ && impl_->core && impl_->construction_error.empty() &&
-           impl_->core->last_error().empty();
+           impl_->core->native_view_open();
 }
 bool StandaloneWindow::should_close() const noexcept {
     return !impl_ || !impl_->core || impl_->close_state.pending() ||
@@ -878,6 +1037,30 @@ struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     ViewCore core;
 };
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool detail::PlatformTestAccess::request_gpu_readback(
+    EmbeddedView& view,
+    Point logical_point) noexcept {
+    return view.impl_ && view.impl_->core.request_gpu_readback(logical_point);
+}
+
+std::optional<detail::PlatformReadbackPixel>
+detail::PlatformTestAccess::take_gpu_readback(EmbeddedView& view) noexcept {
+    return view.impl_ ? view.impl_->core.take_gpu_readback() : std::nullopt;
+}
+
+bool detail::PlatformTestAccess::inject_scene_fault(
+    EmbeddedView& view,
+    detail::SceneFaultStage stage) noexcept {
+    return view.impl_ && view.impl_->core.inject_scene_fault(stage);
+}
+
+detail::SceneDiagnostics detail::PlatformTestAccess::scene_diagnostics(
+    EmbeddedView& view) noexcept {
+    return view.impl_ ? view.impl_->core.scene_diagnostics() : detail::SceneDiagnostics{};
+}
+#endif
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
     : impl_(std::make_unique<Impl>(ui, parent, size)) {}

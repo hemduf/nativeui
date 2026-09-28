@@ -1,9 +1,12 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/image.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -11,9 +14,27 @@
 
 namespace ui {
 
+class ShaderInstance;
+
 namespace detail {
 struct EffectTestAccess;
+struct ShaderBrushAccess;
+struct ImageTextureBrushAccess;
+struct ShaderBrushMaterializer;
+struct ShaderBrushSnapshot;
 }
+
+struct VisualOutset {
+    float left{};
+    float top{};
+    float right{};
+    float bottom{};
+
+    [[nodiscard]] static VisualOutset uniform(float value) noexcept {
+        if (!std::isfinite(value) || value <= 0.0f) value = 0.0f;
+        return {value, value, value, value};
+    }
+};
 
 class Effect {
 public:
@@ -21,6 +42,47 @@ public:
         return Effect{Kind::GaussianBlur,
                       canonical_sigma(sigma_x),
                       canonical_sigma(sigma_y)};
+    }
+
+    [[nodiscard]] static Effect drop_shadow(Point offset,
+                                            float sigma,
+                                            Color color) noexcept {
+        sigma = canonical_sigma(sigma);
+        return Effect{Kind::DropShadow,
+                      sigma,
+                      sigma,
+                      canonical_offset(offset),
+                      canonical_color(color)};
+    }
+
+    [[nodiscard]] static Effect drop_shadow_only(Point offset,
+                                                 float sigma,
+                                                 Color color) noexcept {
+        sigma = canonical_sigma(sigma);
+        return Effect{Kind::DropShadowOnly,
+                      sigma,
+                      sigma,
+                      canonical_offset(offset),
+                      canonical_color(color)};
+    }
+
+    [[nodiscard]] VisualOutset visual_outset() const noexcept {
+        if (kind_ == Kind::GaussianBlur) {
+            return {3.0f * sigma_x_,
+                    3.0f * sigma_y_,
+                    3.0f * sigma_x_,
+                    3.0f * sigma_y_};
+        }
+
+        if (color_.a <= 0.0f) return {};
+
+        const float support = 3.0f * sigma_x_;
+        return {
+            std::max(0.0f, support - offset_.x),
+            std::max(0.0f, support - offset_.y),
+            std::max(0.0f, support + offset_.x),
+            std::max(0.0f, support + offset_.y),
+        };
     }
 
     Effect(const Effect&) noexcept = default;
@@ -32,14 +94,45 @@ public:
 private:
     enum class Kind : unsigned char {
         GaussianBlur,
+        DropShadow,
+        DropShadowOnly,
     };
 
-    Effect(Kind kind, float sigma_x, float sigma_y) noexcept
-        : kind_(kind), sigma_x_(sigma_x), sigma_y_(sigma_y) {}
+    Effect(Kind kind,
+           float sigma_x,
+           float sigma_y,
+           Point offset = {},
+           Color color = {}) noexcept
+        : kind_(kind),
+          sigma_x_(sigma_x),
+          sigma_y_(sigma_y),
+          offset_(offset),
+          color_(color) {}
 
     [[nodiscard]] static float canonical_sigma(float sigma) noexcept {
         if (!std::isfinite(sigma) || sigma <= 0.0f) return 0.0f;
-        return sigma > 64.0f ? 64.0f : sigma;
+        return std::min(sigma, 64.0f);
+    }
+
+    [[nodiscard]] static float canonical_offset_axis(float value) noexcept {
+        if (!std::isfinite(value)) return 0.0f;
+        return std::clamp(value, -256.0f, 256.0f);
+    }
+
+    [[nodiscard]] static Point canonical_offset(Point value) noexcept {
+        return {canonical_offset_axis(value.x), canonical_offset_axis(value.y)};
+    }
+
+    [[nodiscard]] static float canonical_color_channel(float value) noexcept {
+        if (!std::isfinite(value)) return 0.0f;
+        return std::clamp(value, 0.0f, 1.0f);
+    }
+
+    [[nodiscard]] static Color canonical_color(Color value) noexcept {
+        return {canonical_color_channel(value.r),
+                canonical_color_channel(value.g),
+                canonical_color_channel(value.b),
+                canonical_color_channel(value.a)};
     }
 
     friend class Painter;
@@ -48,6 +141,8 @@ private:
     Kind kind_{Kind::GaussianBlur};
     float sigma_x_{};
     float sigma_y_{};
+    Point offset_{};
+    Color color_{};
 };
 
 static_assert(std::is_nothrow_copy_constructible_v<Effect>);
@@ -125,6 +220,11 @@ public:
     Brush(Color color) noexcept : value_(color) {}
     Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
     Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
+    explicit Brush(const ShaderInstance& shader);
+    explicit Brush(ImageTexture texture) noexcept
+        : value_(texture.valid()
+            ? Storage{std::move(texture)}
+            : Storage{transparent()}) {}
 
     Brush(const Brush&) = default;
 
@@ -135,7 +235,12 @@ public:
         return *this;
     }
 
-    Brush(Brush&& other) noexcept : value_(std::move(other.value_)) {
+    Brush(Brush&& other) noexcept : value_(transparent()) {
+        // Construct the variant in a known active alternative before moving the
+        // payload. Besides preserving the zero-allocation move contract, this
+        // avoids GCC's false-positive maybe-uninitialized diagnostic when a
+        // Brush is moved into a closure at -O3/-Werror.
+        value_ = std::move(other.value_);
         other.reset_to_transparent();
     }
 
@@ -152,7 +257,12 @@ public:
     ~Brush() noexcept = default;
 
 private:
-    using Storage = std::variant<Color, LinearGradient, RadialGradient>;
+    using Storage = std::variant<
+        Color,
+        LinearGradient,
+        RadialGradient,
+        ImageTexture,
+        std::shared_ptr<const detail::ShaderBrushSnapshot>>;
 
     static_assert(std::is_nothrow_constructible_v<Storage, Color>);
     static_assert(std::is_nothrow_move_constructible_v<Storage>);
@@ -174,6 +284,9 @@ private:
     }
 
     friend class Painter;
+    friend struct detail::ShaderBrushAccess;
+    friend struct detail::ImageTextureBrushAccess;
+    friend struct detail::ShaderBrushMaterializer;
     Storage value_;
 };
 
