@@ -98,6 +98,7 @@ set(_accessibility_tests
   "nativeui_t068_retained_native_checkpoint_tests|tests/t068_retained_native_checkpoint_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_publication_sink_tests|tests/t068_publication_sink_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_virtual_list_action_tests|tests/t068_virtual_list_action_tests.cpp|nativeui_add_accessibility_test"
+  "nativeui_t068_concurrent_snapshot_readers|tests/t068_concurrent_snapshot_readers.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_uia_mapping|tests/t045/t068_uia_mapping_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_uia_provider|tests/t045/t068_uia_provider_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_semantic_macos_child_projection|tests/t045/semantic_macos_child_projection_tests.cpp|nativeui_add_macos_accessibility_test"
@@ -148,6 +149,11 @@ require_text("${_root_widget_component}" "test_support.hpp"
 file(READ "${SOURCE_DIR}/tests/t045/CMakeLists.txt" _standalone_cmake)
 require_text("${_standalone_cmake}" "nativeui_add_semantics_test(t068_widget_semantic_values"
   "standalone widget values registration")
+# The Batch 7b concurrent reader stress is platform-free and header-only, so it
+# must stay registered in the standalone T045 project as well.
+require_text("${_standalone_cmake}"
+  "nativeui_add_semantics_test(t068_concurrent_snapshot_readers"
+  "standalone concurrent snapshot reader registration")
 
 # The T065-backed action suites keep the standalone dispatcher compilation.
 require_text("${_tests_cmake}"
