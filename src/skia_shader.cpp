@@ -572,7 +572,7 @@ namespace {
 
 std::size_t ShaderBrushAccess::semantic_hash(const Brush& brush) noexcept {
     return std::visit(
-        [](const auto& source) noexcept -> std::size_t {
+        [&brush](const auto& source) noexcept -> std::size_t {
             using Source = std::decay_t<decltype(source)>;
             std::size_t seed = std::hash<std::size_t>{}(
                 brush.value_.index());
