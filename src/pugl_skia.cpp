@@ -26,6 +26,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <mutex>
 #include <vector>
 

@@ -159,14 +159,28 @@ public:
         return std::move(*this);
     }
 
+    Knob&& on_edit(EditCallbacks<float> callbacks) && {
+        callbacks_ = std::move(callbacks);
+        return std::move(*this);
+    }
+
+    Knob&& wheel_enabled(bool value = true) && {
+        wheel_enabled_ = value;
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
-        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum]() mutable {
+        auto callbacks = std::move(callbacks_);
+        const bool wheel_enabled = wheel_enabled_;
+        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum,
+                     callbacks = std::move(callbacks), wheel_enabled]() mutable {
                         return std::make_unique<KnobComponent>(
-                            std::move(label), std::move(state), minimum, maximum);
+                            std::move(label), std::move(state), minimum, maximum,
+                            std::move(callbacks), wheel_enabled);
                     },
                     {}};
     }
@@ -176,6 +190,8 @@ private:
     Binding<float> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
+    EditCallbacks<float> callbacks_;
+    bool wheel_enabled_{};
 };
 
 
@@ -192,13 +208,20 @@ public:
         return std::move(*this);
     }
 
+    Toggle&& on_edit(EditCallbacks<bool> callbacks) && {
+        callbacks_ = std::move(callbacks);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto state = std::move(state_);
         auto style = std::move(style_);
-        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style)]() mutable {
+        auto callbacks = std::move(callbacks_);
+        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style),
+                     callbacks = std::move(callbacks)]() mutable {
                         return std::make_unique<ToggleComponent>(
-                            std::move(label), std::move(state), std::move(style));
+                            std::move(label), std::move(state), std::move(style), std::move(callbacks));
                     },
                     {}};
     }
@@ -207,6 +230,7 @@ private:
     std::string label_;
     Binding<bool> state_;
     ToggleStyle style_;
+    EditCallbacks<bool> callbacks_;
 };
 
 

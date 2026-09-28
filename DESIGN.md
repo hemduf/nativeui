@@ -1297,6 +1297,17 @@ None of these currently justifies reimplementing Win32, Cocoa and X11 windowing 
 
 ---
 
+## Value edit lifetimes and embedded visibility
+
+The [value editing contract](docs/value-editing.md) defines generic `EditSession<T>`
+notifications, standard control input boundaries, exception/reentrancy policy,
+and optional hidden `EmbeddedView` construction. State and editing remain
+UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The macOS Pugl visibility compatibility shim stages sources privately and is
+shared by source-tree and installed-package final consumers.
+
+---
+
 ## 33. References
 
 - Pugl — https://github.com/lv2/pugl

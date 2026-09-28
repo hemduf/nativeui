@@ -4,6 +4,7 @@
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/gesture.hpp>
+#include <nativeui/edit.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
 #include <nativeui/toggle_style.hpp>
@@ -155,12 +156,15 @@ private:
 
 class KnobComponent final : public Component {
 public:
-    KnobComponent(std::string label, Binding<float> state, float minimum, float maximum)
+    KnobComponent(std::string label, Binding<float> state, float minimum, float maximum,
+                  EditCallbacks<float> callbacks = {}, bool wheel_enabled = false)
         : label_(std::move(label)),
           state_(std::move(state)),
+          edit_(state_, std::move(callbacks)),
           value_(state_.get()),
           minimum_(minimum),
-          maximum_(maximum) {
+          maximum_(maximum),
+          wheel_enabled_(wheel_enabled) {
         if (maximum_ <= minimum_) maximum_ = minimum_ + 1.0f;
     }
 
@@ -177,8 +181,43 @@ public:
         });
     }
 
-    EventResult input(const InputEvent& event, InputContext& ctx) override {
+    void unmount(LifecycleContext&) override {
+        subscription_.reset();
+        (void)drag_gesture_.cancel();
+        edit_.cancel();
+    }
+
+    void deactivate(LifecycleContext&) override {
+        (void)drag_gesture_.cancel();
+        edit_.cancel();
+    }
+
+    void focus_changed(bool focused, FocusContext& context) override {
+        if (!focused) {
+            (void)drag_gesture_.cancel();
+            context.invalidate();
+            edit_.cancel();
+        }
+    }
+
+    EventResult input(const InputEvent& event, InputContext& ctx) override try {
         const float range = maximum_ - minimum_;
+        if (event.type == InputType::KeyDown && event.key == Key::Escape &&
+            drag_gesture_.active()) {
+            (void)drag_gesture_.cancel();
+            ctx.release_pointer();
+            ctx.invalidate();
+            edit_.cancel();
+            return EventResult::Handled;
+        }
+        if (event.type == InputType::PointerWheel && wheel_enabled_) {
+            if (effective_read_only()) return EventResult::Handled;
+            if (!std::isfinite(event.delta.y)) return EventResult::Ignored;
+            const float step = event.shift ? range * 0.002f : range * 0.01f;
+            edit_.set(std::clamp(value_ + event.delta.y * step, minimum_, maximum_),
+                      EditSource::Wheel);
+            return EventResult::Handled;
+        }
         if (event.type == InputType::KeyDown) {
             float delta = 0.0f;
             const float step = event.shift ? range * 0.002f : range * 0.01f;
@@ -187,8 +226,7 @@ public:
             if (delta == 0.0f) return EventResult::Ignored;
 
             if (!effective_read_only()) {
-                state_.set(std::clamp(value_ + delta, minimum_, maximum_));
-                ctx.invalidate();
+                edit_.set(std::clamp(value_ + delta, minimum_, maximum_), EditSource::Keyboard);
             }
             return EventResult::Handled;
         }
@@ -199,6 +237,7 @@ public:
             drag_start_value_ = value_;
             ctx.capture_pointer();
             ctx.invalidate();
+            edit_.begin(EditSource::Pointer);
             return EventResult::Handled;
         }
 
@@ -207,36 +246,47 @@ public:
                 (void)drag_gesture_.cancel();
                 ctx.release_pointer();
                 ctx.invalidate();
+                edit_.cancel();
                 return EventResult::Handled;
             }
             const auto drag = drag_gesture_.move(event.position);
+            ctx.invalidate();
             if (drag.dragging) {
                 const float value_delta = drag_value_delta(
                     drag.total, DragAxis::Vertical, range / 180.0f, true);
-                state_.set(std::clamp(drag_start_value_ + value_delta, minimum_, maximum_));
+                edit_.update(std::clamp(drag_start_value_ + value_delta, minimum_, maximum_));
             }
-            ctx.invalidate();
             return EventResult::Handled;
         }
 
         if (event.type == InputType::PointerUp && drag_gesture_.active()) {
-            if (effective_read_only()) {
+            const bool cancelled = effective_read_only();
+            if (cancelled) {
                 (void)drag_gesture_.cancel();
             } else {
                 (void)drag_gesture_.end(event.position);
             }
             ctx.release_pointer();
             ctx.invalidate();
+            if (cancelled) edit_.cancel(); else edit_.end();
             return EventResult::Handled;
         }
 
         if (event.type == InputType::PointerCancel && drag_gesture_.active()) {
             (void)drag_gesture_.cancel();
             ctx.invalidate();
+            edit_.cancel();
             return EventResult::Handled;
         }
 
         return EventResult::Ignored;
+    } catch (...) {
+        // A callback failure ends this physical gesture as well as its value
+        // edit. Release capture before propagating the original exception.
+        (void)drag_gesture_.cancel();
+        try { ctx.release_pointer(); } catch (...) {}
+        try { edit_.cancel(); } catch (...) {}
+        throw;
     }
 
     void paint(PaintContext& p) const override {
@@ -272,9 +322,11 @@ public:
 private:
     std::string label_;
     Binding<float> state_;
+    EditSession<float> edit_;
     float value_{};
     float minimum_{};
     float maximum_{1.0f};
+    bool wheel_enabled_{};
     float drag_start_value_{};
     DragGesture drag_gesture_{};
     Binding<float>::Subscription subscription_;
@@ -283,8 +335,10 @@ private:
 
 class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
-    ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style)
-        : label_(std::move(label)), state_(std::move(state)), style_(std::move(style)) {}
+    ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style,
+                    EditCallbacks<bool> callbacks = {})
+        : label_(std::move(label)), state_(std::move(state)),
+          edit_(state_, std::move(callbacks)), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
@@ -305,7 +359,7 @@ public:
             });
     }
 
-    void unmount(LifecycleContext&) override { subscription_.reset(); }
+    void unmount(LifecycleContext&) override { subscription_.reset(); edit_.cancel(); }
 
     void focus_changed(bool focused, FocusContext& context) override {
         const auto before = presentation_signature(focused_);
@@ -317,6 +371,7 @@ public:
         }
         const auto after = presentation_signature(focused_);
         invalidate_style_transition(before, after, context);
+        if (!focused) edit_.cancel();
     }
 
     void deactivate(LifecycleContext& context) override {
@@ -327,9 +382,10 @@ public:
         enter_pressed_ = false;
         const auto after = presentation_signature(focused_);
         invalidate_style_transition(before, after, context);
+        edit_.cancel();
     }
 
-    EventResult input(const InputEvent& event, InputContext& ctx) override {
+    EventResult input(const InputEvent& event, InputContext& ctx) override try {
         const auto before = presentation_signature(focused_);
         const bool pointer_event = event.type == InputType::PointerDown ||
             event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
@@ -350,7 +406,7 @@ public:
             invalidate_style_transition(before, after_interaction, ctx);
             if (event.type == InputType::PointerDown && !effective_read_only()) {
                 const bool next = !state_.get();
-                state_.set(next);
+                edit_.set(next, EditSource::Pointer);
                 return outcome.result;
             }
             return outcome.result;
@@ -363,7 +419,7 @@ public:
                 const auto after_interaction = presentation_signature(focused_);
                 invalidate_style_transition(before, after_interaction, ctx);
                 const bool next = !state_.get();
-                state_.set(next);
+                edit_.set(next, EditSource::Keyboard);
                 return EventResult::Handled;
             }
             return EventResult::Handled;
@@ -375,7 +431,7 @@ public:
                 const auto after_interaction = presentation_signature(focused_);
                 invalidate_style_transition(before, after_interaction, ctx);
                 const bool next = !state_.get();
-                state_.set(next);
+                edit_.set(next, EditSource::Keyboard);
                 return EventResult::Handled;
             }
             return EventResult::Handled;
@@ -398,6 +454,12 @@ public:
         }
 
         return EventResult::Ignored;
+    } catch (...) {
+        space_pressed_ = false;
+        enter_pressed_ = false;
+        try { interaction_.cancel_pending_mutation(ctx, false); } catch (...) {}
+        try { edit_.cancel(); } catch (...) {}
+        throw;
     }
 
     void paint(PaintContext& p) const override {
@@ -640,6 +702,7 @@ private:
 
     std::string label_;
     Binding<bool> state_;
+    EditSession<bool> edit_;
     ToggleStyle style_;
     detail::PressActivationState interaction_;
     bool focused_{};
