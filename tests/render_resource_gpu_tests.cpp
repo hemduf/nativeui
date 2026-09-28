@@ -1,6 +1,9 @@
 #include "detail/platform_test_access.hpp"
 
 #include <nativeui/nativeui.hpp>
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+#include <nativeui/inspector.hpp>
+#endif
 
 #include <cstdint>
 #include <iostream>
@@ -91,6 +94,11 @@ int main() {
     const auto brush = make_shader_brush();
     auto first_ui = make_ui(brush);
     auto second_ui = make_ui(brush);
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+    // The inspector uses the normal retained paint path and must not bypass
+    // per-view render-resource materialization/caching.
+    ui::debug::set_inspector_enabled(first_ui, true);
+#endif
 
     auto first = std::make_unique<ui::StandaloneWindow>(
         application,

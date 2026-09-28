@@ -367,7 +367,8 @@ private:
         }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
         if (inspector_enabled_) {
-            auto snapshot = tree_.paint_with_inspector_snapshot(canvas, platform);
+            auto snapshot = tree_.paint_with_inspector_snapshot_with_resources(
+                canvas, platform, private_hooks);
             detail::paint_inspector_overlay(canvas, snapshot, inspector_selected_node_);
             return;
         }
