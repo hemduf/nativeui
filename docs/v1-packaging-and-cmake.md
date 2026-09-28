@@ -1,6 +1,6 @@
 # NativeUI 1.0 packaging and CMake
 
-This chapter documents the stable NativeUI 1.0 package architecture already implemented in the repository. It explains the roles of the exported core target and the consumer-side CMake helpers without duplicating the final copy-pasteable application tutorial owned by T070.
+This chapter documents the stable NativeUI 1.0 package architecture already implemented in the repository. It explains the roles of the exported core target and the consumer-side CMake helpers without inventing a copy-pasteable application tutorial that is not yet delivered. T070 is closed as not planned; the repository roadmap tracks the reference-application / Getting Started work as a separate replan with T133–T137 unresolved.
 
 This chapter is reconciled against the current public package/API surface on `main`. As that surface evolves, T122 keeps this documentation synchronized with the exported targets and installed/build-tree package helpers rather than waiting on a separate freeze gate. Where implementation details can move without changing the public package contract, this chapter deliberately describes the contract rather than an internal target graph.
 
@@ -53,7 +53,7 @@ The helper accepts final `EXECUTABLE`, `MODULE_LIBRARY` or `SHARED_LIBRARY` targ
 
 `CONSUMER_ID` is a stable reverse-DNS-style ASCII identity. It is build/package identity, not mutable runtime application state. A single consumer identity must not be reused for a different final target in the same configure.
 
-The canonical helper implementation and validation rules live in [`cmake/NativeUIAttachPlatform.cmake`](../cmake/NativeUIAttachPlatform.cmake). T070 owns the final copy-pasteable consumer CMake example, so this chapter does not create a second tutorial snippet that could drift from it.
+The canonical helper implementation and validation rules live in [`cmake/NativeUIAttachPlatform.cmake`](../cmake/NativeUIAttachPlatform.cmake). Until the replanned reference-application track produces a canonical consumer example, this chapter avoids a standalone copy-paste snippet that could drift from the maintained package helpers.
 
 ## High-level standalone application helper
 
@@ -70,7 +70,7 @@ Its current public metadata model includes:
 
 The helper owns native packaging metadata such as the macOS application bundle configuration and the Windows GUI executable/icon resource setup. Application product metadata remains caller input; consumers should not recreate NativeUI's private platform bridge or Objective-C runtime naming themselves.
 
-See [`cmake/NativeUIApplication.cmake`](../cmake/NativeUIApplication.cmake) for the authoritative helper implementation. The final Getting Started journey and reference application remain T070-owned.
+See [`cmake/NativeUIApplication.cmake`](../cmake/NativeUIApplication.cmake) for the authoritative helper implementation. A final Getting Started journey and production reference application are not currently part of the shipped documentation set; their replacement track remains unresolved in T133–T137.
 
 ## Why macOS platform code is consumer-specific
 
@@ -156,5 +156,5 @@ Before this chapter is considered final:
 - confirm the final package/relocation checks are green on the release candidate;
 - ensure no text presents `NativeUI::NativeUI` as a consumer complete-target;
 - ensure no normal-user guidance depends on direct Skia, Pugl or `nativeui/detail/` APIs;
-- link to T070's canonical Getting Started/reference application once its final location is frozen;
+- link to the replanned canonical Getting Started/reference application only after the T133–T137 follow-up track produces a maintained artifact;
 - remove any stale source-tree/POC packaging guidance from README/navigation during the T122 completion cycle.
