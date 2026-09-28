@@ -1,6 +1,7 @@
 #include "src/detail/render_resource_cache.hpp"
 #include "test_support.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -110,6 +111,45 @@ void checked_accounting_rejects_wraparound() {
     NUI_CHECK(cache.retained_accounted_bytes() == 0);
 }
 
+void full_entry_cap_keeps_all_active_resources_pinned() {
+    Cache cache{{.max_entries = 512, .max_accounted_bytes = 4096}};
+    std::array<Cache::Acquisition, 512> active{};
+
+    for (int key = 0; key < 512; ++key) {
+        active[static_cast<std::size_t>(key)] = cache.acquire(key, 1, [key] {
+            return std::make_shared<Resource>(key);
+        });
+        const auto& acquisition = active[static_cast<std::size_t>(key)];
+        NUI_CHECK(acquisition && acquisition.retained && !acquisition.hit);
+        if (key == 510) NUI_CHECK(cache.retained_entries() == 511);
+    }
+
+    NUI_CHECK(cache.retained_entries() == 512);
+    NUI_CHECK(cache.retained_accounted_bytes() == 512);
+
+    auto transient = cache.acquire(512, 1, [] {
+        return std::make_shared<Resource>(512);
+    });
+    NUI_CHECK(transient);
+    NUI_CHECK(!transient.retained);
+    NUI_CHECK(!transient.hit);
+    NUI_CHECK(cache.retained_entries() == 512);
+    NUI_CHECK(cache.retained_accounted_bytes() == 512);
+    NUI_CHECK(!cache.contains(512));
+
+    active.front().resource.reset();
+    transient.resource.reset();
+
+    auto replacement = cache.acquire(512, 1, [] {
+        return std::make_shared<Resource>(1512);
+    });
+    NUI_CHECK(replacement && replacement.retained && !replacement.hit);
+    NUI_CHECK(cache.retained_entries() == 512);
+    NUI_CHECK(cache.retained_accounted_bytes() == 512);
+    NUI_CHECK(!cache.contains(0));
+    NUI_CHECK(cache.contains(512));
+}
+
 void active_entries_are_pinned_and_new_resource_stays_transient() {
     Cache cache{{.max_entries = 1, .max_accounted_bytes = 16}};
 
@@ -215,6 +255,7 @@ int main() {
     entry_cap_is_exact_and_lru_is_deterministic();
     byte_budget_is_exact_and_oversize_is_transient();
     checked_accounting_rejects_wraparound();
+    full_entry_cap_keeps_all_active_resources_pinned();
     active_entries_are_pinned_and_new_resource_stays_transient();
     hash_collision_still_uses_full_key_equality();
     factory_failure_does_not_mutate_cache();
