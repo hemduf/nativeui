@@ -116,6 +116,46 @@ int main() {
         return fail("resource cache was empty after warm render");
     }
 
+    const auto first_before_recreate =
+        PlatformTestAccess::scene_diagnostics(*first);
+    const auto second_before_recreate =
+        PlatformTestAccess::scene_diagnostics(second);
+    if (!PlatformTestAccess::request_context_recreation(*first)) {
+        return fail("live context recreation request rejected");
+    }
+    for (int attempt = 0; attempt < 96; ++attempt) {
+        (void)application.poll(0.0);
+        const auto diagnostics = PlatformTestAccess::scene_diagnostics(*first);
+        if (diagnostics.render_resource_cache_clears >
+                first_before_recreate.render_resource_cache_clears &&
+            diagnostics.scene_allocations >
+                first_before_recreate.scene_allocations) {
+            break;
+        }
+    }
+    if (!read_pixel(application, *first, {8.0f, 8.0f}) ||
+        !wait_for_resource(application, *first)) {
+        return fail("renderer cache did not repopulate after live recreation");
+    }
+    const auto first_after_recreate =
+        PlatformTestAccess::scene_diagnostics(*first);
+    const auto second_after_recreate =
+        PlatformTestAccess::scene_diagnostics(second);
+    if (first_after_recreate.render_resource_cache_clears <=
+            first_before_recreate.render_resource_cache_clears ||
+        first_after_recreate.scene_allocations <=
+            first_before_recreate.scene_allocations ||
+        !first_after_recreate.scene_valid ||
+        first_after_recreate.render_resource_entries == 0) {
+        return fail("live recreation did not clear and rebuild owning cache");
+    }
+    if (second_after_recreate.render_resource_cache_clears !=
+            second_before_recreate.render_resource_cache_clears ||
+        second_after_recreate.render_resource_entries !=
+            second_before_recreate.render_resource_entries) {
+        return fail("live recreation in one view mutated another view cache");
+    }
+
     if (!PlatformTestAccess::inject_scene_fault(
             *first, SceneFaultStage::ConfirmedContextLoss) ||
         !PlatformTestAccess::request_gpu_readback(*first, {8.0f, 8.0f}) ||
