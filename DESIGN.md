@@ -362,6 +362,16 @@ signed conversion or byte-lane +/-1. The ES2 path performs candidate lattice
 steps on exact byte lanes, never by adding/subtracting one from a large float
 lattice index.
 
+T092 adds bounded fractal composition as a creation-time specialization of the
+same immutable source model. `NoiseSource::create_fractal()` accepts only the
+frozen Value, Perlin and Simplex kernels, with 1..6 octaves and the exact
+iterative frequency/amplitude recurrence defined by T092. fBm, Turbulence and
+Ridged modes are generated as one combined SkSL program and compiled exactly
+once before publication. Fractal configuration is a value-only, allocation-free
+`FractalNoiseOptions`; no octave resource, seed salt, mutable cache or
+paint-time compilation is introduced. Worley F1/F2 remain explicitly excluded
+as NativeUI 1.1 fractal bases.
+
 ---
 
 ## 7. Logical coordinates and high DPI
