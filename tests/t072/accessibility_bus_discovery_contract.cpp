@@ -405,12 +405,27 @@ int main() {
         }
     }
 
+    // A syntactically malformed address string is a malformed GetAddress
+    // reply, even though the D-Bus signature itself is correct. Discovery must
+    // reject it here rather than publishing an unusable address to T068.
+    service.set_mode(FakeReplyMode::Address);
+    service.set_reply_address("not-a-dbus-address");
+    {
+        const auto discovery =
+            LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
+        if (!discovery_matches(discovery, LinuxDbusErrorCode::LocalProtocolError, {}) ||
+            !wait_for_exact_call_count(service, 7, 2s)) {
+            return EXIT_FAILURE;
+        }
+    }
+    service.set_reply_address(session_address);
+
     service.set_mode(FakeReplyMode::ErrorReply);
     {
         const auto discovery =
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
         if (!discovery_matches(discovery, LinuxDbusErrorCode::RemoteError, {}) ||
-            !wait_for_exact_call_count(service, 7, 2s)) {
+            !wait_for_exact_call_count(service, 8, 2s)) {
             return EXIT_FAILURE;
         }
     }
@@ -422,7 +437,7 @@ int main() {
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 1ms);
         const auto elapsed = std::chrono::steady_clock::now() - begin;
         if (!discovery_matches(discovery, LinuxDbusErrorCode::Timeout, {}) ||
-            !wait_for_exact_call_count(service, 8, 2s) || elapsed >= 5s) {
+            !wait_for_exact_call_count(service, 11, 2s) || elapsed >= 5s) {
             return EXIT_FAILURE;
         }
     }
@@ -464,7 +479,7 @@ int main() {
             return EXIT_FAILURE;
         }
     }
-    if (!wait_for_exact_call_count(service, 10, 100ms)) {
+    if (!wait_for_exact_call_count(service, 11, 100ms)) {
         return EXIT_FAILURE;
     }
 
@@ -530,7 +545,7 @@ int main() {
         service.set_mode(FakeReplyMode::Address);
         const auto discovery =
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
-        if (!discovery.available() || !wait_for_exact_call_count(service, 12, 2s)) {
+        if (!discovery.available() || !wait_for_exact_call_count(service, 13, 2s)) {
             return EXIT_FAILURE;
         }
         LinuxDbusTransport accessibility;

@@ -781,7 +781,7 @@ struct LinuxDbusTransport::Impl final {
         // value has been constructed on every path.
         try {
             std::string discovered{address};
-            if (discovered.empty()) {
+            if (!linux_dbus_valid_bus_address(discovered)) {
                 return {LinuxDbusErrorCode::LocalProtocolError, {}};
             }
             return {LinuxDbusErrorCode::None, std::move(discovered)};
