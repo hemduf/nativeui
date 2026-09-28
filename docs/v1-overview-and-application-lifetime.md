@@ -123,9 +123,9 @@ A `UI` is one retained tree and is not a process-wide service. Its layout, focus
 
 The native wrappers receive a `UI&`; application code must therefore keep the referenced `UI` alive while the corresponding `StandaloneWindow` or `EmbeddedView` exists. For independent top-level windows, independent `UI` instances are the normal ownership pattern even though the windows share one `Application` event loop.
 
-`UI` is intentionally confined to the UI/main thread. Worker or audio threads must not directly mutate the retained tree. The final cross-thread service guidance belongs to the resources/services documentation and T070 reference application; this chapter only establishes the ownership boundary.
+`UI` is intentionally confined to the UI/main thread. Worker or audio threads must not directly mutate the retained tree. Cross-thread service guidance belongs to [`v1-services-testing-and-limits.md`](v1-services-testing-and-limits.md); this chapter only establishes the ownership boundary.
 
-State/Binding lifetime, equality and callback/reentrancy semantics are intentionally deferred here until T123 and T124 land and T069 freezes that family.
+State/Binding lifetime, equality and callback/reentrancy semantics are part of the landed contract and are documented in [`v1-state-and-binding.md`](v1-state-and-binding.md).
 
 ## EmbeddedView: host-owned child integration
 
@@ -158,13 +158,13 @@ For NativeUI 1.0 application/embedding code, keep these invariants visible in th
 
 These rules are also review requirements; see [CODE_REVIEW.md](../CODE_REVIEW.md) for the project's ownership, instance-isolation, threading and reentrancy checks.
 
-## Deferred reconciliation
+## Remaining reconciliation
 
-This chapter is deliberately limited to stable T122 areas 1-2. Before T122 can be completed, the documentation set still has to be reconciled with:
+This chapter is reconciled with the landed T123/T124 state/binding safety work and with the current public/package surface on `main`; T069 is no longer an active freeze gate.
 
-- T123/T124 for the final `State<T>` / `Binding<T>` ownership and callback contract;
-- T069 for the final frozen backend-neutral C++/CMake surface and removal of pre-v1 compatibility APIs;
-- T070 for the canonical production reference application and Getting Started snippets;
-- T071 for exact release/support policy.
+The remaining release-facing work is external to this chapter:
 
-Until those gates land, this chapter describes only already-established architecture and lifetime behavior and does not guess their unfinished public names or package details.
+- the production reference application and copy-pasteable Getting Started path need to be replanned after T070 closed as not planned; T133–T137 remain unresolved in the roadmap;
+- release qualification/readiness needs a replacement plan after T071 closed as not planned, using the current repository policies and exact-head qualification evidence.
+
+Until those replacement artifacts exist, this chapter links to shipped examples and repository policy rather than inventing a future application or release contract.
