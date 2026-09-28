@@ -1,6 +1,6 @@
 # NativeUI 1.0 resources, services, testing and limits
 
-This chapter documents stable NativeUI 1.0 resource/service contracts, the project testing and debugging model, and the supported/deferred platform boundary. It deliberately avoids freezing still-changing `State<T>` / `Binding<T>` semantics, final package/API names owned by T069, the canonical Getting Started/reference application owned by T070, or exact release-candidate policy owned by T071.
+This chapter documents stable NativeUI 1.0 resource/service contracts, the project testing and debugging model, and the supported/deferred platform boundary. The landed state/binding contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md), and the current package/CMake contract is documented in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md). This chapter deliberately does not duplicate the canonical Getting Started/reference application owned by T070 or the exact release-candidate policy owned by T071.
 
 ## Resources
 
@@ -22,7 +22,7 @@ Invalid tables fail as a whole rather than exposing a valid prefix. Direct `find
 
 `ResourceManagerProvider` is the compatibility adapter for APIs that require owned resource bytes. A successful non-empty load copies the selected payload into an owned vector. That operation may allocate and is explicitly a resource-preparation/UI-side operation, not a real-time audio operation.
 
-The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) demonstrates the public resource lookup boundary and its deterministic `--self-test` path. Final application packaging/CMake guidance is intentionally documented elsewhere after the T069/T070 contract is frozen; this chapter does not duplicate or guess that surface.
+The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) demonstrates the public resource lookup boundary and its deterministic `--self-test` path. Package/CMake guidance lives in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md); the final copy-pasteable Getting Started/reference application remains T070-owned, so this chapter does not duplicate that tutorial surface.
 
 ## Dispatcher: worker-to-UI handoff
 
@@ -178,13 +178,13 @@ A plug-in adapter may host a NativeUI view, but the adapter remains responsible 
 
 Direct Skia, Pugl, AppKit, Win32/X11 or `nativeui/detail/` implementation APIs are not the normal v1 extension surface. Documentation and application code should use NativeUI drawing, window/view, resource and service abstractions instead of reaching through those private boundaries.
 
-## Deferred reconciliation
+## Remaining release reconciliation
 
-This chapter intentionally covers only stable T122 areas 7, 9 and 11. Before T122 can be completed, the complete documentation set still needs final reconciliation with:
+This chapter is reconciled with the landed state/binding and package/public-surface work represented by current `main`. Those contracts should be kept synchronized as the implementation evolves rather than treated as future freeze gates.
 
-- T123/T124 for the final `State<T>` / `Binding<T>` lifetime and callback contract;
-- T069 for the frozen public C++/CMake inventory and backend-neutral package boundary;
+T122 still needs final release-facing reconciliation with:
+
 - T070 for the canonical reference application, Getting Started path and navigation boundary;
 - T071 for final NativeUI 1.0 release/support wording and exact release-candidate policy.
 
-Until those gates land, this chapter does not guess their unfinished names or duplicate their acceptance artifacts.
+Until those remaining release artifacts land, this chapter links to stable implementation-facing sources of truth and avoids inventing their final tutorial or release wording.
