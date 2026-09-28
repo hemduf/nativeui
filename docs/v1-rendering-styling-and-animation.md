@@ -337,32 +337,84 @@ Avoid application-level whole-window repaint loops as a substitute for NativeUI 
 
 ## Animation
 
-[`include/nativeui/animation.hpp`](../include/nativeui/animation.hpp) defines the current instance-owned animation layer.
+[`include/nativeui/animation.hpp`](../include/nativeui/animation.hpp) defines one UI-thread-confined scalar animation registry per UI/view domain. It uses the owning `Dispatcher` for wake scheduling and monotonic time; it does not create a worker thread, a second event loop or a process-global animation table.
 
-`AnimationContext` is UI-thread confined and uses the owning `Dispatcher` for time/wake scheduling; it does not introduce a second application event loop or a process-global animation registry.
+### Easing, timing and callbacks
 
-The current model supports:
+A tween interpolates finite scalar values from `from` to `to` over a finite non-negative `DispatcherDuration` measured in seconds. `Linear` is constant-rate; `EaseIn`, `EaseOut` and `EaseInOut` are cubic curves. Positive-duration tweens do **not** synchronously write the initial `from` value when started. Their first value callback runs at a later Dispatcher checkpoint. Progress is derived from monotonic elapsed time, not wake count, and the successful final step writes `to` exactly.
 
-- tween animation with `Linear`, `EaseIn`, `EaseOut` and `EaseInOut` easing;
-- spring animation using `SpringOptions`;
-- `AnimationHandle` cancellation scoped to the owning animation context;
-- explicit `AnimationInvalidation::Paint` versus `AnimationInvalidation::Layout`;
-- an `AnimationInvalidationTarget` containing the retained paint/layout invalidation routes;
-- reduced-motion mode.
+For every normal step the observable callback order is:
 
-Each active animation writes its value through the supplied callback and routes the declared invalidation through the retained target. The invalidation kind is therefore part of animation behavior rather than an optional convention left to every caller.
+1. `ValueCallback(next)`;
+2. the selected `AnimationInvalidationTarget` route;
+3. if the animation completed, removal from the active registry;
+4. optional `CompletionCallback()`.
 
-### Reduced motion
+Callbacks execute synchronously in the Dispatcher owner/UI domain and may re-enter the animation context, cancel this or another animation, start new work, or destroy the context. A self-cancel during the value/invalidation phase suppresses later completion for that entry. Destroying the `AnimationContext` cancels its pending wake and discards entries without invoking application completion callbacks.
 
-When reduced motion is enabled, the current animation layer converges animation values to their target without continuing normal time-based interpolation. New zero-duration/reduced-motion transitions likewise apply their target immediately through the retained invalidation path.
+If a value, invalidation or completion callback throws during a scheduled step, that animation is terminal and is not retried. NativeUI removes it, attempts to preserve scheduling for unrelated surviving animations, and rethrows the original exception. Failure while taking the per-tick active-id snapshot likewise preserves/rearms surviving work when possible. These recovery paths avoid leaving a logically active entry permanently unscheduled.
 
-Use reduced motion as behavior, not as a cosmetic afterthought: application components should avoid starting a second independent timer/animation mechanism that bypasses the owning `AnimationContext` policy.
+### Handles, scheduling and rejection
 
-### Animation lifetime
+`AnimationHandle` is an opaque context-scoped identity. It keeps only a small owner token alive; it does not retain the animation context, Dispatcher queue, callbacks or target object. `handle.valid()` means the identity is non-empty, **not** that the entry is still active. A handle can remain syntactically valid after completion, cancellation or owner destruction; `cancel()` returns `false` for such stale handles and for handles from another context.
 
-Keep animation ownership tied to the retained UI/component lifetime. Cancellation and shutdown should not depend on a process-global handle table, and callbacks must not assume their target outlives the owner that registered them.
+Multiple active animations in one context share at most one one-shot Dispatcher wake, normally rearmed at a 16 ms cadence. The cadence is a wake policy rather than a fixed simulation step. Delayed event-loop checkpoints therefore produce elapsed-time tween progress, while spring integration applies its documented `max_dt` clamp.
 
-Callback/reentrancy recovery follows the landed retained safety contracts; this overview intentionally leaves their implementation mechanics to the dedicated state/lifecycle documentation and tests.
+Starting an animation returns an empty handle without invoking callbacks when required state is unavailable or validation fails: invalid Dispatcher, empty value callback, invalid invalidation target, non-finite scalar/duration, negative tween duration, unknown easing value, invalid spring options, id exhaustion, or inability to obtain the initial wake. Allocation or scheduler exceptions are not converted to a normal empty-handle result; they propagate after the provisional animation is removed.
+
+### Retained invalidation target
+
+`AnimationInvalidationTarget` owns two `std::function<void()>` routes: one bounded paint invalidator and one layout invalidator. Both must be present. `AnimationInvalidation::Paint` invokes only the paint route; `Layout` invokes the layout route so normal retained layout + repaint behavior follows.
+
+The function objects are owned, but arbitrary captured pointers/references are not automatically made lifetime-safe. Component code should use the retained node/owner invalidators supplied by its lifecycle rather than capturing an unguarded raw Tree or component pointer that may disappear before a later tick.
+
+### Spring solver and units
+
+`start_spring()` animates a generic scalar in application-defined units U. `SpringOptions::initial_velocity` is U/s, `distance_epsilon` is U, `velocity_epsilon` is U/s, `stiffness` acts as s^-2 and `damping` as s^-1 in the implemented equation:
+
+```text
+acceleration = stiffness * (target - value) - damping * velocity
+velocity    += acceleration * dt
+value       += velocity * dt
+```
+
+This is one semi-implicit Euler update per wake. The elapsed `dt` is clamped to the strictly-positive `max_dt`; a long stall does not replay hidden catch-up substeps. The spring completes only when both distance and velocity satisfy their non-negative epsilons, at which point NativeUI snaps/writes the exact target and invokes completion after invalidation. Zero stiffness/damping are valid, so a configuration that cannot physically converge may remain active until explicitly cancelled.
+
+All spring scalars/options must be finite. stiffness, damping and both epsilons must be >= 0; `max_dt` must be > 0. Invalid configurations are rejected before scheduler/callback state is mutated.
+
+### Reduced motion and immediate paths
+
+A zero-duration tween and every tween/spring started while reduced motion is enabled use the synchronous immediate path: exact target write, selected retained invalidation, then completion, all before the start call returns. No timer is armed and the returned handle is empty.
+
+Calling `set_reduced_motion(true)` while animations are active cancels the pending wake and synchronously converges the captured active entries to their exact targets in the same write -> invalidation -> completion order. Reentrant callbacks are allowed. If allocation or any callback/invalidation throws during this policy transition, reduced motion remains enabled, all remaining animation entries are discarded, the wake is cancelled, and the exception propagates. Disabling reduced motion later does not resurrect completed/discarded work.
+
+### Example
+
+```cpp
+ui::AnimationContext animations{window.dispatcher()};
+ui::State<float> opacity{0.0f};
+
+ui::AnimationInvalidationTarget invalidation{
+    [&] { screen.invalidate({0.0f, 0.0f, 120.0f, 40.0f}); },
+    [&] { screen.invalidate_layout(); }};
+
+ui::AnimationHandle fade = animations.start_tween(
+    opacity.get(),
+    1.0f,
+    std::chrono::milliseconds{250},
+    ui::Easing::EaseInOut,
+    ui::AnimationInvalidation::Paint,
+    invalidation,
+    [&](float value) { opacity.set(value); });
+
+// Later, still in the owning UI domain:
+(void)animations.cancel(fade);
+```
+
+The maintained [`t040_animation`](../examples/features/t040_animation.cpp) executable verifies easing vectors, validation/rejection, spring stepping/rest behavior, timer coalescing and context isolation, retained Paint-vs-Layout invalidation, reduced-motion convergence and reentrant teardown.
+
+Animation setup, callback storage, scheduling and per-tick snapshots may allocate and synchronize through Dispatcher services. None of this API is suitable for direct use from an audio/DSP real-time callback; hand real-time state into the UI domain through an explicitly reviewed bounded mechanism.
+
 
 ## Choosing the invalidation class
 
