@@ -28,6 +28,9 @@ foreach(_required IN ITEMS
     "ui::Effect::gaussian_blur"
     "ui::ShaderProgram::compile"
     "ui::ShaderInstance"
+    "mutable preparation state, not a synchronized shared object"
+    "Numeric uniform setters are allocation-free/noexcept"
+    "`set_child()` snapshots a Brush and may allocate"
     "Skia C++ API and ABI remain private"
     "does **not** claim that arbitrary user-supplied SkSL will meet a hard 60 FPS target")
   string(FIND "${_guide_source}" "${_required}" _required_pos)
