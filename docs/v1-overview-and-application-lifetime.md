@@ -1,6 +1,6 @@
 # NativeUI 1.0 overview and application lifetime
 
-This chapter documents the stable NativeUI 1.0 architecture and application/window lifetime model that are already delivered. It deliberately does not freeze the still-changing `State<T>` / `Binding<T>` contract or the final public API/package inventory: those are reconciled after T123, T124 and T069. The production reference application and copy-pasteable Getting Started journey belong to T070 rather than this chapter.
+This chapter documents the stable NativeUI 1.0 architecture and application/window lifetime model that are already delivered. The landed `State<T>` / `Binding<T>` contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md), and current `main` is the working source of truth for the public/package surface after T069 was deprecated as a standalone freeze gate. A production reference application and copy-pasteable Getting Started journey are not currently delivered: T070 is closed as not planned, and the roadmap tracks that work as a separate replan with T133–T137 still unresolved.
 
 ## What NativeUI is
 
