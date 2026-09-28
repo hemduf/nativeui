@@ -415,6 +415,51 @@ void degeneracy_contract() {
     }
 }
 
+void six_octave_grid_contract() {
+    constexpr ui::NoiseOptions base_options{
+        .feature_size = 37.0f, .seed = 0x6a09e667u};
+
+    for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
+                      ui::NoiseType::Simplex}) {
+        for (auto mode : {ui::FractalNoiseMode::FBm,
+                          ui::FractalNoiseMode::Turbulence,
+                          ui::FractalNoiseMode::Ridged}) {
+            const auto options = fractal_options(mode, 6, 1.7f, 0.3f);
+            for (int y = -96; y <= 96; y += 16) {
+                for (int x = -96; x <= 96; x += 16) {
+                    const double a = fractal_reference(
+                        base, base_options, options, double(x), double(y));
+                    const double b = fractal_reference(
+                        base, base_options, options, double(x), double(y));
+                    NUI_CHECK(std::isfinite(a));
+                    NUI_CHECK(a >= 0.0 && a <= 1.0);
+                    NUI_CHECK(a == b);
+                }
+            }
+
+            const auto first = ui::NoiseSource::create_fractal(
+                base, base_options, options);
+            const auto second = ui::NoiseSource::create_fractal(
+                base, base_options, options);
+            NUI_CHECK(first.ok() && second.ok());
+
+            const auto render = [](const ui::Brush& brush) {
+                ui::UI tree{ui::Canvas{48.0f, 48.0f,
+                    [brush](ui::CanvasContext2D& g) {
+                        g.fill_rect({0, 0, 48, 48}, brush);
+                    }}};
+                ui::HeadlessRenderer renderer{{48, 48}, 1.0f};
+                NUI_CHECK(renderer.render(tree));
+                return renderer.rgba_pixels();
+            };
+            const auto pixels_a = render(first.noise.as_brush());
+            const auto pixels_b = render(second.noise.as_brush());
+            NUI_CHECK(pixels_a == pixels_b);
+            NUI_CHECK(!pixels_a.empty());
+        }
+    }
+}
+
 void extreme_coordinate_contract() {
     constexpr ui::NoiseOptions tiny{
         .feature_size = 1.0e-30f, .seed = 0x12345678u};
@@ -468,6 +513,17 @@ void lifetime_isolation_contract() {
         NUI_CHECK(renderer_b.render(tree_b));
         expected_b = renderer_b.pixel(12, 9).r;
     }
+    NUI_CHECK(renderer_b.render(tree_b));
+    NUI_CHECK(renderer_b.pixel(12, 9).r == expected_b);
+
+    auto invalid = fractal_options(ui::FractalNoiseMode::FBm);
+    invalid.set_octaves(0);
+    const auto failed_a = ui::NoiseSource::create_fractal(
+        ui::NoiseType::Perlin,
+        {.feature_size = 24.0f, .seed = 0x11111111u},
+        invalid);
+    NUI_CHECK(!failed_a.ok());
+    NUI_CHECK(failed_a.error == ui::NoiseCreateError::InvalidArgument);
     NUI_CHECK(renderer_b.render(tree_b));
     NUI_CHECK(renderer_b.pixel(12, 9).r == expected_b);
 
@@ -535,6 +591,7 @@ int main(int argc, char** argv) {
         reference_contract();
         raster_contract();
         degeneracy_contract();
+        six_octave_grid_contract();
         extreme_coordinate_contract();
         lifetime_isolation_contract();
         return 0;
