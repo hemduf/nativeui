@@ -218,6 +218,18 @@ void standard_widget_actions_select_their_primary_patterns() {
     CHECK(virtual_item.selection_item);
     CHECK(virtual_item.virtualized_item);
 
+    // A read-only virtual row is projected from its app-declared immutable
+    // metadata before availability normalization; it keeps VirtualizedItem but
+    // must not advertise SelectionItem because the live action path rejects the
+    // mutating Select for read-only items.
+    auto read_only_virtual_info =
+        ui::detail::list_item_semantic_info("row", false, false);
+    read_only_virtual_info.read_only = true;
+    const auto read_only_virtual_item = semantic_uia_pattern_eligibility(
+        read_only_virtual_info, /*virtual_item=*/true);
+    CHECK(!read_only_virtual_item.selection_item);
+    CHECK(read_only_virtual_item.virtualized_item);
+
     const auto tabs = semantic_uia_pattern_eligibility(
         ui::detail::tabs_semantic_info());
     CHECK(!tabs.selection_item);
