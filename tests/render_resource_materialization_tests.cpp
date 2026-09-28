@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 
 namespace {
 
@@ -182,6 +183,29 @@ void frame_scope_pins_resources_until_completion() {
         ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
 }
 
+void clear_releases_context_owned_frame_leases() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    context.begin_frame();
+
+    std::weak_ptr<const sk_sp<SkShader>> lease;
+    {
+        auto acquisition = context.acquire_image_texture(
+            texture(image), [] { return SkShaders::Color(SK_ColorRED); });
+        NUI_CHECK(acquisition && acquisition.retained && acquisition.frame_lease);
+        lease = acquisition.frame_lease;
+    }
+
+    NUI_CHECK(!lease.expired());
+    context.clear();
+
+    NUI_CHECK(context.retained_entries() == 0);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+    NUI_CHECK(lease.expired());
+}
+
 void clear_is_instance_local() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -211,6 +235,7 @@ int main() {
     different_semantics_create_independent_entries();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
+    clear_releases_context_owned_frame_leases();
     clear_is_instance_local();
     return 0;
 }
