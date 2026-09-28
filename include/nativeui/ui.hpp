@@ -25,7 +25,6 @@ namespace ui {
 class Dialog;
 namespace detail {
 class SkiaGlRenderer;
-class RenderResourceMaterializationContext;
 }
 
 /// One retained NativeUI component tree.
@@ -359,7 +358,7 @@ private:
     void paint_with_resources(
         SkCanvas& canvas,
         PlatformServices& platform,
-        detail::RenderResourceMaterializationContext* resources) {
+        const detail::PainterPrivateHooks* private_hooks) {
         if (tree_.lifecycle_transition_active()) return;
         (void)apply_pending_viewport_resize();
         if (!overlay_state_->entries.empty()) {
@@ -373,7 +372,7 @@ private:
             return;
         }
 #endif
-        tree_.paint_with_resources(canvas, platform, resources);
+        tree_.paint_with_resources(canvas, platform, private_hooks);
     }
 
     class ScenePaintTransaction final {
@@ -453,11 +452,11 @@ private:
         ScenePaintTransaction& transaction,
         SkCanvas& canvas,
         PlatformServices& platform,
-        detail::RenderResourceMaterializationContext* resources,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         return transaction.tree_.valid() &&
                tree_.paint_full_scene_prepared(
-                   canvas, platform, resources, used_effects);
+                   canvas, platform, private_hooks, used_effects);
     }
 
     [[nodiscard]] bool paint_partial_scene_prepared(
@@ -465,11 +464,11 @@ private:
         SkCanvas& canvas,
         PlatformServices& platform,
         Rect repaint_region,
-        detail::RenderResourceMaterializationContext* resources,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         return transaction.tree_.valid() &&
                tree_.paint_partial_scene_prepared(
-                   canvas, platform, repaint_region, resources, used_effects);
+                   canvas, platform, repaint_region, private_hooks, used_effects);
     }
 
     void commit_scene_paint(ScenePaintTransaction& transaction) noexcept {

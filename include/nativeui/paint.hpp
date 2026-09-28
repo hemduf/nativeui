@@ -46,15 +46,17 @@ struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
 struct PainterTransformHistoryFaultAccess;
 struct ShaderBrushSnapshot;
-class RenderResourceMaterializationContext;
 
 [[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
     const std::shared_ptr<const ShaderBrushSnapshot>& snapshot);
 [[nodiscard]] sk_sp<SkShader> materialize_image_texture(
     const ImageTexture& texture);
-[[nodiscard]] sk_sp<SkShader> materialize_image_texture(
-    const ImageTexture& texture,
-    RenderResourceMaterializationContext* resources);
+
+struct PainterPrivateHooks final {
+    void* state{};
+    sk_sp<SkShader> (*materialize_image_texture)(
+        void* state, const ImageTexture& texture){};
+};
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -832,7 +834,11 @@ private:
     }
 
     void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
-        auto shader = detail::materialize_image_texture(texture, render_resources_);
+        auto shader =
+            private_hooks_ && private_hooks_->materialize_image_texture
+            ? private_hooks_->materialize_image_texture(
+                  private_hooks_->state, texture)
+            : detail::materialize_image_texture(texture);
         if (!shader) {
             throw std::runtime_error(
                 "NativeUI image texture materialization returned no shader");
@@ -1053,11 +1059,11 @@ private:
 
     explicit Painter(
         SkCanvas& canvas,
-        detail::RenderResourceMaterializationContext* resources) noexcept
-        : canvas_(canvas), render_resources_(resources) {}
+        const detail::PainterPrivateHooks* private_hooks) noexcept
+        : canvas_(canvas), private_hooks_(private_hooks) {}
 
     SkCanvas& canvas_;
-    detail::RenderResourceMaterializationContext* render_resources_{};
+    const detail::PainterPrivateHooks* private_hooks_{};
     Transform2D current_transform_{};
     std::array<Transform2D, kInlineTransformSaveDepth> transform_history_inline_{};
     std::vector<Transform2D> transform_history_overflow_;

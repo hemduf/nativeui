@@ -67,6 +67,19 @@ private:
     Callback callback_;
 };
 
+[[nodiscard]] sk_sp<SkShader> materialize_cached_image_texture(
+    void* state,
+    const ImageTexture& texture) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::materialize_image_texture(texture);
+
+    auto acquisition = resources->acquire_image_texture(
+        texture,
+        [&texture] { return detail::materialize_image_texture(texture); });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
@@ -466,11 +479,13 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            const detail::PainterPrivateHooks painter_hooks{
+                &render_resources_, &materialize_cached_image_texture};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 canvas->scale(scale_factor, scale_factor);
-                ui.paint_with_resources(*canvas, services, &render_resources_);
+                ui.paint_with_resources(*canvas, services, &painter_hooks);
             } catch (...) {
                 invalidate();
                 throw;
@@ -568,20 +583,22 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            const detail::PainterPrivateHooks painter_hooks{
+                &render_resources_, &materialize_cached_image_texture};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_full_scene_prepared(
                         transaction, *canvas, services,
-                        &render_resources_, used_effects);
+                        &painter_hooks, used_effects);
                 } else {
                     canvas->resetMatrix();
                     canvas->clipIRect(partial_clip, SkClipOp::kIntersect);
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_partial_scene_prepared(
                         transaction, *canvas, services,
-                        damage->logical_query, &render_resources_, used_effects);
+                        damage->logical_query, &painter_hooks, used_effects);
                 }
             } catch (...) {
                 invalidate();
