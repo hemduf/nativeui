@@ -125,6 +125,69 @@ Compilation may allocate and is explicitly not an audio-real-time operation. Ren
 
 Keep shader source compilation, image preparation and effect construction outside audio/DSP callbacks. Once prepared, use the resulting NativeUI values through `Brush`/retained painting rather than passing backend shader/compiler objects through application state.
 
+### Built-in procedural noise
+
+[`noise.hpp`](../include/nativeui/noise.hpp) exposes immutable procedural sources that are prepared explicitly and then converted to a normal `Brush`. NativeUI currently provides `Value`, `Perlin`, `Simplex`, `WorleyF1`, and `WorleyF2` single-octave sources.
+
+`NoiseOptions::feature_size` is the number of **logical Painter pixels per base noise cell** and must be finite and positive. `seed` is an exact 32-bit deterministic seed: repeating the same algorithm and options produces the same procedural field.
+
+```cpp
+auto result = ui::NoiseSource::create(
+    ui::NoiseType::WorleyF1,
+    {.feature_size = 32.0f, .seed = 0x12345678u});
+
+if (result.ok()) {
+    ui::Brush brush = result.noise.as_brush(
+        ui::Color{0.05f, 0.08f, 0.12f, 1.0f},
+        ui::Color{0.85f, 0.95f, 1.0f, 1.0f});
+}
+```
+
+`NoiseSource::create()` validates the algorithm and feature size before compiling the built-in backend effect. Invalid inputs return `NoiseCreateError::InvalidArgument`. Internal shader compilation failure returns `BackendCompileFailed` plus a diagnostic when available. A default or failed source is safe to call: `as_brush()` returns a transparent solid brush.
+
+#### Fractal noise
+
+`NoiseSource::create_fractal()` combines multiple octaves of **Value, Perlin, or Simplex** noise. Worley F1/F2 are valid single-octave algorithms but are intentionally not accepted as fractal bases.
+
+`FractalNoiseOptions` defaults to 4 octaves, lacunarity 2, gain 0.5, and `FBm`. Its setters are deliberately value-only and do **not** validate; validation occurs atomically when `create_fractal()` is called.
+
+The accepted creation ranges are:
+
+- octaves: `1..6`;
+- lacunarity: finite `[1,4]` frequency multiplier per octave;
+- gain: finite `[0,1]` amplitude multiplier per octave;
+- mode: `FBm`, `Turbulence`, or `Ridged`;
+- base feature size: finite and strictly positive.
+
+The modes differ in how each octave's base value is converted and accumulated:
+
+- `FBm` uses signed noise and remaps the normalized weighted result to `[0,1]`;
+- `Turbulence` uses the absolute signed value;
+- `Ridged` uses a squared ridge term `(1 - abs(signed_noise))^2`.
+
+```cpp
+ui::FractalNoiseOptions fractal;
+fractal.set_octaves(5)
+       .set_lacunarity(2.0f)
+       .set_gain(0.5f)
+       .set_mode(ui::FractalNoiseMode::Ridged);
+
+auto result = ui::NoiseSource::create_fractal(
+    ui::NoiseType::Perlin,
+    {.feature_size = 48.0f, .seed = 0x12345678u},
+    fractal);
+
+if (result.ok()) {
+    auto brush = result.noise.as_brush();
+}
+```
+
+Fractal creation compiles one combined built-in shader; increasing octave count does not trigger one compilation per octave. Source creation and backend compilation may allocate and therefore belong to UI/resource-preparation code, never an audio/DSP real-time callback.
+
+#### Color mapping
+
+`as_brush(low, high)` maps procedural value 0 to `low` and 1 to `high`. Color channels are clamped to `[0,1]`; non-finite channels become 0. Interpolation occurs before premultiplication in renderer space. The resulting object is an ordinary NativeUI `Brush`, so application code does not receive Skia shader objects or backend handles.
+
 ### Backend boundary
 
 Do not make direct Skia types, canvases or backend objects part of application/component contracts. T069 has been retired as a standalone freeze gate; the current validated public/package surface on `main` is authoritative. The stable rule remains the abstraction boundary: normal consumers paint through NativeUI, while renderer/platform objects remain implementation details.
