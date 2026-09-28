@@ -21,25 +21,27 @@ Normal consumer code should stay on NativeUI public abstractions. Skia, Pugl, pl
 
 ## Theme
 
-[`include/nativeui/theme.hpp`](../include/nativeui/theme.hpp) defines the current typed theme model. A `Theme` groups:
+[`include/nativeui/theme.hpp`](../include/nativeui/theme.hpp) defines the root typed theme value. `Theme` is ordinary owned C++ value data: it stores no backend handles, subscriptions, singleton state or borrowed UI pointers. A UI owns its effective theme; copying or comparing an independent `Theme` has no retained side effects.
 
-- `ThemePalette` — background/surface/text/border/accent/focus and shared control interaction colors;
-- `ThemeTypography` — family/fallbacks, sizes, weights and slant;
-- `ThemeSpacing` — shared spacing tokens;
-- `ThemeRadii` — shared corner-radius tokens;
-- `ThemeControlMetrics` — standard-control geometry/paint metrics.
+The five families have explicit responsibilities and logical-unit geometry:
 
-`default_theme()` provides the default value. Theme data is ordinary instance-owned value data; changing one UI's theme does not mutate unrelated UIs.
+- `ThemePalette` supplies surface/text/border/accent/focus/selection and standard interaction colors. Theme storage does not clamp or color-convert them.
+- `ThemeTypography` supplies preferred/fallback family names, logical-unit font sizes, weights and slant. Theme construction does not perform font discovery; families are resolved later by the text service.
+- `ThemeSpacing` and `ThemeRadii` are logical-UI-unit token scales. Storage does not impose monotonicity or positivity.
+- `ThemeControlMetrics` contains shared standard-control dimensions. `minimum_width`, `control_height` and `minimum_hit_target` affect retained measurement; thumb/track/border/focus-ring values are currently paint geometry.
+- `default_theme()` returns a fresh default value rather than a borrowed process-global object.
+
+Theme values are not a synchronization primitive. Replacing the theme on a live retained UI is UI/main-thread work even though detached Theme values are ordinary copyable data.
 
 ### Theme invalidation
 
-Theme replacement distinguishes changes that only require repaint from changes that can alter measurement/layout. `classify_theme_change(...)` returns:
+`classify_theme_change(previous, next)` is a pure value classifier with no callbacks or UI mutation. Equality is exact, including floating-point tokens and ordered font fallback vectors. It returns the minimum retained work required by the current v1 style system:
 
-- `ThemeInvalidation::None` when the effective value is unchanged;
-- `ThemeInvalidation::Paint` for palette/radius and paint-only metric changes;
-- `ThemeInvalidation::Layout` when typography, spacing or measurement-affecting control metrics change.
+- `ThemeInvalidation::None` when the complete values compare equal;
+- `ThemeInvalidation::Layout` when typography, spacing, `minimum_width`, `control_height` or `minimum_hit_target` differs;
+- `ThemeInvalidation::Paint` for any other unequal palette/radius/paint-metric change.
 
-Application/component code should preserve this distinction. A purely visual change should not be escalated into unnecessary layout work, while typography or measurement-token changes must not be treated as paint-only.
+`Layout` implies repaint as part of the resulting retained update. Purely visual color/radius/stroke changes should not force unnecessary measurement, while typography or measurement-token changes must not be downgraded to paint-only work.
 
 ## Lexical style scopes
 
