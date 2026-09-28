@@ -77,18 +77,27 @@ void image_texture_warm_hit_allocates_zero() {
     const auto value = texture(image);
 
     ui::detail::RenderResourceMaterializationContext context;
-    auto factory = [] { return SkShaders::Color(SK_ColorRED); };
+    std::size_t creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return SkShaders::Color(SK_ColorRED);
+    };
     auto cold = context.acquire_image_texture(value, factory);
     NUI_CHECK(cold && cold.retained);
+    NUI_CHECK(creates == 1);
     cold = {};
 
     ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
-    AllocationScope guard;
-    warm = context.acquire_image_texture(value, factory);
-    const auto allocations = guard.allocations();
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_image_texture(value, factory);
+        allocations = guard.allocations();
+    }
 
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
 }
 
 void runtime_shader_warm_hit_allocates_zero() {
@@ -107,20 +116,27 @@ void runtime_shader_warm_hit_allocates_zero() {
     NUI_CHECK(snapshot && *snapshot);
 
     ui::detail::RenderResourceMaterializationContext context;
-    auto factory = [snapshot] {
+    std::size_t creates = 0;
+    auto factory = [snapshot, &creates] {
+        ++creates;
         return ui::detail::materialize_shader_brush(*snapshot);
     };
     auto cold = context.acquire_runtime_shader(*snapshot, factory);
     NUI_CHECK(cold && cold.retained);
+    NUI_CHECK(creates == 1);
     cold = {};
 
     ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
-    AllocationScope guard;
-    warm = context.acquire_runtime_shader(*snapshot, factory);
-    const auto allocations = guard.allocations();
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_runtime_shader(*snapshot, factory);
+        allocations = guard.allocations();
+    }
 
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
 }
 
 void effect_warm_hit_allocates_zero() {
@@ -128,20 +144,82 @@ void effect_warm_hit_allocates_zero() {
         {3.0f, -2.0f}, 5.0f, {0.2f, 0.3f, 0.4f, 0.8f});
 
     ui::detail::RenderResourceMaterializationContext context;
-    auto factory = [&effect] {
+    std::size_t creates = 0;
+    auto factory = [&effect, &creates] {
+        ++creates;
         return ui::detail::EffectCacheAccess::materialize(effect);
     };
     auto cold = context.acquire_effect(effect, factory);
     NUI_CHECK(cold && cold.retained);
+    NUI_CHECK(creates == 1);
     cold = {};
 
     ui::detail::RenderResourceMaterializationContext::EffectAcquisition warm;
-    AllocationScope guard;
-    warm = context.acquire_effect(effect, factory);
-    const auto allocations = guard.allocations();
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_effect(effect, factory);
+        allocations = guard.allocations();
+    }
 
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
+}
+
+void deep_shader_child_warm_hit_allocates_zero() {
+    const auto leaf_program = ui::ShaderProgram::compile(R"(
+        uniform float value;
+        half4 main(float2) {
+            return half4(value, value, value, 1.0);
+        }
+    )");
+    const auto parent_program = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) {
+            return child.eval(p);
+        }
+    )");
+    NUI_CHECK(leaf_program.ok() && parent_program.ok());
+
+    ui::ShaderInstance leaf{leaf_program.program};
+    NUI_CHECK(leaf.set_float("value", 0.25f) == ui::ShaderSetResult::Ok);
+
+    ui::ShaderInstance middle{parent_program.program};
+    NUI_CHECK(middle.set_child("child", ui::Brush{leaf}) ==
+              ui::ShaderSetResult::Ok);
+
+    ui::ShaderInstance root{parent_program.program};
+    NUI_CHECK(root.set_child("child", ui::Brush{middle}) ==
+              ui::ShaderSetResult::Ok);
+
+    const ui::Brush brush{root};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+
+    ui::detail::RenderResourceMaterializationContext context;
+    std::size_t creates = 0;
+    auto factory = [snapshot, &creates] {
+        ++creates;
+        return ui::detail::materialize_shader_brush(*snapshot);
+    };
+
+    auto cold = context.acquire_runtime_shader(*snapshot, factory);
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    NUI_CHECK(creates == 1);
+    cold = {};
+
+    ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_runtime_shader(*snapshot, factory);
+        allocations = guard.allocations();
+    }
+
+    NUI_CHECK(warm && warm.hit && warm.retained);
+    NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
 }
 
 } // namespace
@@ -299,5 +377,6 @@ int main() {
     image_texture_warm_hit_allocates_zero();
     runtime_shader_warm_hit_allocates_zero();
     effect_warm_hit_allocates_zero();
+    deep_shader_child_warm_hit_allocates_zero();
     return 0;
 }
