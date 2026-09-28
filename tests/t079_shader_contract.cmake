@@ -111,12 +111,14 @@ foreach(_path IN LISTS _production_files)
       math(EXPR _fractal_kernel_region_length "${_noise_create} - ${_fractal_kernel}")
       string(SUBSTRING "${_content}" ${_fractal_kernel}
         ${_fractal_kernel_region_length} _fractal_kernel_region)
-      string(REGEX MATCH
-        "(pow|exp|log)[ \\t\\r\\n]*\\\\("
-        _fractal_exponentiation "${_fractal_kernel_region}")
+      string(FIND "${_fractal_kernel_region}" "pow(" _fractal_pow)
+      string(FIND "${_fractal_kernel_region}" "exp(" _fractal_exp)
+      string(FIND "${_fractal_kernel_region}" "log(" _fractal_log)
       string(FIND "${_fractal_kernel_region}"
         "fractal_base(p * frequency)" _fractal_scaled_coordinates)
-      if(NOT _fractal_exponentiation STREQUAL "" OR
+      if(NOT _fractal_pow EQUAL -1 OR
+         NOT _fractal_exp EQUAL -1 OR
+         NOT _fractal_log EQUAL -1 OR
          _fractal_scaled_coordinates EQUAL -1)
         message(FATAL_ERROR
           "Fractal noise must use iterative frequency scaling without exponentiation")
