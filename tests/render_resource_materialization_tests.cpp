@@ -62,6 +62,7 @@ constexpr std::array<std::byte, 76> kTinyRgbaPng{
 struct HookState {
     ui::detail::RenderResourceMaterializationContext resources;
     int shader_creates{};
+    int effect_creates{};
 };
 
 [[nodiscard]] sk_sp<SkShader> cached_shader_hook(
@@ -75,6 +76,20 @@ struct HookState {
             return ui::detail::materialize_shader_brush(snapshot);
         });
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] sk_sp<SkImageFilter> cached_effect_hook(
+    void* opaque,
+    const ui::Effect& effect) {
+    auto& state = *static_cast<HookState*>(opaque);
+    auto acquisition = state.resources.acquire_effect(
+        effect,
+        [&] {
+            ++state.effect_creates;
+            return ui::detail::EffectCacheAccess::materialize(effect);
+        });
+    return acquisition ? std::move(acquisition.filter)
+                       : sk_sp<SkImageFilter>{};
 }
 
 void tree_painter_runtime_shader_hits_after_warmup() {
@@ -121,6 +136,63 @@ void tree_painter_runtime_shader_hits_after_warmup() {
         tree, *surface->getCanvas(), platform, &hooks);
     state.resources.end_frame();
     NUI_CHECK(state.shader_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+}
+
+class EffectProbeComponent final : public ui::Component {
+public:
+    explicit EffectProbeComponent(ui::Effect effect) : effect_(effect) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        auto layer = context.painter().scoped_layer(
+            context.bounds(), effect_);
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
+    }
+
+private:
+    ui::Effect effect_;
+};
+
+void tree_painter_effect_hits_after_warmup() {
+    const auto effect = ui::Effect::gaussian_blur(4.0f, 4.0f);
+    ui::Spec spec{
+        [effect] { return std::make_unique<EffectProbeComponent>(effect); },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+
+    const auto info = SkImageInfo::MakeN32Premul(32, 32);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(surface);
+
+    HookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state,
+        nullptr,
+        nullptr,
+        &cached_effect_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.effect_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.effect_creates == 1);
     NUI_CHECK(state.resources.retained_entries() == 1);
 }
 
@@ -475,6 +547,7 @@ void clear_is_instance_local() {
 
 int main() {
     tree_painter_runtime_shader_hits_after_warmup();
+    tree_painter_effect_hits_after_warmup();
     retained_hit_skips_backend_creation();
     retained_hit_reuses_backend_resource_across_frames();
     frame_lease_survives_cache_clear();
