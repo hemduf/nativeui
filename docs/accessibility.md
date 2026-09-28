@@ -128,6 +128,8 @@ virtual SemanticInfo Component::semantics() const;
 
 The default implementation returns `SemanticInfo{}` with `role == SemanticRole::None`, which flattens the component while preserving semantic descendants. An application custom component overrides this hook to return owned/value semantic data. The signature uses NativeUI public types only and transfers no native object ownership.
 
+The public hook is a publication/advertisement seam only. Executing an advertised action for a custom component requires implementing the internal detail interface `ui::detail::SemanticActionHandler` (`perform_semantic_action`) in the same component; that interface is intentionally not part of the public API. A component that publishes actions without implementing it remains a valid read-only semantic projection: platform bridges may advertise those actions, and every request fails closed at the live eligibility recheck instead of reporting a mutation that never happened. Standard widgets ship that internal implementation for their T045 action sets. This also applies to a custom component that selects a standard role such as `Custom`/`Button`: the role decides presentation and platform mapping, while execution still requires the internal handler or is rejected.
+
 Virtual-collection semantics are a separate ListView capability and are not part of the ordinary custom-component hook. T068 must not introduce a second competing ordinary semantic callback/provider API.
 
 ## 6. Virtual collection identity and immutable data

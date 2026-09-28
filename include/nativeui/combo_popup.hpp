@@ -1114,17 +1114,22 @@ private:
         // a competing popup. A later Expand observes the committed handle.
         if (pending_command_ || !overlay_service_) return false;
 
+        auto* overlay_service = overlay_service_;
+        auto runtime = runtime_;
         try {
             auto built = build_popup_overlay();
-            const auto handle = overlay_service_->present(std::move(built.overlay));
+            // show() follows the public UI::show_overlay() policy, including
+            // global transient-presentation dismissal; present() remains the
+            // Tooltip self-presentation seam. OverlayState::show() rolls back
+            // its provisional entry on failure, so a failed presentation is
+            // never reported as executed.
+            const auto handle = overlay_service->show(std::move(built.overlay));
             if (!handle.valid()) return false;
             built.session->handle = handle;
             session_ = built.session;
-            runtime_->handle = handle;
+            runtime->handle = handle;
             return true;
         } catch (...) {
-            // OverlayState::show() rolls back its provisional entry on failure,
-            // and a failed presentation is never reported as executed.
             return false;
         }
     }

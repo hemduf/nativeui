@@ -4,6 +4,7 @@
 #include <nativeui/detail/overlay_service.hpp>
 #include <nativeui/detail/semantic_action.hpp>
 #include <nativeui/detail/semantic_tree_action_access.hpp>
+#include <nativeui/detail/semantic_uia_mapping.hpp>
 #include <nativeui/widgets.hpp>
 
 #include <cstddef>
@@ -37,7 +38,8 @@ namespace {
 
 /// Overlay seam double that behaves exactly like the production presenter
 /// (`OverlayState::show`/`close`) and records how many times the semantic path
-/// presented or dismissed a popup.
+/// presented or dismissed a popup. `show()` counts the full
+/// `UI::show_overlay()` policy path used by widget/anchor presentation.
 class RecordingOverlayService final : public ui::detail::OverlayService {
 public:
     RecordingOverlayService()
@@ -53,8 +55,14 @@ public:
         return state_->show(std::move(overlay));
     }
 
+    [[nodiscard]] ui::OverlayHandle show(ui::OverlaySpec overlay) override {
+        ++show_calls;
+        return present(std::move(overlay));
+    }
+
     bool dismiss(ui::OverlayHandle handle) override {
         ++dismiss_calls;
+        if (fail_dismiss) return false;
         return state_->close(std::move(handle));
     }
 
@@ -64,8 +72,10 @@ public:
 
     std::shared_ptr<ui::detail::OverlayState> state_;
     int present_calls{};
+    int show_calls{};
     int dismiss_calls{};
     int structural_invalidations{};
+    bool fail_dismiss{};
     ui::OverlayMode last_mode{ui::OverlayMode::NonModal};
     std::optional<ui::NodeId> last_anchor;
     bool last_dismiss_on_escape{};
@@ -512,6 +522,9 @@ void combo_box_semantic_expand_collapse_execute_once() {
     NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
         tree, identity, action_request(ui::SemanticAction::Expand)));
     NUI_CHECK(service.present_calls == 1);
+    // Widget/anchor presentation goes through the full UI::show_overlay()
+    // policy seam, not the Tooltip self-presentation seam.
+    NUI_CHECK(service.show_calls == 1);
     NUI_CHECK(service.open_entries() == 1);
     NUI_CHECK(service.last_mode == ui::OverlayMode::Modal);
     NUI_CHECK(service.last_anchor.has_value());
@@ -524,6 +537,7 @@ void combo_box_semantic_expand_collapse_execute_once() {
     NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
         tree, identity, action_request(ui::SemanticAction::Expand)));
     NUI_CHECK(service.present_calls == 1);
+    NUI_CHECK(service.show_calls == 1);
     NUI_CHECK(service.open_entries() == 1);
 
     NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
@@ -847,6 +861,230 @@ void combo_box_and_menu_item_actions_route_through_dispatcher() {
     NUI_CHECK(menu_service.dismiss_calls == 1);
 }
 
+void combo_box_semantic_dismiss_failure_rolls_back() {
+    ui::State<int> selection{99};
+    const std::vector<ui::ComboBoxOption<int>> options{
+        {1, "One", true}, {2, "Two", true}};
+    auto root = ui::compile(ui::make_spec(ui::ComboBox<int>{selection, options}));
+    ui::Node* combo = root.get();
+    const auto combo_id = static_cast<ui::SemanticId>(combo->id);
+
+    RecordingOverlayService service;
+    ui::Tree tree{std::move(root)};
+    ui::TreeTestAccess::set_overlay_service(tree, &service);
+    tree.mount();
+
+    const ui::detail::SemanticIdentity identity{combo_id, std::nullopt};
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Expand)));
+    NUI_CHECK(service.show_calls == 1);
+
+    // Collapse with a failing dismiss reports failure, leaves the popup
+    // committed, and stays retryable.
+    service.fail_dismiss = true;
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Collapse)));
+    NUI_CHECK(service.dismiss_calls == 1);
+    NUI_CHECK(service.open_entries() == 1);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Expanded);
+
+    service.fail_dismiss = false;
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Collapse)));
+    NUI_CHECK(service.dismiss_calls == 2);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Collapsed);
+
+    // Select with a failing dismiss writes no value and keeps the highlight
+    // retryable instead of claiming a commit.
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Expand)));
+    service.fail_dismiss = true;
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Select)));
+    NUI_CHECK(selection.get() == 99);
+    NUI_CHECK(service.open_entries() == 1);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Expanded);
+
+    service.fail_dismiss = false;
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Select)));
+    NUI_CHECK(selection.get() == 1);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Collapsed);
+
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, identity, action_request(ui::SemanticAction::Select)));
+    NUI_CHECK(selection.get() == 1);
+}
+
+void menu_item_input_commit_and_semantic_activate_interleave() {
+    test::MockPlatform platform;
+    RecordingOverlayService service;
+    auto session = std::make_shared<ui::detail::MenuPopupSession>();
+    session->anchor = std::make_shared<ui::detail::MenuAnchorRuntime>();
+    session->anchor->mounted = true;
+    int callback_calls = 0;
+    session->items.push_back(
+        ui::PopupMenuItem::action("Open", [&] { ++callback_calls; }));
+    session->highlighted = 0;
+    session->handle = service.state_->show(ui::OverlaySpec{});
+
+    auto root = ui::compile(ui::Spec{
+        [session] { return std::make_unique<ui::detail::MenuPopupComponent>(session); },
+        {menu_item_spec(session, 0)}});
+    ui::Node* menu = root.get();
+    const auto item_id = static_cast<ui::SemanticId>(menu->children[0]->id);
+
+    ui::Tree tree{std::move(root)};
+    ui::TreeTestAccess::set_overlay_service(tree, &service);
+    tree.mount();
+    tree.activate_focus(platform);
+
+    // Input Enter queues the real close-then-invoke commit on the focused menu.
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Enter), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(session->completion_queued);
+    NUI_CHECK(callback_calls == 0);
+    NUI_CHECK(service.dismiss_calls == 0);
+
+    // A semantic Activate arriving before that commit drains must not
+    // double-run the callback or the close.
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {item_id, std::nullopt}, action_request(ui::SemanticAction::Activate)));
+    NUI_CHECK(callback_calls == 0);
+    NUI_CHECK(service.dismiss_calls == 0);
+
+    // Drain the input command exactly as the UI command checkpoint would.
+    auto* source =
+        dynamic_cast<ui::detail::OverlayCommandSource*>(menu->component.get());
+    NUI_CHECK(source != nullptr);
+    auto command = source->take_overlay_command();
+    NUI_CHECK(command.has_value());
+    NUI_CHECK(command->kind ==
+              ui::detail::OverlayComponentCommandKind::CloseThenInvoke);
+    NUI_CHECK(service.dismiss(command->handle));
+    command->after_close();
+    NUI_CHECK(callback_calls == 1);
+    NUI_CHECK(service.dismiss_calls == 1);
+
+    // Once the input commit has run the callback, a later semantic request
+    // cannot run it again.
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {item_id, std::nullopt}, action_request(ui::SemanticAction::Activate)));
+    NUI_CHECK(callback_calls == 1);
+}
+
+void combo_box_input_open_and_semantic_requests_interleave() {
+    test::MockPlatform platform;
+    ui::State<int> selection{99};
+    const std::vector<ui::ComboBoxOption<int>> options{
+        {1, "One", true}, {2, "Two", true}};
+    auto root = ui::compile(ui::make_spec(ui::ComboBox<int>{selection, options}));
+    ui::Node* combo = root.get();
+    const auto combo_id = static_cast<ui::SemanticId>(combo->id);
+
+    RecordingOverlayService service;
+    ui::Tree tree{std::move(root)};
+    ui::TreeTestAccess::set_overlay_service(tree, &service);
+    tree.mount();
+    tree.activate_focus(platform);
+
+    // Input Down queues the normal open command on the focused anchor.
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Down), platform) ==
+              ui::EventResult::Handled);
+    NUI_CHECK(service.show_calls == 0);
+
+    // Semantic Expand before that command drains must not present a competing
+    // popup; the request fails closed.
+    NUI_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {combo_id, std::nullopt}, action_request(ui::SemanticAction::Expand)));
+    NUI_CHECK(service.show_calls == 0);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Collapsed);
+
+    // Drain the input command exactly as the UI checkpoint would: the
+    // show_overlay policy seam, then the on_shown publication.
+    auto* source =
+        dynamic_cast<ui::detail::OverlayCommandSource*>(combo->component.get());
+    NUI_CHECK(source != nullptr);
+    auto command = source->take_overlay_command();
+    NUI_CHECK(command.has_value());
+    NUI_CHECK(command->kind == ui::detail::OverlayComponentCommandKind::Show);
+    const auto handle = service.show(std::move(command->overlay));
+    NUI_CHECK(handle.valid());
+    command->on_shown(handle);
+    NUI_CHECK(service.show_calls == 1);
+    NUI_CHECK(combo->component->semantics().expanded ==
+              ui::SemanticExpandedState::Expanded);
+
+    // Semantic requests now observe the committed popup: Expand is idempotent,
+    // Collapse dismisses once, and Select commits the highlighted option.
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {combo_id, std::nullopt}, action_request(ui::SemanticAction::Expand)));
+    NUI_CHECK(service.show_calls == 1);
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {combo_id, std::nullopt}, action_request(ui::SemanticAction::Collapse)));
+    NUI_CHECK(service.dismiss_calls == 1);
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {combo_id, std::nullopt}, action_request(ui::SemanticAction::Expand)));
+    NUI_CHECK(service.show_calls == 2);
+    NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, {combo_id, std::nullopt}, action_request(ui::SemanticAction::Select)));
+    NUI_CHECK(selection.get() == 1);
+    NUI_CHECK(service.dismiss_calls == 2);
+}
+
+void read_only_combo_box_router_rejects_expand_collapse_select() {
+    ui::State<bool> read_only{true};
+    ui::State<int> selection{99};
+    const std::vector<ui::ComboBoxOption<int>> options{{1, "One", true}};
+    auto root = ui::compile(ui::make_spec(
+        ui::ReadOnly{read_only, ui::ComboBox<int>{selection, options}}));
+    const auto combo_id = static_cast<ui::SemanticId>(root->children.front()->id);
+
+    RecordingOverlayService service;
+    ui::Tree tree{std::move(root)};
+    ui::TreeTestAccess::set_overlay_service(tree, &service);
+    tree.mount();
+
+    ui::detail::DispatcherOwner dispatcher;
+    auto lifetime = std::make_shared<int>(0);
+    ui::detail::SemanticRetainedViewDomain domain{
+        dispatcher.dispatcher(),
+        std::weak_ptr<const void>{lifetime},
+        tree};
+    NUI_CHECK(domain.checkpoint_snapshot().has_value());
+
+    auto proxy = domain.bridge().make_ordinary_proxy(combo_id);
+    const auto read = proxy.read();
+    NUI_CHECK(read.has_value());
+    NUI_CHECK(read->info().read_only);
+    NUI_CHECK(read->info().actions ==
+              std::vector<ui::SemanticAction>{ui::SemanticAction::Focus});
+
+    // The platform mappings are pure functions of the advertised action set, so
+    // the read-only ComboBox stops exposing the ExpandCollapse pattern and any
+    // action-bearing selection pattern. The role-level container Selection
+    // pattern (read-only GetSelection) is unchanged by T045 section 8.
+    const auto eligibility =
+        ui::detail::semantic_uia_pattern_eligibility(read->info());
+    NUI_CHECK(!eligibility.expand_collapse);
+    NUI_CHECK(!eligibility.selection_item);
+
+    auto router = domain.bridge().make_ordinary_router(combo_id);
+    NUI_CHECK(!router.post(action_request(ui::SemanticAction::Expand)));
+    NUI_CHECK(!router.post(action_request(ui::SemanticAction::Collapse)));
+    NUI_CHECK(!router.post(action_request(ui::SemanticAction::Select)));
+    NUI_CHECK(dispatcher.checkpoint() == 0);
+    NUI_CHECK(service.show_calls == 0);
+    NUI_CHECK(service.present_calls == 0);
+    NUI_CHECK(service.dismiss_calls == 0);
+    NUI_CHECK(selection.get() == 99);
+}
+
 void suite() {
     retained_action_bridge_routes_through_live_tree();
     retained_view_domain_rejects_expired_owner_at_construction();
@@ -860,8 +1098,12 @@ void suite() {
     combo_box_semantic_select_commits_highlighted_option_once();
     combo_box_semantic_actions_revalidate_availability();
     combo_box_stale_identity_fails_closed();
+    combo_box_semantic_dismiss_failure_rolls_back();
+    combo_box_input_open_and_semantic_requests_interleave();
+    read_only_combo_box_router_rejects_expand_collapse_select();
     menu_item_semantic_activate_executes_once();
     menu_item_semantic_failed_close_is_not_executed();
+    menu_item_input_commit_and_semantic_activate_interleave();
     combo_box_and_menu_item_actions_route_through_dispatcher();
 }
 

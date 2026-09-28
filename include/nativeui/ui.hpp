@@ -49,6 +49,9 @@ public:
           tree_(compile(detail::make_overlay_host_spec(
               make_spec(std::forward<Root>(root)), overlay_state_))) {
         tree_.set_overlay_service(&overlay_presenter_);
+        overlay_presenter_.dismiss_transients = [this] {
+            tree_.dismiss_transient_presentations();
+        };
         tree_.set_theme(std::move(theme));
         tree_.mount();
     }
@@ -862,11 +865,20 @@ private:
             return state_->show(std::move(overlay));
         }
 
+        /// Widget/anchor presentation from a T065 checkpoint. Mirrors
+        /// UI::show_overlay(): dismiss transient presentations first, then
+        /// publish the overlay through the same OverlayState transaction.
+        [[nodiscard]] OverlayHandle show(OverlaySpec overlay) override {
+            if (dismiss_transients) dismiss_transients();
+            return state_->show(std::move(overlay));
+        }
+
         bool dismiss(OverlayHandle handle) override {
             return state_->close(std::move(handle));
         }
 
         std::shared_ptr<detail::OverlayState> state_;
+        std::function<void()> dismiss_transients;
     };
 
     // Shared dialog/overlay state must outlive Tree because controllers and the
