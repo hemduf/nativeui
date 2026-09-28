@@ -85,6 +85,8 @@ SkSL is a public source format in NativeUI. The Skia C++ API and ABI remain priv
 
 Shader compilation is explicit preparation work through `ui::ShaderProgram::compile()`. It may allocate and is not audio-real-time work. Rendering a shader Brush does not implicitly compile its source.
 
+`ui::ShaderInstance` is mutable preparation state, not a synchronized shared object. Numeric uniform setters are allocation-free/noexcept; `set_child()` snapshots a Brush and may allocate. Do not mutate one instance concurrently from multiple threads. Publish a `ui::Brush{instance}` snapshot before sharing retained rendering state.
+
 Canonical compile, uniform binding and Brush snapshot:
 
 ~~~cpp
