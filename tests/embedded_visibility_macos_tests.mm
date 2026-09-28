@@ -5,6 +5,129 @@ namespace {
 NSView* native(ui::NativeViewHandle handle) {
     return (__bridge NSView*)reinterpret_cast<void*>(handle);
 }
+
+void mouse(NSView* view, NSEventType type, NSPoint point) {
+    NSWindow* window = view.window;
+    NSEvent* event = [NSEvent mouseEventWithType:type
+        location:[view convertPoint:point toView:nil] modifierFlags:0
+        timestamp:1 windowNumber:window.windowNumber context:nil
+        eventNumber:1 clickCount:1 pressure:1];
+    [window sendEvent:event];
+}
+
+void key(NSWindow* window, NSString* characters, unsigned short code) {
+    for (const auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+        [window sendEvent:[NSEvent keyEventWithType:type location:NSZeroPoint
+            modifierFlags:0 timestamp:2 windowNumber:window.windowNumber context:nil
+            characters:characters charactersIgnoringModifiers:characters
+            isARepeat:NO keyCode:code]];
+    }
+}
+
+void native_embedded_input() {
+    ui::Application application;
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(50, 50, 440, 240)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+        backing:NSBackingStoreBuffered defer:NO];
+    [window setReleasedWhenClosed:NO];
+    NSTextField* host_field = [[NSTextField alloc] initWithFrame:NSMakeRect(220, 150, 180, 24)];
+    [window.contentView addSubview:host_field];
+    [window makeKeyAndOrderFront:nil];
+    [NSApp activateIgnoringOtherApps:YES];
+    for (int i = 0; i < 20 && !NSApp.active; ++i) application.poll(0.01);
+    [window makeKeyAndOrderFront:nil];
+    NUI_CHECK(window.keyWindow);
+    [window makeFirstResponder:host_field];
+    NSResponder* host_responder = window.firstResponder;
+    id host_delegate = window.delegate;
+
+    int first = 0, second = 0;
+    ui::UI tree{ui::Row{
+        ui::Button{"First", [&] { ++first; }},
+        ui::Button{"Second", [&] { ++second; }}
+    }};
+    ui::EmbeddedView child{tree,
+        reinterpret_cast<ui::NativeParentHandle>((__bridge void*)window.contentView),
+        {200, 100}, {}, ui::EmbeddedViewOptions{.initially_visible = false}};
+    NUI_CHECK(window.firstResponder == host_responder);
+    NUI_CHECK(child.show());
+    NUI_CHECK(window.firstResponder == host_responder);
+    NSView* wrapper = native(child.native_handle());
+    // Exercise the real AppKit -> Pugl -> retained-tree route. No UI::activate
+    // or synthetic NativeUI InputEvent may bypass the native focus lifecycle.
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 1);
+    NUI_CHECK(window.firstResponder == wrapper);
+    key(window, @"\t", 48);
+    key(window, @"\r", 36);
+    NUI_CHECK(second == 1);
+    NUI_CHECK(window.delegate == host_delegate);
+
+    // Losing native responder cancels a pending press. Returning to the child
+    // via a user click must work without an explicit retained activation.
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    [window makeFirstResponder:host_field];
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 1);
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 2);
+
+    // Window deactivation preserves Cocoa's responder, but terminates retained
+    // capture. The paired key-window notification reactivates keyboard input.
+    NSWindow* other = [[NSWindow alloc] initWithContentRect:NSMakeRect(520, 50, 100, 100)
+        styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    [other setReleasedWhenClosed:NO];
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    [other makeKeyAndOrderFront:nil];
+    NUI_CHECK(!window.keyWindow && other.keyWindow);
+    [window makeKeyAndOrderFront:nil];
+    NUI_CHECK(window.firstResponder == wrapper);
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 2);
+    key(window, @"\r", 36);
+    NUI_CHECK(first == 3);
+    [other close];
+
+    NUI_CHECK(child.hide());
+    NUI_CHECK(window.firstResponder != wrapper);
+    host_responder = window.firstResponder;
+    NUI_CHECK(child.show());
+    NUI_CHECK(window.firstResponder == host_responder);
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 4);
+
+    int sibling_clicks = 0;
+    ui::UI sibling_tree{ui::Button{"Sibling", [&] { ++sibling_clicks; }}};
+    ui::EmbeddedView sibling{sibling_tree,
+        reinterpret_cast<ui::NativeParentHandle>((__bridge void*)window.contentView), {200, 100}};
+    NSView* sibling_wrapper = native(sibling.native_handle());
+    [sibling_wrapper setFrameOrigin:NSMakePoint(220, 0)];
+    NUI_CHECK(window.firstResponder == wrapper);
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    [window makeFirstResponder:sibling_wrapper];
+    mouse(wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(first == 4);
+    mouse(sibling_wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    mouse(sibling_wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(sibling_clicks == 1);
+    mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    child.request_close();
+    NUI_CHECK(window.firstResponder != wrapper && wrapper.superview == nil);
+    mouse(sibling_wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+    mouse(sibling_wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+    NUI_CHECK(sibling_clicks == 2 && window.delegate == host_delegate);
+    // The removed child's window observer must no longer receive notifications.
+    [other makeKeyAndOrderFront:nil];
+    [window makeKeyAndOrderFront:nil];
+    key(window, @"\r", 36);
+    NUI_CHECK(sibling_clicks == 3);
+    [other close];
+    sibling.request_close();
+    [window close];
+}
 struct HideFailure final : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
@@ -78,6 +201,47 @@ private:
 NSRect candidate_rect(ui::EmbeddedView& child) {
     id<NSTextInputClient> client = (id<NSTextInputClient>)native(child.native_handle());
     return [client firstRectForCharacterRange:NSMakeRange(0, 0) actualRange:nullptr];
+}
+
+void native_focus_failure_isolation() {
+    ui::Application application;
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(50, 50, 440, 240)
+        styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    [window setReleasedWhenClosed:NO];
+    [NSApp activateIgnoringOtherApps:YES];
+    for (int i = 0; i < 20 && !NSApp.active; ++i) application.poll(0.01);
+    [window makeKeyAndOrderFront:nil];
+    NUI_CHECK(window.keyWindow);
+    int sibling_clicks = 0;
+    ui::UI sibling_tree{ui::Button{"Survivor", [&] { ++sibling_clicks; }}};
+    const auto parent = reinterpret_cast<ui::NativeParentHandle>((__bridge void*)window.contentView);
+    ui::EmbeddedView sibling{sibling_tree, parent, {200, 120}};
+    NSView* sibling_wrapper = native(sibling.native_handle());
+    [sibling_wrapper setFrameOrigin:NSMakePoint(220, 0)];
+    for (int failure = 0; failure < 3; ++failure) {
+        HideProbe probe;
+        probe.throw_cancel = failure == 0;
+        probe.throw_blur = failure == 1;
+        probe.throw_deactivate = failure == 2;
+        ui::UI tree{ui::Spec{[&] { return std::make_unique<HideProbeComponent>(probe); }, {}}};
+        ui::EmbeddedView child{tree, parent, {200, 120}};
+        NSView* wrapper = native(child.native_handle());
+        mouse(wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+        NUI_CHECK(probe.trace == "B");
+        NUI_CHECK(probe.focus_in >= 1); // Existing ViewCore also refreshes focus geometry.
+        // User exceptions are contained by the native callback thunk. All
+        // deactivation stages still run, and the failed view becomes terminal.
+        [window makeFirstResponder:sibling_wrapper];
+        NUI_CHECK(probe.trace == "BX" && probe.focus_out == 1 && probe.deactivations == 1);
+        NUI_CHECK(child.should_close());
+        child.request_close();
+        NUI_CHECK(wrapper.superview == nil && probe.trace == "BX");
+        mouse(sibling_wrapper, NSEventTypeLeftMouseDown, NSMakePoint(20, 20));
+        mouse(sibling_wrapper, NSEventTypeLeftMouseUp, NSMakePoint(20, 20));
+        NUI_CHECK(sibling_clicks == failure + 1);
+    }
+    sibling.request_close();
+    [window close];
 }
 
 void hide_callback_failures() {
@@ -194,5 +358,7 @@ void run() {
 }
 }
 int main() {
-    return test::run("embedded visibility macOS", [] { run(); hide_callback_failures(); });
+    return test::run("embedded visibility macOS", [] {
+        native_embedded_input(); native_focus_failure_isolation(); run(); hide_callback_failures();
+    });
 }

@@ -89,8 +89,14 @@ The view borrows the UI; destroy the view before its UI and State owners.
 
 On macOS realization and passive show do not steal the host's first responder.
 Show/hide affect the embedded NSView, never the host NSWindow or sibling views.
+An explicit click acquires the embedded responder and activates input before
+delivering that press. Native responder and key-window changes activate or
+deactivate the retained UI; losing focus cancels an active gesture. Hiding the
+focused child clears its native responder, and showing it again remains passive.
+Window notifications are scoped to that child's current host window and removed
+on detach/destruction. NativeUI does not replace the host window delegate.
 The pinned Pugl backend lacks that contract; `NativeUIPuglVisibility.cmake`
-applies three checked source substitutions to a build-private Pugl staging tree.
+applies checked source substitutions to a build-private Pugl staging tree.
 The CPM cache/source override is unchanged, and installed packages include the
 corrected sources. A mismatched Pugl source fails configuration for review instead
 of silently applying an uncertain patch. Remove the shim after upstream Pugl
@@ -99,5 +105,6 @@ existing Pugl show/hide implementations; this change is validated on macOS.
 
 Public examples: `examples/features/value_edit_sessions.cpp` and
 `examples/features/embedded_visibility.cpp`, both with displayless `--self-test`.
-The macOS integration test checks actual NSView visibility and host focus,
-not just the wrapper's visibility flag.
+The macOS integration test checks NSView visibility, host focus, and real AppKit
+mouse/keyboard delivery through `NSWindow::sendEvent`, without manually activating
+the retained UI.
