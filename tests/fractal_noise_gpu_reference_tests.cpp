@@ -31,6 +31,26 @@ ui::FractalNoiseOptions options(ui::FractalNoiseMode mode,
     return value;
 }
 
+const char* base_name(ui::NoiseType base) {
+    switch (base) {
+        case ui::NoiseType::Value: return "value";
+        case ui::NoiseType::Perlin: return "perlin";
+        case ui::NoiseType::Simplex: return "simplex";
+        case ui::NoiseType::WorleyF1: return "worley-f1";
+        case ui::NoiseType::WorleyF2: return "worley-f2";
+    }
+    return "unknown";
+}
+
+const char* mode_name(ui::FractalNoiseMode mode) {
+    switch (mode) {
+        case ui::FractalNoiseMode::FBm: return "fbm";
+        case ui::FractalNoiseMode::Turbulence: return "turbulence";
+        case ui::FractalNoiseMode::Ridged: return "ridged";
+    }
+    return "unknown";
+}
+
 double base_reference(ui::NoiseType base,
                       std::uint32_t seed,
                       double feature_size,
@@ -47,9 +67,9 @@ double base_reference(ui::NoiseType base,
 
 double fractal_reference(ui::NoiseType base,
                          ui::FractalNoiseMode mode,
+                         std::uint32_t seed,
                          double x,
                          double y) {
-    constexpr std::uint32_t seed = 0x12345678u;
     constexpr double feature_size = 48.0;
     double frequency = 1.0;
     double amplitude = 1.0;
@@ -84,10 +104,10 @@ ui::UI make_ui(const ui::Brush& brush, float size = 64.0f) {
         }}};
 }
 
-void compare(ui::Application& app,
+bool compare(ui::Application& app,
              ui::NoiseType base,
-             ui::FractalNoiseMode mode) {
-    constexpr std::uint32_t seed = 0x12345678u;
+             ui::FractalNoiseMode mode,
+             std::uint32_t seed) {
     const auto source = ui::NoiseSource::create_fractal(
         base, {.feature_size = 48.0f, .seed = seed}, options(mode));
     check(source.ok(), "fractal GPU source did not compile");
@@ -107,10 +127,11 @@ void compare(ui::Application& app,
     constexpr std::array<std::array<int, 2>, 4> samples{{
         {0, 0}, {8, 8}, {31, 23}, {52, 45}
     }};
+    bool all_within_tolerance = true;
     for (const auto& xy : samples) {
         const auto expected = reference.pixel(xy[0], xy[1]);
         const double cpu = fractal_reference(
-            base, mode, double(xy[0]) + 0.5, double(xy[1]) + 0.5);
+            base, mode, seed, double(xy[0]) + 0.5, double(xy[1]) + 0.5);
         check(std::abs(double(expected.r) / 255.0 - cpu) < 0.015,
               "fractal raster diverged from CPU oracle");
 
@@ -123,12 +144,30 @@ void compare(ui::Application& app,
             actual = ui::detail::PlatformTestAccess::take_gpu_readback(window);
         }
         check(actual.has_value(), "fractal GPU readback incomplete");
-        check(std::abs(int(actual->r) - int(expected.r)) <= 5 &&
-                  std::abs(int(actual->g) - int(expected.g)) <= 5 &&
-                  std::abs(int(actual->b) - int(expected.b)) <= 5 &&
-                  actual->a == expected.a,
-              "fractal GPU pixel diverged from raster");
+        const int delta_r = int(actual->r) - int(expected.r);
+        const int delta_g = int(actual->g) - int(expected.g);
+        const int delta_b = int(actual->b) - int(expected.b);
+        const int delta_a = int(actual->a) - int(expected.a);
+        std::cout << "fractal_gpu_delta"
+                  << " base=" << base_name(base)
+                  << " mode=" << mode_name(mode)
+                  << " seed=" << seed
+                  << " sample=(" << xy[0] << ',' << xy[1] << ')'
+                  << " raster=(" << int(expected.r) << ',' << int(expected.g)
+                  << ',' << int(expected.b) << ',' << int(expected.a) << ')'
+                  << " gpu=(" << int(actual->r) << ',' << int(actual->g)
+                  << ',' << int(actual->b) << ',' << int(actual->a) << ')'
+                  << " delta=(" << delta_r << ',' << delta_g
+                  << ',' << delta_b << ',' << delta_a << ')'
+                  << " cpu=" << cpu << '\n';
+        if (std::abs(delta_r) > 5 ||
+            std::abs(delta_g) > 5 ||
+            std::abs(delta_b) > 5 ||
+            delta_a != 0) {
+            all_within_tolerance = false;
+        }
     }
+    return all_within_tolerance;
 }
 
 double benchmark_window(const ui::Brush& brush) {
@@ -191,14 +230,23 @@ int main(int argc, char** argv) {
         ui::Application app;
         check(app.valid(), "platform application invalid");
         app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
-        for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
-                          ui::NoiseType::Simplex}) {
-            for (auto mode : {ui::FractalNoiseMode::FBm,
-                              ui::FractalNoiseMode::Turbulence,
-                              ui::FractalNoiseMode::Ridged}) {
-                compare(app, base, mode);
+        constexpr std::array<std::uint32_t, 2> seeds{{
+            0x12345678u, 0x6a09e667u
+        }};
+        bool gpu_parity_ok = true;
+        for (const auto seed : seeds) {
+            for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
+                              ui::NoiseType::Simplex}) {
+                for (auto mode : {ui::FractalNoiseMode::FBm,
+                                  ui::FractalNoiseMode::Turbulence,
+                                  ui::FractalNoiseMode::Ridged}) {
+                    gpu_parity_ok = compare(app, base, mode, seed) &&
+                                    gpu_parity_ok;
+                }
             }
         }
+        check(gpu_parity_ok,
+              "fractal GPU pixel diverged from raster; see delta diagnostics");
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "FAIL fractal noise GPU reference: " << e.what() << '\n';
