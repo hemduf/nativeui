@@ -3,10 +3,26 @@
 
 #include "include/core/SkColor.h"
 #include "include/core/SkShader.h"
+#include "include/core/SkSurface.h"
+#include "include/core/SkImageInfo.h"
 
 #include <array>
 #include <cstddef>
 #include <memory>
+
+namespace ui {
+
+struct TreeTestAccess {
+    static void paint_with_resources(
+        Tree& tree,
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        const detail::PainterPrivateHooks* hooks) {
+        tree.paint_with_resources(canvas, platform, hooks);
+    }
+};
+
+} // namespace ui
 
 namespace {
 
@@ -41,6 +57,71 @@ constexpr std::array<std::byte, 76> kTinyRgbaPng{
 
 [[nodiscard]] ui::ImageTexture texture(const ui::Image& image) {
     return texture_at(image, 0.0f);
+}
+
+struct HookState {
+    ui::detail::RenderResourceMaterializationContext resources;
+    int shader_creates{};
+};
+
+[[nodiscard]] sk_sp<SkShader> cached_shader_hook(
+    void* opaque,
+    const std::shared_ptr<const ui::detail::ShaderBrushSnapshot>& snapshot) {
+    auto& state = *static_cast<HookState*>(opaque);
+    auto acquisition = state.resources.acquire_runtime_shader(
+        snapshot,
+        [&] {
+            ++state.shader_creates;
+            return ui::detail::materialize_shader_brush(snapshot);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+void tree_painter_runtime_shader_hits_after_warmup() {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform float gain;
+        half4 main(float2) {
+            return half4(gain, 0.0, 0.0, 1.0);
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+
+    ui::ShaderInstance instance{compiled.program};
+    NUI_CHECK(instance.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
+    const ui::Brush brush{instance};
+
+    ui::Tree tree{ui::compile(ui::make_spec(ui::Canvas{
+        32.0f, 32.0f, [brush](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 32.0f, 32.0f}, brush);
+        }}))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+
+    const auto info = SkImageInfo::MakeN32Premul(32, 32);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(surface);
+
+    HookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state,
+        nullptr,
+        &cached_shader_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.shader_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.shader_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
 }
 
 void retained_hit_skips_backend_creation() {
@@ -366,6 +447,7 @@ void clear_is_instance_local() {
 } // namespace
 
 int main() {
+    tree_painter_runtime_shader_hits_after_warmup();
     retained_hit_skips_backend_creation();
     retained_hit_reuses_backend_resource_across_frames();
     frame_lease_survives_cache_clear();
