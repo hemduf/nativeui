@@ -218,7 +218,14 @@ semantic_uia_pattern_eligibility(const SemanticInfo& info,
         case SemanticRole::RadioButton:
         case SemanticRole::Tab:
         case SemanticRole::ListItem:
-            eligibility.selection_item = info.supports(SemanticAction::Select);
+            // T045/T059: read-only nodes reject the mutating Select action.
+            // Ordinary nodes already lose it during normalization; virtual
+            // T067 ListItems are projected from app-declared immutable metadata
+            // before that normalization, so reflect the live read-only
+            // eligibility here as well and never advertise SelectionItem for a
+            // row whose every Select() would fail closed.
+            eligibility.selection_item =
+                info.supports(SemanticAction::Select) && !info.read_only;
             break;
         case SemanticRole::MenuItem:
             eligibility.invoke = info.supports(SemanticAction::Activate);
