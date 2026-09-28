@@ -68,16 +68,26 @@ void row_major_candidate_contract() {
     constexpr struct {
         int dx, dy;
         std::uint32_t hx, hy;
+        double ux, uy;
     } expected[]{
-        {-1, -1, 0x55e3810au, 0x2ce5f5b6u},
-        { 0, -1, 0x1be8f3e2u, 0xe9b1abfdu},
-        { 1, -1, 0x4bfc06d2u, 0x3e4338e0u},
-        {-1,  0, 0xe8919253u, 0x82adb252u},
-        { 0,  0, 0xdb8af549u, 0x223087aau},
-        { 1,  0, 0x5c3b5636u, 0x50e21f36u},
-        {-1,  1, 0x6904f081u, 0xd6ded8b3u},
-        { 0,  1, 0xb01c69b2u, 0xda8ac4b4u},
-        { 1,  1, 0xaab3233cu, 0x6c3c6ac0u},
+        {-1, -1, 0x55e3810au, 0x2ce5f5b6u,
+         0.33550268411636353, 0.17538386583328247},
+        { 0, -1, 0x1be8f3e2u, 0xe9b1abfdu,
+         0.10902327299118042, 0.91286724805831909},
+        { 1, -1, 0x4bfc06d2u, 0x3e4338e0u,
+         0.29681432247161865, 0.24321317672729492},
+        {-1,  0, 0xe8919253u, 0x82adb252u,
+         0.90847122669219971, 0.51046288013458252},
+        { 0,  0, 0xdb8af549u, 0x223087aau,
+         0.85758906602859497, 0.13355296850204468},
+        { 1,  0, 0x5c3b5636u, 0x50e21f36u,
+         0.36028039455413818, 0.31595033407211304},
+        {-1,  1, 0x6904f081u, 0xd6ded8b3u,
+         0.41023159027099609, 0.83933782577514648},
+        { 0,  1, 0xb01c69b2u, 0xda8ac4b4u,
+         0.68793350458145142, 0.85367989540100098},
+        { 1,  1, 0xaab3233cu, 0x6c3c6ac0u,
+         0.66679590940475464, 0.42279684543609619},
     };
     std::size_t index = 0;
     for (int dy = -1; dy <= 1; ++dy) {
@@ -85,12 +95,16 @@ void row_major_candidate_contract() {
             NUI_CHECK(expected[index].dx == dx && expected[index].dy == dy);
             const auto cx = std::int32_t(3 + dx);
             const auto cy = std::int32_t(-2 + dy);
-            NUI_CHECK(ui::detail::noise_hash2(
-                seed ^ ui::detail::kWorleyXSeedSalt, cx, cy) ==
-                expected[index].hx);
-            NUI_CHECK(ui::detail::noise_hash2(
-                seed ^ ui::detail::kWorleyYSeedSalt, cx, cy) ==
-                expected[index].hy);
+            const auto hx = ui::detail::noise_hash2(
+                seed ^ ui::detail::kWorleyXSeedSalt, cx, cy);
+            const auto hy = ui::detail::noise_hash2(
+                seed ^ ui::detail::kWorleyYSeedSalt, cx, cy);
+            NUI_CHECK(hx == expected[index].hx);
+            NUI_CHECK(hy == expected[index].hy);
+            NUI_CHECK(ui::detail::worley_u24_reference(hx) ==
+                      expected[index].ux);
+            NUI_CHECK(ui::detail::worley_u24_reference(hy) ==
+                      expected[index].uy);
             ++index;
         }
     }
@@ -425,9 +439,31 @@ void independent_views() {
         ui::NoiseType::WorleyF2,
         {.feature_size = 16.0f, .seed = 0x11111111u});
     NUI_CHECK(a.ok() && b.ok());
-    ui::Brush retained = a.noise.as_brush();
-    const auto expected_a = render_pixel(retained, 12, 9).r;
-    const auto expected_b = render_pixel(b.noise.as_brush(), 12, 9).r;
+    const auto brush_a = a.noise.as_brush();
+    const auto brush_b = b.noise.as_brush();
+    const auto make_tree = [](const ui::Brush& brush) {
+        return ui::UI{ui::Canvas{32, 32,
+            [brush](ui::CanvasContext2D& g) {
+                g.fill_rect({0, 0, 32, 32}, brush);
+            }}};
+    };
+
+    auto tree_b = make_tree(brush_b);
+    ui::HeadlessRenderer renderer_b{{32, 32}, 1.0f};
+    std::uint8_t expected_a = 0;
+    std::uint8_t expected_b = 0;
+    {
+        auto tree_a = make_tree(brush_a);
+        ui::HeadlessRenderer renderer_a{{32, 32}, 1.0f};
+        NUI_CHECK(renderer_a.render(tree_a));
+        NUI_CHECK(renderer_b.render(tree_b));
+        expected_a = renderer_a.pixel(12, 9).r;
+        expected_b = renderer_b.pixel(12, 9).r;
+    }
+    NUI_CHECK(renderer_b.render(tree_b));
+    NUI_CHECK(renderer_b.pixel(12, 9).r == expected_b);
+
+    ui::Brush retained;
     {
         const auto temporary = ui::NoiseSource::create(
             ui::NoiseType::WorleyF1,
@@ -436,10 +472,12 @@ void independent_views() {
         retained = temporary.noise.as_brush();
     }
     NUI_CHECK(render_pixel(retained, 12, 9).r == expected_a);
+
     const auto failed = ui::NoiseSource::create(
         ui::NoiseType::WorleyF1, {.feature_size = 0.0f});
     NUI_CHECK(!failed.ok());
-    NUI_CHECK(render_pixel(b.noise.as_brush(), 12, 9).r == expected_b);
+    NUI_CHECK(renderer_b.render(tree_b));
+    NUI_CHECK(renderer_b.pixel(12, 9).r == expected_b);
 }
 
 void benchmark() {
@@ -496,6 +534,11 @@ int main(int argc, char** argv) {
         raster_contract();
         family_non_alias_contract();
         independent_views();
+
+        const auto invalid_type = ui::NoiseSource::create(
+            static_cast<ui::NoiseType>(999));
+        NUI_CHECK(!invalid_type.ok());
+        NUI_CHECK(invalid_type.error == ui::NoiseCreateError::InvalidArgument);
 
         for (auto type : {ui::NoiseType::WorleyF1, ui::NoiseType::WorleyF2}) {
             const auto valid = ui::NoiseSource::create(
