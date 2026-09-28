@@ -237,6 +237,39 @@ void recurrence_contract() {
     }
 }
 
+void renderer_float_recurrence_contract() {
+    // These bit patterns freeze iterative float multiplication at values where
+    // exponentiation/reassociation is observably different by one or more ULPs.
+    constexpr std::array<std::uint32_t, 6> frequency_bits{
+        0x3f800000u, 0x3fd9999au, 0x4038f5c3u,
+        0x409d374cu, 0x4105a234u, 0x41632d59u};
+    constexpr std::array<std::uint32_t, 6> amplitude_bits{
+        0x3f800000u, 0x3e99999au, 0x3db851ecu,
+        0x3cdd2f1cu, 0x3c04b5deu, 0x3b1f40a4u};
+
+    constexpr float lacunarity = 1.7f;
+    constexpr float gain = 0.3f;
+    float frequency = 1.0f;
+    float amplitude = 1.0f;
+    for (std::size_t i = 0; i < frequency_bits.size(); ++i) {
+        NUI_CHECK(std::bit_cast<std::uint32_t>(frequency) ==
+                  frequency_bits[i]);
+        NUI_CHECK(std::bit_cast<std::uint32_t>(amplitude) ==
+                  amplitude_bits[i]);
+        frequency = frequency * lacunarity;
+        amplitude = amplitude * gain;
+    }
+
+    const float pow_frequency =
+        static_cast<float>(std::pow(double(lacunarity), 5.0));
+    const float pow_amplitude =
+        static_cast<float>(std::pow(double(gain), 5.0));
+    NUI_CHECK(std::bit_cast<std::uint32_t>(pow_frequency) !=
+              frequency_bits[5]);
+    NUI_CHECK(std::bit_cast<std::uint32_t>(pow_amplitude) !=
+              amplitude_bits[5]);
+}
+
 void same_seed_octave_contract() {
     constexpr ui::NoiseOptions base_options{
         .feature_size = 48.0f, .seed = 0x12345678u};
@@ -497,6 +530,7 @@ int main(int argc, char** argv) {
         option_contract();
         validation_contract();
         recurrence_contract();
+        renderer_float_recurrence_contract();
         same_seed_octave_contract();
         reference_contract();
         raster_contract();
