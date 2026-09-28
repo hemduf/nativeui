@@ -327,6 +327,54 @@ The dialog panel is a focus scope; modal pointer/keyboard ownership and focus re
 
 [`t063_dialog`](../examples/features/t063_dialog.cpp) is the focused executable reference for Default/Cancel behavior, exactly-once completion, focus trapping, bounded scrolling and close-before-callback semantics.
 
+## Virtualized list controller
+
+[`VirtualListState<Key>`](../include/nativeui/virtual_list.hpp) is the external controller for the fixed-row-height virtualized `ListView` path. It owns the instance-local retained runtime while the application supplies a borrowed `State<std::optional<Key>>` for selection. That selection State must outlive every live controller/view/runtime that still refers to it; there is no process-global current-list registry.
+
+The constructor takes a fixed `row_height` in **logical UI pixels**, a row factory, and an `overscan` count in **rows**. Row height must be finite and greater than zero or construction throws `std::invalid_argument`. The row factory receives `const VirtualListState<Key>::Item&`, may return either a `Spec` or a public builder accepted by `make_spec()`, and is retained for later viewport materialization. It is not invoked merely to accept a large logical dataset.
+
+`Item` owns the logical key plus semantic name, description, enabled/read-only/checked state and semantic actions. Keys use the same string-like/integral/enum encoding domain as dynamic composition and must be unique within an accepted dataset.
+
+### Dataset replacement and stable identity
+
+`replace(std::vector<Item>)` consumes a complete logical dataset. Duplicate keys, unrepresentable total content height, exhausted semantic tokens, or exhausted dataset generation reject the update with `false`; these contract-level rejections keep the previously accepted logical dataset. Allocation failures and application callback exceptions are not encoded as `false` and may propagate.
+
+Replacing with an exactly identical dataset succeeds without changing `dataset_generation()`. A changed accepted dataset advances the generation. Stable keys preserve semantic item tokens across reorder, so assistive/native semantic identity does not depend on a row staying at the same numeric index.
+
+Viewport materialization stays bounded by the visible range plus overscan, with focused/captured exception rows retained when required. Dataset replacement can refresh the current materialization window and therefore may invoke the row factory for newly materialized rows. Dataset/state/scroll mutation is UI/main-thread work and is not an audio-thread API.
+
+```cpp
+using ListState = ui::VirtualListState<int>;
+
+ui::State<std::optional<int>> selected{std::nullopt};
+ListState presets{
+    selected,
+    28.0f, // logical pixels
+    [](const ListState::Item& item) {
+        return ui::Label{item.name};
+    },
+    2};     // overscan rows
+
+std::vector<ListState::Item> items;
+items.emplace_back(1, "Init");
+items.emplace_back(2, "Bass");
+(void)presets.replace(std::move(items));
+```
+
+### Programmatic scrolling and geometry
+
+`scroll_to_index()` and `scroll_to_key()` use the current viewport and `ScrollAlignment`. `Nearest` leaves an already-visible row in place; `Start`, `Center`, and `End` position it accordingly while clamping to representable content bounds. These methods return `false` for a missing/out-of-range target or invalid geometry. A successful scroll may cause viewport materialization and row-factory calls.
+
+`offset()`, `viewport_size()`, `content_size()`, and `row_height()` are all expressed in logical UI pixels. `overscan()` is a row count.
+
+### Immutable semantic snapshots
+
+`metadata_snapshot()` exposes the shared immutable O(N) semantic metadata for the accepted dataset. The method returns a reference to the controller's shared-pointer handle; copy that `shared_ptr` if the snapshot must outlive the controller or a later handle replacement.
+
+`semantic_children(list_bounds)` captures the current dataset generation, selection, immutable metadata and scroll geometry into a `VirtualSemanticChildren` value. `list_bounds` is in logical UI coordinates. Querying off-screen semantic items does **not** create visual rows and does not call application row factories, so accessibility inspection is independent of viewport materialization. The returned value owns a shared metadata reference and is data-only after capture.
+
+The maintained [`t067_virtual_list`](../examples/features/t067_virtual_list.cpp) example demonstrates a 100,000-item dataset, bounded row-factory calls, keyboard selection/activation, programmatic semantic inspection, and stable semantic metadata across scrolling.
+
 ## Choosing static, dynamic and virtualized composition
 
 Use the smallest retained mechanism that matches the structural requirement:
