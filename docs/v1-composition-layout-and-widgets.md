@@ -1,6 +1,6 @@
 # NativeUI 1.0 composition, layout, widgets and interaction
 
-This chapter documents the stable NativeUI 1.0 retained composition, layout, widget and interaction model that is already implemented. It deliberately does **not** freeze the final `State<T>` / `Binding<T>` notification, reentrancy or lifetime wording while T123/T124 are still active. Those details must be reconciled before T122 is completed. Final package/API inventory belongs to T069 and the canonical copy-pasteable application journey belongs to T070.
+This chapter documents the stable NativeUI 1.0 retained composition, layout, widget and interaction model that is already implemented. The landed `State<T>` / `Binding<T>` notification, reentrancy and lifetime contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md), and current `main` is the working source of truth for the public/package surface after T069 was deprecated as a standalone freeze gate. A canonical copy-pasteable application journey is not currently delivered: T070 is closed as not planned, and T133–T137 remain the unresolved follow-up track in the roadmap.
 
 ## Retained composition model
 
@@ -66,7 +66,7 @@ The feature examples are the maintained executable references for individual lay
 | scroll/layout interaction | [`t012_scroll`](../examples/features/t012_scroll.cpp) |
 | dynamic retained structure | [`t058_dynamic_composition`](../examples/features/t058_dynamic_composition.cpp) |
 
-These focused programs also expose the repository `--self-test` convention. T070 remains the owner of the final production reference application, so this chapter links to focused examples instead of creating a second independent Getting Started snippet source.
+These focused programs also expose the repository `--self-test` convention. Because the production reference application / Getting Started path is currently being replanned after T070 closed as not planned, this chapter links to shipped focused examples instead of inventing a second tutorial source.
 
 ## Standard widget families
 
@@ -209,15 +209,16 @@ The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and
 | dialog | retained modal dialog/action model | [`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp), [`t063_dialog`](../examples/features/t063_dialog.cpp) |
 | virtual list | bounded live retained rows for large collections | [`include/nativeui/virtual_list.hpp`](../include/nativeui/virtual_list.hpp), [`t067_virtual_list`](../examples/features/t067_virtual_list.cpp) |
 
-This table is chapter navigation, not the authoritative complete v1 API inventory. T069 owns the final mechanical public-family inventory and ownership/thread/failure matrix.
+This table is chapter navigation, not the authoritative complete v1 API inventory. The public headers/package surface on current `main`, together with the repository review and validation policies, are the working source of truth for that inventory.
 
-## Deferred reconciliation before T122 Done
+## Remaining reconciliation before T122 Done
 
-This chapter must be revisited before T122 is complete:
+The landed T123/T124 State/Binding contract and the current public/package surface on `main` are already the source of truth for this chapter; T069 is not an active gate.
 
-- **T123/T124:** replace the deliberate State/Binding deferral with the final ownership, notification, reentrancy, exception and subscription-lifetime contract;
-- **T069:** verify every public family/name against the frozen backend-neutral v1 API inventory and remove any compatibility surface that does not survive the freeze;
-- **T070:** link the final reference application/Getting Started journey instead of duplicating its compile-tested snippets;
-- **T071:** align final support/release terminology if release policy changes the durable wording.
+Remaining closeout work is release-facing rather than an implementation dependency:
 
-Until those gates land, this chapter intentionally documents only stable retained composition/layout/widget/interaction behavior and marks changing contracts instead of guessing them.
+- keep public family/name coverage aligned with `main` as the toolkit evolves;
+- link the eventual reference application / Getting Started artifacts only after the post-T070 replan produces them; T133–T137 remain unresolved;
+- align final support/release terminology with the replacement release-qualification plan created after T071 closed as not planned.
+
+Until those replacement artifacts exist, this chapter documents the shipped retained composition/layout/widget/interaction surface and points readers to maintained feature examples.
