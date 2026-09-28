@@ -1038,6 +1038,28 @@ When Wayland becomes a release requirement, evaluate in this order:
 
 Do not pre-emptively duplicate the complete platform layer before a concrete Wayland requirement exists.
 
+### 25.5 Accessibility bridges (T068)
+
+T045 (`docs/accessibility.md`) defines the semantic roles/actions and the platform mappings; T068 implements them as one per-view publication pipeline:
+
+```text
+live retained tree (UI thread only)
+  -> immutable SemanticTreeSnapshot generation (logical bounds + T045 data)
+  -> per-view immutable native publication (exact semantic generation + T043 scale/physical origin)
+  -> one committed native notification batch delivered to that view's notification sink
+  -> per-platform bridge adapter (macOS NSAccessibility, Windows UIA, Linux AT-SPI2 via T072)
+```
+
+Contract highlights:
+
+- native readers and proxies retain shared immutable publications only; no live `Node*`/`Component*` is retained or traversed from a platform callback;
+- the semantic generation advances only when exposed semantic data changes; a geometry-only change produces a `BoundsChanged` native generation without a semantic rebuild, and T067 virtual item metadata is shared by immutable generation, never copied on scroll/selection/focus;
+- actions are marshalled to the owning UI thread through T065, re-resolve identity against current state, re-check effective disabled/read-only eligibility, and execute at most once; stale/defunct targets fail closed;
+- snapshots, proxy caches, notification state and platform bridges are per view/root; no process-global semantic, proxy or transport registry exists, so multiple views and instances coexist;
+- macOS adds one lazily allocated, consumer-prefixed (`<consumer-view-class>_NativeUIAccessibilityView`) Objective-C subclass per native view class, with no categories/swizzling/`+load`; attach or proxy allocation failure disables accessibility for that view only;
+- Windows exposes one UIA fragment provider root per view through the neutral mapping/provider core plus the `_WIN32` COM adapter; stale providers report element-not-available;
+- Linux consumes the T072 D-Bus transport only; the explicit accessibility-bus address mode is owned by T181 (#464). Until that lands, the Linux bridge is the fail-closed stub. No second D-Bus stack is introduced.
+
 ---
 
 ## 26. Build and dependency model
