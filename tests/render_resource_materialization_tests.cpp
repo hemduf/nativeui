@@ -150,6 +150,46 @@ void different_semantics_create_independent_entries() {
     NUI_CHECK(context.retained_entries() == 2);
 }
 
+void renderer_owned_texture_storage_is_accounted() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    auto factory = [] { return SkShaders::Color(SK_ColorGREEN); };
+
+    auto direct = context.acquire_image_texture(texture(image), factory);
+    NUI_CHECK(direct && direct.retained);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+
+    context.clear();
+    auto mipmapped = texture(image);
+    ui::TextureSampling sampling;
+    sampling.set_mipmap(ui::TextureMipmap::Linear);
+    mipmapped.set_sampling(sampling);
+    auto mip = context.acquire_image_texture(mipmapped, factory);
+    NUI_CHECK(mip && mip.retained);
+    NUI_CHECK(context.retained_accounted_bytes() == 32);
+
+    context.clear();
+    ui::ImageTexture isolated{
+        image,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 16.0f, 16.0f}};
+    isolated.set_tile_mode(
+        ui::TextureTileMode::Repeat, ui::TextureTileMode::Repeat);
+    auto tile = context.acquire_image_texture(isolated, factory);
+    NUI_CHECK(tile && tile.retained);
+    NUI_CHECK(context.retained_accounted_bytes() == 4);
+
+    context.clear();
+    auto shared_full = texture(image);
+    shared_full.set_tile_mode(
+        ui::TextureTileMode::Repeat, ui::TextureTileMode::Repeat);
+    auto repeat = context.acquire_image_texture(shared_full, factory);
+    NUI_CHECK(repeat && repeat.retained);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+}
+
 void invalid_texture_is_transient_and_never_retained() {
     ui::detail::RenderResourceMaterializationContext context;
     int creates = 0;
@@ -267,6 +307,7 @@ int main() {
     retained_hit_reuses_backend_resource_across_frames();
     frame_lease_survives_cache_clear();
     different_semantics_create_independent_entries();
+    renderer_owned_texture_storage_is_accounted();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
     clear_releases_context_owned_frame_leases();

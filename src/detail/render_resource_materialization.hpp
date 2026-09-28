@@ -6,6 +6,7 @@
 #include "include/core/SkShader.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -68,7 +69,7 @@ public:
 
         auto acquisition = image_shaders_.acquire(
             *key,
-            0U,
+            retained_storage_bytes(texture),
             [&factory]() -> std::shared_ptr<sk_sp<SkShader>> {
                 auto shader = std::forward<Factory>(factory)();
                 if (!shader) return {};
@@ -99,6 +100,67 @@ public:
     }
 
 private:
+    [[nodiscard]] static std::size_t retained_storage_bytes(
+        const ImageTexture& texture) noexcept {
+        // The decoded Image backing is shared application/resource state and is
+        // not charged again. Charge only renderer-owned storage that this
+        // materialization path can create and retain. Use a conservative
+        // saturation bound: an RGBA base level is 4 bytes/pixel and a complete
+        // mip chain is strictly below twice that base storage.
+        const auto rgba_storage = [](Rect source, bool mipmapped) noexcept {
+            constexpr std::size_t kBytesPerPixel = 4U;
+            constexpr std::size_t kOverBudget = kMaxAccountedBytes + 1U;
+            constexpr std::size_t kMaxPixels =
+                kMaxAccountedBytes / kBytesPerPixel;
+
+            const double width = std::ceil(static_cast<double>(source.w));
+            const double height = std::ceil(static_cast<double>(source.h));
+            if (!(width >= 1.0) || !(height >= 1.0) ||
+                width > static_cast<double>(kMaxPixels) ||
+                height > static_cast<double>(kMaxPixels)) {
+                return kOverBudget;
+            }
+
+            const auto w = static_cast<std::size_t>(width);
+            const auto h = static_cast<std::size_t>(height);
+            if (h != 0U && w > kMaxPixels / h) return kOverBudget;
+            const std::size_t base = w * h * kBytesPerPixel;
+            if (!mipmapped) return base;
+            if (base > kMaxAccountedBytes / 2U) return kOverBudget;
+            return base * 2U;
+        };
+
+        const auto source = texture.source();
+        const auto image_size = texture.image().size();
+        const bool full_source =
+            source.x == 0.0f && source.y == 0.0f &&
+            source.w == image_size.w && source.h == image_size.h;
+        const bool mipmapped =
+            texture.sampling().mipmap() != TextureMipmap::None;
+        if (mipmapped) return rgba_storage(source, true);
+
+        const bool clamp_x =
+            texture.tile_mode_x() == TextureTileMode::Clamp;
+        const bool clamp_y =
+            texture.tile_mode_y() == TextureTileMode::Clamp;
+        if (clamp_x && clamp_y) return 0U;
+
+        if (texture.interpretation() == TextureInterpretation::Data &&
+            full_source) {
+            return 0U;
+        }
+
+        const bool uses_decal =
+            texture.tile_mode_x() == TextureTileMode::Decal ||
+            texture.tile_mode_y() == TextureTileMode::Decal;
+        if (texture.interpretation() == TextureInterpretation::Color &&
+            full_source && !uses_decal) {
+            return 0U;
+        }
+
+        return rgba_storage(source, false);
+    }
+
     void retain_frame_resource(
         const std::shared_ptr<const sk_sp<SkShader>>& resource,
         bool retained) {
