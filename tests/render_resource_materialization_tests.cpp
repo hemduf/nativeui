@@ -433,6 +433,64 @@ void effects_share_the_unified_cache_budget() {
     NUI_CHECK(context.retained_accounted_bytes() == 0);
 }
 
+void image_and_runtime_shader_share_hard_entry_limit() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2) { return half4(1.0); }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance instance{compiled.program};
+    const ui::Brush brush{instance};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+
+    ui::detail::RenderResourceMaterializationContext context;
+    context.begin_frame();
+
+    auto shader = context.acquire_runtime_shader(
+        *snapshot, [snapshot] {
+            return ui::detail::materialize_shader_brush(*snapshot);
+        });
+    NUI_CHECK(shader && shader.retained && !shader.hit);
+
+    for (std::size_t index = 0;
+         index + 1U <
+             ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries;
+         ++index) {
+        auto image_resource = context.acquire_image_texture(
+            texture_at(image, static_cast<float>(index)),
+            [] { return SkShaders::Color(SK_ColorRED); });
+        NUI_CHECK(image_resource && image_resource.retained && !image_resource.hit);
+    }
+
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+
+    const auto overflow_key = texture_at(
+        image,
+        static_cast<float>(
+            ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries));
+    auto transient = context.acquire_image_texture(
+        overflow_key, [] { return SkShaders::Color(SK_ColorBLUE); });
+    NUI_CHECK(transient && !transient.retained && !transient.hit);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+
+    context.end_frame();
+
+    transient = {};
+    auto retained_after_frame = context.acquire_image_texture(
+        overflow_key, [] { return SkShaders::Color(SK_ColorGREEN); });
+    NUI_CHECK(retained_after_frame && retained_after_frame.retained);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+}
+
 void invalid_texture_is_transient_and_never_retained() {
     ui::detail::RenderResourceMaterializationContext context;
     int creates = 0;
@@ -555,6 +613,7 @@ int main() {
     renderer_owned_texture_storage_is_accounted();
     runtime_shader_shares_the_same_budget_and_hits();
     image_and_runtime_shader_share_one_entry_budget();
+    image_and_runtime_shader_share_hard_entry_limit();
     effects_share_the_unified_cache_budget();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();

@@ -220,6 +220,28 @@ void* operator new[](std::size_t size, std::align_val_t alignment) {
     return ::operator new(size, alignment);
 }
 
+void* operator new(
+    std::size_t size,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new(size, alignment);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](
+    std::size_t size,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept {
+    try {
+        return ::operator new[](size, alignment);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
 void operator delete(void* memory, std::align_val_t) noexcept {
 #if defined(_WIN32)
     _aligned_free(memory);
@@ -242,7 +264,38 @@ void operator delete[](
     ::operator delete[](memory, alignment);
 }
 
+void operator delete(
+    void* memory,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept {
+    ::operator delete(memory, alignment);
+}
+
+void operator delete[](
+    void* memory,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept {
+    ::operator delete[](memory, alignment);
+}
+
+void allocation_guard_covers_aligned_nothrow_new() {
+    void* memory = nullptr;
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        memory = ::operator new(
+            64U, std::align_val_t{64U}, std::nothrow);
+        allocations = guard.allocations();
+    }
+
+    NUI_CHECK(memory);
+    NUI_CHECK(allocations == 1U);
+    ::operator delete(
+        memory, std::align_val_t{64U}, std::nothrow);
+}
+
 int main() {
+    allocation_guard_covers_aligned_nothrow_new();
     image_texture_warm_hit_allocates_zero();
     runtime_shader_warm_hit_allocates_zero();
     effect_warm_hit_allocates_zero();
