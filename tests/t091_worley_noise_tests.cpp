@@ -268,6 +268,73 @@ void guard_contract() {
     NUI_CHECK(std::isfinite(high.f1) && std::isfinite(high.f2));
 }
 
+void sksl_salted_hash_contract() {
+    std::string source{ui::detail::kNoiseHashSkSL};
+    source.append(R"(
+        uniform float4 seed_bytes;
+        uniform float4 x_bytes;
+        uniform float4 y_bytes;
+        uniform float use_y_salt;
+        half4 main(float2 p) {
+            float4 salt = use_y_salt > 0.5
+                ? float4(149.0, 53.0, 216.0, 99.0)
+                : float4(179.0, 233.0, 17.0, 165.0);
+            float4 h = hash2(xor32(seed_bytes, salt), x_bytes, y_bytes);
+            if (p.x < 1.0) {
+                return half4(h.x / 255.0, h.y / 255.0,
+                             h.z / 255.0, 1.0);
+            }
+            return half4(h.w / 255.0, 0.0, 0.0, 1.0);
+        }
+    )");
+    const auto compiled = ui::ShaderProgram::compile(source);
+    NUI_CHECK(compiled.ok());
+
+    constexpr struct {
+        std::uint32_t seed;
+        std::int32_t x, y;
+    } vectors[]{
+        {0x12345678u, 3, -2},
+        {0xffffffffu, -1, -1},
+        {0x87654321u, -2147483520, 2147483520},
+    };
+    for (const auto& v : vectors) {
+        for (bool y_salt : {false, true}) {
+            const std::uint32_t salt = y_salt
+                ? ui::detail::kWorleyYSeedSalt
+                : ui::detail::kWorleyXSeedSalt;
+            const std::uint32_t expected =
+                ui::detail::noise_hash2(v.seed ^ salt, v.x, v.y);
+
+            ui::ShaderInstance shader{compiled.program};
+            NUI_CHECK(shader.set_float4("seed_bytes", bytes(v.seed)) ==
+                      ui::ShaderSetResult::Ok);
+            NUI_CHECK(shader.set_float4("x_bytes",
+                                        bytes(std::uint32_t(v.x))) ==
+                      ui::ShaderSetResult::Ok);
+            NUI_CHECK(shader.set_float4("y_bytes",
+                                        bytes(std::uint32_t(v.y))) ==
+                      ui::ShaderSetResult::Ok);
+            NUI_CHECK(shader.set_float("use_y_salt", y_salt ? 1.0f : 0.0f) ==
+                      ui::ShaderSetResult::Ok);
+
+            auto surface = SkSurfaces::Raster(SkImageInfo::Make(
+                2, 1, kRGBA_8888_SkColorType, kPremul_SkAlphaType));
+            NUI_CHECK(surface);
+            ui::Painter painter{*surface->getCanvas()};
+            painter.fill_rounded_rect({0, 0, 2, 1}, 0.0f, ui::Brush{shader});
+            std::array<std::uint8_t, 8> pixels{};
+            NUI_CHECK(surface->readPixels(SkImageInfo::Make(
+                2, 1, kRGBA_8888_SkColorType, kPremul_SkAlphaType),
+                pixels.data(), 8, 0, 0));
+            NUI_CHECK(pixels[0] == std::uint8_t(expected));
+            NUI_CHECK(pixels[1] == std::uint8_t(expected >> 8));
+            NUI_CHECK(pixels[2] == std::uint8_t(expected >> 16));
+            NUI_CHECK(pixels[4] == std::uint8_t(expected >> 24));
+        }
+    }
+}
+
 void sksl_byte_lane_contract() {
     std::string source{ui::detail::kNoiseHashSkSL};
     source.append(ui::detail::kWorleyNoiseKernelSkSL);
@@ -529,6 +596,7 @@ int main(int argc, char** argv) {
         local_distance_contract();
         bounded_neighborhood_contract();
         guard_contract();
+        sksl_salted_hash_contract();
         sksl_byte_lane_contract();
         sksl_reference_contract();
         raster_contract();
