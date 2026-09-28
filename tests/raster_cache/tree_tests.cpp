@@ -369,11 +369,13 @@ void dynamic_reconcile_failure_retires_boundary_identity() {
     const auto outer_before = publish(tree, outer->id);
 
     Access::Token failed_lifetime;
+    std::function<void()> failed_invalidator;
     ui::NodeId failed_id = ui::kInvalidNodeId;
     child->on_mount = [&](ui::NodeId id) {
         failed_id = id;
         NUI_CHECK(Access::register_boundary(tree, id));
         failed_lifetime = ui::TreeTestAccess::lifetime(tree, id);
+        failed_invalidator = Access::invalidator(tree, id);
         throw std::runtime_error("injected dynamic mount failure");
     };
 
@@ -389,16 +391,21 @@ void dynamic_reconcile_failure_retires_boundary_identity() {
     NUI_CHECK(caught);
     NUI_CHECK(failed_id != ui::kInvalidNodeId);
     NUI_CHECK(failed_lifetime.expired());
+    NUI_CHECK(failed_invalidator);
     NUI_CHECK(ui::TreeTestAccess::raster_records(tree) == 1);
     NUI_CHECK(!Access::commit(tree, failed_id, failed_lifetime));
+    failed_invalidator();
+    NUI_CHECK(ui::TreeTestAccess::raster_records(tree) == 1);
 
     child->on_mount = {};
     tree.paint(canvas, platform);
     NUI_CHECK(child->id != ui::kInvalidNodeId);
     NUI_CHECK(child->id != failed_id);
     NUI_CHECK(Access::register_boundary(tree, child->id));
-    (void)publish(tree, child->id);
+    const auto replacement = publish(tree, child->id);
     (void)publish(tree, outer->id);
+    failed_invalidator();
+    NUI_CHECK(Access::reusable(tree, child->id, replacement));
 }
 
 }
