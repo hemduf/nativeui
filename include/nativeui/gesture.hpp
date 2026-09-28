@@ -7,17 +7,29 @@
 
 namespace ui {
 
+/// Axis used when projecting a two-dimensional pointer delta to one scalar.
 enum class DragAxis {
     Horizontal,
     Vertical
 };
 
+/// Current state of `DragGesture`.
+///
+/// `Pressed` means a pointer is down but has not crossed the drag threshold.
+/// `Dragging` begins on the first move whose total Euclidean distance reaches
+/// the configured threshold.
 enum class GesturePhase {
     Idle,
     Pressed,
     Dragging
 };
 
+/// Result of one drag-gesture transition.
+///
+/// `delta` is movement since the previous sample; `total` is movement from
+/// the press origin. `drag_started` is true only on the threshold-crossing
+/// update. `clicked` is reported only by `end()` when the threshold was never
+/// crossed. `ended` and `cancelled` are mutually exclusive terminal markers.
 struct DragUpdate {
     Point delta{};
     Point total{};
@@ -35,15 +47,23 @@ struct DragUpdate {
 /// configured threshold. Releasing before that threshold reports a click.
 class DragGesture {
 public:
+    /// Construct with a non-negative logical-pixel drag threshold. Negative
+    /// values are clamped to zero.
     explicit constexpr DragGesture(float threshold = 3.0f) noexcept
         : threshold_(std::max(0.0f, threshold)) {}
 
+    /// Start/restart a gesture at `position` in the caller's logical
+    /// coordinate space.
     void begin(Point position) noexcept {
         origin_ = position;
         current_ = position;
         phase_ = GesturePhase::Pressed;
     }
 
+    /// Advance the active gesture to `position`.
+    ///
+    /// Returns an empty update while idle. The first sample whose total
+    /// Euclidean distance reaches `threshold()` reports `drag_started=true`.
     [[nodiscard]] DragUpdate move(Point position) noexcept {
         if (!active()) return {};
 
@@ -64,6 +84,10 @@ public:
             .dragging = phase_ == GesturePhase::Dragging};
     }
 
+    /// Finish the gesture at `position`.
+    ///
+    /// Ending before the threshold is crossed reports a click; ending after a
+    /// drag reports `dragging=true` and never `clicked`.
     [[nodiscard]] DragUpdate end(Point position) noexcept {
         if (!active()) return {};
 
@@ -75,6 +99,8 @@ public:
         return update;
     }
 
+    /// Cancel the active gesture and return its final total displacement.
+    /// Cancellation never reports a click.
     [[nodiscard]] DragUpdate cancel() noexcept {
         if (!active()) return {};
 
@@ -111,10 +137,16 @@ private:
     GesturePhase phase_{GesturePhase::Idle};
 };
 
+/// Project a logical two-dimensional delta onto one configured drag axis.
 [[nodiscard]] constexpr float drag_axis_delta(Point delta, DragAxis axis) noexcept {
     return axis == DragAxis::Horizontal ? delta.x : delta.y;
 }
 
+/// Convert a logical pointer delta into an application value delta.
+///
+/// `value_per_pixel` is multiplied by the selected axis displacement. Set
+/// `invert` for controls whose increasing visual direction maps to decreasing
+/// values. This helper does not clamp the resulting application value.
 [[nodiscard]] constexpr float drag_value_delta(
     Point delta,
     DragAxis axis,

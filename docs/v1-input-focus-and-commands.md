@@ -186,6 +186,93 @@ auto scoped = ui::CommandScope{
 
 Returning `Ignored` is intentional when a parent/global handler should remain eligible. [`t017_commands.cpp`](../examples/features/t017_commands.cpp) demonstrates TextInput owning Copy/Paste, a scoped Undo handler and global fallback.
 
+## Reusable click/drag gestures
+
+[`gesture.hpp`](../include/nativeui/gesture.hpp) provides `DragGesture`, a small synchronous value-only state machine for controls that need click-versus-drag classification without owning another event subsystem.
+
+The helper allocates no heap memory and owns no platform or retained-tree object. The caller is responsible for starting it from pointer input, forwarding moves, ending or cancelling it, and requesting pointer capture when the interaction must continue outside the original hit-test bounds.
+
+### Threshold semantics
+
+The constructor threshold is expressed in the same logical coordinate units as the `Point` values supplied to `begin()`, `move()` and `end()`. In ordinary NativeUI input code that means logical pixels.
+
+A gesture transitions:
+
+```text
+Idle --begin--> Pressed --distance >= threshold--> Dragging
+  ^                    \--end before threshold--> click
+  |                                         |
+  +-------------------- end/cancel ---------+
+```
+
+The threshold check uses Euclidean distance from the original press point, not accumulated per-event distance.
+
+`DragUpdate` reports two displacement forms:
+
+- `delta`: movement since the previous sample;
+- `total`: movement from the original press point.
+
+`drag_started` is true only on the update that crosses the threshold. `clicked` appears only on `end()` if the gesture remained Pressed. `cancel()` returns the final total displacement and marks the update cancelled without producing a click.
+
+### Typical retained input use
+
+```cpp
+ui::DragGesture drag{5.0f};
+
+ui::EventResult input(
+    const ui::InputEvent& event,
+    ui::InputContext& context)
+{
+    switch (event.type) {
+    case ui::InputType::PointerDown:
+        drag.begin(event.position);
+        context.capture_pointer();
+        return ui::EventResult::Handled;
+
+    case ui::InputType::PointerMove:
+        if (drag.active()) {
+            const auto update = drag.move(event.position);
+            if (update.dragging) {
+                // Apply update.total or update.delta.
+            }
+            return ui::EventResult::Handled;
+        }
+        break;
+
+    case ui::InputType::PointerUp:
+        if (drag.active()) {
+            const auto update = drag.end(event.position);
+            context.release_pointer();
+            if (update.clicked) {
+                // Handle click.
+            }
+            return ui::EventResult::Handled;
+        }
+        break;
+
+    case ui::InputType::PointerCancel:
+        if (drag.active()) {
+            (void)drag.cancel();
+            return ui::EventResult::Handled;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return ui::EventResult::Ignored;
+}
+```
+
+[`t016_gestures.cpp`](../examples/features/t016_gestures.cpp) demonstrates this pattern with pointer capture and a horizontal drag value.
+
+### Mapping drag distance to values
+
+`drag_axis_delta()` projects a `Point` onto Horizontal or Vertical. `drag_value_delta()` additionally multiplies by a caller-provided value-per-logical-pixel scale and optionally inverts the sign.
+
+These helpers deliberately do not clamp application values. The control/application retains responsibility for its value domain.
+
 ## Threading and lifetime
 
 Retained input/focus mutation is UI/main-thread work. No process-global focus, pointer-capture or command target exists: ownership belongs to the concrete retained tree/UI instance.
