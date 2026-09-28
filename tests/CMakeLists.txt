@@ -251,6 +251,8 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_t090_simplex_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_t091_worley_noise_tests ${PROJECT_SOURCE_DIR}/tests/t091_worley_noise_tests.cpp)
   target_include_directories(nativeui_t091_worley_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_t092_fractal_noise_tests ${PROJECT_SOURCE_DIR}/tests/t092_fractal_noise_tests.cpp)
+  target_include_directories(nativeui_t092_fractal_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
 
   # Fault controls remain in this isolated executable, never NativeUI::Core.
   add_executable(nativeui_t088_noise_fault_tests
