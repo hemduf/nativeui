@@ -141,7 +141,7 @@ Packaging changes are not validated by a successful in-tree library build alone.
 
 For contributors, use the repository policies rather than copying them into application documentation:
 
-- [`CI_POLICY.md`](../CI_POLICY.md) defines exact-head qualification and final-candidate rules;
+- [`VALIDATION.md`](../VALIDATION.md) records platform/build validation guidance and supporting evidence;
 - [`CODE_REVIEW.md`](../CODE_REVIEW.md) defines package/public-private/lifetime/platform review expectations;
 - [`AGENTS.md`](../AGENTS.md) defines the repository implementation/review workflow.
 
