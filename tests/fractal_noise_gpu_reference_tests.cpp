@@ -190,6 +190,7 @@ int main(int argc, char** argv) {
         }
         ui::Application app;
         check(app.valid(), "platform application invalid");
+        app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
         for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
                           ui::NoiseType::Simplex}) {
             for (auto mode : {ui::FractalNoiseMode::FBm,
