@@ -57,7 +57,7 @@ native view/event integration ------> Pugl ------> Cocoa / Win32 / X11
 
 A `UI` owns one retained component tree. Declarative construction creates the initial specification; the resulting runtime tree owns component instances and their parent/child relationships, layout state, focus/input routing and invalidation state. A normal custom component extends this retained model instead of registering itself in a process-global component registry.
 
-Pugl and Skia are implementation dependencies, not alternate application models. The durable architecture is described in [DESIGN.md](../DESIGN.md); final backend-neutral public-surface cleanup is owned by T069 and must be reflected here before T122 is completed.
+Pugl and Skia are implementation dependencies, not alternate application models. The durable architecture is described in [DESIGN.md](../DESIGN.md); the backend-neutral public surface on current `main` is authoritative for this documentation.
 
 ## Application and window ownership
 
@@ -93,7 +93,7 @@ The canonical lifetime order is:
 
 The existing [`t060_multi_window_application`](../examples/features/t060_multi_window_application.cpp) feature example is the maintained executable demonstration of the shared-Application multi-window model. This chapter does not duplicate that example as a second Getting Started snippet source.
 
-Pre-1.0 independent-world standalone compatibility APIs are intentionally not documented as a supported 1.0 ownership model. T069 owns their final removal from the frozen public surface.
+Pre-1.0 independent-world standalone compatibility APIs are intentionally not documented as a supported 1.0 ownership model. Current public headers and package exports on `main` define the supported ownership surface.
 
 ### Application initialization and registration
 
