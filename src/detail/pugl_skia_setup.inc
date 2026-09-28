@@ -18,6 +18,8 @@
 #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
+
+#include "render_resource_materialization.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
 #endif
@@ -113,16 +115,22 @@ public:
         snapshot_.reset();
         presentation_.reset();
         scene_.reset();
+        // Live-context teardown releases cache-owned backend handles before
+        // dropping the Ganesh context they belong to.
+        render_resources_.clear();
         context_.reset();
         interface_.reset();
         clear_identity();
     }
 
     void abandon() noexcept {
+        // Confirmed context loss: abandon first so releasing cached Skia handles
+        // cannot attempt stale backend work, then discard this view's cache.
         if (context_) context_->abandonContext();
         snapshot_.reset();
         presentation_.reset();
         scene_.reset();
+        render_resources_.clear();
         context_.reset();
         interface_.reset();
         clear_identity();
@@ -785,6 +793,7 @@ private:
 #endif
     sk_sp<const GrGLInterface> interface_;
     sk_sp<GrDirectContext> context_;
+    RenderResourceMaterializationContext render_resources_;
     GrGLBindFramebufferFn* bind_framebuffer_{};
     sk_sp<SkSurface> scene_;
     sk_sp<SkImage> snapshot_;
