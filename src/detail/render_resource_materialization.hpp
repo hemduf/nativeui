@@ -5,9 +5,11 @@
 
 #include "include/core/SkShader.h"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace ui::detail {
 
@@ -44,6 +46,16 @@ public:
 
     ~RenderResourceMaterializationContext() noexcept = default;
 
+    void begin_frame() noexcept {
+        release_frame_resources();
+        frame_active_ = true;
+    }
+
+    void end_frame() noexcept {
+        release_frame_resources();
+        frame_active_ = false;
+    }
+
     template <class Factory>
     [[nodiscard]] ImageTextureAcquisition acquire_image_texture(
         const ImageTexture& texture,
@@ -64,6 +76,7 @@ public:
             });
         if (!acquisition) return {};
 
+        retain_frame_resource(acquisition.resource, acquisition.retained);
         return {
             *acquisition.resource,
             std::move(acquisition.resource),
@@ -80,16 +93,52 @@ public:
     }
 
     void clear() noexcept {
+        release_frame_resources();
+        frame_active_ = false;
         image_shaders_.clear();
     }
 
 private:
+    void retain_frame_resource(
+        const std::shared_ptr<const sk_sp<SkShader>>& resource,
+        bool retained) {
+        if (!frame_active_ || !resource) return;
+
+        if (!retained) {
+            transient_frame_leases_.push_back(resource);
+            return;
+        }
+
+        for (std::size_t index = 0; index < retained_frame_lease_count_; ++index) {
+            if (retained_frame_leases_[index].get() == resource.get()) return;
+        }
+
+        if (retained_frame_lease_count_ < retained_frame_leases_.size()) {
+            retained_frame_leases_[retained_frame_lease_count_++] = resource;
+            return;
+        }
+
+        transient_frame_leases_.push_back(resource);
+    }
+
+    void release_frame_resources() noexcept {
+        for (std::size_t index = 0; index < retained_frame_lease_count_; ++index) {
+            retained_frame_leases_[index].reset();
+        }
+        retained_frame_lease_count_ = 0;
+        transient_frame_leases_.clear();
+    }
     using ImageShaderCache = RenderResourceCache<
         ImageTextureCacheKey,
         sk_sp<SkShader>,
         ImageTextureCacheKeyHash>;
 
     ImageShaderCache image_shaders_;
+    std::array<std::shared_ptr<const sk_sp<SkShader>>,
+               kMaxRetainedEntries> retained_frame_leases_{};
+    std::vector<std::shared_ptr<const sk_sp<SkShader>>> transient_frame_leases_;
+    std::size_t retained_frame_lease_count_{};
+    bool frame_active_{};
 };
 
 } // namespace ui::detail

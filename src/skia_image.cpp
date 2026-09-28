@@ -20,6 +20,7 @@
 #include "include/core/SkTileMode.h"
 #include "detail/image_access.hpp"
 #include "detail/image_texture_test_seams.hpp"
+#include "detail/render_resource_materialization.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -699,6 +700,17 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         filter,
         &tile_local_matrix,
         &subset);
+}
+
+sk_sp<SkShader> materialize_image_texture(
+    const ImageTexture& texture,
+    RenderResourceMaterializationContext* resources) {
+    if (!resources) return materialize_image_texture(texture);
+
+    auto acquisition = resources->acquire_image_texture(
+        texture,
+        [&texture] { return materialize_image_texture(texture); });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
 }
 
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {

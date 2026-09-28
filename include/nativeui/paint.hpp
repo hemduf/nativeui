@@ -46,11 +46,15 @@ struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
 struct PainterTransformHistoryFaultAccess;
 struct ShaderBrushSnapshot;
+class RenderResourceMaterializationContext;
 
 [[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
     const std::shared_ptr<const ShaderBrushSnapshot>& snapshot);
 [[nodiscard]] sk_sp<SkShader> materialize_image_texture(
     const ImageTexture& texture);
+[[nodiscard]] sk_sp<SkShader> materialize_image_texture(
+    const ImageTexture& texture,
+    RenderResourceMaterializationContext* resources);
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -78,6 +82,7 @@ struct ResolvedTextLayout {
 
 } // namespace detail
 
+class Tree;
 
 class Painter {
     struct ScopeFrame {
@@ -99,6 +104,7 @@ class Painter {
     friend struct detail::PainterLayerFaultAccess;
     friend struct detail::PainterEffectFaultAccess;
     friend struct detail::PainterTransformHistoryFaultAccess;
+    friend class Tree;
 
 public:
     class StateGuard {
@@ -127,7 +133,7 @@ public:
         ScopeFrame frame_{};
     };
 
-    explicit Painter(SkCanvas& canvas) : canvas_(canvas) {}
+    explicit Painter(SkCanvas& canvas) noexcept : Painter(canvas, nullptr) {}
     ~Painter() noexcept {
         // Framework-owned tree scopes may be unwinding because component paint
         // threw before the matching manual pop. Restore every outstanding save
@@ -825,8 +831,8 @@ private:
         });
     }
 
-    static void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
-        auto shader = detail::materialize_image_texture(texture);
+    void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
+        auto shader = detail::materialize_image_texture(texture, render_resources_);
         if (!shader) {
             throw std::runtime_error(
                 "NativeUI image texture materialization returned no shader");
@@ -877,7 +883,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(
+    [[nodiscard]] SkPaint make_fill_paint(
         const ImageTexture& texture,
         PaintOptions options) {
         SkPaint paint;
@@ -899,13 +905,13 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
-        return brush.visit([options](const auto& source) {
+    [[nodiscard]] SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
+        return brush.visit([this, options](const auto& source) {
             return make_fill_paint(source, options);
         });
     }
 
-    [[nodiscard]] static SkPaint make_stroke_paint(const Brush& brush,
+    [[nodiscard]] SkPaint make_stroke_paint(const Brush& brush,
                                                    StrokeStyle style,
                                                    PaintOptions options) {
         auto paint = make_fill_paint(brush, options);
@@ -1045,7 +1051,13 @@ private:
         }
     }
 
+    explicit Painter(
+        SkCanvas& canvas,
+        detail::RenderResourceMaterializationContext* resources) noexcept
+        : canvas_(canvas), render_resources_(resources) {}
+
     SkCanvas& canvas_;
+    detail::RenderResourceMaterializationContext* render_resources_{};
     Transform2D current_transform_{};
     std::array<Transform2D, kInlineTransformSaveDepth> transform_history_inline_{};
     std::vector<Transform2D> transform_history_overflow_;

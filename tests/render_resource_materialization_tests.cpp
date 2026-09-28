@@ -31,11 +31,15 @@ constexpr std::array<std::byte, 76> kTinyRgbaPng{
     std::byte{174}, std::byte{66}, std::byte{96}, std::byte{130},
 };
 
-[[nodiscard]] ui::ImageTexture texture(const ui::Image& image) {
+[[nodiscard]] ui::ImageTexture texture_at(const ui::Image& image, float x) {
     return ui::ImageTexture{
         image,
         {0.0f, 0.0f, 2.0f, 2.0f},
-        {0.0f, 0.0f, 16.0f, 16.0f}};
+        {x, 0.0f, 16.0f, 16.0f}};
+}
+
+[[nodiscard]] ui::ImageTexture texture(const ui::Image& image) {
+    return texture_at(image, 0.0f);
 }
 
 void retained_hit_skips_backend_creation() {
@@ -130,6 +134,54 @@ void invalid_texture_is_transient_and_never_retained() {
     NUI_CHECK(context.retained_entries() == 0);
 }
 
+void frame_scope_pins_resources_until_completion() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    context.begin_frame();
+
+    for (std::size_t index = 0;
+         index < ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries;
+         ++index) {
+        auto acquisition = context.acquire_image_texture(
+            texture_at(image, static_cast<float>(index)),
+            [] { return SkShaders::Color(SK_ColorRED); });
+        NUI_CHECK(acquisition && acquisition.retained && !acquisition.hit);
+    }
+
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+
+    {
+        auto transient = context.acquire_image_texture(
+            texture_at(
+                image,
+                static_cast<float>(
+                    ui::detail::RenderResourceMaterializationContext::
+                        kMaxRetainedEntries)),
+            [] { return SkShaders::Color(SK_ColorBLUE); });
+        NUI_CHECK(transient);
+        NUI_CHECK(!transient.retained);
+        NUI_CHECK(!transient.hit);
+    }
+
+    context.end_frame();
+
+    auto replacement = context.acquire_image_texture(
+        texture_at(
+            image,
+            static_cast<float>(
+                ui::detail::RenderResourceMaterializationContext::
+                    kMaxRetainedEntries)),
+        [] { return SkShaders::Color(SK_ColorGREEN); });
+    NUI_CHECK(replacement && replacement.retained && !replacement.hit);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+}
+
 void clear_is_instance_local() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -158,6 +210,7 @@ int main() {
     frame_lease_survives_cache_clear();
     different_semantics_create_independent_entries();
     invalid_texture_is_transient_and_never_retained();
+    frame_scope_pins_resources_until_completion();
     clear_is_instance_local();
     return 0;
 }

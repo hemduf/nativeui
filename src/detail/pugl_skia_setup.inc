@@ -463,11 +463,14 @@ public:
             scene_frame_captured_ = true;
             const ScopeExit finish_capture{
                 [this]() noexcept { scene_frame_captured_ = false; }};
+            render_resources_.begin_frame();
+            const ScopeExit finish_resources{
+                [this]() noexcept { render_resources_.end_frame(); }};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 canvas->scale(scale_factor, scale_factor);
-                ui.paint(*canvas, services);
+                ui.paint_with_resources(*canvas, services, &render_resources_);
             } catch (...) {
                 invalidate();
                 throw;
@@ -562,19 +565,23 @@ public:
 
             bool used_effects = false;
             bool painted = false;
+            render_resources_.begin_frame();
+            const ScopeExit finish_resources{
+                [this]() noexcept { render_resources_.end_frame(); }};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_full_scene_prepared(
-                        transaction, *canvas, services, used_effects);
+                        transaction, *canvas, services,
+                        &render_resources_, used_effects);
                 } else {
                     canvas->resetMatrix();
                     canvas->clipIRect(partial_clip, SkClipOp::kIntersect);
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_partial_scene_prepared(
                         transaction, *canvas, services,
-                        damage->logical_query, used_effects);
+                        damage->logical_query, &render_resources_, used_effects);
                 }
             } catch (...) {
                 invalidate();
