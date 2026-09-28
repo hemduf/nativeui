@@ -2,6 +2,7 @@
 
 #include "image_texture_cache_key.hpp"
 #include "render_resource_cache.hpp"
+#include "shader_brush_access.hpp"
 
 #include "include/core/SkShader.h"
 
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <memory>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace ui::detail {
@@ -32,7 +34,7 @@ public:
         128U * 1024U * 1024U;
 
     RenderResourceMaterializationContext()
-        : image_shaders_({
+        : resources_({
               .max_entries = kMaxRetainedEntries,
               .max_accounted_bytes = kMaxAccountedBytes}) {}
 
@@ -67,8 +69,8 @@ public:
             return {std::move(shader), {}, false, false};
         }
 
-        auto acquisition = image_shaders_.acquire(
-            *key,
+        auto acquisition = resources_.acquire(
+            RenderResourceKey{*key},
             retained_storage_bytes(texture),
             [&factory]() -> std::shared_ptr<sk_sp<SkShader>> {
                 auto shader = std::forward<Factory>(factory)();
@@ -85,21 +87,91 @@ public:
             acquisition.retained};
     }
 
+    template <class Factory>
+    [[nodiscard]] ImageTextureAcquisition acquire_runtime_shader(
+        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot,
+        Factory&& factory) {
+        if (!snapshot) {
+            auto shader = std::forward<Factory>(factory)();
+            return {std::move(shader), {}, false, false};
+        }
+
+        auto acquisition = resources_.acquire(
+            RenderResourceKey{RuntimeShaderKey{snapshot}},
+            0U,
+            [&factory]() -> std::shared_ptr<sk_sp<SkShader>> {
+                auto shader = std::forward<Factory>(factory)();
+                if (!shader) return {};
+                return std::make_shared<sk_sp<SkShader>>(std::move(shader));
+            });
+        if (!acquisition) return {};
+
+        retain_frame_resource(acquisition.resource, acquisition.retained);
+        return {
+            *acquisition.resource,
+            std::move(acquisition.resource),
+            acquisition.hit,
+            acquisition.retained};
+    }
+
     [[nodiscard]] std::size_t retained_entries() const noexcept {
-        return image_shaders_.retained_entries();
+        return resources_.retained_entries();
     }
 
     [[nodiscard]] std::size_t retained_accounted_bytes() const noexcept {
-        return image_shaders_.retained_accounted_bytes();
+        return resources_.retained_accounted_bytes();
     }
 
     void clear() noexcept {
         release_frame_resources();
         frame_active_ = false;
-        image_shaders_.clear();
+        resources_.clear();
     }
 
 private:
+    struct RuntimeShaderKey final {
+        std::shared_ptr<const ShaderBrushSnapshot> snapshot;
+    };
+
+    using RenderResourceKey = std::variant<ImageTextureCacheKey, RuntimeShaderKey>;
+
+    struct RenderResourceKeyHash final {
+        [[nodiscard]] std::size_t operator()(
+            const RenderResourceKey& key) const noexcept {
+            return std::visit(
+                [](const auto& value) noexcept -> std::size_t {
+                    using Value = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Value, ImageTextureCacheKey>) {
+                        return ImageTextureCacheKeyHash{}(value);
+                    } else {
+                        return ShaderBrushAccess::semantic_hash(value.snapshot);
+                    }
+                },
+                key);
+        }
+    };
+
+    struct RenderResourceKeyEqual final {
+        [[nodiscard]] bool operator()(
+            const RenderResourceKey& a,
+            const RenderResourceKey& b) const noexcept {
+            if (a.index() != b.index()) return false;
+            return std::visit(
+                [](const auto& left, const auto& right) noexcept -> bool {
+                    using Left = std::decay_t<decltype(left)>;
+                    using Right = std::decay_t<decltype(right)>;
+                    if constexpr (!std::is_same_v<Left, Right>) {
+                        return false;
+                    } else if constexpr (std::is_same_v<Left, ImageTextureCacheKey>) {
+                        return left == right;
+                    } else {
+                        return ShaderBrushAccess::semantic_equal(
+                            left.snapshot, right.snapshot);
+                    }
+                },
+                a, b);
+        }
+    };
     [[nodiscard]] static std::size_t retained_storage_bytes(
         const ImageTexture& texture) noexcept {
         // The decoded Image backing is shared application/resource state and is
@@ -190,12 +262,13 @@ private:
         retained_frame_lease_count_ = 0;
         transient_frame_leases_.clear();
     }
-    using ImageShaderCache = RenderResourceCache<
-        ImageTextureCacheKey,
+    using ResourceCache = RenderResourceCache<
+        RenderResourceKey,
         sk_sp<SkShader>,
-        ImageTextureCacheKeyHash>;
+        RenderResourceKeyHash,
+        RenderResourceKeyEqual>;
 
-    ImageShaderCache image_shaders_;
+    ResourceCache resources_;
     std::array<std::shared_ptr<const sk_sp<SkShader>>,
                kMaxRetainedEntries> retained_frame_leases_{};
     std::vector<std::shared_ptr<const sk_sp<SkShader>>> transient_frame_leases_;

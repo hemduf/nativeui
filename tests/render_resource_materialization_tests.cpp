@@ -190,6 +190,69 @@ void renderer_owned_texture_storage_is_accounted() {
     NUI_CHECK(context.retained_accounted_bytes() == 0);
 }
 
+void runtime_shader_shares_the_same_budget_and_hits() {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform float gain;
+        half4 main(float2) {
+            return half4(gain, gain, gain, 1.0);
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+
+    ui::ShaderInstance instance{compiled.program};
+    NUI_CHECK(instance.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
+    const ui::Brush brush{instance};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+
+    ui::detail::RenderResourceMaterializationContext context;
+    int creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return ui::detail::materialize_shader_brush(*snapshot);
+    };
+
+    context.begin_frame();
+    auto first = context.acquire_runtime_shader(*snapshot, factory);
+    NUI_CHECK(first);
+    NUI_CHECK(creates == 1);
+    NUI_CHECK(context.retained_entries() == 1);
+    context.end_frame();
+
+    context.begin_frame();
+    auto second = context.acquire_runtime_shader(*snapshot, factory);
+    NUI_CHECK(second);
+    NUI_CHECK(creates == 1);
+    NUI_CHECK(first.shader == second.shader);
+    NUI_CHECK(context.retained_entries() == 1);
+    context.end_frame();
+}
+
+void image_and_runtime_shader_share_one_entry_budget() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2) { return half4(1.0); }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance instance{compiled.program};
+    const ui::Brush brush{instance};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+
+    ui::detail::RenderResourceMaterializationContext context;
+    context.begin_frame();
+    NUI_CHECK(context.acquire_image_texture(
+        texture(image), [] { return SkShaders::Color(SK_ColorRED); }));
+    NUI_CHECK(context.acquire_runtime_shader(
+        *snapshot, [snapshot] {
+            return ui::detail::materialize_shader_brush(*snapshot);
+        }));
+    NUI_CHECK(context.retained_entries() == 2);
+    context.end_frame();
+}
+
 void invalid_texture_is_transient_and_never_retained() {
     ui::detail::RenderResourceMaterializationContext context;
     int creates = 0;
@@ -308,6 +371,8 @@ int main() {
     frame_lease_survives_cache_clear();
     different_semantics_create_independent_entries();
     renderer_owned_texture_storage_is_accounted();
+    runtime_shader_shares_the_same_budget_and_hits();
+    image_and_runtime_shader_share_one_entry_budget();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
     clear_releases_context_owned_frame_leases();

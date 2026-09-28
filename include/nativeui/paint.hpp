@@ -56,6 +56,9 @@ struct PainterPrivateHooks final {
     void* state{};
     sk_sp<SkShader> (*materialize_image_texture)(
         void* state, const ImageTexture& texture){};
+    sk_sp<SkShader> (*materialize_shader_brush)(
+        void* state,
+        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot){};
 };
 
 struct ResolvedTextRun {
@@ -846,10 +849,14 @@ private:
         paint.setShader(std::move(shader));
     }
 
-    static void apply_fill_source(
+    void apply_fill_source(
         SkPaint& paint,
         const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-        auto shader = detail::materialize_shader_brush(snapshot);
+        auto shader =
+            private_hooks_ && private_hooks_->materialize_shader_brush
+            ? private_hooks_->materialize_shader_brush(
+                  private_hooks_->state, snapshot)
+            : detail::materialize_shader_brush(snapshot);
         if (!shader) {
             throw std::runtime_error(
                 "NativeUI runtime shader materialization returned no shader");
@@ -900,7 +907,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(
+    [[nodiscard]] SkPaint make_fill_paint(
         const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot,
         PaintOptions options) {
         SkPaint paint;

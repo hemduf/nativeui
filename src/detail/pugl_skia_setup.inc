@@ -80,6 +80,19 @@ private:
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
 }
 
+[[nodiscard]] sk_sp<SkShader> materialize_cached_runtime_shader(
+    void* state,
+    const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::materialize_shader_brush(snapshot);
+
+    auto acquisition = resources->acquire_runtime_shader(
+        snapshot,
+        [&snapshot] { return detail::materialize_shader_brush(snapshot); });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
@@ -480,7 +493,9 @@ public:
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_, &materialize_cached_image_texture};
+                &render_resources_,
+                &materialize_cached_image_texture,
+                &materialize_cached_runtime_shader};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -584,7 +599,9 @@ public:
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_, &materialize_cached_image_texture};
+                &render_resources_,
+                &materialize_cached_image_texture,
+                &materialize_cached_runtime_shader};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
