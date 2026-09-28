@@ -2,7 +2,7 @@
 
 This chapter documents the stable NativeUI 1.0 package architecture already implemented in the repository. It explains the roles of the exported core target and the consumer-side CMake helpers without duplicating the final copy-pasteable application tutorial owned by T070.
 
-The final T122 reconciliation must compare this chapter with the frozen T069 public API/package inventory before NativeUI 1.0 is declared complete. Where implementation details can still move without changing the public package contract, this chapter deliberately describes the contract rather than an internal target graph.
+This chapter is reconciled against the current public package/API surface on `main`. As that surface evolves, T122 keeps this documentation synchronized with the exported targets and installed/build-tree package helpers rather than waiting on a separate freeze gate. Where implementation details can move without changing the public package contract, this chapter deliberately describes the contract rather than an internal target graph.
 
 ## Package model
 
@@ -88,7 +88,7 @@ Windows and Linux use the same public final-target attachment concept. The packa
 
 On Linux/X11, the package also connects the package-owned D-Bus transport required by NativeUI platform services. That transport remains below the public API: callers use NativeUI service types rather than libdbus types.
 
-Platform implementation details are deliberately not reproduced here because normal application code should not depend on them and T069 owns the final public/private inventory.
+Platform implementation details are deliberately not reproduced here because normal application code should not depend on them. The current public/private boundary is defined by the exported package surface and public headers on `main`.
 
 ## Installed and build-tree package parity
 
@@ -145,13 +145,13 @@ For contributors, use the repository policies rather than copying them into appl
 - [`CODE_REVIEW.md`](../CODE_REVIEW.md) defines package/public-private/lifetime/platform review expectations;
 - [`AGENTS.md`](../AGENTS.md) defines the repository implementation/review workflow.
 
-T122's final documentation pass must also scan this chapter for obsolete package claims after T069 freezes the v1 public surface.
+T122's final documentation pass must keep scanning this chapter for obsolete package claims whenever the public package surface on `main` changes.
 
 ## Final 1.0 reconciliation checklist
 
 Before this chapter is considered final:
 
-- confirm the exported package target inventory against T069;
+- confirm the exported package target inventory against the current package/configuration files on `main`;
 - confirm `nativeui_attach_platform(...)` and `nativeui_add_application(...)` names/arguments against the frozen package contract;
 - confirm the final package/relocation checks are green on the release candidate;
 - ensure no text presents `NativeUI::NativeUI` as a consumer complete-target;
