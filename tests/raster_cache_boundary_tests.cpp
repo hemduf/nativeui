@@ -328,6 +328,12 @@ void ancestor_repaint_preserves_clean_content() {
     NUI_CHECK(after && !after->stale);
     NUI_CHECK(after->generation == before->generation);
     NUI_CHECK(after->serial == before->serial);
+
+    // A renderer entry may be evicted while retained content remains clean.
+    // Re-rasterizing that same generation can still validate and publish safely.
+    NUI_CHECK(ui::TreeTestAccess::commit(tree, boundary));
+    const auto validated = ui::TreeTestAccess::state(tree, boundary);
+    NUI_CHECK(validated && !validated->stale);
 }
 
 void translation_reuses_but_size_change_stales() {

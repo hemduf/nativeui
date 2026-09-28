@@ -343,7 +343,8 @@
     [[nodiscard]] bool try_commit_raster_cache_boundary(
         const RasterCacheBoundarySnapshot& snapshot) noexcept {
         auto* record = raster_cache_boundary_record(snapshot.node_id);
-        if (!record || !snapshot.content_stale || !record->content_stale ||
+        if (!record ||
+            record->content_stale != snapshot.content_stale ||
             record->lifetime_identity == 0U ||
             record->generation_exhausted ||
             record->invalidation_serial_exhausted ||
