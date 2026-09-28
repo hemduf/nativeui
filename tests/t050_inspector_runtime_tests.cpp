@@ -18,11 +18,66 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <memory>
+#include <utility>
 
 namespace {
 
 bool same_rect(ui::Rect a, ui::Rect b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+struct ReentrantInspectorPaintState {
+    std::function<void()> invalidate;
+    bool invalidate_on_next_paint{true};
+    int paints{};
+};
+
+class ReentrantInspectorPaintComponent final : public ui::Component {
+public:
+    explicit ReentrantInspectorPaintComponent(
+        std::shared_ptr<ReentrantInspectorPaintState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {40.0f, 40.0f};
+    }
+
+    void mount(ui::MountContext& context) override {
+        state_->invalidate = context.invalidator();
+    }
+
+    void paint(ui::PaintContext&) const override {
+        ++state_->paints;
+        if (!state_->invalidate_on_next_paint) return;
+        state_->invalidate_on_next_paint = false;
+        if (state_->invalidate) state_->invalidate();
+    }
+
+private:
+    std::shared_ptr<ReentrantInspectorPaintState> state_;
+};
+
+void inspector_reentrant_paint_invalidation_survives() {
+    auto state = std::make_shared<ReentrantInspectorPaintState>();
+    ui::Spec root{
+        [state] {
+            return std::make_unique<ReentrantInspectorPaintComponent>(state);
+        },
+        {}};
+    ui::UI view{std::move(root)};
+    ui::HeadlessRenderer renderer{{64.0f, 64.0f}};
+    ui::debug::set_inspector_enabled(view, true);
+
+    NUI_CHECK(renderer.render(view));
+    NUI_CHECK(state->paints == 1);
+    NUI_CHECK(view.paint_dirty());
+
+    NUI_CHECK(renderer.render(view));
+    NUI_CHECK(state->paints == 2);
+    NUI_CHECK(!view.paint_dirty());
 }
 
 void state_is_per_ui_and_snapshot_is_value_based() {
@@ -418,6 +473,7 @@ void suite() {
     snapshot_reports_focus_capture_and_effective_clip();
     snapshot_reports_effective_availability();
     overlay_draws_selection_focus_and_capture_markers();
+    inspector_reentrant_paint_invalidation_survives();
     inspector_changes_headless_pixels_without_persistent_redraw();
     inspector_does_not_intercept_focus_or_keyboard_input();
     inspector_does_not_intercept_pointer_input();
