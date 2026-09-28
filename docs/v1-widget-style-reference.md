@@ -15,15 +15,72 @@ Public families:
 
 ## Common resolution
 
-Inherited/theme-derived base values resolve first, then component-local base overrides, then the active state patches. The shared interaction branch is deterministic:
+`style.hpp` defines `VisualState`, the shared interaction selector, and the Button/Checkbox/Radio recipes. These are backend-neutral value types: detached recipes contain no UI/tree/native ownership and resolver functions do not invoke callbacks, traverse scopes or mutate retained state.
+
+The shared interaction branch is deterministic:
 
 ```text
 disabled > pressed > hovered > normal
 ```
 
-Checked/selected, read-only and focused states remain orthogonal where exposed. Only fields present in a patch replace previous values.
+`focused`, `read_only`, `checked` and `selected` remain orthogonal flags. Family resolvers apply layers in a fixed order, and within each layer the inherited recipe is applied before the component-local recipe. An explicit/local field therefore wins at the same layer.
 
-A style field can affect measurement. Control dimensions, padding/insets, intrinsic geometry and typography can require layout; colors/highlights are usually paint-only. The widget's style invalidation classifier remains authoritative.
+Resolvers perform **no implicit Theme lookup**. Callers normally provide `default_*_style(theme)` as the fully populated inherited recipe. If a field is absent from both inherited and local recipes, the corresponding `Resolved*Style` default remains in place (numeric/color fields can therefore remain zero/default). Returned font-family strings and fallback vectors are owned copies, not borrows.
+
+Numeric patch values are stored verbatim; the style value layer does not clamp negative/non-finite geometry. Geometry and text sizes use logical UI units. Control dimensions, padding/insets, intrinsic geometry and typography can affect measurement; colors and decorative geometry are usually paint-only. The live widget's invalidation classifier remains authoritative.
+
+Default-style creation and resolution can allocate while copying strings/vectors. Allocation failure propagates; there is no fallback/error-code path. The pure resolvers themselves have no reentrancy path because they invoke no callbacks. They are not audio-real-time operations. Applying/changing style on retained widgets remains UI/main-thread work.
+
+## Button
+
+`ButtonStylePatch` covers fill/border/text plus logical-unit border width, corner radius, minimum width, control height, per-side horizontal text padding and typography. Current Button measurement depends on `minimum_width`, `control_height`, `horizontal_padding` and typography; border width and corner radius are paint geometry.
+
+Resolution order is:
+
+```text
+base -> interaction -> read_only -> focused
+```
+
+Within each layer inherited fields are applied before local fields. Focus is therefore the final overlapping override. `default_button_style(theme)` returns an owned complete recipe; `resolve_button_style()` borrows its input recipes only for the call and returns an owned resolved value.
+
+## Checkbox
+
+`CheckboxStylePatch` covers box/checkmark/label colors, box and checkmark geometry, minimum/control size, leading inset, label gap and typography. Current measurement depends on `box_size`, `minimum_width`, `control_height`, `leading_padding`, `label_gap` and typography; corner/border/checkmark widths are paint geometry.
+
+Resolution order is:
+
+```text
+base -> checked -> interaction -> read_only -> focused
+```
+
+This ordering is intentional: for checked+disabled, the disabled interaction patch can override the checked patch; read-only and focus apply later. The checked state still controls whether the retained widget paints its checkmark.
+
+## RadioButton
+
+`RadioStylePatch` covers outer/inner/selected-mark colors and radii, minimum/control size, leading inset, label gap and typography. `outer_radius` affects measurement because it determines the circular control diameter; `inner_radius` and `mark_radius` are paint geometry.
+
+Resolution order is:
+
+```text
+base -> selected -> interaction -> read_only -> focused
+```
+
+A selected+disabled radio receives the selected patch first and disabled overrides second where fields overlap.
+
+```cpp
+auto inherited = ui::default_checkbox_style(theme);
+
+ui::CheckboxStyle local;
+local.checked.box_fill = ui::Color{0.15f, 0.75f, 0.35f, 1.0f};
+local.focused.box_border_width = 3.0f;
+
+ui::VisualState visual;
+visual.checked = true;
+visual.focused = true;
+
+ui::ResolvedCheckboxStyle resolved =
+    ui::resolve_checkbox_style(inherited, local, visual);
+```
 
 ## Slider / RangeSlider
 
