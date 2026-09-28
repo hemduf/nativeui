@@ -73,7 +73,7 @@ The focused executable [`t065_ui_dispatcher`](../examples/features/t065_ui_dispa
 - open an absolute HTTP(S) URL;
 - cancel an active request.
 
-Every request completes asynchronously through the owning `Dispatcher`, including immediate validation/capacity/unsupported results. Application callbacks are therefore not invoked inline from the request call.
+With a non-empty callback and a valid owning `Dispatcher`, completion is marshalled asynchronously through that Dispatcher, including immediate validation/capacity/unsupported results. Application callbacks are therefore not invoked inline from a normal request call, even when a custom backend calls its completion synchronously. If the callback is empty or the Dispatcher is already invalid, the request returns `kInvalidDesktopRequestId` and there is no callback delivery.
 
 The public status model distinguishes successful acceptance/cancellation from bounded or unavailable cases:
 
@@ -86,6 +86,68 @@ The public status model distinguishes successful acceptance/cancellation from bo
 - `Error` — the backend attempted the operation but encountered an operational failure.
 
 V1 keeps one file chooser request active per `DesktopServices` owner and up to sixteen concurrent URL requests. There is no hidden overflow queue.
+
+### Request identity and return contract
+
+`DesktopRequestId` is an owner-local 64-bit identity; `0` is invalid. The facade returns a non-zero ID only after the backend reports that it **accepted** the request. Validation failure, missing/unsupported backend, capacity exhaustion or backend start failure returns the invalid ID. For those immediate failures, a valid callback/Dispatcher still receives the corresponding status asynchronously.
+
+All file/open/save/directory requests share the single chooser slot. URL requests use the separate sixteen-request bound. IDs are not process-global handles and do not keep the owning `DesktopServices`, window or backend alive.
+
+A backend is allowed to complete synchronously before its `start_*` call returns. NativeUI makes the request terminal at the backend-completion boundary and posts application delivery to the Dispatcher; duplicate/stale completion for the same ID is ignored after the request has become terminal.
+
+### Option validation
+
+File-filter extensions include the leading dot. NativeUI accepts an extension only when it starts with `.` followed by an ASCII alphanumeric character; later characters may additionally be `.`, `_`, `+` or `-`. Examples such as `.wav`, `.tar.gz` and `.m4a` are valid; a bare `wav` is not.
+
+`SaveFileOptions::suggested_filename` is a filename, not a path. A value containing `/` or `\\` is rejected as `InvalidArgument`.
+
+`open_url()` accepts only absolute HTTP(S) URLs (scheme matching is ASCII case-insensitive) with a non-empty authority. Relative URLs and other schemes are `InvalidArgument`; the public API does not expose arbitrary shell/scheme execution.
+
+### File result normalization
+
+NativeUI normalizes backend file-dialog results before application delivery:
+
+- an Accepted `open_file`, `save_file` or `select_directory` result must contain exactly one path;
+- an Accepted `open_files` result must contain at least one path;
+- invalid Accepted cardinality becomes `Error`;
+- non-Accepted results expose an empty path list;
+- `error` text is retained/generated only for `Error`; other statuses clear it.
+
+This keeps application-side cardinality deterministic even for custom backends.
+
+### Cancellation and destruction
+
+`cancel(id)` asks the backend to cancel a currently active owner-local request. A `true` return means the backend accepted that cancellation request; it is not a synchronous application completion. Invalid/stale IDs, missing backend, backend rejection or a backend exception return `false`.
+
+Destroying `DesktopServices` closes the facade first, suppresses every later application callback, removes its active request ownership and best-effort calls backend cancellation. Destruction never falls back to invoking user callbacks. The backend is held by `shared_ptr` for the service lifetime; the Dispatcher remains a weak owner handle.
+
+Backend/native completion may arrive from a platform/worker thread, but application callback execution is dispatched onto the owning UI event-loop checkpoint. Initiating/cancelling desktop requests remains application/UI work; none of this API is an audio-real-time boundary.
+
+### Example
+
+```cpp
+auto& services = window.desktop_services();
+
+ui::OpenFileOptions options;
+options.title = "Open audio";
+options.filters = {
+    ui::FileFilter{.description = "Audio", .extensions = {".wav", ".aiff"}}
+};
+
+const auto request = services.open_file(
+    std::move(options),
+    [](ui::FileDialogResult result) {
+        if (result.status == ui::DesktopServiceStatus::Accepted) {
+            // Exactly one path for open_file().
+            use_file(result.paths.front());
+        }
+    });
+
+if (request == ui::kInvalidDesktopRequestId) {
+    // Immediate rejection/status delivery may still be queued when the
+    // callback and Dispatcher were valid.
+}
+```
 
 ### Standalone and embedded behavior
 
