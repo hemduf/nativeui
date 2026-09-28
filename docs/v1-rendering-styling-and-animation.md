@@ -1,6 +1,6 @@
 # NativeUI 1.0 rendering, styling and animation
 
-This chapter documents the stable NativeUI 1.0 presentation model that is already implemented: UI-owned theme values, lexical style scopes, typed widget style resolution, retained invalidation, custom painting and instance-owned animation. It deliberately avoids freezing backend/private drawing details or exception guarantees that are still owned by active pre-1.0 blockers and the T069 API freeze.
+This chapter documents the stable NativeUI 1.0 presentation model that is already implemented: UI-owned theme values, lexical style scopes, typed widget style resolution, retained invalidation, custom painting and instance-owned animation. Backend/private drawing details remain implementation concerns; public documentation follows the current validated public/package surface on `main`.
 
 For retained structure, layout, widgets and input, see [Composition, layout and widgets](v1-composition-layout-and-widgets.md). For resource loading and Dispatcher ownership, see [Services, testing and limits](v1-services-testing-and-limits.md).
 
@@ -54,7 +54,7 @@ Two retained forms are supported by the current implementation:
 - an immutable `StyleScopeOverrides` value for the retained lifetime;
 - a `State<StyleScopeOverrides>`-backed form that can replace the effective scope on the UI thread and classify the resulting invalidation as none/paint/layout.
 
-The final `State<T>`/`Binding<T>` notification, recursive-write, callback-exception and subscription-lifetime contract remains owned by T123/T124 and T069. This chapter documents only the style result and invalidation boundary, not unfinished observer internals.
+The `State<T>`/`Binding<T>` notification, recursive-write, callback-exception and subscription-lifetime safety work has landed through T123/T124 and the associated binding follow-ups. This chapter still focuses on the presentation result and invalidation boundary; detailed observable semantics live in [State and binding](v1-state-and-binding.md).
 
 ## Typed widget styles
 
@@ -105,9 +105,9 @@ Application code should express drawing in logical coordinates and let the ownin
 
 ### Backend boundary
 
-Do not make direct Skia types, canvases or backend objects part of application/component contracts. T069 owns the final mechanical public-header and backend-neutral API inventory. Until that freeze closes, the stable rule is the abstraction boundary: normal consumers paint through NativeUI, while renderer/platform objects remain implementation details.
+Do not make direct Skia types, canvases or backend objects part of application/component contracts. T069 has been retired as a standalone freeze gate; the current validated public/package surface on `main` is authoritative. The stable rule remains the abstraction boundary: normal consumers paint through NativeUI, while renderer/platform objects remain implementation details.
 
-The active T130/T125 safety work also owns the final strong wording for paint/lifecycle/callback exception recovery. This documentation does not promise behavior beyond the currently qualified retained contract while those blockers are open.
+T125/T130 have closed the retained dispatch, lifecycle, layout, paint and teardown exception-safety work. Presentation documentation may rely on those landed contracts, while implementation-only recovery mechanisms remain private.
 
 ## Text, images and vector content
 
@@ -163,7 +163,7 @@ Use reduced motion as behavior, not as a cosmetic afterthought: application comp
 
 Keep animation ownership tied to the retained UI/component lifetime. Cancellation and shutdown should not depend on a process-global handle table, and callbacks must not assume their target outlives the owner that registered them.
 
-The final callback-throw/reentrancy recovery wording remains subject to the active safety closeout and should not be inferred from this overview.
+Callback/reentrancy recovery follows the landed retained safety contracts; this overview intentionally leaves their implementation mechanics to the dedicated state/lifecycle documentation and tests.
 
 ## Choosing the invalidation class
 
@@ -194,7 +194,7 @@ The table describes the stable design intent; the component/style implementation
 | image/vector presentation | [`include/nativeui/image.hpp`](../include/nativeui/image.hpp), [`include/nativeui/svg.hpp`](../include/nativeui/svg.hpp) |
 | retained animation | [`include/nativeui/animation.hpp`](../include/nativeui/animation.hpp) |
 
-This table is navigation to currently implemented sources, not the final authoritative 1.0 API inventory. T069 owns the final freeze and may narrow which implementation-adjacent headers are advertised directly to normal consumers.
+This table is navigation to currently implemented public sources. Current `main` public/package contracts and exact-head qualification are authoritative; implementation-adjacent headers should not be advertised to normal consumers unless they are part of that validated surface.
 
 ## Review checklist for presentation code
 
@@ -210,16 +210,17 @@ For presentation-related changes, verify at least:
 - animation invalidation matches the property being animated;
 - animation handles/callbacks cannot intentionally outlive their owning retained target;
 - reduced-motion behavior follows the owning animation context rather than a separate timer path;
-- exception/reentrancy claims are checked against the final safety closeout rather than guessed while T125/T130 remain active.
+- exception/reentrancy claims are checked against the landed T125/T130 retained-safety contracts and current exact-head tests.
 
-## Freeze boundaries before T122 completion
+## T122 closeout boundaries
 
-This chapter is a bounded T122 documentation slice, not final 1.0 freeze evidence. T122 completion still requires reconciliation with:
+The safety and freeze assumptions that originally bounded this chapter have changed:
 
-- T125/T130 for final retained callback/lifecycle/paint exception guarantees;
-- T123/T124 for final State/Binding notification and lifetime semantics used by state-backed style scopes;
-- T069 for the exact supported public-header/API inventory and backend-neutral drawing exposure;
-- T070 for the canonical copy-pasteable Getting Started/reference application;
-- T071 for release-candidate policy and release-readiness wording.
+- T123/T124 and related binding follow-ups are complete, so state/binding wording can now be reconciled against landed behavior;
+- T125/T130 are complete, so retained callback/lifecycle/layout/paint/teardown exception guarantees no longer need to be described as pending;
+- T069 is deprecated as a standalone public-API freeze gate; current validated public/package contracts on `main` are authoritative;
+- T070 still owns the canonical copy-pasteable Getting Started/reference application;
+- T071 still owns release-candidate procedure and final release-readiness wording;
+- T068 native accessibility bridges remain deferred to NativeUI 1.2.
 
-Until those tickets close, this document describes stable architecture and already-delivered presentation behavior without promoting unresolved implementation details into promised public API.
+T122 completion should therefore focus on cross-document consistency, navigation, examples and release-facing accuracy rather than preserving historical blocker wording.
