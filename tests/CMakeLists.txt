@@ -214,6 +214,34 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_tests.cpp)
   target_include_directories(nativeui_render_resource_allocation_tests PRIVATE
     ${PROJECT_SOURCE_DIR})
+
+  # Exact warm-hit counters require existing image/shader test seams. Keep
+  # those seams out of NativeUI::Core by compiling an isolated executable.
+  add_executable(nativeui_render_resource_hot_hit_counter_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_hot_hit_counter_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+  )
+  target_include_directories(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_render_resource_hot_hit_counter_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    SkiaBuilder::svg
+  )
+  nativeui_enable_project_warnings(nativeui_render_resource_hot_hit_counter_tests)
+  nativeui_enable_sanitizers(nativeui_render_resource_hot_hit_counter_tests)
+  add_test(
+    NAME nativeui_render_resource_hot_hit_counter_tests
+    COMMAND nativeui_render_resource_hot_hit_counter_tests
+  )
+  set_tests_properties(nativeui_render_resource_hot_hit_counter_tests PROPERTIES
+    LABELS "unit"
+  )
   nativeui_add_core_test(nativeui_t096_damage_mapping_tests
     ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)
   target_include_directories(nativeui_t096_damage_mapping_tests PRIVATE
