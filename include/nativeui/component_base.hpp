@@ -258,6 +258,12 @@ private:
     bool focused_{};
 };
 
+/// Borrowed services for the duration of one `Component::input()` callback.
+///
+/// Do not retain this object or references to services obtained through it.
+/// Bounds and geometry use NativeUI logical coordinates. Pointer capture/release
+/// applies to the pointer identity associated with the current callback and is
+/// guarded against stale/re-entrant contact generations.
 class InputContext {
 public:
     InputContext(
@@ -274,19 +280,34 @@ public:
           legacy_capture_(std::move(capture)),
           legacy_release_(std::move(release)) {}
 
+    /// Retained bounds of the receiving component in logical coordinates.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
+
+    /// Measure text through the owning platform services.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
     }
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
+    /// Replace the platform clipboard's text payload.
     void set_clipboard_text(std::string_view text) { platform_.set_clipboard_text(text); }
+
+    /// Ask the platform adapter to deliver clipboard text through its normal
+    /// NativeUI input path.
     void request_clipboard_text() { platform_.request_clipboard_text(); }
+
+    /// Accept one exact advertised drop type for this component's bounds.
     [[nodiscard]] bool accept_drop(std::string_view type) {
         return platform_.accept_drop(type, bounds_);
     }
+    /// Reject the current drop offer for this component.
     void reject_drop() { platform_.reject_drop(bounds_); }
+
+    /// Start/update/stop native text input for this focused editor.
+    ///
+    /// `area` and `cursor_offset` are logical geometry; the platform boundary
+    /// performs physical-pixel scaling.
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         platform_.set_text_input(active, area, cursor_offset);
     }
@@ -294,6 +315,11 @@ public:
     void invalidate() const { invalidate_(); }
     /// Recompute layout from this component through its ancestors, then repaint.
     void invalidate_layout() const { invalidate_layout_(); }
+    /// Capture the current pointer contact to this retained component.
+    ///
+    /// Capture requests from terminal PointerUp/PointerCancel/ContextMenu
+    /// callbacks are ignored. Stale outer callbacks cannot replace a newer
+    /// re-entrant capture for the same pointer ID.
     void capture_pointer() const {
         if (capture_) {
             if (pointer_action_.capture_allowed) capture_(pointer_action_);
@@ -301,6 +327,8 @@ public:
             legacy_capture_();
         }
     }
+    /// Release capture owned by this component for the current pointer contact.
+    /// A stale callback cannot release a newer re-entrant capture generation.
     void release_pointer() const {
         if (release_) release_(pointer_action_);
         else if (legacy_release_) legacy_release_();
@@ -342,6 +370,11 @@ private:
     std::function<void()> legacy_release_;
 };
 
+/// Canvas-friendly borrowed facade over `InputContext`.
+///
+/// It exposes size rather than absolute bounds and forwards invalidation,
+/// pointer-capture, clipboard and drag/drop operations to the same callback
+/// context. It must not outlive the enclosing input callback.
 class CanvasInputContext {
 public:
     explicit CanvasInputContext(InputContext& context) : context_(context) {}
@@ -371,6 +404,11 @@ private:
     InputContext& context_;
 };
 
+/// Borrowed services for one `Component::focus_changed()` callback.
+///
+/// This context is valid only for the callback duration. It provides the
+/// focused component's logical bounds, text metrics/text-input platform seam,
+/// and paint/layout invalidation.
 class FocusContext {
 public:
     FocusContext(Rect bounds,
@@ -389,10 +427,16 @@ public:
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
+    /// Start/update/stop platform text input for the focused component. Geometry
+    /// is supplied in logical coordinates.
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         platform_.set_text_input(active, area, cursor_offset);
     }
+
+    /// Repaint this component without recomputing layout.
     void invalidate() const { invalidate_(); }
+
+    /// Recompute layout from this component through its ancestors, then repaint.
     void invalidate_layout() const { invalidate_layout_(); }
 
 private:

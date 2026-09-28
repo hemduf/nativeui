@@ -10,8 +10,12 @@
 
 namespace ui {
 
-/// Focus-only subtree boundary. Rendering and visibility are intentionally
-/// independent: `active=false` only removes descendants from focus targeting.
+/// Retained implementation of a focus-only subtree boundary.
+///
+/// Rendering, layout and ordinary visibility are independent: `active=false`
+/// removes descendants from focus targeting but does not hide or unmount them.
+/// The active binding is observed while mounted and focus structure is
+/// invalidated when it changes.
 class FocusScopeComponent final : public Component {
 public:
     FocusScopeComponent(Binding<bool> active, bool trap, std::size_t default_index)
@@ -57,6 +61,16 @@ private:
     Binding<bool>::Subscription subscription_;
 };
 
+/// Declarative focus boundary for one child subtree.
+///
+/// An active scope may optionally trap traversal inside itself. On activation,
+/// `default_focus()` selects a zero-based focusable-descendant index; if the
+/// requested index is unavailable/out of range, the first available descendant
+/// is used. Deactivation restores the previously focused eligible target when
+/// possible, otherwise normal tree fallback rules apply.
+///
+/// Focus/state mutation is UI-thread work. The supplied Binding/State must obey
+/// the lifetime rules documented by NativeUI's state/binding contract.
 class FocusScope {
 public:
     template <class Child>
@@ -68,11 +82,15 @@ public:
     FocusScope(State<bool>& active, Child&& child)
         : FocusScope(active.binding(), std::forward<Child>(child)) {}
 
+    /// When true (the default), Tab/Shift+Tab traversal cannot leave this scope
+    /// while focus is inside an active scope.
     FocusScope&& trap(bool value = true) && {
         trap_ = value;
         return std::move(*this);
     }
 
+    /// Select the zero-based available focusable descendant preferred when the
+    /// scope becomes active.
     FocusScope&& default_focus(std::size_t focusable_descendant_index) && {
         default_index_ = focusable_descendant_index;
         return std::move(*this);

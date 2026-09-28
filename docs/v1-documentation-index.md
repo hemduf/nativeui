@@ -8,7 +8,8 @@ This page is the navigation entry point for the NativeUI 1.0 documentation set t
 | --- | --- | --- |
 | Understand the toolkit, supported platforms and ownership model | [NativeUI 1.0 overview and application lifetime](v1-overview-and-application-lifetime.md) | Retained architecture, `Application`/`UI`/window ownership, standalone vs embedded lifetime, UI-thread boundary |
 | Understand logical geometry and box constraints | [Core geometry and constraints](v1-core-geometry-and-constraints.md) | `Size`, `Point`, `Rect`, affine transforms, colors and normalized `Constraints` |
-| Build retained interfaces and use standard controls | [Composition, layout and widgets](v1-composition-layout-and-widgets.md) | Static/dynamic composition, layout, input, focus, pointer capture, widgets, overlays and virtualization |
+| Build retained interfaces and use standard controls | [Composition, layout and widgets](v1-composition-layout-and-widgets.md) | Static/dynamic composition, layout, widgets, overlays and virtualization |
+| Handle input, pointer capture, focus and editing commands | [Input, focus and commands](v1-input-focus-and-commands.md) | Normalized events, bubbling, IME, pointer metadata/capture, focus scopes and semantic command routing |
 | Understand observable state and UI bindings | [State and binding](v1-state-and-binding.md) | `State<T>`, `Binding<T>`, notification/lifetime rules, reentrancy and widget binding boundaries |
 | Customize drawing, styling and animation | [Rendering, styling and animation](v1-rendering-styling-and-animation.md) | Theme/style resolution, retained invalidation, custom painting and animation ownership |
 | Consume NativeUI from CMake | [Packaging and CMake](v1-packaging-and-cmake.md) | Installed/build-tree package concepts, public targets/helpers, platform attachment and binary resources |

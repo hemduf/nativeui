@@ -103,6 +103,8 @@ Widget-specific styling and animation are documented separately in the T122 styl
 
 ## Event routing and interaction
 
+The complete public event/focus/command contract is documented in [Input, focus and commands](v1-input-focus-and-commands.md), including [`input.hpp`](../include/nativeui/input.hpp), [`focus.hpp`](../include/nativeui/focus.hpp), [`command.hpp`](../include/nativeui/command.hpp) and the borrowed callback contexts in [`component_base.hpp`](../include/nativeui/component_base.hpp).
+
 NativeUI routes input through the retained tree in logical coordinates. Interaction state is owned by the relevant `UI`/retained tree; there is no process-wide focus target, pointer-capture target or gesture registry shared by unrelated UI instances.
 
 ### Bubbling and keyboard handling
@@ -203,7 +205,7 @@ The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and
 | `ComponentAvailability`, `VisibilityMode` | retained visibility/enabled/read-only state | [`include/nativeui/component_base.hpp`](../include/nativeui/component_base.hpp) |
 | layout containers / scroll layout | constraints, measurement and placement | [`include/nativeui/layout.hpp`](../include/nativeui/layout.hpp) |
 | standard widgets | retained controls and text/list families | [`include/nativeui/widgets.hpp`](../include/nativeui/widgets.hpp) |
-| focus/input/gesture | retained interaction routing | [`t013_bubbling`](../examples/features/t013_bubbling.cpp), [`t014_focus_scopes`](../examples/features/t014_focus_scopes.cpp), [`t016_gestures`](../examples/features/t016_gestures.cpp) |
+| focus/input/commands/gesture | retained interaction routing | [Input, focus and commands](v1-input-focus-and-commands.md), [`t016_gestures`](../examples/features/t016_gestures.cpp) |
 | overlay | transient/modal retained content | [`include/nativeui/overlay.hpp`](../include/nativeui/overlay.hpp), [`t061_overlay_portal`](../examples/features/t061_overlay_portal.cpp) |
 | tooltip | delayed transient help presentation | [`include/nativeui/tooltip.hpp`](../include/nativeui/tooltip.hpp), [`t062_tooltip`](../examples/features/t062_tooltip.cpp) |
 | dialog | retained modal dialog/action model | [`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp), [`t063_dialog`](../examples/features/t063_dialog.cpp) |

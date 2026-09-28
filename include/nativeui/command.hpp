@@ -9,10 +9,16 @@
 
 namespace ui {
 
+/// Callback used by `CommandScope`. Return `Handled` to stop command
+/// bubbling or `Ignored` to allow an ancestor/global handler to try.
 using CommandCallback = std::function<EventResult(Command)>;
 
-/// Transparent retained-mode wrapper that handles portable commands while
-/// allowing ordinary input to continue targeting descendants.
+/// Transparent retained-mode wrapper that handles portable semantic commands.
+///
+/// Only `InputType::Command` with a non-None command invokes the callback.
+/// Ordinary pointer/key/text events continue through normal descendant
+/// targeting. Returning `Ignored` lets command routing continue through
+/// retained ancestors and eventually the tree's global command handler.
 class CommandScopeComponent final : public Component {
 public:
     explicit CommandScopeComponent(CommandCallback callback)
@@ -45,6 +51,12 @@ private:
     CommandCallback callback_;
 };
 
+/// Declarative one-child command handler.
+///
+/// The scope does not create focus or intercept raw key events. NativeUI first
+/// converts supported primary-modifier shortcuts into semantic commands, routes
+/// from the focused leaf through ancestors, and invokes this callback only if
+/// the route reaches the scope.
 class CommandScope {
 public:
     template <class Child>
