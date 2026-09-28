@@ -126,10 +126,38 @@ void runtime_shader_warm_hit_skips_compile_and_materialization() {
     context.end_frame();
 }
 
+void effect_warm_hit_skips_materialization() {
+    const auto effect = ui::Effect::drop_shadow(
+        {3.0f, -2.0f}, 5.0f, {0.2f, 0.3f, 0.4f, 0.8f});
+    ui::detail::RenderResourceMaterializationContext context;
+
+    context.begin_frame();
+    auto cold = context.acquire_effect(
+        effect,
+        [&effect] { return ui::detail::EffectCacheAccess::materialize(effect); });
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    const auto materializations_after_cold =
+        ui::detail::effect_materialization_call_count_for_test();
+    NUI_CHECK(materializations_after_cold > 0U);
+    cold = {};
+    context.end_frame();
+
+    context.begin_frame();
+    auto warm = context.acquire_effect(
+        effect,
+        [&effect] { return ui::detail::EffectCacheAccess::materialize(effect); });
+    NUI_CHECK(warm && warm.retained && warm.hit);
+    NUI_CHECK(
+        ui::detail::effect_materialization_call_count_for_test() ==
+        materializations_after_cold);
+    context.end_frame();
+}
+
 } // namespace
 
 int main() {
     image_texture_warm_hit_skips_decode_and_materialization();
     runtime_shader_warm_hit_skips_compile_and_materialization();
+    effect_warm_hit_skips_materialization();
     return 0;
 }
