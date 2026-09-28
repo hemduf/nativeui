@@ -219,6 +219,26 @@ At a conceptual level:
 
 Animation uses the same distinction explicitly, so a paint-only tween does not need to become a layout animation.
 
+### DirtyRegion
+
+[`invalidation.hpp`](../include/nativeui/invalidation.hpp) exposes `DirtyRegion`, NativeUI's bounded logical-coordinate damage accumulator.
+
+`add(rect, clip)` first intersects `rect` with `clip`. Both rectangles must use the same **logical coordinate space**; this value type performs no framebuffer/device-scale conversion. An empty clipped rectangle, or one already completely covered by existing damage, returns `std::nullopt`.
+
+Overlapping **or touching** rectangles are coalesced. At most eight disjoint rectangles are retained (`kMaxRects == 8`). If adding another independent fragment would exceed that budget, the accumulator deliberately collapses all damage into one conservative bounding rectangle. This bounds retained bookkeeping while preserving correctness: the renderer may repaint more pixels, but never fewer than the recorded damage requires.
+
+Construction reserves storage for the full bounded working set and may throw on allocation failure. Once a `DirtyRegion` has been successfully constructed, `add()` is allocation-free and `noexcept`; `clear()` preserves reserved capacity. Move assignment is also `noexcept`, and moved-from instances remain valid/empty and reusable.
+
+`rects()` returns a **borrowed** reference to the current coalesced rectangle vector. Do not retain that reference across mutation, assignment or destruction of the `DirtyRegion`.
+
+The value type has no internal synchronization. Retained Tree/UI use follows NativeUI's UI/main-thread confinement. A separate caller sharing a `DirtyRegion` across threads must supply its own synchronization.
+
+### Relationship to Tree damage and partial repaint
+
+The low-level retained [Tree runtime](v1-low-level-tree-runtime.md) exposes logical dirty regions through `Tree::dirty_regions()`, `invalidate()`, `invalidate(Rect)` and `invalidate_layout()`. Normal applications should usually invalidate through `UI`/component callback contexts rather than owning a second repaint loop.
+
+The post-v1 T096 renderer uses bounded logical damage as one input to conservative partial-scene reconstruction: it maps logical damage to a device clip, rebuilds only when that mapping/effect state is proven safe, and otherwise falls back to a full scene. This optimization does not change the public coordinate contract: application/component invalidation remains logical, and device-pixel expansion belongs below the retained public surface.
+
 Avoid application-level whole-window repaint loops as a substitute for NativeUI invalidation. Components should use the retained invalidation path supplied by their owning UI/tree.
 
 ## Animation
@@ -278,6 +298,7 @@ The table describes the stable design intent; the component/style implementation
 | runtime shaders and per-instance bindings | [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp) |
 | text presentation | [`include/nativeui/text.hpp`](../include/nativeui/text.hpp) |
 | image/vector presentation | [`include/nativeui/image.hpp`](../include/nativeui/image.hpp), [`include/nativeui/svg.hpp`](../include/nativeui/svg.hpp) |
+| retained invalidation / damage accumulation | [`include/nativeui/invalidation.hpp`](../include/nativeui/invalidation.hpp), [low-level Tree runtime](v1-low-level-tree-runtime.md) |
 | retained animation | [`include/nativeui/animation.hpp`](../include/nativeui/animation.hpp) |
 
 This table is navigation to currently implemented public sources. Current `main` public/package contracts and exact-head qualification are authoritative; implementation-adjacent headers should not be advertised to normal consumers unless they are part of that validated surface.

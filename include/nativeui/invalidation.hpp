@@ -8,23 +8,37 @@
 
 namespace ui {
 
-/// Small logical-coordinate dirty-region accumulator. Overlapping/touching
-/// rectangles are coalesced. If fragmentation grows beyond the bounded budget,
-/// the region collapses to one bounding rectangle.
+/// Bounded value-semantic accumulator for dirty rectangles in logical coordinates.
+///
+/// Each input rectangle is clipped before publication. Overlapping or touching
+/// rectangles are coalesced, and fragmentation is bounded: if more than
+/// `kMaxRects` disjoint fragments would be retained, the complete region
+/// conservatively collapses to one bounding rectangle.
+///
+/// Construction reserves the complete bounded working capacity and may allocate.
+/// Once construction succeeds, `add()` is allocation-free and `noexcept`.
+/// DirtyRegion itself performs no synchronization; retained NativeUI usage is
+/// normally confined to the UI/main thread.
 class DirtyRegion {
 public:
     /// Maximum number of disjoint dirty rectangles retained before the region
     /// collapses to one bounding rectangle.
     static constexpr std::size_t kMaxRects = 8;
 
+    /// Construct an empty region and reserve the full bounded work capacity.
+    /// May throw if the initial storage reservation fails.
     DirtyRegion() {
         reserve_storage();
     }
 
+    /// Copy into independently owned bounded storage. Construction may allocate.
     DirtyRegion(const DirtyRegion& other) : DirtyRegion() {
         rects_.assign(other.rects_.begin(), other.rects_.end());
     }
 
+    /// Replace this region with an independent copy of `other`.
+    /// Successfully constructed instances already retain the capacity invariant
+    /// required by allocation-free `add()`.
     DirtyRegion& operator=(const DirtyRegion& other) {
         if (this != &other) {
             rects_.assign(other.rects_.begin(), other.rects_.end());
@@ -32,12 +46,16 @@ public:
         return *this;
     }
 
+    /// Move-construct while leaving `other` valid, empty and ready for reuse.
+    /// Construction may allocate for the destination's reserved empty storage.
     DirtyRegion(DirtyRegion&& other) : DirtyRegion() {
         // Swap with an already-reserved empty vector so both destination and
         // moved-from source retain the capacity invariant required by add().
         rects_.swap(other.rects_);
     }
 
+    /// Move-assign without allocation. The moved-from region remains valid,
+    /// empty and retains bounded capacity for later `add()` calls.
     DirtyRegion& operator=(DirtyRegion&& other) noexcept {
         if (this != &other) {
             rects_.swap(other.rects_);
@@ -56,12 +74,18 @@ public:
     /// Remove all dirty rectangles while preserving reserved capacity.
     void clear() noexcept { rects_.clear(); }
 
-    /// Add a logical rectangle after clipping it to `clip`.
+    /// Add one logical rectangle after clipping it to `clip`.
     ///
-    /// Overlapping/touching rectangles are coalesced. Returns the merged region
-    /// whose exposure is newly required, or nullopt if the clipped input is
-    /// empty/already covered. Successfully constructed DirtyRegion instances
-    /// reserve enough storage that add() performs no allocation and is noexcept.
+    /// `rect` and `clip` use the same caller-defined logical coordinate
+    /// space; DirtyRegion performs no device-scale conversion. Overlapping or
+    /// touching rectangles are coalesced. Returns the conservative merged
+    /// rectangle whose exposure is newly required, or `nullopt` if the clipped
+    /// input is empty or already completely covered.
+    ///
+    /// If a new disjoint fragment would exceed `kMaxRects`, every retained
+    /// fragment collapses to one bounding rectangle. Successfully constructed
+    /// instances reserve enough storage that this operation performs no
+    /// allocation and is `noexcept`.
     [[nodiscard]] std::optional<Rect> add(Rect rect, Rect clip) noexcept {
         rect = intersect(rect, clip);
         if (rect.empty()) return std::nullopt;
