@@ -167,12 +167,57 @@ Painter state belongs to the current retained paint traversal. Do not retain `Pa
 
 Runtime shaders use a two-stage contract:
 
-1. `ShaderProgram::compile(sksl)` performs explicit compilation/resource preparation and returns owned diagnostics plus an immutable program;
-2. `ShaderInstance` owns one mutable binding set for that program and is then snapshotted into a `Brush` for painting.
+1. `ShaderProgram::compile(sksl)` explicitly compiles source and freezes a supported reflected interface into an immutable, shared program;
+2. `ShaderInstance` owns one mutable binding set for that program and can be snapshotted into a `Brush` for painting.
 
-Compilation may allocate and is explicitly not an audio-real-time operation. Rendering does not compile shader source implicitly. Program reflection exposes supported uniform and child names/types through NativeUI-owned metadata. Numeric uniform setters are `noexcept` and do not allocate; binding a child `Brush` may allocate. Mutation of one `ShaderInstance` is ordinary UI/resource-preparation work and is not synchronized for concurrent writers.
+### Shader compilation and reflection
 
-Keep shader source compilation, image preparation and effect construction outside audio/DSP callbacks. Once prepared, use the resulting NativeUI values through `Brush`/retained painting rather than passing backend shader/compiler objects through application state.
+The source `string_view` passed to `compile()` is borrowed only for the call. A successful program owns its backend representation plus copied uniform/child names, so the caller may release or mutate the source buffer afterwards. Expected SkSL syntax/backend compile failures return `CompileError`; a program that compiles but uses a reflected interface outside NativeUI's profile returns `UnsupportedInterface`. The published profile supports scalar/vector float and signed-int uniforms, `layout(color)` float4/half4, and `uniform shader` children. Uniform arrays, matrices, and non-shader child interfaces are rejected rather than silently exposed through backend types.
+
+`ShaderCompileResult::ok()` is exactly `program != nullptr`. Diagnostics own their message strings; source line/column use 0 when the backend does not supply a position. Compilation/reflection ownership may allocate, so allocation failures propagate rather than being converted to a normal shader diagnostic. Rendering never performs implicit source compilation.
+
+`uniforms()` and `children()` return borrowed spans over program-owned reflection. Their names and span storage are stable only for the lifetime of the `ShaderProgram`; copy data that must survive beyond that lifetime.
+
+### Typed bindings and snapshots
+
+Constructing `ShaderInstance` retains the immutable program, allocates a zero-initialized numeric binding block, and creates empty child slots. Passing a null program throws `std::invalid_argument`. Copying an instance creates independent mutable bindings/child slots while sharing the immutable program. Moving is `noexcept` and leaves the source inert; setters on an inert instance return `NotFound`, and normal assignment can make it valid again.
+
+Numeric setters are `noexcept`, allocation-free, and transactional:
+
+- `NotFound`: no slot with that name, or the instance is inert;
+- `TypeMismatch`: a numeric/color slot exists but requires another typed setter;
+- `InvalidValue`: floating input contains NaN/Inf or the internal slot cannot accept the value;
+- `Ok`: the complete binding was written.
+
+`Color` is distinct from ordinary `Float4`: a `layout(color)` slot must use `set_color()`. Color channels must be finite but are not clamped by this binding API. Signed integer setters accept the complete `std::int32_t` domain.
+
+`set_child(name, brush)` binds only reflected `uniform shader` slots. It snapshots/owns a copy of the Brush and may allocate; later lifetime or mutation of the caller's Brush does not alter the child slot. Unbound child slots render as transparent black. Nested shader Brush depth is bounded by `ShaderInstance::kMaxChildDepth == 16`; an over-depth replacement returns `InvalidValue` without replacing the previous valid child. Child Brush coordinates are evaluated in the runtime shader's coordinate expression, so `child.eval(p * 0.5)` intentionally changes child sampling coordinates.
+
+Constructing `Brush{shader_instance}` snapshots the instance's current numeric bytes and child Brush references. Later changes to the original `ShaderInstance` do not mutate that Brush snapshot.
+
+```cpp
+constexpr std::string_view source = R"(
+    uniform float gain;
+    layout(color) uniform half4 tint;
+    uniform shader texture;
+
+    half4 main(float2 p) {
+        return texture.eval(p) * gain * tint;
+    }
+)";
+
+const auto compiled = ui::ShaderProgram::compile(source);
+if (compiled.ok()) {
+    ui::ShaderInstance instance{compiled.program};
+    instance.set_float("gain", 0.8f);
+    instance.set_color("tint", {1.0f, 0.7f, 0.5f, 1.0f});
+    instance.set_child("texture", ui::Brush{ui::Color{1, 1, 1, 1}});
+
+    ui::Brush stable_snapshot{instance};
+}
+```
+
+Compilation, ShaderInstance construction/copying, child binding and Brush snapshot creation may allocate and are explicitly not audio-real-time operations. A mutable `ShaderInstance` has no internal synchronization; keep mutation in an owned UI/resource-preparation domain. Once prepared, pass NativeUI `Brush` values through retained painting rather than exposing backend shader/compiler objects through application contracts.
 
 ### Built-in procedural noise
 
