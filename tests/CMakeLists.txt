@@ -198,6 +198,10 @@ if(NATIVEUI_BUILD_TESTS)
   )
   nativeui_add_core_test(nativeui_invalidation_tests ${PROJECT_SOURCE_DIR}/tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_paint_culling_tests ${PROJECT_SOURCE_DIR}/tests/paint_culling_tests.cpp)
+  nativeui_add_core_test(nativeui_render_resource_cache_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_cache_tests.cpp)
+  target_include_directories(nativeui_render_resource_cache_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_t096_damage_mapping_tests
     ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)
   target_include_directories(nativeui_t096_damage_mapping_tests PRIVATE
