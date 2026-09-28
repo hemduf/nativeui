@@ -1,5 +1,8 @@
+    /// Borrow the current tree-owned Theme.
     [[nodiscard]] const Theme& theme() const noexcept { return theme_; }
 
+    /// Replace the Theme and publish only the paint/layout invalidation required
+    /// by the classified theme change.
     void set_theme(Theme value) {
         const auto invalidation = classify_theme_change(theme_, value);
         if (invalidation == ThemeInvalidation::None) {

@@ -14,6 +14,10 @@ inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* pare
 
 } // namespace detail
 
+/// Compile a declarative Spec hierarchy into an exclusively owned retained root.
+///
+/// Node IDs start at 1 for this compiled hierarchy. Most applications let `UI`
+/// perform this step; this is the low-level companion to `Tree`.
 inline std::unique_ptr<Node> compile(Spec spec) {
     NodeId next_id = 1;
     return detail::compile_node(std::move(spec), next_id);

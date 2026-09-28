@@ -1,8 +1,11 @@
+    /// Take exclusive ownership of one already-compiled retained root.
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {
         focus_transition_stack_.reserve(4);
         pointer_hover_transition_stack_.reserve(4);
     }
 
+    /// Best-effort no-throw teardown. Explicit lifecycle calls may propagate
+    /// application callback failures; destructor cleanup contains them.
     ~Tree() noexcept {
         try {
             unmount();
@@ -13,6 +16,8 @@
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
 
+    /// Mount the retained hierarchy once. Parents mount before children.
+    /// Partial failure is rolled back before the exception propagates.
     void mount() {
         if (mounted_) return;
         reset_semantic_recovery();
@@ -63,12 +68,15 @@
         mounted_ = true;
     }
 
+    /// Measure the root under logical constraints without publishing layout.
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
         if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
 
+    /// Publish retained logical geometry for `viewport`. Failed layout is
+    /// rolled back and remains dirty for a later retry.
     void layout(Size viewport) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -85,6 +93,7 @@
         commit_layout_publication();
     }
 
+    /// Activate mounted components and the retained focus/input domain.
     void activate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Activate, true};
         if (!mounted_) return;
@@ -138,6 +147,8 @@
         }
     }
 
+    /// Refresh the active focused component after synchronizing availability
+    /// and focus structure.
     void refresh_focus(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -151,6 +162,8 @@
         node->component->focus_changed(true, context);
     }
 
+    /// Clear hover/capture/focus and deactivate components. Cleanup continues
+    /// across callback failures and rethrows the first captured exception.
     void deactivate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Deactivate, true};
         std::exception_ptr first_error;
@@ -200,6 +213,7 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
+    /// Unmount child-to-parent, deactivating first when still active.
     void unmount() {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) {
@@ -234,18 +248,28 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
+    /// True when layout or paint work remains.
     [[nodiscard]] bool dirty() const noexcept {
         return layout_dirty_ || !paint_dirty_.empty();
     }
+    /// True when retained geometry must be recomputed.
     [[nodiscard]] bool layout_dirty() const noexcept { return layout_dirty_; }
+
+    /// True when one or more logical paint regions remain dirty.
     [[nodiscard]] bool paint_dirty() const noexcept { return !paint_dirty_.empty(); }
+
+    /// Borrow current logical dirty rectangles. Later Tree mutation may
+    /// invalidate this reference.
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
     }
+    /// Borrow the latest bounded structural-reconciliation diagnostic.
     [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
         return structural_diagnostic_;
     }
 
+    /// Read effective availability for one retained node, or nullopt for a
+    /// stale/missing identity.
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
         if (!root_) return std::nullopt;
@@ -254,6 +278,8 @@
         return node->component->effective_availability();
     }
 
+    /// Install a logical-region presentation callback. Existing dirty regions
+    /// are replayed immediately to a newly installed callback.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         invalidation_callback_ = std::move(callback);
         if (invalidation_callback_) {
@@ -261,6 +287,7 @@
         }
     }
 
+    /// Region-agnostic invalidation callback convenience overload.
     void set_invalidation_callback(std::function<void()> callback) {
         if (!callback) {
             set_invalidation_callback(std::function<void(Rect)>{});
@@ -270,10 +297,14 @@
             [callback = std::move(callback)](Rect) mutable { callback(); });
     }
 
+    /// Mark the complete viewport for repaint.
     void invalidate() { invalidate_paint(viewport_rect()); }
+    /// Mark one root-logical region for repaint.
     void invalidate(Rect rect) { invalidate_paint(rect); }
+    /// Mark retained layout dirty from the root.
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
+    /// Move focus to the next eligible retained target.
     void focus_next(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -281,6 +312,7 @@
         move_focus(1, platform);
     }
 
+    /// Move focus to the previous eligible retained target.
     void focus_previous(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -288,10 +320,12 @@
         move_focus(-1, platform);
     }
 
+    /// Install semantic-command fallback after retained routing returns Ignored.
     void set_global_command_handler(std::function<EventResult(Command)> handler) {
         global_command_handler_ = std::move(handler);
     }
 
+    /// Install fallback handling for KeyDown left unconsumed by retained routing.
     void set_global_key_down_handler(
         std::function<EventResult(const InputEvent&)> handler) {
         global_key_down_handler_ = std::move(handler);
@@ -358,6 +392,8 @@
         pointer_interaction_active_ = false;
     }
 
+    /// Route one normalized event through focus/hit-test/capture and return
+    /// whether the retained/global route consumed it.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
         const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
@@ -637,6 +673,7 @@
         }
     }
 
+    /// Deliver PointerCancel to active capture owners and clear capture state.
     EventResult cancel_pointer(PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
@@ -644,6 +681,8 @@
         return cancel_all_pointer_captures(platform);
     }
 
+    /// Paint the full retained tree. Failed paint restores pre-existing damage
+    /// so a later frame can retry.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
