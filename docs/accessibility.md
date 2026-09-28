@@ -1,6 +1,53 @@
 # NativeUI v1 accessibility semantics
 
-Status: normative T045 design freeze for T067/T068. Production native accessibility bridges are implemented by T068, not here.
+Status: normative T045 design freeze for T067/T068, amended by the two platform-constant substitutions recorded in [§0](#0-implementation-status); the normative sections below are otherwise unchanged. Production native accessibility bridges are implemented by T068.
+
+## 0. Implementation status
+
+Implementation is active on PR #241 (T068 / issue #80); T045 remains the authority for roles, actions, mappings and lifetime rules, and this section is status/evidence bookkeeping only.
+
+| Slice | State |
+| --- | --- |
+| Immutable per-view semantic snapshots, deterministic diff and native publication | Implemented; locally validated |
+| T065 action routing with execution-time eligibility recheck | Implemented; locally validated |
+| T067 shared virtual metadata, lazy logical items and logical Select/Focus | Implemented; locally validated |
+| Standard-widget projections (§4) | Implemented; locally validated |
+| macOS NSAccessibility bridge and per-view publication sink | Implemented; locally validated with an in-process AppKit query fixture plus the consumer-prefix audit. A real AXUIElement/VoiceOver session needs TCC consent and stays a manual checklist item, not an automated gate. |
+| Windows UIA fragment provider | Neutral mapping/provider core implemented and covered by host-independent suites; the `_WIN32` COM adapter and the Windows client fixture are compiled and registered, but their runtime evidence is pending remote Windows CI. |
+| Linux AT-SPI2 over T072 | Not implemented. The fail-closed stub remains until T181 (issue #464 / PR #465) lands the explicit accessibility-bus address mode for the T072 transport. |
+
+Local validation: serial macOS Release build with zero unapproved warnings and full local CTest 238/239. The only failure is `nativeui_fractal_noise_gpu_reference_tests` (T092 fractal-noise GPU divergence on the local Apple M1 Pro), tracked as Bug #479 and unrelated to T068.
+
+Remaining: Linux AT-SPI2 (T181 / #464 / PR #465), remote Windows UIA runtime evidence, and a dedicated concurrent reader-vs-publisher thread-stress test — current concurrency evidence is thread-driven proxy-cache lookup and off-thread action posting, while retained-generation survival across publication is asserted sequentially.
+
+### T045 amendments (recorded)
+
+1. **Dialog mapping.** The §7 Dialog row uses `NSAccessibilityWindowRole` + `NSAccessibilityDialogSubrole` because the originally frozen `NSAccessibilityDialogRole` does not exist in AppKit on the pinned SDK. This is a constant substitution preserving the same role semantics; no role was added, renamed or removed.
+2. **Children-changed notification.** The historical `NSAccessibilityChildrenChangedNotification` constant is absent from the pinned SDK. A committed structure transition announces the root transition with `NSAccessibilityCreatedNotification` / `NSAccessibilityUIElementDestroyedNotification` plus `NSAccessibilityLayoutChangedNotification` for the structure change, exactly as recorded in §7.
+
+### Acceptance-criteria matrix (issue #80)
+
+All CTest names below are root-tree targets; `nativeui_t068_root_integration_contract` guards the T068 registrations, their labels and the isolated public-header target, and platform-only suites are registered when that platform is built. Paths are relative to the repository root.
+
+| Acceptance criterion | Implementation | CTest coverage |
+| --- | --- | --- |
+| Native read queries on immutable snapshots only; no retained/traversed live-tree pointer | `include/nativeui/detail/semantic_snapshot.hpp`, `include/nativeui/detail/semantic_proxy.hpp`, `include/nativeui/detail/semantic_native_query.hpp`, `include/nativeui/detail/semantic_native_view_bridge.hpp` | `nativeui_t068_semantic_proxy`, `nativeui_t068_semantic_children_query`, `nativeui_t045_semantics` |
+| Generation advances only when exposed semantic data changes | `SemanticSnapshotPublisher::publish` (`include/nativeui/detail/semantic_snapshot.hpp`), `SemanticNativePublicationState::publish` (`include/nativeui/detail/semantic_native_publication.hpp`) | `nativeui_t068_semantic_native_generation`, `nativeui_t068_semantic_view_state`, `nativeui_smoke_accessibility` |
+| Concurrent readers keep the old immutable generation while a new one is published | Atomic `shared_ptr` publication plus the lifetime-safe weak reader source (`include/nativeui/detail/semantic_snapshot.hpp`, `include/nativeui/detail/semantic_native_publication.hpp`) | `nativeui_t068_semantic_proxy`, `nativeui_t068_semantic_proxy_cache`, `nativeui_t068_semantic_native_generation` |
+| Removed/stale ordinary and virtual proxies become defunct safely | `SemanticSnapshotProxy` / `SemanticProxyCache` (`include/nativeui/detail/semantic_proxy.hpp`), `include/nativeui/detail/semantic_virtual_source.hpp` | `nativeui_t068_semantic_proxy`, `nativeui_t068_semantic_proxy_cache`, `nativeui_t068_virtual_list_action_tests`, `nativeui_semantic_macos_proxy_cache` |
+| T065 action executes at most once after current-state eligibility recheck | `include/nativeui/detail/semantic_action.hpp`, `include/nativeui/detail/semantic_action_target_binding.hpp`, `include/nativeui/detail/semantic_action_view_binding.hpp`, `include/nativeui/detail/semantic_live_action.hpp` | `nativeui_t068_semantic_action_router`, `nativeui_t068_semantic_action_target_binding`, `nativeui_t068_semantic_action_view_binding`, `nativeui_t068_retained_action_bridge_tests` |
+| Disabled/ReadOnly revalidated at execution | `include/nativeui/detail/semantic_rules.hpp` (`normalize_semantic_info`, `semantic_action_mutates_value`, `semantic_action_allowed`), `include/nativeui/detail/semantic_live_action.hpp` | `nativeui_t068_semantic_action_policy`, `nativeui_t068_semantic_read_only`, `nativeui_t068_retained_action_bridge_tests` |
+| Deterministic diff categories; slider value never rebuilds the native root | `diff_semantic_snapshots` (`include/nativeui/detail/semantic_snapshot.hpp`), `include/nativeui/detail/semantic_native_publication.hpp`, `src/detail/native_accessibility_macos.mm` | `nativeui_t068_semantic_diff_regression`, `nativeui_t068_semantic_publication_batch`, `nativeui_semantic_macos_notifications` |
+| Bounds convert exactly once through T043 and stay correct after scale/scroll/layout | `src/detail/semantic_native_bounds.hpp`, `src/detail/native_screen_origin.hpp`, `src/detail/view_geometry.hpp`, `include/nativeui/detail/semantic_native_publication.hpp` | `nativeui_t068_semantic_native_bounds`, `nativeui_t068_semantic_native_geometry_capture`, `nativeui_smoke_accessibility` |
+| 100k dataset: 1,000 scroll/selection/focus publications retain the same T067 metadata pointer with zero O(N) copy | `include/nativeui/detail/semantic_view_state.hpp`, `VirtualSemanticChildren` (`include/nativeui/semantics.hpp`), T067 `include/nativeui/detail/virtual_list_model.hpp` | `nativeui_t068_semantic_view_state`, `nativeui_t067_semantic_api_tests`, `nativeui_example_t068_accessibility_self_test` |
+| Dataset replacement swaps one new T067 metadata generation; old readers stay safe | T067 `include/nativeui/detail/virtual_list_model.hpp` / `include/nativeui/detail/virtual_list_retained.hpp`, `virtual_storage_refresh_required` (`include/nativeui/detail/semantic_snapshot.hpp`) | `nativeui_t068_semantic_view_state`, `nativeui_t067_semantic_api_tests`, `nativeui_example_t068_accessibility_self_test` |
+| 100k virtual collection exposes full logical children without eager proxies or visual rows | `include/nativeui/detail/semantic_virtual_source.hpp`, T067 immutable metadata, lazy providers in `include/nativeui/detail/semantic_uia_provider.hpp` | `nativeui_t067_semantic_api_tests`, `nativeui_t068_semantic_children_query`, `nativeui_t068_uia_provider`, `nativeui_example_t068_accessibility_self_test` |
+| Offscreen virtual Select/Focus runs as a logical action, then normal T067 scroll/materialization | `include/nativeui/detail/semantic_live_action.hpp`, `include/nativeui/detail/virtual_list_semantic_action.hpp`, `include/nativeui/detail/semantic_action.hpp` | `nativeui_t068_virtual_list_action_tests`, `nativeui_t068_semantic_action_policy`, `nativeui_example_t068_accessibility_self_test` |
+| macOS VoiceOver-representative fixture works with consumer-prefixed runtime names | `src/detail/native_accessibility_macos.mm`, `src/detail/semantic_macos_*.hpp`, `tests/smoke_accessibility_appkit.mm` | `nativeui_semantic_macos_production_bridge`, `nativeui_semantic_macos_notifications`, `nativeui_t068_objc_runtime_prefix_probe`, `nativeui_smoke_accessibility`, `nativeui_smoke_accessibility_objc_runtime_prefix` |
+| Windows UIA/Narrator representative fixture works | `include/nativeui/detail/semantic_uia_mapping.hpp`, `include/nativeui/detail/semantic_uia_provider.hpp`, `src/detail/native_accessibility_windows.cpp` | `nativeui_t068_uia_mapping`, `nativeui_t068_uia_provider` (host-independent); `nativeui_t068_uia_win32_provider_tests` and the `nativeui_smoke_accessibility` Windows fixture run on Windows CI (evidence pending) |
+| Linux AT-SPI2 works via T072; missing bus disables once/boundedly | Pending T181 (#464 / PR #465); fail-closed `src/detail/native_accessibility_stub.c` until then | None yet |
+| Two views keep isolated roots/snapshots/proxy caches/transports | `include/nativeui/detail/semantic_native_view_bridge.hpp`, `include/nativeui/detail/semantic_platform_identity.hpp`, per-view caches and sinks | `nativeui_t068_semantic_native_view_bridge`, `nativeui_t068_semantic_proxy_cache`, `nativeui_semantic_macos_proxy_cache`, `nativeui_t068_uia_provider`, `nativeui_t068_publication_sink_tests` |
+| Public accessibility headers contain no platform/D-Bus/Pugl types | `include/nativeui/semantics.hpp`, umbrella export in `include/nativeui/nativeui.hpp` | `nativeui_t068_root_integration_contract` (guards the isolated `tests/headers/semantics.cpp` compile target) |
 
 ## 1. Semantic identity and snapshots
 

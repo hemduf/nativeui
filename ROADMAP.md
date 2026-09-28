@@ -171,7 +171,7 @@ T077 and T078 remain outside the v1 critical path. **T078 / #161 / PR #431 is Do
 ### Active pre-freeze work
 
 - **T069 / #81 — Deprecated:** retired as a standalone v1 freeze gate; current `main` public/package contracts and exact-head qualification are authoritative. It is not a dependency or merge gate for T079 or subsequent 1.1 shader work.
-- **T068 / #80 / PR #241 — deferred to 1.2:** native accessibility bridges remain outside the v1 critical path.
+- **T068 / #80 / PR #241 — in progress (Draft):** the accessibility implementation is active on PR #241. Immutable snapshot/diff/publication, T065 action routing, T067 shared virtual metadata, the standard-widget projections and the production macOS NSAccessibility bridge are implemented and locally validated (serial macOS Release build, full local CTest 238/239 where the only failure is the known local `nativeui_fractal_noise_gpu_reference_tests` T092 GPU divergence tracked as Bug #479). Windows UIA ships the neutral mapping/provider core plus the `_WIN32` COM adapter, with Win32 runtime evidence pending remote Windows CI. The Linux AT-SPI2 slice waits on T181 / #464 / PR #465 (explicit accessibility-bus address mode for the T072 transport). The historical 1.2 wording remains scheduling history until completion bookkeeping.
 
 ## Current dependency frontier
 
@@ -207,7 +207,8 @@ post-1.0 / later-release work already landed:
   T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
   T073(done) + T079(done) -> T088(done) -> T089(done) -> T090(done) -> T091(done) -> T092(regression gate #479) -> T093(blocked on T092 closeout)
   T098(done) ---------------------------------------------------------------> T086(done)
-  T068 ----------------------------------------------> 1.2
+  T068(doing, PR #241) -> Windows runtime evidence pending remote CI
+  T068(doing, PR #241) -> Linux AT-SPI2 waits on T181/#465
 ```
 
 ## Milestone status
@@ -314,4 +315,4 @@ The remaining v1 sequence is:
 
 ## Release policy
 
-T069/#81 is deprecated. T070/#82 and T071/#83 are closed as not planned; the v1 reference-app/documentation and release path needs replanning rather than implicit completion. T122 and T133–T137 remain open. T073–T091, T094, T095, T096 and T098 are merged as later-release foundations. T092's implementation is merged and PR #477 is exact-head remotely qualified, but regression #479 still blocks completion until its required Apple M1 Pro evidence is recorded; T093 remains blocked until #176 is fully qualified and Done. Retained per-view shader/resource caching remains deferred to T097. A future release ticket must freeze one candidate SHA and run full CI plus relevant package/WebAssembly checks against an explicit approved benchmark baseline before publication. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated. T070/#82 and T071/#83 are closed as not planned; the v1 reference-app/documentation and release path needs replanning rather than implicit completion. T122 and T133–T137 remain open. T073–T091, T094, T095, T096 and T098 are merged as later-release foundations. T092's implementation is merged and PR #477 is exact-head remotely qualified, but regression #479 still blocks completion until its required Apple M1 Pro evidence is recorded; T093 remains blocked until #176 is fully qualified and Done. Retained per-view shader/resource caching remains deferred to T097. A future release ticket must freeze one candidate SHA and run full CI plus relevant package/WebAssembly checks against an explicit approved benchmark baseline before publication. T068 remains outside the v1 critical path: implementation is active on PR #241, Windows UIA runtime evidence is pending remote CI, and Linux AT-SPI2 waits on T181/#464 (PR #465); the local-only `nativeui_fractal_noise_gpu_reference_tests` failure is the known T092 GPU divergence tracked as Bug #479.
