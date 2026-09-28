@@ -27,11 +27,17 @@ struct ShaderBrushAccess {
     [[nodiscard]] static std::size_t semantic_hash(
         const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept;
 
+    [[nodiscard]] static std::size_t retained_storage_bytes(
+        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept;
+
     [[nodiscard]] static bool semantic_equal(
         const std::shared_ptr<const ShaderBrushSnapshot>& a,
         const std::shared_ptr<const ShaderBrushSnapshot>& b) noexcept;
 
     [[nodiscard]] static std::size_t semantic_hash(
+        const Brush& brush) noexcept;
+
+    [[nodiscard]] static std::size_t retained_storage_bytes(
         const Brush& brush) noexcept;
 
     [[nodiscard]] static bool semantic_equal(

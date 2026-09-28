@@ -4,6 +4,7 @@
 #include "detail/shader_brush_access.hpp"
 #include "detail/shader_instance_access.hpp"
 #include "detail/image_texture_cache_key.hpp"
+#include "detail/render_resource_accounting.hpp"
 #include "detail/shader_test_seams.hpp"
 
 #include "include/core/SkColorSpace.h"
@@ -112,6 +113,18 @@ std::size_t semantic_shader_hash(
     return seed;
 }
 
+std::size_t semantic_shader_retained_storage_bytes(
+    const std::vector<std::shared_ptr<const Brush>>& children) noexcept {
+    std::size_t total = 0U;
+    for (const auto& child : children) {
+        if (!child) continue;
+        total = saturated_render_resource_storage_add(
+            total, ShaderBrushAccess::retained_storage_bytes(*child));
+        if (total > kRenderResourceMaxAccountedBytes) return total;
+    }
+    return total;
+}
+
 } // namespace
 
 struct ShaderBrushSnapshot final {
@@ -128,6 +141,8 @@ struct ShaderBrushSnapshot final {
         }
         semantic_hash = semantic_shader_hash(
             program.get(), bindings, children);
+        retained_storage_bytes =
+            semantic_shader_retained_storage_bytes(children);
     }
 
     std::shared_ptr<const ShaderProgram> program;
@@ -135,6 +150,7 @@ struct ShaderBrushSnapshot final {
     std::vector<std::shared_ptr<const Brush>> children;
     std::size_t depth{1};
     std::size_t semantic_hash{};
+    std::size_t retained_storage_bytes{};
 };
 
 struct ShaderProgramAccess final {
@@ -523,6 +539,11 @@ std::size_t ShaderBrushAccess::semantic_hash(
     return snapshot ? snapshot->semantic_hash : 0U;
 }
 
+std::size_t ShaderBrushAccess::retained_storage_bytes(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept {
+    return snapshot ? snapshot->retained_storage_bytes : 0U;
+}
+
 bool ShaderBrushAccess::semantic_equal(
     const std::shared_ptr<const ShaderBrushSnapshot>& a,
     const std::shared_ptr<const ShaderBrushSnapshot>& b) noexcept {
@@ -604,6 +625,25 @@ std::size_t ShaderBrushAccess::semantic_hash(const Brush& brush) noexcept {
                     seed, source ? source->semantic_hash : 0U);
             }
             return seed;
+        },
+        brush.value_);
+}
+
+std::size_t ShaderBrushAccess::retained_storage_bytes(
+    const Brush& brush) noexcept {
+    return std::visit(
+        [](const auto& source) noexcept -> std::size_t {
+            using Source = std::decay_t<decltype(source)>;
+            if constexpr (std::is_same_v<Source, ImageTexture>) {
+                return image_texture_retained_storage_bytes(source);
+            } else if constexpr (
+                std::is_same_v<
+                    Source,
+                    std::shared_ptr<const ShaderBrushSnapshot>>) {
+                return ShaderBrushAccess::retained_storage_bytes(source);
+            } else {
+                return 0U;
+            }
         },
         brush.value_);
 }

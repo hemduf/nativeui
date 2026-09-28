@@ -407,6 +407,43 @@ void image_and_runtime_shader_share_one_entry_budget() {
     context.end_frame();
 }
 
+void runtime_shader_accounts_nested_image_storage() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    auto mipmapped = texture(image);
+    ui::TextureSampling sampling;
+    sampling.set_mipmap(ui::TextureMipmap::Linear);
+    mipmapped.set_sampling(sampling);
+
+    const auto parent_program = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    NUI_CHECK(parent_program.ok());
+
+    ui::ShaderInstance inner{parent_program.program};
+    NUI_CHECK(inner.set_child("child", ui::Brush{mipmapped}) ==
+              ui::ShaderSetResult::Ok);
+
+    ui::ShaderInstance outer{parent_program.program};
+    NUI_CHECK(outer.set_child("child", ui::Brush{inner}) ==
+              ui::ShaderSetResult::Ok);
+
+    const ui::Brush brush{outer};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+
+    ui::detail::RenderResourceMaterializationContext context;
+    auto acquisition = context.acquire_runtime_shader(
+        *snapshot, [snapshot] {
+            return ui::detail::materialize_shader_brush(*snapshot);
+        });
+    NUI_CHECK(acquisition && acquisition.retained);
+    NUI_CHECK(context.retained_entries() == 1);
+    NUI_CHECK(context.retained_accounted_bytes() == 32);
+}
+
 void effects_share_the_unified_cache_budget() {
     ui::detail::RenderResourceMaterializationContext context;
     const auto blur = ui::Effect::gaussian_blur(4.0f, 6.0f);
@@ -615,6 +652,7 @@ int main() {
     runtime_shader_shares_the_same_budget_and_hits();
     image_and_runtime_shader_share_one_entry_budget();
     image_and_runtime_shader_share_hard_entry_limit();
+    runtime_shader_accounts_nested_image_storage();
     effects_share_the_unified_cache_budget();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
