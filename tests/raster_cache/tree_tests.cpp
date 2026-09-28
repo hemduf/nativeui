@@ -416,7 +416,7 @@ int main() {
         failed_mount_retires_registration();
         dynamic_remove_reinsert();
         dynamic_reconcile_failure_retires_boundary_identity();
-        std::cout << "10 retained raster cache boundary contracts passed\n";
+        std::cout << "11 retained raster cache boundary contracts passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
