@@ -460,7 +460,7 @@ void six_octave_grid_contract() {
     }
 }
 
-void extreme_coordinate_contract() {
+void tiny_feature_size_contract() {
     constexpr ui::NoiseOptions tiny{
         .feature_size = 1.0e-30f, .seed = 0x12345678u};
     for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
@@ -479,6 +479,43 @@ void extreme_coordinate_contract() {
             const auto pixel = render_pixel(source.noise.as_brush(), 8, 8);
             NUI_CHECK(pixel.a == 255);
             NUI_CHECK(std::abs(double(pixel.r) / 255.0 - reference) < 0.015);
+        }
+    }
+}
+
+
+void extreme_painter_coordinate_contract() {
+    constexpr float kPainterScale = 1.0e-20f;
+    constexpr float kLogicalWidth = 2.0e21f;
+
+    for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
+                      ui::NoiseType::Simplex}) {
+        for (auto mode : {ui::FractalNoiseMode::FBm,
+                          ui::FractalNoiseMode::Turbulence,
+                          ui::FractalNoiseMode::Ridged}) {
+            const auto source = ui::NoiseSource::create_fractal(
+                base, {.feature_size = 1.0f, .seed = 0x12345678u},
+                fractal_options(mode, 6, 4.0f, 1.0f));
+            NUI_CHECK(source.ok());
+            const auto brush = source.noise.as_brush();
+
+            ui::UI tree{ui::Canvas{16.0f, 16.0f,
+                [brush](ui::CanvasContext2D& g) {
+                    g.save();
+                    g.scale(kPainterScale, 1.0f);
+                    g.fill_rect({0.0f, 0.0f, kLogicalWidth, 16.0f}, brush);
+                    g.restore();
+                }}};
+            ui::HeadlessRenderer renderer{{16, 16}, 1.0f};
+            NUI_CHECK(renderer.render(tree));
+            const auto pixel = renderer.pixel(8, 8);
+            NUI_CHECK(pixel.a == 255);
+            NUI_CHECK(pixel.r == pixel.g && pixel.r == pixel.b);
+
+            const int expected =
+                mode == ui::FractalNoiseMode::FBm ? 128 :
+                mode == ui::FractalNoiseMode::Turbulence ? 0 : 255;
+            NUI_CHECK(std::abs(int(pixel.r) - expected) <= 1);
         }
     }
 }
@@ -570,7 +607,7 @@ void benchmark() {
     NUI_CHECK(base.ok() && fractal.ok());
     const double base_ms = measure_raster(base.noise.as_brush());
     const double fractal_ms = measure_raster(fractal.noise.as_brush());
-    std::cout << "T092 warm 256x256 raster median (5 runs): base_perlin="
+    std::cout << "Fractal noise warm 256x256 raster median (5 runs): base_perlin="
               << base_ms << " ms, fractal6_perlin=" << fractal_ms
               << " ms, ratio=" << (fractal_ms / base_ms) << "\n";
 }
@@ -592,11 +629,12 @@ int main(int argc, char** argv) {
         raster_contract();
         degeneracy_contract();
         six_octave_grid_contract();
-        extreme_coordinate_contract();
+        tiny_feature_size_contract();
+        extreme_painter_coordinate_contract();
         lifetime_isolation_contract();
         return 0;
     } catch (const std::exception& e) {
-        std::cerr << "FAIL T092 fractal noise: " << e.what() << '\n';
+        std::cerr << "FAIL fractal noise: " << e.what() << '\n';
         return 1;
     }
 }
