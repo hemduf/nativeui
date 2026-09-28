@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
 
 namespace {
@@ -91,24 +92,24 @@ int main() {
     auto first_ui = make_ui(brush);
     auto second_ui = make_ui(brush);
 
-    ui::StandaloneWindow first{
+    auto first = std::make_unique<ui::StandaloneWindow>(
         application,
         first_ui,
-        ui::WindowDesc{.title = "render-resource-a", .size = {32.0f, 32.0f}}};
+        ui::WindowDesc{.title = "render-resource-a", .size = {32.0f, 32.0f}});
     ui::StandaloneWindow second{
         application,
         second_ui,
         ui::WindowDesc{.title = "render-resource-b", .size = {32.0f, 32.0f}}};
-    if (!first.valid() || !second.valid()) return fail("window creation failed");
+    if (!first->valid() || !second.valid()) return fail("window creation failed");
 
-    if (!read_pixel(application, first, {8.0f, 8.0f}) ||
+    if (!read_pixel(application, *first, {8.0f, 8.0f}) ||
         !read_pixel(application, second, {8.0f, 8.0f}) ||
-        !wait_for_resource(application, first) ||
+        !wait_for_resource(application, *first) ||
         !wait_for_resource(application, second)) {
         return fail("initial renderer cache did not populate");
     }
 
-    const auto first_before = PlatformTestAccess::scene_diagnostics(first);
+    const auto first_before = PlatformTestAccess::scene_diagnostics(*first);
     const auto second_before = PlatformTestAccess::scene_diagnostics(second);
     if (first_before.render_resource_entries == 0 ||
         second_before.render_resource_entries == 0) {
@@ -116,13 +117,13 @@ int main() {
     }
 
     if (!PlatformTestAccess::inject_scene_fault(
-            first, SceneFaultStage::ConfirmedContextLoss) ||
-        !PlatformTestAccess::request_gpu_readback(first, {8.0f, 8.0f}) ||
-        !wait_for_failure(application, first, first_before.failed_exposes)) {
+            *first, SceneFaultStage::ConfirmedContextLoss) ||
+        !PlatformTestAccess::request_gpu_readback(*first, {8.0f, 8.0f}) ||
+        !wait_for_failure(application, *first, first_before.failed_exposes)) {
         return fail("confirmed context loss did not execute");
     }
 
-    const auto first_after_loss = PlatformTestAccess::scene_diagnostics(first);
+    const auto first_after_loss = PlatformTestAccess::scene_diagnostics(*first);
     const auto second_after_loss = PlatformTestAccess::scene_diagnostics(second);
     if (first_after_loss.render_resource_cache_clears <=
             first_before.render_resource_cache_clears) {
@@ -135,11 +136,11 @@ int main() {
         return fail("context loss in one view mutated another view cache");
     }
 
-    if (!read_pixel(application, first, {8.0f, 8.0f}) ||
-        !wait_for_resource(application, first)) {
+    if (!read_pixel(application, *first, {8.0f, 8.0f}) ||
+        !wait_for_resource(application, *first)) {
         return fail("renderer cache did not repopulate after context loss");
     }
-    const auto first_recovered = PlatformTestAccess::scene_diagnostics(first);
+    const auto first_recovered = PlatformTestAccess::scene_diagnostics(*first);
     if (!first_recovered.scene_valid ||
         first_recovered.render_resource_entries == 0) {
         return fail("recreated renderer did not establish fresh cache state");
@@ -153,6 +154,22 @@ int main() {
         second_final.render_resource_cache_clears !=
             second_before.render_resource_cache_clears) {
         return fail("surviving view did not remain independent");
+    }
+
+    const auto second_before_destroy =
+        PlatformTestAccess::scene_diagnostics(second);
+    first.reset();
+
+    const auto second_after_destroy_pixel =
+        read_pixel(application, second, {8.0f, 8.0f});
+    const auto second_after_destroy =
+        PlatformTestAccess::scene_diagnostics(second);
+    if (!second_after_destroy_pixel || second_after_destroy_pixel->r < 120 ||
+        !second_after_destroy.scene_valid ||
+        second_after_destroy.render_resource_entries == 0 ||
+        second_after_destroy.render_resource_cache_clears !=
+            second_before_destroy.render_resource_cache_clears) {
+        return fail("destroying one view mutated the surviving view cache");
     }
 
     return 0;
