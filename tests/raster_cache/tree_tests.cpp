@@ -353,6 +353,54 @@ void dynamic_remove_reinsert() {
     NUI_CHECK(!Access::register_boundary(tree, old_id));
     NUI_CHECK(!Access::register_boundary(tree, ui::kInvalidNodeId));
 }
+void dynamic_reconcile_failure_retires_boundary_identity() {
+    auto outer = std::make_shared<ProbeState>();
+    auto child = std::make_shared<ProbeState>();
+    ui::State<bool> visible{false};
+    auto conditional = ui::make_spec(ui::If{visible, probe(child)});
+    ui::Tree tree{ui::compile(probe(outer, {std::move(conditional)}))};
+    test::MockPlatform platform;
+    SkCanvas canvas;
+
+    tree.mount();
+    tree.layout({200, 100});
+    tree.paint(canvas, platform);
+    NUI_CHECK(Access::register_boundary(tree, outer->id));
+    const auto outer_before = publish(tree, outer->id);
+
+    Access::Token failed_lifetime;
+    ui::NodeId failed_id = ui::kInvalidNodeId;
+    child->on_mount = [&](ui::NodeId id) {
+        failed_id = id;
+        NUI_CHECK(Access::register_boundary(tree, id));
+        failed_lifetime = ui::TreeTestAccess::lifetime(tree, id);
+        throw std::runtime_error("injected dynamic mount failure");
+    };
+
+    visible.set(true);
+    NUI_CHECK(!Access::reusable(tree, outer->id, outer_before));
+
+    bool caught = false;
+    try {
+        tree.paint(canvas, platform);
+    } catch (const std::runtime_error&) {
+        caught = true;
+    }
+    NUI_CHECK(caught);
+    NUI_CHECK(failed_id != ui::kInvalidNodeId);
+    NUI_CHECK(failed_lifetime.expired());
+    NUI_CHECK(ui::TreeTestAccess::raster_records(tree) == 1);
+    NUI_CHECK(!Access::commit(tree, failed_id, failed_lifetime));
+
+    child->on_mount = {};
+    tree.paint(canvas, platform);
+    NUI_CHECK(child->id != ui::kInvalidNodeId);
+    NUI_CHECK(child->id != failed_id);
+    NUI_CHECK(Access::register_boundary(tree, child->id));
+    (void)publish(tree, child->id);
+    (void)publish(tree, outer->id);
+}
+
 }
 
 int main() {
@@ -367,6 +415,7 @@ int main() {
         activation_and_deactivation_revoke_content();
         failed_mount_retires_registration();
         dynamic_remove_reinsert();
+        dynamic_reconcile_failure_retires_boundary_identity();
         std::cout << "10 retained raster cache boundary contracts passed\n";
         return 0;
     } catch (const std::exception& error) {
