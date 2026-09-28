@@ -100,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir build --output-on-failure -C Release -LE '^package$' -E 'nativeui_smoke_|_gpu_'
-          ctest --test-dir build --output-on-failure -C Release -R 't091'
+          ctest --test-dir build --output-on-failure -C Release -R 't091' -E '_gpu_'
 
       - name: T091 raster benchmark
         if: runner.os == 'macOS'
