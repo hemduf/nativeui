@@ -1,3 +1,4 @@
+#include "src/detail/effect_cache_key.hpp"
 #include "src/detail/image_texture_cache_key.hpp"
 #include "src/detail/shader_brush_access.hpp"
 #include "test_support.hpp"
@@ -265,6 +266,57 @@ void invalid_transform_is_never_a_retained_key() {
     NUI_CHECK(!ui::detail::image_texture_cache_key(texture));
 }
 
+void effect_key_distinguishes_all_material_fields() {
+    using ui::detail::EffectCacheAccess;
+    using ui::detail::EffectCacheKeyHash;
+
+    const auto blur = EffectCacheAccess::key(
+        ui::Effect::gaussian_blur(2.0f, 3.0f));
+    const auto same_blur = EffectCacheAccess::key(
+        ui::Effect::gaussian_blur(2.0f, 3.0f));
+    NUI_CHECK(blur == same_blur);
+    NUI_CHECK(EffectCacheKeyHash{}(blur) == EffectCacheKeyHash{}(same_blur));
+    NUI_CHECK(!(blur == EffectCacheAccess::key(
+        ui::Effect::gaussian_blur(4.0f, 3.0f))));
+    NUI_CHECK(!(blur == EffectCacheAccess::key(
+        ui::Effect::gaussian_blur(2.0f, 4.0f))));
+
+    const ui::Color base_color{0.1f, 0.2f, 0.3f, 0.4f};
+    const auto shadow = EffectCacheAccess::key(
+        ui::Effect::drop_shadow({1.0f, 2.0f}, 3.0f, base_color));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow_only({1.0f, 2.0f}, 3.0f, base_color))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow({2.0f, 2.0f}, 3.0f, base_color))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow({1.0f, 3.0f}, 3.0f, base_color))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow({1.0f, 2.0f}, 4.0f, base_color))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {1.0f, 2.0f}, 3.0f, {0.5f, 0.2f, 0.3f, 0.4f}))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {1.0f, 2.0f}, 3.0f, {0.1f, 0.5f, 0.3f, 0.4f}))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {1.0f, 2.0f}, 3.0f, {0.1f, 0.2f, 0.5f, 0.4f}))));
+    NUI_CHECK(!(shadow == EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {1.0f, 2.0f}, 3.0f, {0.1f, 0.2f, 0.3f, 0.5f}))));
+
+    const auto positive_zero = EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {0.0f, -0.0f}, 1.0f, {0.0f, 0.25f, 0.5f, 1.0f}));
+    const auto negative_zero = EffectCacheAccess::key(
+        ui::Effect::drop_shadow(
+            {-0.0f, 0.0f}, 1.0f, {-0.0f, 0.25f, 0.5f, 1.0f}));
+    NUI_CHECK(positive_zero == negative_zero);
+    NUI_CHECK(
+        EffectCacheKeyHash{}(positive_zero) ==
+        EffectCacheKeyHash{}(negative_zero));
+}
+
 } // namespace
 
 int main() {
@@ -276,5 +328,6 @@ int main() {
     shader_snapshot_semantics_are_stable();
     nested_shader_snapshot_semantics_do_not_flatten_on_lookup();
     invalid_transform_is_never_a_retained_key();
+    effect_key_distinguishes_all_material_fields();
     return 0;
 }
