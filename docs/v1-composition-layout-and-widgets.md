@@ -202,7 +202,7 @@ The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and
 | --- | --- | --- |
 | `Spec`, Component builders | declarative retained composition | [`include/nativeui/component.hpp`](../include/nativeui/component.hpp) |
 | `If`, `Switch<T>`, `ForEach<T>` | dynamic retained structure | [`t058_dynamic_composition`](../examples/features/t058_dynamic_composition.cpp) |
-| `ComponentAvailability`, `VisibilityMode` | retained visibility/enabled/read-only state | [`include/nativeui/component_base.hpp`](../include/nativeui/component_base.hpp) |
+| `ComponentAvailability`, `VisibilityMode`, `Visibility`, `Enabled`, `ReadOnly` | retained visibility/enabled/read-only state | [`component_base.hpp`](../include/nativeui/component_base.hpp), [`component_state.hpp`](../include/nativeui/component_state.hpp), [State and binding](v1-state-and-binding.md) |
 | layout containers / scroll layout | constraints, measurement and placement | [`include/nativeui/layout.hpp`](../include/nativeui/layout.hpp) |
 | standard widgets | retained controls and text/list families | [`include/nativeui/widgets.hpp`](../include/nativeui/widgets.hpp) |
 | focus/input/commands/gesture | retained interaction routing | [Input, focus and commands](v1-input-focus-and-commands.md), [`t016_gestures`](../examples/features/t016_gestures.cpp) |

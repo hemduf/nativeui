@@ -1,6 +1,8 @@
 # State and Binding in NativeUI 1.0
 
-NativeUI provides `State<T>` as an observable UI value and `Binding<T>` as a reference-like handle to one `State<T>` source. Both are retained-UI abstractions: they are intended for the UI/main thread and are not synchronization primitives for audio, worker, or arbitrary cross-thread data flow.
+NativeUI provides [`State<T>` and `Binding<T>`](../include/nativeui/state.hpp) as its observable UI-value layer. Both are retained-UI abstractions: they are intended for the UI/main thread and are not synchronization primitives for audio, worker, or arbitrary cross-thread data flow.
+
+The same state layer drives retained availability decorators in [`component_state.hpp`](../include/nativeui/component_state.hpp), while [`DirtyRegion`](../include/nativeui/invalidation.hpp) is the bounded logical invalidation accumulator used by the retained renderer.
 
 This page documents behavior already merged on `main`. The current validated public/package surface on `main` is authoritative; T069 is no longer treated as a future freeze gate. The retained callback/lifecycle exception-safety work tracked by T125/T130 has also landed, so this page can state the final state/binding contract without preserving those historical blocker assumptions.
 
@@ -100,6 +102,60 @@ This lets retained components hold a binding safely without extending the logica
 `Binding<T>::set()` and `Binding<T>::observe()` use the same source and the same notification transaction as the corresponding `State<T>` operations. There is no second observer list or synchronization layer.
 
 Consequently, writes through a binding follow the same equality, reentrancy, coalescing, source-lifetime, and throwing-observer rules described above.
+
+## Availability decorators
+
+[`component_state.hpp`](../include/nativeui/component_state.hpp) exposes three one-child retained decorators driven by borrowed State objects:
+
+| Decorator | State | Effective behavior |
+| --- | --- | --- |
+| `Visibility` | `State<VisibilityMode>` or `State<bool>` | Visible, Hidden or Collapsed retained availability |
+| `Enabled` | `State<bool>` | Enabled/disabled interaction and focus eligibility |
+| `ReadOnly` | `State<bool>` | Monotonic read-only capability without generic focus/hit-test suppression |
+
+The State reference is borrowed by these builders/components and must outlive the mounted retained wrapper. Changes are observed while mounted and feed the tree's availability reconciliation; they do not simulate structural removal.
+
+### Visibility
+
+With `State<VisibilityMode>`, the state value is used directly.
+
+With `State<bool>`, true means Visible and false means Hidden by default:
+
+```cpp
+ui::State<bool> details_visible{true};
+
+auto details = ui::Visibility{
+    details_visible,
+    ui::Label{"Advanced settings"}
+};
+```
+
+Use `.mode(ui::VisibilityMode::Collapsed)` when false should also remove the subtree's layout contribution. Passing `Visible` as the false-mode is sanitized to `Hidden`, so false always makes the subtree unavailable.
+
+Hidden keeps layout participation but removes paint/normal interaction/focus eligibility. Collapsed additionally removes layout contribution. Neither state unmounts the retained child.
+
+### Enabled
+
+A disabled subtree remains retained, measured and painted but is unavailable for normal focus and interactive targeting. Effective enabled state is monotonic through ancestry: a child cannot opt back into enabled below a disabled ancestor.
+
+### ReadOnly
+
+Read-only is also monotonic through ancestry, but unlike disabled it does not generically remove focus or pointer targeting. Editable/value controls enforce mutation policy while retaining non-mutating behavior such as selection, navigation or copy when their widget contract supports it.
+
+## DirtyRegion and paint invalidation
+
+[`DirtyRegion`](../include/nativeui/invalidation.hpp) accumulates dirty rectangles in logical coordinates. It coalesces overlapping/touching regions and retains at most `DirtyRegion::kMaxRects` (8) disjoint rectangles. A ninth fragment collapses the set to one bounding rectangle, keeping repaint bookkeeping bounded.
+
+```cpp
+ui::DirtyRegion dirty;
+const ui::Rect viewport{0, 0, 800, 600};
+
+if (auto exposure = dirty.add({20, 20, 100, 40}, viewport)) {
+    // exposure is the merged logical region that newly needs presentation.
+}
+```
+
+`add()` clips to the supplied bounds, returns `std::nullopt` for empty/already-covered input and performs no allocation after successful DirtyRegion construction. `rects()` returns a borrowed vector reference that is invalidated by later mutation/assignment/destruction.
 
 ## Threading boundary
 

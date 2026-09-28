@@ -13,6 +13,8 @@ namespace ui {
 /// the region collapses to one bounding rectangle.
 class DirtyRegion {
 public:
+    /// Maximum number of disjoint dirty rectangles retained before the region
+    /// collapses to one bounding rectangle.
     static constexpr std::size_t kMaxRects = 8;
 
     DirtyRegion() {
@@ -44,13 +46,22 @@ public:
         return *this;
     }
 
+    /// True when no dirty logical pixels are recorded.
     [[nodiscard]] bool empty() const noexcept { return rects_.empty(); }
+
+    /// Borrow the current coalesced rectangles. The reference/view is invalidated
+    /// by subsequent mutation, assignment or destruction of this DirtyRegion.
     [[nodiscard]] const std::vector<Rect>& rects() const noexcept { return rects_; }
 
+    /// Remove all dirty rectangles while preserving reserved capacity.
     void clear() noexcept { rects_.clear(); }
 
-    /// Add a rectangle clipped to `clip`. Returns the (possibly merged) region
-    /// that newly needs exposure, or nullopt when it was already fully covered.
+    /// Add a logical rectangle after clipping it to `clip`.
+    ///
+    /// Overlapping/touching rectangles are coalesced. Returns the merged region
+    /// whose exposure is newly required, or nullopt if the clipped input is
+    /// empty/already covered. Successfully constructed DirtyRegion instances
+    /// reserve enough storage that add() performs no allocation and is noexcept.
     [[nodiscard]] std::optional<Rect> add(Rect rect, Rect clip) noexcept {
         rect = intersect(rect, clip);
         if (rect.empty()) return std::nullopt;

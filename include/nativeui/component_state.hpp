@@ -137,6 +137,13 @@ private:
 
 } // namespace detail
 
+/// Availability decorator that controls retained subtree visibility from State.
+///
+/// The referenced State is borrowed and must outlive the mounted retained
+/// wrapper. `State<VisibilityMode>` selects Visible/Hidden/Collapsed directly.
+/// With `State<bool>`, true means Visible and false defaults to Hidden unless
+/// `mode(Collapsed)` is selected. This decorator does not mount/unmount its
+/// child when visibility changes.
 class Visibility {
 public:
     template <class Child>
@@ -181,6 +188,13 @@ private:
     std::vector<Spec> children_;
 };
 
+/// Availability decorator that enables/disables one retained subtree.
+///
+/// The referenced `State<bool>` is borrowed and must outlive the mounted
+/// wrapper. Effective enabled state is inherited monotonically through
+/// ancestors: a disabled ancestor cannot be re-enabled by a descendant.
+/// Disabled content remains laid out/painted but is excluded from normal
+/// interactive targeting and focus eligibility.
 class Enabled {
 public:
     template <class Child>
@@ -200,6 +214,13 @@ private:
     std::vector<Spec> children_;
 };
 
+/// Availability decorator that marks one retained subtree read-only.
+///
+/// The referenced `State<bool>` is borrowed and must outlive the mounted
+/// wrapper. Effective read-only state is inherited monotonically. Read-only
+/// does not itself remove focus or hit-test eligibility; editable/value
+/// components decide which mutating actions to reject while preserving
+/// non-mutating interactions such as navigation/selection where applicable.
 class ReadOnly {
 public:
     template <class Child>

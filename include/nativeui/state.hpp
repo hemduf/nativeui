@@ -46,6 +46,12 @@ concept StateValue = requires(const T& lhs, const T& rhs) {
 template <detail::StateValue T>
 class Binding;
 
+/// Observable retained-UI value with synchronous, deterministic notification.
+///
+/// `T` must be equality comparable. State is UI/main-thread confined: it
+/// performs no internal synchronization and is not an audio/worker-thread
+/// transport. Equal writes are ignored; recursive writes are coalesced to a
+/// later stable notification pass.
 template <detail::StateValue T>
 class State {
     struct Listener {
@@ -105,6 +111,10 @@ class State {
 public:
     using Callback = std::function<void(const T&)>;
 
+    /// Move-only RAII registration returned by `observe()`.
+    ///
+    /// Destroying/resetting unsubscribes. A subscription does not keep the
+    /// owning State logically alive and becomes inactive when that owner dies.
     class Subscription {
     public:
         Subscription() = default;
@@ -123,6 +133,7 @@ public:
         }
         ~Subscription() { reset(); }
 
+        /// Unregister this observer. Repeated reset is harmless.
         void reset() noexcept {
             if (id_ == 0) return;
             if (auto control = control_.lock()) {
@@ -132,6 +143,8 @@ public:
             id_ = 0;
         }
 
+        /// True only while the source State is alive and this listener remains
+        /// registered.
         [[nodiscard]] bool active() const noexcept {
             if (id_ == 0) return false;
             if (auto control = control_.lock()) {
@@ -145,6 +158,8 @@ public:
         std::size_t id_{};
     };
 
+    /// Construct state with an initial value. Construction may allocate the
+    /// lifetime-safe shared control block.
     explicit State(T initial = {})
         : control_(std::make_shared<Control>(std::move(initial))) {}
     State(const State&) = delete;
@@ -154,16 +169,25 @@ public:
         control_->invalidate_owner();
     }
 
+    /// Borrow the current committed value. The reference remains owned by this
+    /// State/control block and must not be retained across a mutation when T may
+    /// replace internal storage.
     [[nodiscard]] const T& get() const noexcept { return control_->value; }
 
+    /// Commit a new value and synchronously notify observers on the calling UI
+    /// thread. Equal values are ignored. Observer exceptions propagate after
+    /// State restores its internal notification bookkeeping.
     void set(T value) {
         set_control(control_, std::move(value));
     }
 
+    /// Register a synchronous observer. The callback is not invoked immediately;
+    /// it runs on later distinct committed writes until the Subscription resets.
     Subscription observe(Callback callback) {
         return observe_control(control_, std::move(callback));
     }
 
+    /// Create a reference-like handle to the same source control block.
     [[nodiscard]] Binding<T> binding() noexcept;
 
 private:
@@ -251,6 +275,13 @@ private:
 // reference-handle copy so the moved-from Binding remains a valid handle; this
 // keeps every constructed Binding readable and avoids an empty-handle state with
 // no retained value.
+/// Reference-like handle to one `State<T>` source.
+///
+/// Binding retains the source control block, not the owning State object. After
+/// State destruction `valid()` is false, the last committed value remains
+/// readable, writes are ignored and new observations are inactive. Copy and
+/// move preserve source identity; move intentionally leaves the source Binding
+/// valid as another handle to the same source.
 template <detail::StateValue T>
 class Binding {
 public:
@@ -266,18 +297,25 @@ public:
         return *this;
     }
 
+    /// True while the owning State object is still logically alive.
     [[nodiscard]] bool valid() const noexcept {
         return control_->owner_alive;
     }
 
+    /// Read the last committed value, including after State destruction while
+    /// this Binding keeps the control block alive.
     [[nodiscard]] const T& get() const noexcept {
         return control_->value;
     }
 
+    /// Write through to the shared State source. This is a no-op after source
+    /// invalidation and otherwise follows State::set notification semantics.
     void set(T value) {
         State<T>::set_control(control_, std::move(value));
     }
 
+    /// Observe the shared source. Returns an inactive subscription after the
+    /// owning State has been destroyed.
     Subscription observe(Callback callback) {
         return State<T>::observe_control(control_, std::move(callback));
     }
