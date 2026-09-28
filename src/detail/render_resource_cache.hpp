@@ -62,8 +62,10 @@ public:
             return {std::move(resource), false, false};
         }
 
-        evict_until_room(accounted_bytes);
-
+        // Stage every potentially-throwing insertion before evicting an
+        // existing entry. A failed key copy, list allocation, hash/equality
+        // call, or unordered-map node allocation must leave the retained
+        // cache and its LRU order unchanged.
         entries_.push_back(Entry{key, resource, accounted_bytes});
         const auto inserted_entry = std::prev(entries_.end());
         try {
@@ -79,6 +81,7 @@ public:
             throw;
         }
 
+        evict_until_room_for_inserted(accounted_bytes, inserted_entry);
         retained_accounted_bytes_ += accounted_bytes;
         return {std::move(resource), false, true};
     }
@@ -145,16 +148,22 @@ private:
         return false;
     }
 
-    void evict_until_room(std::size_t incoming_bytes) {
-        for (auto it = entries_.begin();
-             !has_room(entries_.size(),
-                       retained_accounted_bytes_,
-                       incoming_bytes);) {
+    void evict_until_room_for_inserted(
+        std::size_t incoming_bytes,
+        EntryIterator inserted_entry) {
+        const auto fits_after_insert = [this, incoming_bytes]() noexcept {
+            return entries_.size() <= limits_.max_entries &&
+                   retained_accounted_bytes_ <= limits_.max_accounted_bytes &&
+                   incoming_bytes <=
+                       limits_.max_accounted_bytes - retained_accounted_bytes_;
+        };
+
+        for (auto it = entries_.begin(); !fits_after_insert();) {
             if (it == entries_.end()) {
                 throw std::logic_error(
                     "RenderResourceCache eviction preflight was inconsistent");
             }
-            if (it->resource.use_count() != 1) {
+            if (it == inserted_entry || it->resource.use_count() != 1) {
                 ++it;
                 continue;
             }

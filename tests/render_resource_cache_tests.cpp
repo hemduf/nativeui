@@ -17,6 +17,38 @@ struct Resource {
 
 using Cache = ui::detail::RenderResourceCache<int, Resource>;
 
+struct ThrowingCopyKey {
+    int value{};
+
+    ThrowingCopyKey() = default;
+    explicit ThrowingCopyKey(int value_in) : value(value_in) {}
+
+    ThrowingCopyKey(const ThrowingCopyKey& other) : value(other.value) {
+        if (throw_on_copy) {
+            throw std::runtime_error("injected cache key copy failure");
+        }
+    }
+
+    ThrowingCopyKey& operator=(const ThrowingCopyKey&) = default;
+
+    [[nodiscard]] bool operator==(const ThrowingCopyKey& other) const noexcept {
+        return value == other.value;
+    }
+
+    static bool throw_on_copy;
+};
+
+bool ThrowingCopyKey::throw_on_copy = false;
+
+struct ThrowingCopyKeyHash {
+    [[nodiscard]] std::size_t operator()(const ThrowingCopyKey& key) const noexcept {
+        return std::hash<int>{}(key.value);
+    }
+};
+
+using ThrowingCopyCache =
+    ui::detail::RenderResourceCache<ThrowingCopyKey, Resource, ThrowingCopyKeyHash>;
+
 void retained_hit_reuses_resource() {
     Cache cache{{.max_entries = 4, .max_accounted_bytes = 64}};
     int creates = 0;
@@ -228,6 +260,53 @@ void factory_failure_does_not_mutate_cache() {
     NUI_CHECK(recovered && recovered.retained);
 }
 
+void insertion_failure_preserves_full_cache_and_lru() {
+    ThrowingCopyCache cache{{.max_entries = 2, .max_accounted_bytes = 16}};
+
+    auto one = cache.acquire(ThrowingCopyKey{1}, 8, [] {
+        return std::make_shared<Resource>(1);
+    });
+    auto two = cache.acquire(ThrowingCopyKey{2}, 8, [] {
+        return std::make_shared<Resource>(2);
+    });
+    NUI_CHECK(one && two && one.retained && two.retained);
+    one.resource.reset();
+    two.resource.reset();
+
+    auto touch_one = cache.acquire(ThrowingCopyKey{1}, 8, [] {
+        return std::make_shared<Resource>(101);
+    });
+    NUI_CHECK(touch_one && touch_one.hit);
+    touch_one.resource.reset();
+
+    const ThrowingCopyKey incoming{3};
+    ThrowingCopyKey::throw_on_copy = true;
+    bool threw = false;
+    try {
+        static_cast<void>(cache.acquire(incoming, 8, [] {
+            return std::make_shared<Resource>(3);
+        }));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    ThrowingCopyKey::throw_on_copy = false;
+
+    NUI_CHECK(threw);
+    NUI_CHECK(cache.retained_entries() == 2);
+    NUI_CHECK(cache.retained_accounted_bytes() == 16);
+    NUI_CHECK(cache.contains(ThrowingCopyKey{1}));
+    NUI_CHECK(cache.contains(ThrowingCopyKey{2}));
+    NUI_CHECK(!cache.contains(ThrowingCopyKey{3}));
+
+    auto three = cache.acquire(ThrowingCopyKey{3}, 8, [] {
+        return std::make_shared<Resource>(3);
+    });
+    NUI_CHECK(three && three.retained && !three.hit);
+    NUI_CHECK(cache.contains(ThrowingCopyKey{1}));
+    NUI_CHECK(!cache.contains(ThrowingCopyKey{2}));
+    NUI_CHECK(cache.contains(ThrowingCopyKey{3}));
+}
+
 void factory_failure_preserves_full_cache_and_lru() {
     Cache cache{{.max_entries = 2, .max_accounted_bytes = 16}};
 
@@ -302,6 +381,7 @@ int main() {
     active_entries_are_pinned_and_new_resource_stays_transient();
     hash_collision_still_uses_full_key_equality();
     factory_failure_does_not_mutate_cache();
+    insertion_failure_preserves_full_cache_and_lru();
     factory_failure_preserves_full_cache_and_lru();
     cache_instances_are_lifetime_independent();
     return 0;
