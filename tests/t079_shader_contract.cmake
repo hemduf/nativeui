@@ -90,7 +90,7 @@ foreach(_path IN LISTS _production_files)
       # creation boundaries. T088 owns create(); T092 adds create_fractal().
       # Neither path may defer source compilation to as_brush()/paint.
       string(REGEX MATCHALL
-        "ShaderProgram[ \\t\\r\\n]*::[ \\t\\r\\n]*compile[ \\t\\r\\n]*\\\\("
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _noise_compile_calls "${_content}")
       list(LENGTH _noise_compile_calls _noise_compile_count)
       string(FIND "${_content}" "NoiseCreateResult NoiseSource::create(" _noise_create)
@@ -113,10 +113,10 @@ foreach(_path IN LISTS _production_files)
         _fractal_create_region)
 
       string(REGEX MATCHALL
-        "ShaderProgram[ \\t\\r\\n]*::[ \\t\\r\\n]*compile[ \\t\\r\\n]*\\\\("
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _base_compile_calls "${_base_create_region}")
       string(REGEX MATCHALL
-        "ShaderProgram[ \\t\\r\\n]*::[ \\t\\r\\n]*compile[ \\t\\r\\n]*\\\\("
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _fractal_compile_calls "${_fractal_create_region}")
       list(LENGTH _base_compile_calls _base_compile_count)
       list(LENGTH _fractal_compile_calls _fractal_compile_count)
