@@ -427,6 +427,13 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/t068_publication_sink_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_virtual_list_action_tests
     ${PROJECT_SOURCE_DIR}/tests/t068_virtual_list_action_tests.cpp)
+  # T068 Batch 4 neutral Windows UIA mapping/provider core. These suites are
+  # platform-free and run on every host; the Win32 adapter below is remote-CI
+  # only.
+  nativeui_add_accessibility_test(nativeui_t068_uia_mapping
+    ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_mapping_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_t068_uia_provider
+    ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_provider_tests.cpp)
 
   # The action-router/view-bridge suites compile src/dispatcher.cpp directly,
   # exactly like their standalone projects, so they exercise the real T065
@@ -501,6 +508,23 @@ if(NATIVEUI_BUILD_TESTS)
       )
       target_link_libraries(${_nativeui_t068_bridge_test} PRIVATE Threads::Threads)
     endforeach()
+  endif()
+
+  if(WIN32)
+    # T068 Batch 4 Win32 UIA provider suite. It compiles the real per-platform
+    # adapter source, exactly like the macOS production bridge suites, and is
+    # remote-Windows-CI only. The test creates a real window and drives a real
+    # IUIAutomation client against the fragment provider.
+    nativeui_add_accessibility_test(nativeui_t068_uia_win32_provider_tests
+      ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_win32_provider_tests.cpp)
+    target_sources(nativeui_t068_uia_win32_provider_tests PRIVATE
+      ${PROJECT_SOURCE_DIR}/src/detail/native_accessibility_windows.cpp
+      ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
+    )
+    target_link_libraries(nativeui_t068_uia_win32_provider_tests PRIVATE
+      Threads::Threads
+      uiautomationcore ole32 oleaut32 uuid user32 comctl32
+    )
   endif()
 
   if(NATIVEUI_BUILD_PLATFORM)
@@ -596,6 +620,14 @@ if(NATIVEUI_BUILD_TESTS)
         OBJCXX_STANDARD 20
         OBJCXX_STANDARD_REQUIRED YES
         OBJCXX_EXTENSIONS NO)
+    endif()
+    if(WIN32)
+      # In-process UI Automation client fixture for the production Win32 UIA
+      # fragment provider (root/control type/value through a real view).
+      target_sources(nativeui_smoke_accessibility PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests/smoke_accessibility_windows.cpp)
+      target_link_libraries(nativeui_smoke_accessibility PRIVATE
+        uiautomationcore ole32 oleaut32 uuid)
     endif()
 
     if(APPLE)

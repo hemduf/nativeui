@@ -138,6 +138,57 @@ public:
         return virtual_children ? virtual_children->size() : 0;
     }
 
+    /// True when this exact retained publication exposes this identity as the
+    /// fragment root. Platform readers use it to decide whether one provider is
+    /// the in-view fragment root without loading a second generation.
+    [[nodiscard]] bool is_semantic_root() const noexcept {
+        return !virtual_item_ && publication_ && publication_->semantic_snapshot &&
+               publication_->semantic_snapshot->root == node_id_;
+    }
+
+    /// Resolve the logical virtual child index containing one view-relative
+    /// logical y coordinate through the fixed row height and scroll transform
+    /// retained by the exact publication. This keeps virtual hit-testing O(1)
+    /// and never mounts or enumerates visual rows. Non-virtual nodes, malformed
+    /// geometry and coordinates outside the collection viewport fail closed.
+    [[nodiscard]] std::optional<std::size_t> virtual_child_index_at_logical_y(
+        float y) const noexcept {
+        if (virtual_item_ || !publication_ || !publication_->semantic_snapshot) {
+            return std::nullopt;
+        }
+        if (node_index_ >= publication_->semantic_snapshot->nodes.size()) {
+            return std::nullopt;
+        }
+
+        const auto& virtual_children =
+            publication_->semantic_snapshot->nodes[node_index_].virtual_children;
+        if (!virtual_children) {
+            return std::nullopt;
+        }
+        const float row_height = virtual_children->row_height();
+        if (!(row_height > 0.0f)) {
+            return std::nullopt;
+        }
+
+        const auto list_bounds = virtual_children->list_bounds();
+        if (y < list_bounds.y || y > list_bounds.y + list_bounds.h) {
+            return std::nullopt;
+        }
+        const float local =
+            y - list_bounds.y + virtual_children->scroll_y();
+        if (local < 0.0f) {
+            return std::nullopt;
+        }
+
+        const double ratio =
+            static_cast<double>(local) / static_cast<double>(row_height);
+        if (!(ratio >= 0.0) ||
+            ratio >= static_cast<double>(virtual_children->size())) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(ratio);
+    }
+
     [[nodiscard]] std::optional<VirtualSemanticItemToken> virtual_child_token_at(
         std::size_t index) const noexcept {
         if (virtual_item_) {

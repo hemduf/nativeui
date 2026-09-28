@@ -97,6 +97,8 @@ set(_accessibility_tests
   "nativeui_t068_retained_native_checkpoint_tests|tests/t068_retained_native_checkpoint_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_publication_sink_tests|tests/t068_publication_sink_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_virtual_list_action_tests|tests/t068_virtual_list_action_tests.cpp|nativeui_add_accessibility_test"
+  "nativeui_t068_uia_mapping|tests/t045/t068_uia_mapping_tests.cpp|nativeui_add_accessibility_test"
+  "nativeui_t068_uia_provider|tests/t045/t068_uia_provider_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_semantic_macos_child_projection|tests/t045/semantic_macos_child_projection_tests.cpp|nativeui_add_macos_accessibility_test"
   "nativeui_semantic_macos_mapping|tests/t045/semantic_macos_mapping_tests.cpp|nativeui_add_macos_accessibility_test"
   "nativeui_semantic_macos_frame|tests/t045/semantic_macos_frame_tests.cpp|nativeui_add_macos_accessibility_test"
@@ -194,6 +196,44 @@ require_text("${_tests_cmake}"
 require_text("${_tests_cmake}"
   "nativeui_t068_objc_runtime_prefix_probe"
   "Objective-C runtime prefix probe registration")
+
+# T068 Batch 4 Windows UIA fragment provider. The platform adapter is compiled
+# into the platform target from the root build and into the package platform
+# target for consumers; Windows uses it instead of the fail-closed stub, and
+# the Windows-only client suite plus smoke extension stay behind if(WIN32).
+file(READ "${SOURCE_DIR}/CMakeLists.txt" _root_cmake)
+file(READ "${SOURCE_DIR}/cmake/Dependencies.cmake" _dependencies)
+if(NOT EXISTS "${SOURCE_DIR}/src/detail/native_accessibility_windows.cpp")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing Windows accessibility bridge source")
+endif()
+require_text("${_root_cmake}" "src/detail/native_accessibility_windows.cpp"
+  "root platform target Windows accessibility bridge source")
+require_text("${_consumer_platform}" "native_accessibility_windows.cpp"
+  "package platform Windows accessibility bridge source")
+require_text("${_dependencies}" "if(NOT WIN32)" "Windows stub exclusion gate")
+require_text("${_consumer_platform}" "if(NOT WIN32)" "package Windows stub exclusion gate")
+require_conditional_body("${_tests_cmake}"
+  "if(WIN32)"
+  "Windows UIA provider test gate" _win32_gate)
+require_text("${_win32_gate}" "nativeui_t068_uia_win32_provider_tests"
+  "Windows UIA provider test registration inside the WIN32 gate")
+require_text("${_win32_gate}"
+  "src/detail/native_accessibility_windows.cpp"
+  "Windows UIA provider test adapter compilation")
+require_text("${_tests_cmake}" "smoke_accessibility_windows.cpp"
+  "in-process Windows UIA query fixture")
+require_text("${_tests_cmake}" "uiautomationcore"
+  "Windows UIA client/provider linkage")
+if(NOT EXISTS "${SOURCE_DIR}/tests/t045/t068_uia_win32_provider_tests.cpp")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing Windows UIA provider test source")
+endif()
+if(NOT EXISTS "${SOURCE_DIR}/tests/smoke_accessibility_windows.cpp" OR
+   NOT EXISTS "${SOURCE_DIR}/tests/smoke_accessibility_windows.hpp")
+  message(FATAL_ERROR
+    "T068 root integration contract: missing Windows accessibility smoke extension")
+endif()
 
 # The dedicated T068 feature example ships through the same automatic
 # discovery/registration path as every other feature ticket: the macOS

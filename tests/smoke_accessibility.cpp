@@ -1,6 +1,7 @@
 #include "src/detail/platform_test_access.hpp"
 #include "src/detail/semantic_native_bounds.hpp"
 #include "smoke_accessibility_appkit.hpp"
+#include "smoke_accessibility_windows.hpp"
 
 #include <nativeui/nativeui.hpp>
 
@@ -602,6 +603,15 @@ int main() {
         stage = "appkit";
         if (const int result =
                 nativeui_smoke_accessibility::run_appkit_query_fixture()) {
+            return result;
+        }
+#endif
+#if defined(_WIN32)
+        // Automatable screen-reader-representative fixture: a real Application
+        // window queried through the production Win32 UIA fragment provider.
+        stage = "uia";
+        if (const int result =
+                nativeui_smoke_accessibility_windows::run_uia_query_fixture()) {
             return result;
         }
 #endif

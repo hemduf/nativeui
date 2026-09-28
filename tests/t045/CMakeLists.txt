@@ -41,6 +41,12 @@ nativeui_add_semantics_test(t068_semantic_view_state t068_semantic_view_state_te
 nativeui_add_semantics_test(t068_semantic_publication_batch t068_semantic_publication_batch_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_native_bounds t068_semantic_native_bounds_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_native_geometry_capture t068_semantic_native_geometry_capture_tests.cpp)
+nativeui_add_semantics_test(t068_uia_mapping t068_uia_mapping_tests.cpp)
+nativeui_add_semantics_test(t068_uia_provider t068_uia_provider_tests.cpp)
+target_sources(t068_uia_provider PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+)
+target_link_libraries(t068_uia_provider PRIVATE Threads::Threads)
 nativeui_add_semantics_test(semantic_macos_child_projection semantic_macos_child_projection_tests.cpp)
 nativeui_add_semantics_test(semantic_macos_mapping semantic_macos_mapping_tests.cpp)
 nativeui_add_semantics_test(semantic_macos_frame semantic_macos_frame_tests.cpp)
@@ -122,4 +128,19 @@ if(APPLE)
     )
     target_link_libraries(${_semantic_macos_dispatcher_test} PRIVATE Threads::Threads)
   endforeach()
+endif()
+
+# T068 Batch 4 Win32 UIA provider suite. Remote-Windows-CI only: it compiles the
+# real adapter source and drives a real IUIAutomation client against a real
+# window.
+if(WIN32)
+  nativeui_add_semantics_test(t068_uia_win32_provider t068_uia_win32_provider_tests.cpp)
+  target_sources(t068_uia_win32_provider PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/detail/native_accessibility_windows.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+  )
+  target_link_libraries(t068_uia_win32_provider PRIVATE
+    Threads::Threads
+    uiautomationcore ole32 oleaut32 uuid user32 comctl32
+  )
 endif()
