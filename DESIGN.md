@@ -350,6 +350,28 @@ coordinates before `floor` because it cannot represent the tighter integer
 bound. The same double-precision oracle and the same documented tolerance pair
 cover CPU, raster and GPU.
 
+
+T091 adds bounded cellular/Worley F1 and F2 variants without changing the
+immutable procedural-source ownership model. Each scalar evaluation hashes
+exactly one feature point for each of the fixed row-major 3x3 neighbor cells,
+using salts `0xA511E9B3` and `0x63D83595` with the frozen T088 hash/high-24
+mapping. Distances are evaluated in center-cell-local coordinates, the two
+smallest squared Euclidean distances use strict insertion order, and both F1/F2
+normalize by `sqrt(8)`. Center lattice coordinates are range-checked before
+signed conversion or byte-lane +/-1. The ES2 path performs candidate lattice
+steps on exact byte lanes, never by adding/subtracting one from a large float
+lattice index.
+
+T092 adds bounded fractal composition as a creation-time specialization of the
+same immutable source model. `NoiseSource::create_fractal()` accepts only the
+frozen Value, Perlin and Simplex kernels, with 1..6 octaves and the exact
+iterative frequency/amplitude recurrence defined by T092. fBm, Turbulence and
+Ridged modes are generated as one combined SkSL program and compiled exactly
+once before publication. Fractal configuration is a value-only, allocation-free
+`FractalNoiseOptions`; no octave resource, seed salt, mutable cache or
+paint-time compilation is introduced. Worley F1/F2 remain explicitly excluded
+as NativeUI 1.1 fractal bases.
+
 ---
 
 ## 7. Logical coordinates and high DPI

@@ -75,29 +75,31 @@ PLAN → IMPLEMENT → VALIDATE → INDEPENDENT REVIEW
 
 Rules:
 
-- one implementation ticket = one branch/worktree = one PR;
-- one writer per implementation worktree;
-- planner/verifier/reviewer are read-only in multi-agent workflows;
+- one implementation ticket = one canonical branch/PR; a local worktree is optional and must never be required by GitHub-only automation;
+- avoid concurrent writes to the same branch by re-reading the exact head immediately before a mutation and using expected-head/SHA protection when available; a claim/comment/lease is advisory, never a prerequisite for safe progress;
+- planner/verifier/reviewer may remain read-only, but an explicitly authorized implementation or review-fix worker may write bounded source/tests/docs changes;
 - never duplicate an existing active PR;
-- at most two independent implementation lanes;
-- local builds are always serial across all lanes;
-- no automatic merge unless explicitly requested by the human.
+- at most two independent source-changing implementation lanes; review, qualification, research and documentation work may continue without creating a competing writer;
+- local builds, when available, are always serial across all lanes;
+- a connector/comment/label/status/workflow-dispatch failure must not stop a worker: retry safely or continue another independent actionable ticket;
+- inability to run local validation blocks only the final merge gate that explicitly requires that evidence; it does not block implementation, review, tests-as-code, documentation, or progress on other tickets;
+- no automatic merge unless explicitly requested by the human; an explicit automation instruction granting merge authority satisfies this requirement for its stated scope.
 
 Research tickets end with `ADOPT`, `REJECT`, or `NEEDS_MORE_EVIDENCE`. `ADOPT` normally creates a separate production implementation ticket.
 
 ## 5. Implementation
 
-Behavioral work uses local RED → GREEN → REFACTOR.
+Behavioral work uses RED → GREEN → REFACTOR when an executable test environment is available. GitHub-only workers still add the regression test before or with the implementation, but must not fabricate a local RED/GREEN execution result.
 
 For each bounded batch:
 
 1. inspect the complete affected surface;
 2. add/update tests, including deterministic failure recovery where applicable;
-3. confirm the expected RED when practical;
+3. confirm the expected RED when an executable environment is available; otherwise record that execution is pending;
 4. implement the bounded correction;
-5. run targeted tests;
-6. after injected failure, prove a subsequent normal operation still works;
-7. run the relevant full local suite before publishing.
+5. run targeted tests when an executor is available; otherwise continue with static review and tests-as-code;
+6. after injected failure, prove a subsequent normal operation still works when executable validation is available;
+7. before merge, run every validation explicitly required by the ticket/release gate. Missing execution evidence is a merge/Done gate, not a publication or implementation gate.
 
 Never weaken/delete tests for green, mix unrelated refactors, or publish one commit per assertion/RED/review finding.
 
@@ -110,8 +112,8 @@ Keep PRs Draft while source/build/tests are actively changing.
 Every feature ticket ships a dedicated public-API example:
 
 ```text
-examples/features/tNNN_<feature>.cpp
-nativeui_example_tNNN_<feature>
+examples/features/<descriptive_feature_name>.cpp
+nativeui_example_<descriptive_feature_name>
 ```
 
 It must support deterministic `--self-test`, return non-zero on failure, be registered with CTest when applicable, and compile against `NativeUI::Core` in display-less CI.
@@ -169,15 +171,15 @@ Detailed Objective-C runtime rules remain in `CODE_REVIEW.md`.
 
 ## 9. Validation
 
-Before final review:
+Before final review/merge:
 
-- run targeted tests;
-- run the relevant complete local CTest suite;
+- run targeted tests using an available executor;
+- run the relevant complete local CTest suite when local execution is available and the ticket/release gate requires it;
 - run ticket-required sanitizer/golden/headless/platform/benchmark checks;
 - record exact commands/results and explicit environment limitations;
 - run focused remote validation before merge when native/ABI/packaging/dependency correctness cannot be established locally.
 
-Remote CI does not replace local validation or review.
+GitHub-only automation must distinguish implementation/review from executable qualification. Lack of a local executor must never block safe source/test/documentation progress; it remains an explicit missing merge/Done gate only when the applicable ticket or release contract requires local evidence. Remote CI does not silently substitute for an explicitly required local validation, and local validation does not substitute for required remote/platform evidence.
 
 ## 10. Review
 
@@ -219,4 +221,5 @@ Do not guess.
 1. isolate the uncertainty in a minimal test/probe;
 2. inspect the pinned dependency/API/source;
 3. document the blocker or return `NEEDS_DECISION`;
-4. continue another independent Ready ticket when possible.
+4. continue another independent actionable ticket immediately; a blocker on one ticket must not pause a worker or the release workflow while any safe work remains.
+5. connector/metadata/claim/write-path failures are operational conditions, not product blockers: retry with a safe GitHub mutation path or move to another ticket, and re-check the blocked operation on a later run.
