@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <type_traits>
 
 namespace ui::detail {
 

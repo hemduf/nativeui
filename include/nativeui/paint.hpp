@@ -59,6 +59,8 @@ struct PainterPrivateHooks final {
     sk_sp<SkShader> (*materialize_shader_brush)(
         void* state,
         const std::shared_ptr<const ShaderBrushSnapshot>& snapshot){};
+    sk_sp<SkImageFilter> (*materialize_effect_filter)(
+        void* state, const Effect& effect){};
 };
 
 struct ResolvedTextRun {
@@ -645,8 +647,12 @@ private:
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
 
-    [[nodiscard]] static sk_sp<SkImageFilter> materialize_effect_filter(
+    [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
         const Effect& effect) {
+        if (private_hooks_ && private_hooks_->materialize_effect_filter) {
+            return private_hooks_->materialize_effect_filter(
+                private_hooks_->state, effect);
+        }
         switch (effect.kind_) {
             case Effect::Kind::GaussianBlur:
                 return SkImageFilters::Blur(

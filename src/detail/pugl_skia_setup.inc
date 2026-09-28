@@ -93,6 +93,20 @@ private:
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
 }
 
+[[nodiscard]] sk_sp<SkImageFilter> materialize_cached_effect(
+    void* state,
+    const Effect& effect) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::EffectCacheAccess::materialize(effect);
+
+    auto acquisition = resources->acquire_effect(
+        effect,
+        [&effect] { return detail::EffectCacheAccess::materialize(effect); });
+    return acquisition ? std::move(acquisition.filter)
+                       : sk_sp<SkImageFilter>{};
+}
+
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
@@ -495,7 +509,8 @@ public:
             const detail::PainterPrivateHooks painter_hooks{
                 &render_resources_,
                 &materialize_cached_image_texture,
-                &materialize_cached_runtime_shader};
+                &materialize_cached_runtime_shader,
+                &materialize_cached_effect};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -601,7 +616,8 @@ public:
             const detail::PainterPrivateHooks painter_hooks{
                 &render_resources_,
                 &materialize_cached_image_texture,
-                &materialize_cached_runtime_shader};
+                &materialize_cached_runtime_shader,
+                &materialize_cached_effect};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
