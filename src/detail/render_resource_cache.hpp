@@ -2,10 +2,10 @@
 
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <stdexcept>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -34,13 +34,6 @@ public:
 
     explicit RenderResourceCache(Limits limits = {})
         : limits_(limits) {
-        static_assert(
-            std::is_nothrow_invocable_r_v<std::size_t, const Hash&, const Key&>,
-            "RenderResourceCache requires a noexcept key hash");
-        static_assert(
-            std::is_nothrow_invocable_r_v<
-                bool, const Equal&, const Key&, const Key&>,
-            "RenderResourceCache requires noexcept key equality");
         index_.reserve(limits_.max_entries);
     }
 
@@ -98,7 +91,7 @@ public:
         return retained_accounted_bytes_;
     }
 
-    [[nodiscard]] bool contains(const Key& key) const noexcept {
+    [[nodiscard]] bool contains(const Key& key) const {
         return index_.find(key) != index_.end();
     }
 
