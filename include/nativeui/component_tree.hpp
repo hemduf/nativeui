@@ -51,6 +51,7 @@ private:
     friend struct TreeTestAccess;
     friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
+#include <nativeui/detail/tree_raster_cache_boundary.inc>
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
