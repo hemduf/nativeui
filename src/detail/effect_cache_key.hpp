@@ -12,6 +12,14 @@
 
 namespace ui::detail {
 
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+inline std::size_t effect_materialization_call_count_for_test_value = 0;
+
+[[nodiscard]] inline std::size_t effect_materialization_call_count_for_test() noexcept {
+    return effect_materialization_call_count_for_test_value;
+}
+#endif
+
 enum class EffectCacheKind : unsigned char {
     GaussianBlur,
     DropShadow,
@@ -89,6 +97,9 @@ struct EffectCacheAccess final {
 
     [[nodiscard]] static sk_sp<SkImageFilter> materialize(
         const Effect& effect) {
+#if defined(NATIVEUI_ENABLE_TEST_SEAMS)
+        ++effect_materialization_call_count_for_test_value;
+#endif
         switch (effect.kind_) {
             case Effect::Kind::GaussianBlur:
                 return SkImageFilters::Blur(
