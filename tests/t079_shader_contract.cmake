@@ -87,22 +87,39 @@ foreach(_path IN LISTS _production_files)
   if(NOT _implicit_compile STREQUAL "")
     if(_name STREQUAL "skia_noise.cpp")
       # Built-in noise programs may compile only at explicit NoiseSource
-      # creation boundaries. T088 owns create(); T092 adds create_fractal().
-      # Neither path may defer source compilation to as_brush()/paint.
+      # creation boundaries. Neither path may defer source compilation to
+      # as_brush()/paint.
       string(REGEX MATCHALL
         "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _noise_compile_calls "${_content}")
       list(LENGTH _noise_compile_calls _noise_compile_count)
+      string(FIND "${_content}" "void append_fractal_kernel" _fractal_kernel)
       string(FIND "${_content}" "NoiseCreateResult NoiseSource::create(" _noise_create)
       string(FIND "${_content}" "NoiseCreateResult NoiseSource::create_fractal(" _fractal_create)
       string(FIND "${_content}" "Brush NoiseSource::as_brush" _noise_brush)
 
-      if(_noise_create EQUAL -1 OR _fractal_create EQUAL -1 OR
+      if(_fractal_kernel EQUAL -1 OR _noise_create EQUAL -1 OR
+         _fractal_create EQUAL -1 OR
          _noise_brush EQUAL -1 OR
+         _fractal_kernel GREATER _noise_create OR
          _fractal_create LESS _noise_create OR
          _noise_brush LESS _fractal_create)
         message(FATAL_ERROR
-          "T079/T092: NoiseSource creation/materialization boundaries are missing or reordered")
+          "Noise shader contract: creation/materialization boundaries are missing or reordered")
+      endif()
+
+      math(EXPR _fractal_kernel_region_length "${_noise_create} - ${_fractal_kernel}")
+      string(SUBSTRING "${_content}" ${_fractal_kernel}
+        ${_fractal_kernel_region_length} _fractal_kernel_region)
+      string(REGEX MATCH
+        "(pow|exp|log)[ \\t\\r\\n]*\\\\("
+        _fractal_exponentiation "${_fractal_kernel_region}")
+      string(FIND "${_fractal_kernel_region}"
+        "fractal_base(p * frequency)" _fractal_scaled_coordinates)
+      if(NOT _fractal_exponentiation STREQUAL "" OR
+         _fractal_scaled_coordinates EQUAL -1)
+        message(FATAL_ERROR
+          "Fractal noise must use iterative frequency scaling without exponentiation")
       endif()
 
       math(EXPR _base_region_length "${_fractal_create} - ${_noise_create}")
@@ -125,7 +142,7 @@ foreach(_path IN LISTS _production_files)
          NOT _base_compile_count EQUAL 1 OR
          NOT _fractal_compile_count EQUAL 1)
         message(FATAL_ERROR
-          "T079/T092: built-in noise shaders must compile exactly once in each explicit creation path")
+          "Noise shader contract: built-in programs must compile exactly once in each explicit creation path")
       endif()
     else()
       message(FATAL_ERROR
