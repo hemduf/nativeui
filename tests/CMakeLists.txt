@@ -210,6 +210,10 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/render_resource_materialization_tests.cpp)
   target_include_directories(nativeui_render_resource_materialization_tests PRIVATE
     ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_render_resource_allocation_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_tests.cpp)
+  target_include_directories(nativeui_render_resource_allocation_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_t096_damage_mapping_tests
     ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)
   target_include_directories(nativeui_t096_damage_mapping_tests PRIVATE
