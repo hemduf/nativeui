@@ -210,6 +210,7 @@ The final `State<T>` / `Binding<T>` borrowing, subscription, recursive-write and
 | tooltip | delayed transient help presentation | [`include/nativeui/tooltip.hpp`](../include/nativeui/tooltip.hpp), [`t062_tooltip`](../examples/features/t062_tooltip.cpp) |
 | dialog | retained modal dialog/action model | [`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp), [`t063_dialog`](../examples/features/t063_dialog.cpp) |
 | virtual list | bounded live retained rows for large collections | [`include/nativeui/virtual_list.hpp`](../include/nativeui/virtual_list.hpp), [`t067_virtual_list`](../examples/features/t067_virtual_list.cpp) |
+| semantic/accessibility data | roles, actions, stable IDs and immutable projections | [Semantic and accessibility data model](v1-semantics-and-accessibility.md), [`semantics.hpp`](../include/nativeui/semantics.hpp) |
 
 This table is chapter navigation, not the authoritative complete v1 API inventory. The public headers/package surface on current `main`, together with the repository review and validation policies, are the working source of truth for that inventory.
 

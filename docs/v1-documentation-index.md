@@ -17,7 +17,8 @@ This page is the navigation entry point for the NativeUI 1.0 documentation set t
 | Understand release status and qualification evidence | [Release and validation](v1-release-and-validation.md) | Active validation sources, exact-head evidence, retired release gates and remaining reference-app/Getting Started work |
 | Build NativeUI itself on Linux | [Linux build notes](linux-build.md) | Linux/X11 development dependencies and build commands |
 | Understand performance gates | [Performance benchmarks](performance-benchmarks.md) | Benchmark workloads, allocation/timing expectations and CI performance evidence |
-| Understand accessibility scope | [Accessibility](accessibility.md) | Current semantic surface and the boundary between 1.0 semantics and deferred native accessibility bridges |
+| Publish semantic/accessibility data | [Semantic and accessibility data model](v1-semantics-and-accessibility.md) | `SemanticInfo`, roles/actions, stable IDs, immutable snapshots and virtualized collection semantics |
+| Understand platform accessibility mapping | [Accessibility](accessibility.md) | Platform mapping, focus/availability semantics and native bridge boundaries |
 
 ## Public/private boundary
 
