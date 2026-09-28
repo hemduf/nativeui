@@ -1,5 +1,14 @@
 #pragma once
 
+/// \file
+/// Public retained dynamic-composition builders: If, Switch and ForEach.
+///
+/// These builders observe UI State/Binding values and request structural
+/// reconciliation at NativeUI's retained safe checkpoint. They do not mutate
+/// the component tree synchronously from a State observer. Construction,
+/// reconciliation and callback execution are UI/main-thread work and may
+/// allocate; none of this API is an audio-real-time synchronization boundary.
+
 #include <nativeui/component_base.hpp>
 #include <nativeui/detail/dynamic_key.hpp>
 #include <nativeui/detail/dynamic_source.hpp>
@@ -199,16 +208,31 @@ private:
 
 } // namespace detail
 
+/// Conditionally retain one child while a boolean Binding is true.
+///
+/// The child is converted to an owned `Spec` when the builder is constructed.
+/// State changes only request structural reconciliation; actual mount/unmount
+/// happens later at the retained tree's safe structural checkpoint.
+///
+/// The Binding follows NativeUI's normal UI-thread/lifetime contract. Removing
+/// the child runs normal retained focus/capture/lifecycle reconciliation; keeping
+/// an `If` builder or its produced Spec does not create process-global state.
 class If {
 public:
+    /// Build from a Binding. `child` is converted to Spec immediately.
     template <class Child>
     If(Binding<bool> state, Child&& child)
         : state_(std::move(state)), child_(make_spec(std::forward<Child>(child))) {}
 
+    /// Convenience overload borrowing observable state through its Binding.
     template <class Child>
     If(State<bool>& state, Child&& child)
         : If(state.binding(), std::forward<Child>(child)) {}
 
+    /// Consume this builder and produce a reusable retained specification.
+    ///
+    /// If the current value is true the initial compiled structure contains the
+    /// child; later changes are reconciled by retained identity `"if:true"`.
     Spec spec() && {
         auto child = std::make_shared<const Spec>(std::move(child_));
         std::vector<Spec> initial_children;
@@ -224,12 +248,29 @@ private:
     Spec child_;
 };
 
+/// Select exactly one retained branch from an observable value.
+///
+/// `T` must support equality comparison with the values passed to `when()`.
+/// Branches are tested in declaration order; when several branches compare
+/// equal, the first matching branch wins. `otherwise()` supplies an optional
+/// fallback when no branch matches.
+///
+/// Each declared branch owns a reusable Spec. Returning to a previously removed
+/// branch reconstructs its retained subtree from that Spec; state changes are
+/// applied only at the retained structural checkpoint. All operations are
+/// UI/main-thread work and may allocate/call component factories.
 template <class T>
 class Switch {
 public:
+    /// Build from a Binding whose current value selects the active branch.
     explicit Switch(Binding<T> state) : state_(std::move(state)) {}
+    /// Convenience overload using `state.binding()`.
     explicit Switch(State<T>& state) : Switch(state.binding()) {}
 
+    /// Append one branch and return this lvalue builder.
+    ///
+    /// `child` is converted to an owned Spec immediately. Branch retained keys
+    /// are stable by declaration position, not derived from `value`.
     template <class Child>
     Switch& when(T value, Child&& child) & {
         const auto index = branches_.size();
@@ -240,24 +281,32 @@ public:
         return *this;
     }
 
+    /// Rvalue-qualified fluent overload of `when()`.
     template <class Child>
     Switch&& when(T value, Child&& child) && {
         when(std::move(value), std::forward<Child>(child));
         return std::move(*this);
     }
 
+    /// Set/replace the fallback branch used when no `when()` value matches.
     template <class Child>
     Switch& otherwise(Child&& child) & {
         fallback_ = std::make_shared<const Spec>(make_spec(std::forward<Child>(child)));
         return *this;
     }
 
+    /// Rvalue-qualified fluent overload of `otherwise()`.
     template <class Child>
     Switch&& otherwise(Child&& child) && {
         otherwise(std::forward<Child>(child));
         return std::move(*this);
     }
 
+    /// Consume the builder and produce the retained dynamic specification.
+    ///
+    /// The current selection seeds the initial compiled child. Subsequent State
+    /// notifications only enqueue reconciliation; they do not synchronously
+    /// splice retained nodes on the observer callback stack.
     Spec spec() && {
         std::vector<Spec> initial_children;
         const auto& selected = state_.get();
@@ -288,11 +337,35 @@ private:
     std::shared_ptr<const Spec> fallback_;
 };
 
+/// Reconcile a vector of items by stable application-provided keys.
+///
+/// `Items` is `std::vector<T>`. The key callback must return a string-like,
+/// integral or enum value; NativeUI type-encodes it into an owned string key so
+/// string/signed/unsigned domains do not collide accidentally. Keys must be
+/// unique within every observed snapshot.
+///
+/// A stable key preserves the existing retained child across reordering. A
+/// removed or changed key tears down the old retained child; a new key creates a
+/// new child from the child callback. Duplicate-key snapshots are rejected
+/// atomically rather than partially replacing the last valid retained structure.
+///
+/// The key callback can be evaluated more than once during one reconciliation
+/// and should therefore be deterministic and free of externally visible side
+/// effects. The child callback may be called for items while preparing a changed
+/// structural snapshot, not only for keys that ultimately become new retained
+/// nodes. Both callbacks execute on the UI/main thread, may allocate/throw, and
+/// may be invoked again after a recoverable failed reconciliation.
 template <class T>
 class ForEach {
 public:
+    /// Observable collection type reconciled by this builder.
     using Items = std::vector<T>;
 
+    /// Build from a Binding plus key and child callbacks.
+    ///
+    /// `key_function(const T&)` must return a supported key type:
+    /// string/string-view-like, integral, or enum. `child_function(const T&)`
+    /// may return either a Spec or any public builder accepted by `make_spec`.
     template <class KeyFunction, class ChildFunction>
     ForEach(Binding<Items> state, KeyFunction key_function, ChildFunction child_function)
         : state_(std::move(state)),
@@ -303,10 +376,17 @@ public:
               return detail::dynamic_make_spec(std::invoke(function, item));
           }) {}
 
+    /// Convenience overload using `state.binding()`.
     template <class KeyFunction, class ChildFunction>
     ForEach(State<Items>& state, KeyFunction key_function, ChildFunction child_function)
         : ForEach(state.binding(), std::move(key_function), std::move(child_function)) {}
 
+    /// Consume this builder and create its retained dynamic specification.
+    ///
+    /// The current item snapshot is inspected immediately to seed the initial
+    /// children. If initial keys are duplicated, no partial initial child list
+    /// is published; runtime reconciliation continues to reject duplicate
+    /// snapshots until a valid unique-key snapshot is observed.
     Spec spec() && {
         std::vector<std::string> initial_keys;
         initial_keys.reserve(state_.get().size());

@@ -16,15 +16,61 @@ Normal application code composes public builders and components. It should not i
 
 ### Dynamic composition
 
-[`include/nativeui/dynamic.hpp`](../include/nativeui/dynamic.hpp) provides three public dynamic composition families:
+[`include/nativeui/dynamic.hpp`](../include/nativeui/dynamic.hpp) provides three UI-thread-confined dynamic composition families:
 
-- `If` conditionally includes one child;
-- `Switch<T>` selects one branch, with an optional fallback;
-- `ForEach<T>` reconciles a sequence by application-provided keys.
+- `If` conditionally retains one child while a boolean `Binding` is true;
+- `Switch<T>` selects the first equality-matching branch, with an optional fallback;
+- `ForEach<T>` reconciles `std::vector<T>` by application-provided stable keys.
 
-`ForEach<T>` keys are retained identity. Reordering items while preserving keys preserves their retained identity; changing a key replaces that item. Duplicate-key snapshots are rejected rather than partially mutating the currently valid retained tree. The maintained [`t058_dynamic_composition`](../examples/features/t058_dynamic_composition.cpp) example exercises conditional composition, branch switching, keyed reordering, duplicate-key rejection and recovery.
+All three builders convert their declarative children to owned `Spec` state and subscribe only while their retained host is mounted. A `State` notification requests structural work; it does **not** synchronously splice nodes into the tree on the observer callback stack. Actual mount/unmount/reorder work runs at NativeUI's retained safe reconciliation checkpoint and follows normal focus, pointer-capture and lifecycle teardown rules.
 
-These helpers observe `State<T>` to request structural reconciliation. The nested-observer, recursive-write, equality and subscription-destruction semantics are now part of the landed T123/T124 contract; this chapter relies on that contract and leaves the detailed rules to [`v1-state-and-binding.md`](v1-state-and-binding.md).
+#### If and Switch identity
+
+`If` has one stable logical key while its condition is true. Turning the condition off removes that retained subtree; turning it on later reconstructs it from the stored Spec.
+
+`Switch<T>` requires equality comparison for `T`. `when()` branches are tested in declaration order, so if several stored values compare equal the first one wins. Branch retained keys are derived from declaration position, not from `T`; `otherwise()` supplies the fallback and a later `otherwise()` call replaces the previous fallback. Returning to a branch that was previously removed reconstructs its subtree from the reusable stored Spec.
+
+```cpp
+ui::State<bool> advanced{false};
+ui::State<int> page{1};
+
+auto content = ui::Column{
+    ui::If{advanced, ui::Label{"Advanced controls"}},
+    ui::Switch<int>{page}
+        .when(1, ui::Label{"Main"})
+        .when(2, ui::Label{"Modulation"})
+        .otherwise(ui::Label{"Unknown page"}),
+};
+```
+
+#### ForEach keys and callback contract
+
+`ForEach<T>` takes an observable `std::vector<T>`, a key callback and a child callback. Key results may be string/string-view-like, integral, or enum values. NativeUI encodes those values into owned type-tagged string identities, so for example a string key and an integer key are not silently treated as the same domain.
+
+Keys must be **unique within each snapshot**. Reordering items while preserving keys preserves the corresponding retained children. Removing a key tears down that child, and changing an item's key is removal plus insertion. Duplicate-key snapshots are rejected atomically: an already-valid retained structure is left intact rather than partially updated; an initially duplicated snapshot does not publish a partial initial list.
+
+The key callback is not a one-shot callback. NativeUI may evaluate it more than once while preparing one reconciliation, so it should be deterministic and should not use call count as state. The child callback may also run while preparing a changed snapshot for items whose retained nodes are ultimately reused. Both callbacks may allocate or throw, run in the UI/main-thread domain, and can be invoked again when a recoverable reconciliation is retried.
+
+```cpp
+struct Item {
+    int id;
+    std::string label;
+    bool operator==(const Item&) const = default;
+};
+
+ui::State<std::vector<Item>> items{{{1, "Alpha"}, {2, "Beta"}}};
+
+auto rows = ui::ForEach<Item>{
+    items,
+    [](const Item& item) { return item.id; },       // stable unique identity
+    [](const Item& item) { return ui::Label{item.label}; },
+};
+```
+
+Dynamic builders inherit the normal `State<T>` / `Binding<T>` notification and lifetime contract documented in [State and binding](v1-state-and-binding.md). They are not thread-safe collection primitives and are not suitable for direct mutation from an audio callback. Worker/audio domains must hand state changes into the UI domain through an explicitly reviewed mechanism.
+
+The maintained [`t058_dynamic_composition`](../examples/features/t058_dynamic_composition.cpp) example exercises conditional composition, branch revisiting, keyed reordering, duplicate-key rejection and recovery.
+
 
 ## Availability and read-only state
 
