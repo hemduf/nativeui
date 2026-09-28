@@ -279,4 +279,109 @@ half4 main(float2 p) {
 }
 )";
 
+
+// Frozen T091 bounded cellular kernel. The center cell is guarded before
+// byte-lane +/-1, then exactly nine candidates are evaluated in row-major
+// dy=-1..1 / dx=-1..1 order. Feature distances stay local to the center cell.
+inline constexpr std::string_view kWorleyNoiseKernelSkSL = R"(
+uniform float feature_size;
+uniform float4 seed_bytes;
+layout(color) uniform float4 low_color;
+layout(color) uniform float4 high_color;
+float4 subtract_one(float4 v) {
+    v.x -= 1.0;
+    if (v.x < 0.0) {
+        v.x += 256.0;
+        v.y -= 1.0;
+        if (v.y < 0.0) {
+            v.y += 256.0;
+            v.z -= 1.0;
+            if (v.z < 0.0) {
+                v.z += 256.0;
+                v.w = low_byte(v.w + 255.0);
+            }
+        }
+    }
+    return v;
+}
+float2 worley_insert(float2 best, float d2) {
+    if (d2 < best.x) return float2(d2, best.x);
+    if (d2 < best.y) return float2(best.x, d2);
+    return best;
+}
+float worley_candidate(float4 seed_x, float4 seed_y,
+                       float4 xb, float4 yb,
+                       float dx, float dy, float fx, float fy) {
+    float ux = u24(hash2(seed_x, xb, yb));
+    float uy = u24(hash2(seed_y, xb, yb));
+    float rx = dx + ux - fx;
+    float ry = dy + uy - fy;
+    return rx * rx + ry * ry;
+}
+float2 worley_noise(float2 p) {
+    float x = p.x / feature_size;
+    float y = p.y / feature_size;
+    // At int32 magnitude ES2 float spacing is coarse. Strictly excluding
+    // -2^31 and +2^31 keeps every representable center cell safe for +/-1.
+    if (!(x > -2147483648.0 && x < 2147483648.0 &&
+          y > -2147483648.0 && y < 2147483648.0)) {
+        return float2(0.5, 0.5);
+    }
+    float ix = floor(x);
+    float iy = floor(y);
+    float fx = x - ix;
+    float fy = y - iy;
+
+    float4 xb = bytes_of_int(ix);
+    float4 yb = bytes_of_int(iy);
+    float4 xm = subtract_one(xb);
+    float4 xp = add_one(xb);
+    float4 ym = subtract_one(yb);
+    float4 yp = add_one(yb);
+    float4 seed_x = xor32(seed_bytes, float4(179.0, 233.0, 17.0, 165.0));
+    float4 seed_y = xor32(seed_bytes, float4(149.0, 53.0, 216.0, 99.0));
+
+    float2 best = float2(8.0, 8.0);
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, ym,
+                                                -1.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, ym,
+                                                 0.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, ym,
+                                                 1.0, -1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, yb,
+                                                -1.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, yb,
+                                                 0.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, yb,
+                                                 1.0, 0.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xm, yp,
+                                                -1.0, 1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xb, yp,
+                                                 0.0, 1.0, fx, fy));
+    best = worley_insert(best, worley_candidate(seed_x, seed_y, xp, yp,
+                                                 1.0, 1.0, fx, fy));
+
+    return float2(clamp(sqrt(best.x) / 2.8284271247461900976033774484194,
+                        0.0, 1.0),
+                  clamp(sqrt(best.y) / 2.8284271247461900976033774484194,
+                        0.0, 1.0));
+}
+)";
+
+inline constexpr std::string_view kWorleyF1MainSkSL = R"(
+half4 main(float2 p) {
+    float v = worley_noise(p).x;
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
+inline constexpr std::string_view kWorleyF2MainSkSL = R"(
+half4 main(float2 p) {
+    float v = worley_noise(p).y;
+    float4 color = mix(low_color, high_color, v);
+    return half4(color.rgb * color.a, color.a);
+}
+)";
+
 } // namespace ui::detail
