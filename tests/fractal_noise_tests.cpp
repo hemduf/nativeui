@@ -485,8 +485,9 @@ void tiny_feature_size_contract() {
 
 
 void extreme_painter_coordinate_contract() {
-    constexpr float kPainterScale = 1.0e-20f;
-    constexpr float kLogicalWidth = 2.0e21f;
+    constexpr float kPainterOffset =
+        std::numeric_limits<float>::max() / 256.0f;
+    constexpr float kLogicalWidth = kPainterOffset * 1.0e-5f;
 
     for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
                       ui::NoiseType::Simplex}) {
@@ -502,8 +503,9 @@ void extreme_painter_coordinate_contract() {
             ui::UI tree{ui::Canvas{16.0f, 16.0f,
                 [brush](ui::CanvasContext2D& g) {
                     g.save();
-                    g.scale(kPainterScale, 1.0f);
-                    g.fill_rect({0.0f, 0.0f, kLogicalWidth, 16.0f}, brush);
+                    g.translate(-kPainterOffset, 0.0f);
+                    g.fill_rect(
+                        {kPainterOffset, 0.0f, kLogicalWidth, 16.0f}, brush);
                     g.restore();
                 }}};
             ui::HeadlessRenderer renderer{{16, 16}, 1.0f};
