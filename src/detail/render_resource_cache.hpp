@@ -165,6 +165,10 @@ private:
                 throw std::logic_error(
                     "RenderResourceCache index lost an LRU entry");
             }
+            if (victim->accounted_bytes > retained_accounted_bytes_) {
+                throw std::logic_error(
+                    "RenderResourceCache retained-byte accounting underflow");
+            }
             index_.erase(found);
             retained_accounted_bytes_ -= victim->accounted_bytes;
             entries_.erase(victim);
