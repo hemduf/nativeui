@@ -124,7 +124,7 @@ The repository validation model uses complementary layers:
 - sanitizer coverage where supported;
 - package/external-consumer contracts for installed/public consumption.
 
-Remote CI is a qualification layer rather than the inner RED/GREEN loop. Active implementation remains Draft, coherent batches receive normal/path-relevant validation, and heavyweight lifecycle/release gates are reserved for a frozen final candidate according to [`CI_POLICY.md`](../CI_POLICY.md).
+Remote CI is a qualification layer rather than the inner RED/GREEN loop. Active implementation remains Draft, coherent batches receive normal/path-relevant validation, and heavyweight lifecycle/release gates are reserved for a frozen final candidate according to the active workflow and validation rules in [`AGENTS.md`](../AGENTS.md), [`VALIDATION.md`](../VALIDATION.md) and [`ROADMAP.md`](../ROADMAP.md).
 
 ## Debug inspector
 
@@ -142,7 +142,6 @@ The project policy documents have distinct roles:
 | --- | --- |
 | [`AGENTS.md`](../AGENTS.md) | development workflow, ticket lifecycle, TDD/batching, examples and completion rules |
 | [`CODE_REVIEW.md`](../CODE_REVIEW.md) | mandatory ownership, isolation, threading, lifetime, ABI/platform and validation review |
-| [`CI_POLICY.md`](../CI_POLICY.md) | remote-validation cadence, backpressure and final-candidate rules |
 | [`DESIGN.md`](../DESIGN.md) | durable architecture and platform/rendering design decisions |
 | [`VALIDATION.md`](../VALIDATION.md) | platform/build validation guidance and supporting evidence |
 
