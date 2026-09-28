@@ -91,32 +91,77 @@ For field-by-field standard-widget recipes and examples, see [Widget style refer
 
 ## Custom painting boundary
 
-Custom components paint through NativeUI's retained paint callback and drawing abstractions. [`include/nativeui/paint.hpp`](../include/nativeui/paint.hpp), [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp) and [`include/nativeui/path.hpp`](../include/nativeui/path.hpp) contain the current drawing surface.
+Custom components paint through NativeUI's retained callback using [`Painter`](../include/nativeui/paint.hpp). [`paint_style.hpp`](../include/nativeui/paint_style.hpp) supplies backend-neutral brush/effect values and [`path.hpp`](../include/nativeui/path.hpp) supplies vector paths/stroke geometry. Coordinates, lengths, widths, radii and effect offsets/sigmas are **logical UI units**; framebuffer/device scaling stays below this retained boundary.
 
-The current retained drawing model supports operations such as:
+### Painter ownership, threading and backend escape hatch
 
-- filled/stroked rounded geometry;
-- circles, arcs and lines;
-- paths with fill/stroke styles;
-- text using NativeUI text styles and measurement;
-- transforms and clipping;
-- linear/radial gradients and paint options;
-- scoped drawing state so one component does not leak its transform/clip/save state into later paint work.
+A `Painter` **borrows** the `SkCanvas&` supplied to its constructor and must not outlive that canvas. Painting is UI/render-thread work and can allocate while materializing paths, gradients, effects, text, image/runtime-shader brushes or unusually deep save stacks; it is not an audio-real-time API.
 
-Application code should express drawing in logical coordinates and let the owning window/view handle framebuffer scale below the retained component layer.
+`canvas()` is a low-level integration escape hatch. Normal components should use Painter methods: raw backend save/restore/transform operations bypass Painter's logical transform/history bookkeeping.
 
-## Brushes, effects and runtime shaders
+`current_transform()` reports the affine transform accumulated through Painter. Translation is in logical units, scale is dimensionless, and rotation uses **radians**. Non-finite transform inputs are ignored. Painter updates its logical transform only after the backend mutation succeeds.
 
-The installed v1 headers expose higher-level fill/effect primitives in [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp) and explicit runtime-shader preparation in [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp).
+### Scoped state, clipping and layers
 
-`Brush` is the common fill source used by retained painting. It can snapshot:
+`scoped_state()`, `scoped_clip(...)` and `scoped_layer(...)` return a non-copyable/non-movable `Painter::StateGuard`. The guard borrows the Painter and restores protected backend/logical state on destruction. Manual `save()`/`restore()` calls inside a protected scope must balance before the guard dies; crossing its restore floor is a programming error.
 
-- a solid `Color`;
-- a `LinearGradient` or `RadialGradient`;
-- an `ImageTexture`;
-- a prepared `ShaderInstance`.
+Rectangular clips turn non-finite, empty and non-positive geometry into an empty clip. Rounded clips canonicalize non-finite/non-positive radius to zero and clamp positive radius to half the smaller rectangle dimension. Path clipping validates every command coordinate before publishing its save frame; non-finite path geometry becomes an empty clip.
 
-`PaintOptions` supplies bounded opacity plus the documented blend modes `SourceOver`, `Multiply`, `Screen` and `Plus`. Layer effects are explicit values: `Effect::gaussian_blur(...)`, `Effect::drop_shadow(...)` and `Effect::drop_shadow_only(...)`. The effect's `visual_outset()` reports the conservative visual expansion that retained invalidation/layout code can account for; effects do not create an application-owned renderer loop.
+`scoped_layer(bounds, options)` hard-clips to finite logical bounds and applies `PaintOptions` once when the offscreen layer is composed back. Invalid bounds deliberately create an empty clip-only scope rather than an unbounded backend layer. Scope setup is transactional: failures roll back private backend frames before propagation.
+
+The effect overload adds `Effect` filtering. Zero Gaussian blur reduces to an ordinary layer. Transparent `drop_shadow` keeps the source without a shadow, while transparent `drop_shadow_only` produces empty output. NativeUI computes a conservative finite device support rectangle; unrepresentable/non-finite transformed support fails closed instead of requesting an unbounded temporary surface. Materialized effects set `used_effects()`, which lets the scene renderer conservatively fall back from localized partial reconstruction when needed.
+
+### Paths and primitive drawing
+
+[`Path`](../include/nativeui/path.hpp) owns move/line/quadratic/cubic/close commands in logical coordinates. Fluent construction may allocate as its vector grows. `clear()` is noexcept and keeps capacity for reuse.
+
+`StrokeStyle::width` is a logical length. `StrokeCap` selects Butt/Round/Square endpoints, `StrokeJoin` selects Miter/Round/Bevel joins, and `miter_limit` is a dimensionless stroke-width ratio. `stroke_path()` treats an empty path or non-positive width as a no-op.
+
+Painter also draws rounded rectangles, circles, lines and arcs. Arc start/end are in **radians**, sweep is `end - start`, and arc/line helpers use round caps. Primitive draw calls otherwise expect finite meaningful geometry rather than defining cross-backend behavior for arbitrary invalid dimensions.
+
+`push_clip()`/`pop_clip()` are manual pairing helpers. Prefer `scoped_clip()` for exception-safe balance and invalid-geometry canonicalization.
+
+### Text drawing and measurement
+
+`Painter::text(position, text, style)` treats `position.y` as the run's **vertical center**, not a baseline. `position.x` follows `TextStyle::align` (Left/Center/Right). Font size and coordinates are logical units; negative draw size clamps to zero. Malformed UTF-8 is repaired into owned valid bytes before being passed to Skia.
+
+`measure_text(text, size)` is the width-only convenience path through `TextService`; use the full text service/style APIs when ascent/descent or explicit typography is required.
+
+## Brushes, gradients, paint options and effects
+
+[`paint_style.hpp`](../include/nativeui/paint_style.hpp) stores renderer-neutral values; backend resources are materialized later by Painter.
+
+`PaintOptions::opacity` is canonicalized at draw/layer time: finite values clamp to [0, 1], non-finite opacity falls back to 1.0. `BlendMode` provides `SourceOver`, `Multiply`, `Screen` and `Plus`.
+
+`LinearGradient` and `RadialGradient` own their stop vectors. Offsets are normalized [0, 1] values and must be finite and **strictly increasing**, with at least two stops. Validation is deferred to materialization: an invalid non-empty sequence falls back to its first stop color; an empty sequence falls back to default transparent color. A radial gradient with non-positive/non-finite radius cannot materialize a radial shader and likewise falls back to the first stop color. `stops()` is a borrowed vector reference and must not be retained across assignment/destruction.
+
+`Brush` is the common owned/snapshotted fill source: solid `Color`, owned linear/radial gradient, `ImageTexture`, or immutable snapshot of a prepared `ShaderInstance`. Invalid `ImageTexture` construction yields a transparent Brush. Copying may allocate because gradient stop vectors are owned; moving is noexcept and leaves the source as a valid transparent Brush.
+
+`Effect` is a small noexcept-copyable value. Gaussian sigma canonicalizes to [0, 64] logical units. Shadow offsets canonicalize per axis to [-256, 256], and color channels to [0, 1]; non-finite values are replaced with bounded zero-equivalents before clamping. `visual_outset()` reports conservative non-negative logical expansion using three sigma plus directional shadow offset. Fully transparent shadows report zero outset.
+
+```cpp
+ui::Path outline;
+outline.move_to({4.0f, 4.0f})
+       .line_to({92.0f, 4.0f})
+       .line_to({92.0f, 28.0f})
+       .close();
+
+auto state = painter.scoped_state();
+auto clip = painter.scoped_clip({0.0f, 0.0f, 96.0f, 32.0f}, 6.0f);
+
+ui::LinearGradient fill{
+    {0.0f, 0.0f},
+    {96.0f, 0.0f},
+    {{0.0f, ui::Color{0.1f, 0.7f, 0.4f, 1.0f}},
+     {1.0f, ui::Color{0.8f, 0.9f, 0.2f, 1.0f}}}};
+
+painter.fill_path(
+    outline,
+    ui::Brush{fill},
+    {.opacity = 0.9f, .blend = ui::BlendMode::SourceOver});
+```
+
+Painter state belongs to the current retained paint traversal. Do not retain `Painter&`, `StateGuard`, `SkCanvas&` or borrowed gradient-stop references beyond the lifetime that supplies them, and do not use Painter as a cross-thread handoff mechanism.
 
 Runtime shaders use a two-stage contract:
 

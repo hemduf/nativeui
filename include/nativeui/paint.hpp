@@ -1,3 +1,10 @@
+/// \file
+/// Retained drawing surface used by NativeUI component paint callbacks.
+///
+/// Painter borrows a backend SkCanvas for one paint traversal while tracking
+/// NativeUI save/restore and logical-transform state. Public drawing coordinates
+/// and lengths are logical UI units unless stated otherwise. This is UI/render-
+/// thread work and is not an audio-real-time API.
 #pragma once
 
 #include <nativeui/geometry.hpp>
@@ -79,6 +86,16 @@ struct ResolvedTextLayout {
 } // namespace detail
 
 
+/// Backend-backed drawing context for one retained paint traversal.
+///
+/// Painter does not own the SkCanvas supplied at construction and must not
+/// outlive it. Prefer typed Painter methods over mutating the raw canvas:
+/// backend save/restore/transform calls can bypass NativeUI's transform history
+/// and protected-scope invariants.
+///
+/// Path/gradient/effect/text materialization and unusually deep save stacks may
+/// allocate. Exceptions from fallible scope setup roll back protected backend
+/// state before propagating.
 class Painter {
     struct ScopeFrame {
         int previous_floor{};
@@ -101,6 +118,11 @@ class Painter {
     friend struct detail::PainterTransformHistoryFaultAccess;
 
 public:
+    /// Non-copyable lexical guard that restores one protected Painter scope.
+    ///
+    /// The guard borrows its Painter and must die first. Manual save()/restore()
+    /// calls inside the scope must balance before guard destruction; debug builds
+    /// diagnose imbalance while cleanup still restores outstanding frames.
     class StateGuard {
     public:
         StateGuard(const StateGuard&) = delete;
@@ -127,7 +149,12 @@ public:
         ScopeFrame frame_{};
     };
 
+    /// Borrow `canvas`; no ownership is transferred and Painter must die first.
     explicit Painter(SkCanvas& canvas) : canvas_(canvas) {}
+    /// Restore outstanding backend saves before releasing the borrowed canvas.
+    ///
+    /// Destruction is noexcept so component-paint unwinding cannot poison the
+    /// backend save stack used by a later frame.
     ~Painter() noexcept {
         // Framework-owned tree scopes may be unwinding because component paint
         // threw before the matching manual pop. Restore every outstanding save
@@ -142,15 +169,34 @@ public:
         }
     }
 
+    /// Return the borrowed backend canvas.
+    ///
+    /// This low-level escape hatch is valid only for the Painter/canvas lifetime.
+    /// Avoid backend save/restore/transform mutations through it because Painter
+    /// tracks those operations separately.
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
+    /// Save drawing state and restore it automatically at lexical scope exit.
     [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
+    /// Current Painter-managed backend save depth, primarily for diagnostics.
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    /// Report whether a non-trivial image effect was materialized.
+    ///
+    /// This renderer-observability bit supports conservative partial/full scene
+    /// decisions; ordinary opacity, blend and gradients do not set it.
     // Renderer-internal effect observability for scene update validation.
     [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
+    /// Current logical affine transform accumulated through Painter.
+    ///
+    /// It is restored with Painter's save stack. Direct raw-canvas transforms are
+    /// outside this tracking contract.
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;
     }
 
+    /// Intersect drawing with a logical rectangle until guard destruction.
+    ///
+    /// Non-finite, empty or non-positive geometry becomes an empty clip. Backend
+    /// failure rolls back the newly entered save frame before propagating.
     [[nodiscard]] StateGuard scoped_clip(Rect rect) {
         const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
         const ScopeFrame frame = begin_scope();
@@ -163,6 +209,11 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Intersect drawing with a rounded logical rectangle.
+    ///
+    /// Radius is logical: non-finite/non-positive becomes zero and positive
+    /// values clamp to half the smaller rectangle dimension. Invalid rectangle
+    /// geometry produces an empty rectangular clip.
     [[nodiscard]] StateGuard scoped_clip(Rect rect, float radius) {
         const bool valid_rect = valid_clip_rect(rect);
         const SkRect sk_rect = valid_rect ? to_sk_rect(rect) : SkRect::MakeEmpty();
@@ -186,6 +237,10 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Intersect drawing with `path` until scope exit.
+    ///
+    /// Path conversion may allocate and finishes before publishing the protected
+    /// save frame. Any non-finite path coordinate yields an empty clip.
     [[nodiscard]] StateGuard scoped_clip(const Path& path) {
         // Path conversion may allocate inside the backend value builder. Finish
         // it before entering the Painter save frame so construction failure
@@ -201,6 +256,11 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Create a bounded offscreen composition layer.
+    ///
+    /// Bounds are logical. PaintOptions opacity/blend apply once when restoring
+    /// the layer. Invalid bounds create an empty clip-only scope instead of an
+    /// unbounded backend layer. Fallible setup is transactional.
     [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
                                           PaintOptions options = {}) {
         const bool valid_bounds = valid_clip_rect(logical_bounds);
@@ -254,6 +314,12 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Create a bounded filtered layer and apply `effect` on composition.
+    ///
+    /// Effects use logical/local units. Zero blur reduces to a normal layer.
+    /// Transparent DropShadow keeps the source; transparent DropShadowOnly yields
+    /// empty output. Non-finite/unrepresentable support fails closed. Filter
+    /// materialization may allocate/throw and successful effects set used_effects().
     [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
                                           const Effect& effect,
                                           PaintOptions options = {}) {
@@ -341,28 +407,41 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Push backend state plus Painter's logical-transform snapshot.
+    ///
+    /// Ordinary nesting uses inline storage; unusually deep nesting may allocate
+    /// and throw before the backend save is published. Pair with restore().
     void save() {
         push_backend_frame([&] { canvas_.save(); });
     }
 
+    /// Restore one matching Painter save().
+    ///
+    /// Crossing a protected scoped_state/scoped_clip/scoped_layer restore floor
+    /// is a programming error and is ignored at that floor.
     void restore() {
         assert(save_depth_ > restore_floor_ && "Painter restore() crossed a protected paint scope");
         if (save_depth_ <= restore_floor_) return;
         restore_unchecked();
     }
 
+    /// Post-concatenate a logical translation; non-finite inputs are ignored.
     void translate(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
         const Transform2D operation = Transform2D::translation(x, y);
         apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
     }
+    /// Convenience overload for a logical translation vector.
     void translate(Point offset) { translate(offset.x, offset.y); }
+    /// Post-concatenate dimensionless X/Y scale factors; non-finite input is ignored.
     void scale(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
         const Transform2D operation = Transform2D::scaling(x, y);
         apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
     }
+    /// Apply one dimensionless scale factor to both axes.
     void scale(float uniform) { scale(uniform, uniform); }
+    /// Post-concatenate rotation in radians; non-finite input is ignored.
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
         const Transform2D operation = Transform2D::rotation(radians);
@@ -373,6 +452,10 @@ public:
                 0.0f, 0.0f, 1.0f));
         });
     }
+    /// Post-concatenate an affine logical transform.
+    ///
+    /// Non-finite input/composition is ignored. Backend mutation completes before
+    /// Painter publishes the new logical transform.
     void concat(const Transform2D& transform) {
         apply_logical_transform(transform, [&] {
             canvas_.concat(SkMatrix::MakeAll(
@@ -382,52 +465,63 @@ public:
         });
     }
 
+    /// Fill a rounded logical rectangle with a solid color.
     void fill_rounded_rect(Rect rect, float radius, Color color) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(color, {}));
     }
 
+    /// Fill a rounded logical rectangle with a linear gradient.
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(gradient, options));
     }
 
+    /// Fill a rounded logical rectangle with a radial gradient.
     void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(gradient, options));
     }
 
+    /// Fill a rounded logical rectangle from any Brush source.
     void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(brush, options));
     }
 
+    /// Stroke a rounded rectangle; radius/width are logical lengths.
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         stroke_rounded_rect(rect, radius, width, Brush{color});
     }
 
+    /// Brush overload for stroking a rounded logical rectangle.
     void stroke_rounded_rect(Rect rect, float radius, float width, const Brush& brush,
                              PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_stroke_paint(brush, StrokeStyle{width}, options));
     }
 
+    /// Fill a logical-coordinate circle with a solid color.
     void circle(Point center, float radius, Color color) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(color, {}));
     }
 
+    /// Fill a logical-coordinate circle from any Brush source.
     void circle(Point center, float radius, const Brush& brush,
                 PaintOptions options = {}) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(brush, options));
     }
 
+    /// Stroke an arc; angles are radians and radius/width are logical lengths.
+    /// Sweep is end-start and caps are round.
     void arc(Point center, float radius, float start, float end, float width, Color color) {
         arc(center, radius, start, end, width, Brush{color});
     }
 
+    /// Brush overload for an arc; angles are radians and caps are round.
     void arc(Point center, float radius, float start, float end, float width,
              const Brush& brush, PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -438,10 +532,12 @@ public:
         canvas_.drawArc(oval, start * rad_to_deg, (end - start) * rad_to_deg, false, paint);
     }
 
+    /// Stroke a logical-coordinate line segment with round caps.
     void line(Point a, Point b, float width, Color color) {
         line(a, b, width, Brush{color});
     }
 
+    /// Brush overload for a logical-coordinate line segment with round caps.
     void line(Point a, Point b, float width, const Brush& brush,
               PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -449,26 +545,35 @@ public:
         canvas_.drawLine(a.x, a.y, b.x, b.y, paint);
     }
 
+    /// Fill a Path with solid color; an empty path is a no-op.
     void fill_path(const Path& path, Color color) {
         if (path.empty()) return;
         canvas_.drawPath(to_sk_path(path), make_fill_paint(color, {}));
     }
 
+    /// Fill a Path from a Brush; an empty path is a no-op.
     void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
         if (path.empty()) return;
         canvas_.drawPath(to_sk_path(path), make_fill_paint(brush, options));
     }
 
+    /// Stroke a Path with solid color and StrokeStyle.
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
         stroke_path(path, Brush{color}, style);
     }
 
+    /// Brush overload; empty paths and non-positive widths are no-ops.
     void stroke_path(const Path& path, const Brush& brush, StrokeStyle style = {},
                      PaintOptions options = {}) {
         if (path.empty() || style.width <= 0.0f) return;
         canvas_.drawPath(to_sk_path(path), make_stroke_paint(brush, style, options));
     }
 
+    /// Draw UTF-8 text centered vertically on `position.y`.
+    ///
+    /// position.x follows TextStyle::align. Font size/coordinates are logical.
+    /// Layout may allocate; malformed UTF-8 is repaired before reaching Skia and
+    /// negative drawing size is clamped to zero.
     void text(Point position, std::string_view text, const TextStyle& style) {
         const auto layout = detail::resolve_text_layout(text, style);
         text = layout.text_bytes(text);
@@ -497,6 +602,7 @@ public:
         }
     }
 
+    /// Convenience overload constructing TextStyle from size/color/alignment.
     void text(Point position, std::string_view text, float size, Color color,
               TextAlign align = TextAlign::Left) {
         TextStyle style{};
@@ -506,13 +612,19 @@ public:
         this->text(position, text, style);
     }
 
+    /// Manually save then intersect a rectangular clip.
+    ///
+    /// This forwards rect directly and must pair with pop_clip(). Prefer
+    /// scoped_clip() for exception-safe balance and invalid-geometry handling.
     void push_clip(Rect rect) {
         save();
         canvas_.clipRect(to_sk_rect(rect), SkClipOp::kIntersect, true);
     }
 
+    /// Restore the state pushed by push_clip().
     void pop_clip() { restore(); }
 
+    /// Measure UTF-8 text width in logical units using TextService defaults.
     [[nodiscard]] static float measure_text(std::string_view text, float size) {
         return TextService::measure(text, size).width;
     }
