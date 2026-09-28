@@ -41,6 +41,7 @@ nativeui_add_semantics_test(t068_semantic_view_state t068_semantic_view_state_te
 nativeui_add_semantics_test(t068_semantic_publication_batch t068_semantic_publication_batch_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_native_bounds t068_semantic_native_bounds_tests.cpp)
 nativeui_add_semantics_test(t068_semantic_native_geometry_capture t068_semantic_native_geometry_capture_tests.cpp)
+nativeui_add_semantics_test(t068_concurrent_snapshot_readers ../t068_concurrent_snapshot_readers.cpp)
 nativeui_add_semantics_test(t068_uia_mapping t068_uia_mapping_tests.cpp)
 nativeui_add_semantics_test(t068_uia_provider t068_uia_provider_tests.cpp)
 target_sources(t068_uia_provider PRIVATE
@@ -110,6 +111,7 @@ target_link_libraries(t068_semantic_action_router PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_action_view_binding PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_native_view_bridge PRIVATE Threads::Threads)
 target_link_libraries(t068_semantic_proxy_cache PRIVATE Threads::Threads)
+target_link_libraries(t068_concurrent_snapshot_readers PRIVATE Threads::Threads)
 
 # The AppKit suites resolve the T065 Dispatcher used by the action router and
 # bridge; compile the real implementation directly exactly like the portable

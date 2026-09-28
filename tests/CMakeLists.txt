@@ -497,6 +497,10 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/t068_publication_sink_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_virtual_list_action_tests
     ${PROJECT_SOURCE_DIR}/tests/t068_virtual_list_action_tests.cpp)
+  # T068 Batch 7b concurrent reader-vs-publisher stress: platform-free and
+  # header-only, so it also joins the standalone T045 project.
+  nativeui_add_accessibility_test(nativeui_t068_concurrent_snapshot_readers
+    ${PROJECT_SOURCE_DIR}/tests/t068_concurrent_snapshot_readers.cpp)
   # T068 Batch 4 neutral Windows UIA mapping/provider core. These suites are
   # platform-free and run on every host; the Win32 adapter below is remote-CI
   # only.
@@ -522,6 +526,7 @@ if(NATIVEUI_BUILD_TESTS)
   target_link_libraries(nativeui_t068_semantic_action_view_binding PRIVATE Threads::Threads)
   target_link_libraries(nativeui_t068_semantic_native_view_bridge PRIVATE Threads::Threads)
   target_link_libraries(nativeui_t068_semantic_proxy_cache PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_t068_concurrent_snapshot_readers PRIVATE Threads::Threads)
 
   if(APPLE)
     # The macOS mapping/AppKit suites mirror tests/t045's standalone project:
