@@ -20,6 +20,10 @@
 
 namespace ui {
 
+/// One owned ComboBox option snapshot.
+///
+/// `value` is written to the selection Binding when committed, `label` is
+/// display text, and disabled options remain visible but cannot be selected.
 template <class T>
 struct ComboBoxOption final {
     T value;
@@ -27,7 +31,10 @@ struct ComboBoxOption final {
     bool enabled{true};
 };
 
+/// One owned PopupMenu row. Action rows may carry callbacks; separators are
+/// structural and never actionable.
 struct PopupMenuItem final {
+    /// Distinguishes callable action rows from visual separators.
     enum class Kind {
         Action,
         Separator,
@@ -38,6 +45,7 @@ struct PopupMenuItem final {
     bool enabled{true};
     std::function<void()> callback;
 
+    /// Build an action row. Disabled actions remain visible but are skipped.
     [[nodiscard]] static PopupMenuItem action(
         std::string label,
         std::function<void()> callback,
@@ -50,6 +58,7 @@ struct PopupMenuItem final {
         return item;
     }
 
+    /// Build a disabled non-actionable separator row.
     [[nodiscard]] static PopupMenuItem separator() {
         PopupMenuItem item;
         item.kind = Kind::Separator;
@@ -57,6 +66,7 @@ struct PopupMenuItem final {
         return item;
     }
 
+    /// True only for an enabled Action row with a non-empty callback.
     [[nodiscard]] bool actionable() const noexcept {
         return kind == Kind::Action && enabled && static_cast<bool>(callback);
     }
@@ -1158,12 +1168,21 @@ private:
 
 } // namespace detail
 
+/// Focusable retained ComboBox backed by one selection Binding.
+///
+/// `T` must be copy-constructible and equality-comparable. Option snapshots
+/// are owned. Provider-backed instances call the provider once during builder
+/// construction to seed anchor display state and again whenever the popup opens.
+/// Selection changes use the normal State/Binding UI-thread/lifetime contract.
 template <class T>
     requires std::copy_constructible<T> && std::equality_comparable<T>
 class ComboBox {
 public:
+    /// Produces a fresh owned option snapshot in the UI domain. It may allocate
+    /// or call application code and is not a real-time callback.
     using OptionsProvider = std::function<std::vector<ComboBoxOption<T>>() >;
 
+    /// Construct from a stable option set; each popup gets an owned copy.
     ComboBox(Binding<T> selection, std::vector<ComboBoxOption<T>> options)
         : selection_(std::move(selection)),
           initial_options_(options),
@@ -1172,6 +1191,7 @@ public:
     ComboBox(State<T>& selection, std::vector<ComboBoxOption<T>> options)
         : ComboBox(selection.binding(), std::move(options)) {}
 
+    /// Construct from a dynamic provider refreshed on each popup open.
     ComboBox(Binding<T> selection, OptionsProvider options_provider)
         : selection_(std::move(selection)), options_provider_(std::move(options_provider)) {
         if (options_provider_) initial_options_ = options_provider_();
@@ -1180,16 +1200,19 @@ public:
     ComboBox(State<T>& selection, OptionsProvider options_provider)
         : ComboBox(selection.binding(), std::move(options_provider)) {}
 
+    /// Text displayed when selection is absent from the current option snapshot.
     ComboBox&& placeholder(std::string value) && {
         placeholder_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Override the anchor's typed style recipe.
     ComboBox&& style(ComboBoxStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Override popup-row styling for this ComboBox.
     ComboBox&& item_style(MenuItemStyle value) && {
         item_style_ = std::move(value);
         return std::move(*this);
@@ -1232,22 +1255,32 @@ private:
     MenuItemStyle item_style_;
 };
 
+/// Focusable retained action menu presented through NativeUI's in-view overlay
+/// stack, not a separate native popup window.
+///
+/// Item providers are snapshotted on each open. Action callbacks run only after
+/// popup close/detach reaches its retained safe commit point.
 class PopupMenu {
 public:
+    /// Produces a fresh owned item snapshot in the UI domain.
     using ItemsProvider = std::function<std::vector<PopupMenuItem>()>;
 
+    /// Construct with a stable owned item set.
     PopupMenu(std::string label, std::vector<PopupMenuItem> items)
         : label_(std::move(label)),
           items_provider_([items = std::move(items)] { return items; }) {}
 
+    /// Construct with an item provider regenerated on each open.
     PopupMenu(std::string label, ItemsProvider items_provider)
         : label_(std::move(label)), items_provider_(std::move(items_provider)) {}
 
+    /// Override the menu anchor's typed ComboBox-style recipe.
     PopupMenu&& style(ComboBoxStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Override popup-row styling.
     PopupMenu&& item_style(MenuItemStyle value) && {
         item_style_ = std::move(value);
         return std::move(*this);

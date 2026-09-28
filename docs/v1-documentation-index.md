@@ -2,6 +2,8 @@
 
 This page is the navigation entry point for the NativeUI 1.0 documentation set tracked by T122. It links the current public documentation slices and records the remaining release-closeout boundaries against the current `main` branch.
 
+For broad application code, [`<nativeui/nativeui.hpp>`](../include/nativeui/nativeui.hpp) is the convenience umbrella for the normal public consumer surface. Narrow public headers may be included directly to reduce compile-time coupling; `nativeui/detail/` remains implementation-only.
+
 ## Start here
 
 | Goal | Document | Scope |

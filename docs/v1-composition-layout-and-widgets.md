@@ -129,6 +129,45 @@ Pointer capture is retained per UI and ties an active pointer sequence to the ow
 
 Drag/drop integration is demonstrated by [`t018_drop`](../examples/features/t018_drop.cpp). Application code should consume the public NativeUI drop/input abstractions rather than reaching into platform event objects.
 
+## ComboBox and PopupMenu
+
+[`combo_popup.hpp`](../include/nativeui/combo_popup.hpp) provides two focusable retained controls presented through NativeUI's in-view overlay stack rather than separate native popup windows.
+
+### ComboBox<T>
+
+`ComboBox<T>` requires a copy-constructible, equality-comparable value and writes through a `Binding<T>` (or a `State<T>&` convenience constructor). Each `ComboBoxOption<T>` owns a value, display label and enabled flag. Disabled options remain visible but are skipped by navigation and cannot be committed.
+
+Options may be an owned vector or an `OptionsProvider`. Provider-backed ComboBoxes call the provider once during builder construction to seed anchor display state and again **on every popup open**. The popup owns the returned vector snapshot.
+
+```cpp
+ui::State<int> voice{1};
+
+auto combo = ui::ComboBox<int>{
+    voice,
+    [] {
+        return std::vector<ui::ComboBoxOption<int>>{
+            {1, "Mono", true},
+            {2, "Poly", true},
+            {3, "Unavailable", false},
+        };
+    }}
+    .placeholder("Choose a voice");
+```
+
+The placeholder appears when the selected value is absent from the current display snapshot. `.style()` customizes the anchor; `.item_style()` customizes popup rows.
+
+Selection is committed only after popup close/reconciliation reaches its safe retained checkpoint, so selection observers cannot run against a popup subtree still being detached.
+
+### PopupMenu
+
+`PopupMenuItem::action(label, callback, enabled)` builds an action row; `separator()` builds a disabled structural row. `actionable()` is true only for enabled action rows with a callback.
+
+`PopupMenu` accepts a stable vector or an `ItemsProvider`; providers are evaluated on each open and the session owns that snapshot. Action callbacks run after popup close/detach reaches its retained commit point.
+
+Keyboard behavior is demonstrated by [`t035_combo_popup.cpp`](../examples/features/t035_combo_popup.cpp): Down/Enter/Space can open, Up/Down/Home/End navigate eligible rows, Enter/Space commit, Escape dismisses, and Tab closes before normal focus traversal.
+
+Typed anchor/row presentation is documented in [Widget style reference](v1-widget-style-reference.md).
+
 ## Text input and IME
 
 Text editing uses NativeUI's retained text/editing model while platform integration supplies native text/IME events. The stable conceptual boundary is:
