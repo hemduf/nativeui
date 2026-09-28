@@ -120,16 +120,28 @@ foreach(_path IN LISTS _production_files)
       string(FIND "${_fractal_kernel_compact}" "powf(" _fractal_powf)
       string(FIND "${_fractal_kernel_compact}" "exp(" _fractal_exp)
       string(FIND "${_fractal_kernel_compact}" "expf(" _fractal_expf)
+      string(FIND "${_fractal_kernel_compact}" "exp2(" _fractal_exp2)
+      string(FIND "${_fractal_kernel_compact}" "exp2f(" _fractal_exp2f)
       string(FIND "${_fractal_kernel_compact}" "log(" _fractal_log)
       string(FIND "${_fractal_kernel_compact}" "logf(" _fractal_logf)
+      string(FIND "${_fractal_kernel_compact}" "log2(" _fractal_log2)
+      string(FIND "${_fractal_kernel_compact}" "log2f(" _fractal_log2f)
+      string(FIND "${_fractal_kernel_compact}" "ldexp(" _fractal_ldexp)
+      string(FIND "${_fractal_kernel_compact}" "ldexpf(" _fractal_ldexpf)
       string(FIND "${_fractal_kernel_compact}"
         "fractal_base(p*frequency)" _fractal_scaled_coordinates)
       if(NOT _fractal_pow EQUAL -1 OR
          NOT _fractal_powf EQUAL -1 OR
          NOT _fractal_exp EQUAL -1 OR
          NOT _fractal_expf EQUAL -1 OR
+         NOT _fractal_exp2 EQUAL -1 OR
+         NOT _fractal_exp2f EQUAL -1 OR
          NOT _fractal_log EQUAL -1 OR
          NOT _fractal_logf EQUAL -1 OR
+         NOT _fractal_log2 EQUAL -1 OR
+         NOT _fractal_log2f EQUAL -1 OR
+         NOT _fractal_ldexp EQUAL -1 OR
+         NOT _fractal_ldexpf EQUAL -1 OR
          _fractal_scaled_coordinates EQUAL -1)
         message(FATAL_ERROR
           "Fractal noise must use iterative frequency scaling without exponentiation")
