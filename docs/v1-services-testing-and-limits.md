@@ -32,31 +32,72 @@ The focused executable [`t057_embedded_resources`](../examples/features/t057_emb
 
 ## Dispatcher: worker-to-UI handoff
 
-NativeUI's [`Dispatcher`](../include/nativeui/dispatcher.hpp) is the supported bounded handoff mechanism when work originating outside the UI thread must schedule a callback onto a concrete NativeUI window/view owner.
+NativeUI's [`Dispatcher`](../include/nativeui/dispatcher.hpp) is the supported bounded handoff mechanism when work originating outside the UI thread must schedule a callback onto a concrete NativeUI window/view owner. `DispatcherDuration` is `std::chrono::duration<double>` in **seconds**; scheduling converts it to the owner's steady-clock representation.
 
 A dispatcher is owner-scoped rather than process-global:
 
 - each standalone window exposes the dispatcher for that window;
 - each embedded view exposes an independent dispatcher;
 - copying a `Dispatcher` copies a weak lifetime-safe handle, not ownership of the queue/backend;
-- destroying one owner prevents its pending work from becoming work owned by another window/view;
+- destroying one owner invalidates its handles and discards its queued tasks/timers rather than transferring them to another window/view;
 - NativeUI defines no global event bus and no general background executor.
 
-`Dispatcher::post()` is thread-safe for ordinary worker-thread use. An accepted callback executes on the owning UI/main thread at a later event-loop checkpoint; it is not invoked inline by `post()`. Standalone owners can wake their application event loop without busy polling. Embedded owners remain host-driven: posting work does not create a background poll thread and `EmbeddedView::poll()` remains non-blocking.
+All public queue/timer mutation is synchronized for ordinary worker/UI-thread use. It may allocate and lock. Callback execution is different: an accepted callback runs only on the owning UI/main thread when that owner pumps a later dispatcher checkpoint.
+
+### Posting, acceptance and reentrancy
+
+`post(callback)` returns `true` only after a non-empty callback has been accepted into that owner's bounded FIFO task queue. It returns `false` when the Dispatcher is invalid/closing, the callback is empty or the queue cannot accept more work. Allocation failure can throw before acceptance.
+
+Acceptance does **not** mean inline execution and does not extend owner lifetime. A callback capture is owned by the queue until execution or owner shutdown, so reference captures must still outlive the deferred invocation.
+
+Each checkpoint freezes a snapshot of at most `kDispatcherMaxTasksPerCheckpoint` callbacks. Work posted reentrantly by a callback is deliberately outside that snapshot and waits for another checkpoint. If one callback throws, that invocation is consumed and the exception propagates through the owning checkpoint path; later already-accepted tasks remain queued and are re-woken rather than silently discarded.
+
+FIFO applies to accepted task order. Due timers are inserted into that same queue in deadline order, using creation order to break equal-deadline ties. Tasks that were already queued remain ahead of timers that merely become due at the checkpoint.
 
 The v1 service is intentionally bounded per owner:
 
 | Limit | NativeUI 1.0 value |
 | --- | ---: |
 | Pending queued tasks | 65,536 |
-| Active timers | 8,192 |
-| Tasks executed from one checkpoint snapshot | 1,024 |
+| Active one-shot + repeating timers | 8,192 |
+| Callbacks begun from one checkpoint snapshot | 1,024 |
 
-Timer callbacks use the same owner queue. Zero-delay work still waits for a dispatcher checkpoint; repeating timers use bounded fixed-delay behavior rather than catch-up bursts; stale or cross-owner timer handles cannot cancel another owner's timer.
+### Timer validation and lifetime
+
+`schedule_after(delay, callback)` accepts a finite non-negative delay that fits the owner's steady clock. A zero delay is valid but still waits for a checkpoint. `schedule_every(interval, callback)` requires a finite **strictly positive** interval that remains non-zero after native clock conversion. Empty callbacks, invalid/closing owners, invalid durations and timer-capacity exhaustion return an invalid `TimerHandle`; allocation failures may throw.
+
+Repeating timers are fixed-delay and intentionally do not replay missed periods as catch-up bursts. When a repeat becomes due, its firing is queued and the next deadline becomes the current checkpoint time plus the configured interval. The same owned callback object is reused across firings, so mutable state captured by value in that callback persists between repetitions.
+
+`TimerHandle` is owner-local identity, not ownership. `handle.valid()` only means the value contains a non-empty owner/id identity; it does **not** prove that the timer is still active. `cancel(handle)` returns `false` for stale/already-fired/already-cancelled or cross-owner handles. Successful cancellation removes future scheduling, but cannot retract a firing already moved into the task queue or already running. This is why cancelling a repeating timer from inside its callback prevents later repeats without undoing the current firing.
+
+### Example
+
+```cpp
+const ui::Dispatcher dispatcher = window.dispatcher();
+
+std::thread worker{[dispatcher] {
+    (void)dispatcher.post([] {
+        // Runs later on the owning UI thread.
+    });
+}};
+worker.join();
+
+const ui::TimerHandle timer = dispatcher.schedule_every(
+    ui::DispatcherDuration{0.5},
+    [] {
+        // Runs at most once per due checkpoint; missed periods do not burst.
+    });
+
+if (timer) {
+    (void)dispatcher.cancel(timer);
+}
+```
+
+Standalone owners can wake their application event loop without busy polling. Embedded owners remain host-driven: posting work does not create a background poll thread and `EmbeddedView::poll()` remains non-blocking.
 
 ### Not real-time safe
 
-`post()` and timer creation/cancellation may allocate and synchronize. They are deliberately **not real-time safe**. Do not call them from an audio/DSP callback and do not treat `Dispatcher` as an audio-to-UI lock-free transport.
+`post()`, timer creation and cancellation may allocate and synchronize. They are deliberately **not real-time safe**. Do not call them from an audio/DSP callback and do not treat `Dispatcher` as an audio-to-UI lock-free transport.
 
 If a plug-in or audio application needs a real-time boundary, its adapter/application owns that boundary first—for example an explicitly reviewed atomic snapshot or bounded lock-free queue. Ordinary worker-side code may then use `Dispatcher` after leaving the real-time domain to perform the final UI-thread handoff.
 
