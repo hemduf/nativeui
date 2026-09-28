@@ -2,6 +2,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
   add_test(
+    NAME nativeui_advanced_rendering_docs_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_contract.cmake"
+  )
+  set_tests_properties(nativeui_advanced_rendering_docs_contract PROPERTIES
+    LABELS "docs;contract"
+  )
+
+  add_test(
     NAME nativeui_feature_example_discovery_contract
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -154,6 +164,13 @@ if(NATIVEUI_BUILD_TESTS)
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES LABELS "unit")
   endfunction()
+
+  nativeui_add_core_test(
+    nativeui_advanced_rendering_docs_snippets
+    ${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_snippets.cpp)
+  set_tests_properties(nativeui_advanced_rendering_docs_snippets PROPERTIES
+    LABELS "docs;unit"
+  )
 
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
