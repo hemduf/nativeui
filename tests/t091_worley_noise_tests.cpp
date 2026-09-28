@@ -463,7 +463,7 @@ void independent_views() {
     NUI_CHECK(renderer_b.render(tree_b));
     NUI_CHECK(renderer_b.pixel(12, 9).r == expected_b);
 
-    ui::Brush retained;
+    ui::Brush retained{ui::Color{0.0f, 0.0f, 0.0f, 0.0f}};
     {
         const auto temporary = ui::NoiseSource::create(
             ui::NoiseType::WorleyF1,
