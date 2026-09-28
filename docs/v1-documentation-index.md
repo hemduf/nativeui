@@ -1,6 +1,6 @@
 # NativeUI 1.0 documentation index
 
-This page is the navigation entry point for the broad NativeUI 1.0 documentation set tracked by T122. It links stable documentation slices without trying to freeze public contracts that are still owned by active pre-1.0 blockers.
+This page is the navigation entry point for the NativeUI 1.0 documentation set tracked by T122. It links the current public documentation slices and records the remaining release-closeout boundaries against the current `main` branch.
 
 ## Start here
 
@@ -8,6 +8,8 @@ This page is the navigation entry point for the broad NativeUI 1.0 documentation
 | --- | --- | --- |
 | Understand the toolkit, supported platforms and ownership model | [NativeUI 1.0 overview and application lifetime](v1-overview-and-application-lifetime.md) | Retained architecture, `Application`/`UI`/window ownership, standalone vs embedded lifetime, UI-thread boundary |
 | Build retained interfaces and use standard controls | [Composition, layout and widgets](v1-composition-layout-and-widgets.md) | Static/dynamic composition, layout, input, focus, pointer capture, widgets, overlays and virtualization |
+| Understand observable state and UI bindings | [State and binding](v1-state-and-binding.md) | `State<T>`, `Binding<T>`, notification/lifetime rules, reentrancy and widget binding boundaries |
+| Customize drawing, styling and animation | [Rendering, styling and animation](v1-rendering-styling-and-animation.md) | Theme/style resolution, retained invalidation, custom painting and animation ownership |
 | Consume NativeUI from CMake | [Packaging and CMake](v1-packaging-and-cmake.md) | Installed/build-tree package concepts, public targets/helpers, platform attachment and binary resources |
 | Use services, tests and platform-specific limits | [Services, testing and limits](v1-services-testing-and-limits.md) | Resources, Dispatcher, DesktopServices, inspector/testing paths, supported/deferred platform scope |
 | Build NativeUI itself on Linux | [Linux build notes](linux-build.md) | Linux/X11 development dependencies and build commands |
@@ -18,28 +20,31 @@ This page is the navigation entry point for the broad NativeUI 1.0 documentation
 
 Normal application and component code should stay on documented NativeUI public headers and drawing abstractions. The v1 documentation set does not teach direct Skia, Pugl, platform-backend or `nativeui/detail/` APIs as normal consumer interfaces.
 
-The final exact 1.0 public API and CMake inventory is owned by T069. Until that freeze closes, documentation pages should describe only already-delivered behavior and must not turn provisional compatibility paths into promised stable API.
+T069 has been retired as a standalone freeze gate. The public/package contracts and exact-head qualification on current `main` are authoritative. Documentation pages should describe that shipped public surface and must not promote `nativeui/detail/`, renderer internals or compatibility-only paths into supported consumer API.
 
-## Deliberate freeze boundaries
+## Release closeout boundaries
 
-Several areas require final reconciliation before T122 can be considered complete:
+The main safety contracts that were previously provisional are now landed:
 
-- the final `State<T>` / `Binding<T>` ownership, reentrancy, notification and exception wording follows the T123/T124 safety work and the T069 API freeze;
-- retained callback, reconciliation, lifecycle, layout, paint and teardown exception guarantees follow the remaining pre-freeze safety blockers before T069 freezes those contracts;
-- the copy-pasteable Getting Started journey and production reference application belong to T070 and its child tickets rather than being duplicated here;
+- T123/T124 and their binding follow-ups closed the `State<T>` / `Binding<T>` ownership, notification, reentrancy and lifetime work;
+- T125/T130 closed retained dispatch, reconciliation, lifecycle, layout, paint and teardown exception-safety work;
+- T069 is deprecated as a standalone freeze gate; current public/package contracts on `main` are the working source of truth.
+
+T122 still needs final reconciliation around the remaining release sequence:
+
+- the copy-pasteable Getting Started journey and production reference application belong to T070 and should be linked rather than duplicated;
 - release-candidate procedure and final release-readiness wording belong to T071;
-- native accessibility bridges remain outside the 1.0 blocker set and are tracked separately; the current semantic/custom-component accessibility surface remains documented in [Accessibility](accessibility.md).
+- native accessibility bridges remain deferred to 1.2, while the current semantic/custom-component accessibility surface remains documented in [Accessibility](accessibility.md).
 
-Documentation should make these boundaries explicit instead of guessing the final result of an unfinished blocker.
-
+Documentation should distinguish those remaining release tasks from contracts that have already landed.
 ## Contributor and validation references
 
 The repository control documents remain the source of truth for contribution and qualification rules:
 
 - [`AGENTS.md`](../AGENTS.md) — repository workflow and engineering constraints;
 - [`CODE_REVIEW.md`](../CODE_REVIEW.md) — mandatory review domains;
-- [`CI_POLICY.md`](../CI_POLICY.md) — CI and final-qualification policy;
-- [`ROADMAP.md`](../ROADMAP.md) — delivery order and milestone state;
-- [`CONTEXT.md`](../CONTEXT.md) — current project context and active frontier.
+- [`ROADMAP.md`](../ROADMAP.md) — delivery order, milestone state and current release frontier;
+- [`VALIDATION.md`](../VALIDATION.md) — validation commands and qualification expectations;
+- [`DESIGN.md`](../DESIGN.md) — architectural design notes and public/private boundaries.
 
-This index is navigation only. It does not replace those policies, the T069 public API inventory, or ticket-specific acceptance criteria.
+This index is navigation only. It does not replace repository policy, current public/package contracts, exact-head qualification evidence or ticket-specific acceptance criteria.
