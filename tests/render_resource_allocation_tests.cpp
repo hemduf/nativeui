@@ -82,11 +82,14 @@ void image_texture_warm_hit_allocates_zero() {
         ++creates;
         return SkShaders::Color(SK_ColorRED);
     };
+    context.begin_frame();
     auto cold = context.acquire_image_texture(value, factory);
     NUI_CHECK(cold && cold.retained);
     NUI_CHECK(creates == 1);
     cold = {};
+    context.end_frame();
 
+    context.begin_frame();
     ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
     std::size_t allocations = 0;
     {
@@ -98,6 +101,7 @@ void image_texture_warm_hit_allocates_zero() {
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
     NUI_CHECK(creates == 1);
+    context.end_frame();
 }
 
 void runtime_shader_warm_hit_allocates_zero() {
@@ -121,11 +125,14 @@ void runtime_shader_warm_hit_allocates_zero() {
         ++creates;
         return ui::detail::materialize_shader_brush(*snapshot);
     };
+    context.begin_frame();
     auto cold = context.acquire_runtime_shader(*snapshot, factory);
     NUI_CHECK(cold && cold.retained);
     NUI_CHECK(creates == 1);
     cold = {};
+    context.end_frame();
 
+    context.begin_frame();
     ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
     std::size_t allocations = 0;
     {
@@ -137,6 +144,7 @@ void runtime_shader_warm_hit_allocates_zero() {
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
     NUI_CHECK(creates == 1);
+    context.end_frame();
 }
 
 void effect_warm_hit_allocates_zero() {
@@ -149,11 +157,14 @@ void effect_warm_hit_allocates_zero() {
         ++creates;
         return ui::detail::EffectCacheAccess::materialize(effect);
     };
+    context.begin_frame();
     auto cold = context.acquire_effect(effect, factory);
     NUI_CHECK(cold && cold.retained);
     NUI_CHECK(creates == 1);
     cold = {};
+    context.end_frame();
 
+    context.begin_frame();
     ui::detail::RenderResourceMaterializationContext::EffectAcquisition warm;
     std::size_t allocations = 0;
     {
@@ -165,6 +176,7 @@ void effect_warm_hit_allocates_zero() {
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
     NUI_CHECK(creates == 1);
+    context.end_frame();
 }
 
 void deep_shader_child_warm_hit_allocates_zero() {
@@ -204,11 +216,14 @@ void deep_shader_child_warm_hit_allocates_zero() {
         return ui::detail::materialize_shader_brush(*snapshot);
     };
 
+    context.begin_frame();
     auto cold = context.acquire_runtime_shader(*snapshot, factory);
     NUI_CHECK(cold && cold.retained && !cold.hit);
     NUI_CHECK(creates == 1);
     cold = {};
+    context.end_frame();
 
+    context.begin_frame();
     ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
     std::size_t allocations = 0;
     {
@@ -220,6 +235,7 @@ void deep_shader_child_warm_hit_allocates_zero() {
     NUI_CHECK(warm && warm.hit && warm.retained);
     NUI_CHECK(allocations == 0);
     NUI_CHECK(creates == 1);
+    context.end_frame();
 }
 
 } // namespace
