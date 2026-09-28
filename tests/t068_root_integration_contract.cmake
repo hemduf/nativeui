@@ -89,6 +89,7 @@ set(_accessibility_tests
   "nativeui_t068_semantic_native_generation|tests/t045/t068_semantic_native_generation_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_semantic_read_only|tests/t045/t068_semantic_read_only_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_widget_semantic_values|tests/t045/t068_widget_semantic_values_tests.cpp|nativeui_add_accessibility_test"
+  "nativeui_t068_widget_component_semantics|tests/t068_widget_component_semantics_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_semantic_view_state|tests/t045/t068_semantic_view_state_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_semantic_publication_batch|tests/t045/t068_semantic_publication_batch_tests.cpp|nativeui_add_accessibility_test"
   "nativeui_t068_semantic_native_bounds|tests/t045/t068_semantic_native_bounds_tests.cpp|nativeui_add_accessibility_test"
@@ -123,6 +124,30 @@ foreach(_entry IN LISTS _accessibility_tests)
       "T068 root integration contract: missing accessibility test source: ${_source}")
   endif()
 endforeach()
+
+# The standalone tests/t045 project ships only include directories: it has no
+# Skia include/link wiring. The helper-level widget semantic values suite must
+# therefore stay free of the umbrella paint/widget surface, while the
+# component-level widget assertions live in the root-only suite that links the
+# real Core through nativeui_add_accessibility_test.
+file(READ "${SOURCE_DIR}/tests/t045/t068_widget_semantic_values_tests.cpp" _standalone_widget_values)
+foreach(_forbidden IN ITEMS "nativeui/nativeui.hpp" "nativeui/paint.hpp" "nativeui/widgets.hpp")
+  string(FIND "${_standalone_widget_values}" "${_forbidden}" _forbidden_index)
+  if(NOT _forbidden_index EQUAL -1)
+    message(FATAL_ERROR
+      "T068 root integration contract: standalone widget values suite must stay Skia-free: ${_forbidden}")
+  endif()
+endforeach()
+require_text("${_standalone_widget_values}" "nativeui/detail/semantic_widget_info.hpp"
+  "standalone widget values helper include")
+file(READ "${SOURCE_DIR}/tests/t068_widget_component_semantics_tests.cpp" _root_widget_component)
+require_text("${_root_widget_component}" "nativeui/nativeui.hpp"
+  "root-only widget component suite umbrella include")
+require_text("${_root_widget_component}" "test_support.hpp"
+  "root-only widget component suite test support")
+file(READ "${SOURCE_DIR}/tests/t045/CMakeLists.txt" _standalone_cmake)
+require_text("${_standalone_cmake}" "nativeui_add_semantics_test(t068_widget_semantic_values"
+  "standalone widget values registration")
 
 # The T065-backed action suites keep the standalone dispatcher compilation.
 require_text("${_tests_cmake}"

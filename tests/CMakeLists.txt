@@ -411,6 +411,8 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_read_only_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_widget_semantic_values
     ${PROJECT_SOURCE_DIR}/tests/t045/t068_widget_semantic_values_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_t068_widget_component_semantics
+    ${PROJECT_SOURCE_DIR}/tests/t068_widget_component_semantics_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_semantic_view_state
     ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_view_state_tests.cpp)
   nativeui_add_accessibility_test(nativeui_t068_semantic_publication_batch
