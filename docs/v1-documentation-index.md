@@ -32,8 +32,8 @@ The main safety contracts that were previously provisional are now landed:
 
 T122 still needs final reconciliation around the remaining release sequence:
 
-- the copy-pasteable Getting Started journey and production reference application belong to T070 and should be linked rather than duplicated;
-- release-candidate procedure and final release-readiness wording belong to T071;
+- the production reference application and copy-pasteable Getting Started journey are not currently delivered; T070 is closed as not planned, while T133–T137 remain the separate follow-up track and should be linked here only when those artifacts exist;
+- T071 is closed as not planned; release/readiness wording must follow the current repository policies and exact-head qualification evidence rather than waiting on that retired gate;
 - native accessibility bridges remain deferred to 1.2, while the current semantic/custom-component accessibility surface remains documented in [Accessibility](accessibility.md).
 
 Documentation should distinguish those remaining release tasks from contracts that have already landed.
