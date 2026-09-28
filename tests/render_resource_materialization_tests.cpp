@@ -334,6 +334,33 @@ void image_and_runtime_shader_share_one_entry_budget() {
     context.end_frame();
 }
 
+void effects_share_the_unified_cache_budget() {
+    ui::detail::RenderResourceMaterializationContext context;
+    const auto blur = ui::Effect::gaussian_blur(4.0f, 6.0f);
+    const auto shadow = ui::Effect::drop_shadow(
+        {3.0f, -2.0f}, 5.0f, {0.1f, 0.2f, 0.3f, 0.7f});
+
+    int blur_creates = 0;
+    auto first = context.acquire_effect(blur, [&] {
+        ++blur_creates;
+        return ui::detail::EffectCacheAccess::materialize(blur);
+    });
+    auto warm = context.acquire_effect(blur, [&] {
+        ++blur_creates;
+        return ui::detail::EffectCacheAccess::materialize(blur);
+    });
+    NUI_CHECK(first && warm);
+    NUI_CHECK(blur_creates == 1);
+    NUI_CHECK(first.filter == warm.filter);
+
+    auto distinct = context.acquire_effect(shadow, [&] {
+        return ui::detail::EffectCacheAccess::materialize(shadow);
+    });
+    NUI_CHECK(distinct);
+    NUI_CHECK(context.retained_entries() == 2);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+}
+
 void invalid_texture_is_transient_and_never_retained() {
     ui::detail::RenderResourceMaterializationContext context;
     int creates = 0;
@@ -455,6 +482,7 @@ int main() {
     renderer_owned_texture_storage_is_accounted();
     runtime_shader_shares_the_same_budget_and_hits();
     image_and_runtime_shader_share_one_entry_budget();
+    effects_share_the_unified_cache_budget();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
     clear_releases_context_owned_frame_leases();
