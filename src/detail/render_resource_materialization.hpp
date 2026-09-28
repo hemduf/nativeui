@@ -13,6 +13,17 @@ namespace ui::detail {
 
 class RenderResourceMaterializationContext final {
 public:
+    struct ImageTextureAcquisition final {
+        sk_sp<SkShader> shader;
+        std::shared_ptr<const sk_sp<SkShader>> frame_lease;
+        bool hit{false};
+        bool retained{false};
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return static_cast<bool>(shader);
+        }
+    };
+
     static constexpr std::size_t kMaxRetainedEntries = 512;
     static constexpr std::size_t kMaxAccountedBytes =
         128U * 1024U * 1024U;
@@ -34,12 +45,13 @@ public:
     ~RenderResourceMaterializationContext() noexcept = default;
 
     template <class Factory>
-    [[nodiscard]] sk_sp<SkShader> acquire_image_texture(
+    [[nodiscard]] ImageTextureAcquisition acquire_image_texture(
         const ImageTexture& texture,
         Factory&& factory) {
         const auto key = image_texture_cache_key(texture);
         if (!key) {
-            return std::forward<Factory>(factory)();
+            auto shader = std::forward<Factory>(factory)();
+            return {std::move(shader), {}, false, false};
         }
 
         auto acquisition = image_shaders_.acquire(
@@ -50,7 +62,13 @@ public:
                 if (!shader) return {};
                 return std::make_shared<sk_sp<SkShader>>(std::move(shader));
             });
-        return acquisition ? *acquisition.resource : sk_sp<SkShader>{};
+        if (!acquisition) return {};
+
+        return {
+            *acquisition.resource,
+            std::move(acquisition.resource),
+            acquisition.hit,
+            acquisition.retained};
     }
 
     [[nodiscard]] std::size_t retained_entries() const noexcept {

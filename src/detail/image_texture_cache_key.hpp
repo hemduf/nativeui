@@ -4,14 +4,16 @@
 
 #include "image_access.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace ui::detail {
 
 struct ImageTextureCacheKey final {
-    const ImageData* backing{};
+    std::shared_ptr<const ImageData> backing;
     Rect source{};
     Rect destination{};
     TextureTileMode tile_x{TextureTileMode::Clamp};
@@ -48,7 +50,7 @@ private:
 struct ImageTextureCacheKeyHash final {
     [[nodiscard]] std::size_t operator()(
         const ImageTextureCacheKey& key) const noexcept {
-        std::size_t seed = std::hash<const ImageData*>{}(key.backing);
+        std::size_t seed = std::hash<const ImageData*>{}(key.backing.get());
         combine(seed, key.source.x);
         combine(seed, key.source.y);
         combine(seed, key.source.w);
@@ -94,7 +96,7 @@ image_texture_cache_key(const ImageTexture& texture) noexcept {
         return std::nullopt;
     }
 
-    const auto* backing = ImageAccess::identity(texture.image());
+    const auto& backing = ImageAccess::data(texture.image());
     if (!backing) return std::nullopt;
 
     const auto sampling = texture.sampling();

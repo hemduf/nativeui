@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 namespace {
 
@@ -59,6 +60,24 @@ void shared_image_and_copy_hit_identity() {
     NUI_CHECK(
         ui::detail::ImageTextureCacheKeyHash{}(*a) ==
         ui::detail::ImageTextureCacheKeyHash{}(*b));
+}
+
+void cache_key_keeps_backing_identity_alive() {
+    std::optional<ui::detail::ImageTextureCacheKey> retained_key;
+    {
+        const auto image = ui::Image::decode(kTinyRgbaPng);
+        NUI_CHECK(image.valid());
+        retained_key = ui::detail::image_texture_cache_key(base_texture(image));
+        NUI_CHECK(retained_key && retained_key->backing);
+        NUI_CHECK(retained_key->backing.use_count() >= 2);
+    }
+
+    NUI_CHECK(retained_key && retained_key->backing);
+    const auto copied_key = *retained_key;
+    NUI_CHECK(copied_key.backing == retained_key->backing);
+    NUI_CHECK(
+        ui::detail::ImageTextureCacheKeyHash{}(copied_key) ==
+        ui::detail::ImageTextureCacheKeyHash{}(*retained_key));
 }
 
 void independently_decoded_images_do_not_alias() {
@@ -159,6 +178,7 @@ void invalid_transform_is_never_a_retained_key() {
 
 int main() {
     shared_image_and_copy_hit_identity();
+    cache_key_keeps_backing_identity_alive();
     independently_decoded_images_do_not_alias();
     every_semantic_field_participates();
     signed_zero_is_semantically_equal_and_hash_consistent();

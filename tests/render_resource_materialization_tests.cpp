@@ -51,15 +51,43 @@ void retained_hit_skips_backend_creation() {
 
     auto first = context.acquire_image_texture(texture(image), factory);
     NUI_CHECK(first);
+    NUI_CHECK(first.shader);
+    NUI_CHECK(first.frame_lease);
+    NUI_CHECK(!first.hit);
+    NUI_CHECK(first.retained);
     NUI_CHECK(creates == 1);
     NUI_CHECK(context.retained_entries() == 1);
 
     auto second = context.acquire_image_texture(texture(image), factory);
     NUI_CHECK(second);
+    NUI_CHECK(second.shader);
+    NUI_CHECK(second.frame_lease);
+    NUI_CHECK(second.hit);
+    NUI_CHECK(second.retained);
     NUI_CHECK(creates == 1);
-    NUI_CHECK(first == second);
+    NUI_CHECK(first.shader == second.shader);
+    NUI_CHECK(first.frame_lease == second.frame_lease);
     NUI_CHECK(context.retained_entries() == 1);
     NUI_CHECK(context.retained_accounted_bytes() == 0);
+}
+
+void frame_lease_survives_cache_clear() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    auto acquisition = context.acquire_image_texture(
+        texture(image), [] { return SkShaders::Color(SK_ColorRED); });
+    NUI_CHECK(acquisition && acquisition.frame_lease);
+
+    const auto shader = acquisition.shader;
+    const auto frame_lease = acquisition.frame_lease;
+    context.clear();
+
+    NUI_CHECK(context.retained_entries() == 0);
+    NUI_CHECK(frame_lease);
+    NUI_CHECK(*frame_lease == shader);
+    NUI_CHECK(acquisition.shader == shader);
 }
 
 void different_semantics_create_independent_entries() {
@@ -77,8 +105,9 @@ void different_semantics_create_independent_entries() {
     auto data = color;
     data.set_interpretation(ui::TextureInterpretation::Data);
 
-    NUI_CHECK(context.acquire_image_texture(color, factory));
-    NUI_CHECK(context.acquire_image_texture(data, factory));
+    auto color_acquisition = context.acquire_image_texture(color, factory);
+    auto data_acquisition = context.acquire_image_texture(data, factory);
+    NUI_CHECK(color_acquisition && data_acquisition);
     NUI_CHECK(creates == 2);
     NUI_CHECK(context.retained_entries() == 2);
 }
@@ -88,11 +117,15 @@ void invalid_texture_is_transient_and_never_retained() {
     int creates = 0;
 
     ui::ImageTexture invalid;
-    auto shader = context.acquire_image_texture(invalid, [&] {
+    auto acquisition = context.acquire_image_texture(invalid, [&] {
         ++creates;
         return SkShaders::Color(SK_ColorBLUE);
     });
-    NUI_CHECK(shader);
+    NUI_CHECK(acquisition);
+    NUI_CHECK(acquisition.shader);
+    NUI_CHECK(!acquisition.frame_lease);
+    NUI_CHECK(!acquisition.hit);
+    NUI_CHECK(!acquisition.retained);
     NUI_CHECK(creates == 1);
     NUI_CHECK(context.retained_entries() == 0);
 }
@@ -104,22 +137,25 @@ void clear_is_instance_local() {
     ui::detail::RenderResourceMaterializationContext a;
     ui::detail::RenderResourceMaterializationContext b;
 
-    NUI_CHECK(a.acquire_image_texture(
-        texture(image), [] { return SkShaders::Color(SK_ColorRED); }));
-    NUI_CHECK(b.acquire_image_texture(
-        texture(image), [] { return SkShaders::Color(SK_ColorRED); }));
+    auto a_acquisition = a.acquire_image_texture(
+        texture(image), [] { return SkShaders::Color(SK_ColorRED); });
+    auto b_acquisition = b.acquire_image_texture(
+        texture(image), [] { return SkShaders::Color(SK_ColorRED); });
+    NUI_CHECK(a_acquisition && b_acquisition);
     NUI_CHECK(a.retained_entries() == 1);
     NUI_CHECK(b.retained_entries() == 1);
 
     a.clear();
     NUI_CHECK(a.retained_entries() == 0);
     NUI_CHECK(b.retained_entries() == 1);
+    NUI_CHECK(b_acquisition.frame_lease);
 }
 
 } // namespace
 
 int main() {
     retained_hit_skips_backend_creation();
+    frame_lease_survives_cache_clear();
     different_semantics_create_independent_entries();
     invalid_texture_is_transient_and_never_retained();
     clear_is_instance_local();
