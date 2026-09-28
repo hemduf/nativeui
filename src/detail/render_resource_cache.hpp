@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace ui::detail {
 
@@ -34,7 +35,13 @@ public:
 
     explicit RenderResourceCache(Limits limits = {})
         : limits_(limits) {
-        index_.reserve(limits_.max_entries);
+        // One additional bucket slot keeps index iterators stable while a
+        // candidate entry is staged ahead of transactional eviction.
+        const auto staged_capacity =
+            limits_.max_entries < index_.max_size()
+                ? limits_.max_entries + 1
+                : limits_.max_entries;
+        index_.reserve(staged_capacity);
     }
 
     RenderResourceCache(const RenderResourceCache&) = delete;
@@ -62,10 +69,14 @@ public:
             return {std::move(resource), false, false};
         }
 
+        // Resolve every victim through the index before publishing the
+        // candidate. Hash/equality and eviction-plan allocation may throw, but
+        // at this point the cache and its LRU order are still untouched.
+        auto eviction_plan = prepare_evictions(accounted_bytes);
+
         // Stage every potentially-throwing insertion before evicting an
-        // existing entry. A failed key copy, list allocation, hash/equality
-        // call, or unordered-map node allocation must leave the retained
-        // cache and its LRU order unchanged.
+        // existing entry. The constructor reserves one extra map slot, so this
+        // insertion cannot rehash and invalidate the prepared index iterators.
         entries_.push_back(Entry{key, resource, accounted_bytes});
         const auto inserted_entry = std::prev(entries_.end());
         try {
@@ -81,7 +92,7 @@ public:
             throw;
         }
 
-        evict_until_room_for_inserted(accounted_bytes, inserted_entry);
+        commit_evictions(eviction_plan);
         retained_accounted_bytes_ += accounted_bytes;
         return {std::move(resource), false, true};
     }
@@ -113,6 +124,13 @@ private:
 
     using EntryList = std::list<Entry>;
     using EntryIterator = typename EntryList::iterator;
+    using Index = std::unordered_map<Key, EntryIterator, Hash, Equal>;
+    using IndexIterator = typename Index::iterator;
+
+    struct EvictionVictim {
+        EntryIterator entry;
+        IndexIterator index;
+    };
 
     [[nodiscard]] bool can_retain(std::size_t accounted_bytes) const noexcept {
         return limits_.max_entries != 0 &&
@@ -148,45 +166,54 @@ private:
         return false;
     }
 
-    void evict_until_room_for_inserted(
-        std::size_t incoming_bytes,
-        EntryIterator inserted_entry) {
-        const auto fits_after_insert = [this, incoming_bytes]() noexcept {
-            return entries_.size() <= limits_.max_entries &&
-                   retained_accounted_bytes_ <= limits_.max_accounted_bytes &&
-                   incoming_bytes <=
-                       limits_.max_accounted_bytes - retained_accounted_bytes_;
-        };
+    [[nodiscard]] std::vector<EvictionVictim> prepare_evictions(
+        std::size_t incoming_bytes) {
+        std::vector<EvictionVictim> victims;
+        std::size_t simulated_entries = entries_.size();
+        std::size_t simulated_bytes = retained_accounted_bytes_;
+        if (has_room(simulated_entries, simulated_bytes, incoming_bytes)) {
+            return victims;
+        }
 
-        for (auto it = entries_.begin(); !fits_after_insert();) {
-            if (it == entries_.end()) {
-                throw std::logic_error(
-                    "RenderResourceCache eviction preflight was inconsistent");
-            }
-            if (it == inserted_entry || it->resource.use_count() != 1) {
-                ++it;
-                continue;
-            }
+        for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+            if (it->resource.use_count() != 1) continue;
 
-            auto victim = it++;
-            const auto found = index_.find(victim->key);
-            if (found == index_.end()) {
-                throw std::logic_error(
-                    "RenderResourceCache index lost an LRU entry");
-            }
-            if (victim->accounted_bytes > retained_accounted_bytes_) {
+            if (it->accounted_bytes > simulated_bytes) {
                 throw std::logic_error(
                     "RenderResourceCache retained-byte accounting underflow");
             }
-            index_.erase(found);
-            retained_accounted_bytes_ -= victim->accounted_bytes;
-            entries_.erase(victim);
+            const auto found = index_.find(it->key);
+            if (found == index_.end() || found->second != it) {
+                throw std::logic_error(
+                    "RenderResourceCache index lost an LRU entry");
+            }
+
+            // Allocation here is intentionally still part of the prepare
+            // phase. If it fails, no retained cache state has changed.
+            victims.push_back(EvictionVictim{it, found});
+            --simulated_entries;
+            simulated_bytes -= it->accounted_bytes;
+            if (has_room(simulated_entries, simulated_bytes, incoming_bytes)) {
+                return victims;
+            }
+        }
+
+        throw std::logic_error(
+            "RenderResourceCache eviction preflight was inconsistent");
+    }
+
+    void commit_evictions(
+        const std::vector<EvictionVictim>& victims) noexcept {
+        for (const auto& victim : victims) {
+            retained_accounted_bytes_ -= victim.entry->accounted_bytes;
+            index_.erase(victim.index);
+            entries_.erase(victim.entry);
         }
     }
 
     Limits limits_;
     EntryList entries_;
-    std::unordered_map<Key, EntryIterator, Hash, Equal> index_;
+    Index index_;
     std::size_t retained_accounted_bytes_{0};
 };
 
