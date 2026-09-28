@@ -45,18 +45,56 @@ Theme values are not a synchronization primitive. Replacing the theme on a live 
 
 ## Lexical style scopes
 
-[`include/nativeui/style_scope.hpp`](../include/nativeui/style_scope.hpp) provides typed inheritable overrides for one retained subtree.
+[`include/nativeui/style_scope.hpp`](../include/nativeui/style_scope.hpp) provides typed inheritable Theme overrides for exactly one retained child subtree. A scope does not own a second style engine: it resolves a descendant `Theme`, and the normal typed widget resolvers then apply component-local recipes and `VisualState` on top.
 
-`StyleScopeOverrides` mirrors the inheritable theme families with optional fields. Empty fields inherit the nearest outer value. When scopes are nested, values resolve outer-to-inner and the nearest supplied field wins independently.
+`StyleScopeOverrides` is sparse owned value data. Every empty optional inherits the nearest outer value; nested scopes are applied outer-to-inner, so the nearest supplied field wins independently. The five override groups mirror Theme:
 
-A style scope intentionally cannot encode arbitrary component state. Per-instance width/height constraints, Flex/Grid placement, scroll position, callbacks, models and availability are not inheritable style properties.
+- `StyleScopePaletteOverrides` covers background/surface/text/muted/border/accent/disabled/selection/focus/control/track colors. Colors are copied verbatim.
+- `StyleScopeTypographyOverrides` owns preferred/fallback families plus base/control/label sizes, weights and slant. Font sizes are logical UI units; the scope does not perform font discovery.
+- `StyleScopeSpacingOverrides` and `StyleScopeRadiiOverrides` contain logical-unit spacing/radius tokens.
+- `StyleScopeControlOverrides` contains logical-unit standard-control metrics. `minimum_width`, `control_height` and `minimum_hit_target` are layout-affecting; thumb/track/border/focus-ring values follow the Theme classifier as paint metrics.
+- `StyleScopeOverrides` groups those families and has exact value equality. Float/color comparisons are exact; ordered font fallback vectors are significant.
 
-Two retained forms are supported by the current implementation:
+The scope layer stores numeric values verbatim rather than clamping or normalizing them. Per-instance width/height constraints, Flex/Grid placement, scroll position, callbacks, models and availability are intentionally absent: those remain component/retained state rather than inheritable style.
 
-- an immutable `StyleScopeOverrides` value for the retained lifetime;
-- a `State<StyleScopeOverrides>`-backed form that can replace the effective scope on the UI thread and classify the resulting invalidation as none/paint/layout.
+### Pure scope resolution and invalidation
 
-The `State<T>`/`Binding<T>` notification, recursive-write, callback-exception and subscription-lifetime safety work has landed through T123/T124 and the associated binding follow-ups. This chapter still focuses on the presentation result and invalidation boundary; detailed observable semantics live in [State and binding](v1-state-and-binding.md).
+`apply_style_scope_overrides(inherited, overrides)` receives `inherited` by value and returns a fully-owned Theme. Empty fields preserve inherited values. The result borrows nothing from either argument; applying nested scopes is therefore simply repeated outer-to-inner application. Typography strings/vectors can allocate and allocation failures propagate.
+
+`classify_style_scope_change(inherited, before, after)` first resolves both patches against the same inherited Theme and then delegates to `classify_theme_change()`. This makes **effective** equality authoritative: two different sparse patches that yield the same descendant Theme produce `ThemeInvalidation::None`. Typography/layout-token differences produce `Layout`; other effective differences produce `Paint`.
+
+Both helpers are pure with respect to retained UI state: no callbacks or native/backend operations occur. They are ordinary preparation/UI-domain helpers, not audio-real-time operations, because owned Theme copies can allocate.
+
+### Retained StyleScope lifetime
+
+`StyleScope` wraps exactly one child Spec and is transparent to that child's constraints and final bounds. The value constructor owns an immutable override patch for the retained lifetime. The `Binding<StyleScopeOverrides>` constructor stores the binding handle; the `State<StyleScopeOverrides>&` convenience constructor delegates through `State::binding()` and does not retain a raw `State*`.
+
+A live binding-backed scope subscribes only while mounted. Updates are UI/main-thread operations and follow the normal State/Binding notification/reentrancy contract. Each replacement resolves against the current inherited Theme, classifies the effective delta, and requests no invalidation, bounded paint invalidation, or layout+paint as appropriate. Unmount releases the subscription and callback bridge, so later State changes cannot call into the removed retained component.
+
+Scopes remain instance/tree-local. Sibling subtrees do not inherit one another's overrides, and independent UI trees share no mutable current-scope registry. Dynamic descendants inserted later resolve the current lexical ancestry when they enter the retained tree.
+
+```cpp
+ui::StyleScopeOverrides panel;
+panel.palette.surface = ui::Color{0.10f, 0.14f, 0.20f, 1.0f};
+panel.typography.control_size = 15.0f;
+panel.controls.control_height = 38.0f;
+
+ui::State<ui::StyleScopeOverrides> live_scope{panel};
+
+auto subtree = ui::StyleScope{
+    live_scope,
+    ui::Column{
+        ui::Button{"Scoped", [] {}},
+        ui::Label{"Inherits the same lexical Theme"},
+    }};
+
+// Later, on the owning UI thread:
+auto next = live_scope.get();
+next.palette.surface = ui::Color{0.18f, 0.12f, 0.10f, 1.0f}; // paint-only
+live_scope.set(next);
+```
+
+The maintained [`t039_style_scope`](../examples/features/t039_style_scope.cpp) example covers nested precedence, exact no-op/paint/layout invalidation, sibling/two-tree isolation, dynamic insertion and restoration after scope removal.
 
 ## Typed widget styles
 

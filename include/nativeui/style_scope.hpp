@@ -1,5 +1,12 @@
 #pragma once
 
+/// \file
+/// Lexically inheritable Theme overrides for one retained subtree.
+///
+/// Override values are owned C++ data. Float geometry/typography tokens use
+/// logical UI units and are not clamped by this layer. Live StyleScope updates
+/// are UI/main-thread work and are not audio/DSP real-time operations.
+
 #include <nativeui/component_base.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/state.hpp>
@@ -28,22 +35,38 @@ namespace detail {
 
 } // namespace detail
 
-/// Typed inheritable palette overrides for one lexical style scope.
+/// Sparse inheritable palette overrides for one lexical scope.
+/// Empty optionals inherit from the nearest outer scope/root Theme. Colors are
+/// copied verbatim; this value owns no retained/backend object.
 struct StyleScopePaletteOverrides {
+    /// Root/background color override.
     std::optional<Color> background;
+    /// Elevated/control surface color override.
     std::optional<Color> surface;
+    /// Primary text color override.
     std::optional<Color> text;
+    /// Secondary/muted text color override.
     std::optional<Color> muted_text;
+    /// Standard border color override.
     std::optional<Color> border;
+    /// Accent/active color override.
     std::optional<Color> accent;
+    /// Disabled-content color override.
     std::optional<Color> disabled;
+    /// Selection-highlight color override.
     std::optional<Color> selection;
+    /// Focus-indicator color override.
     std::optional<Color> focus;
+    /// Standard control background override.
     std::optional<Color> control_background;
+    /// Standard hover background override.
     std::optional<Color> control_hover;
+    /// Active/pressed highlight override.
     std::optional<Color> active_highlight;
+    /// Standard track color override.
     std::optional<Color> track;
 
+    /// Exact field-wise equality, including exact RGBA float components.
     [[nodiscard]] bool operator==(const StyleScopePaletteOverrides& other) const noexcept {
         return detail::style_scope_optional_color_equal(background, other.background) &&
             detail::style_scope_optional_color_equal(surface, other.surface) &&
@@ -62,65 +85,105 @@ struct StyleScopePaletteOverrides {
     }
 };
 
-/// Typed inheritable typography overrides. These are style defaults only;
-/// component/layout constraints are deliberately absent from the scope API.
+/// Sparse inheritable typography defaults.
+/// Family strings/vectors are owned; sizes use logical UI units. These values
+/// affect descendants only and do not perform font discovery themselves.
 struct StyleScopeTypographyOverrides {
+    /// Owned preferred font-family name.
     std::optional<std::string> family;
+    /// Owned ordered fallback-family names.
     std::optional<std::vector<std::string>> fallback_families;
+    /// Base/body font size in logical UI units.
     std::optional<float> base_size;
+    /// Standard control font size in logical UI units.
     std::optional<float> control_size;
+    /// Label font size in logical UI units.
     std::optional<float> label_size;
+    /// Base/body font weight.
     std::optional<FontWeight> base_weight;
+    /// Standard control font weight.
     std::optional<FontWeight> control_weight;
+    /// Label font weight.
     std::optional<FontWeight> label_weight;
+    /// Inherited font slant.
     std::optional<FontSlant> slant;
 
+    /// Exact value equality, including ordered fallback families and floats.
     [[nodiscard]] bool operator==(const StyleScopeTypographyOverrides&) const = default;
 };
 
+/// Sparse inheritable spacing-scale overrides, all in logical UI units.
 struct StyleScopeSpacingOverrides {
+    /// Extra-small spacing token.
     std::optional<float> xs;
+    /// Small spacing token.
     std::optional<float> sm;
+    /// Medium spacing token.
     std::optional<float> medium;
+    /// Large spacing token.
     std::optional<float> large;
+    /// Extra-large spacing token.
     std::optional<float> xl;
 
+    /// Exact token equality.
     [[nodiscard]] bool operator==(const StyleScopeSpacingOverrides&) const = default;
 };
 
+/// Sparse inheritable corner-radius overrides in logical UI units.
 struct StyleScopeRadiiOverrides {
+    /// Small radius token.
     std::optional<float> sm;
+    /// Medium radius token.
     std::optional<float> medium;
+    /// Large radius token.
     std::optional<float> large;
 
+    /// Exact token equality.
     [[nodiscard]] bool operator==(const StyleScopeRadiiOverrides&) const = default;
 };
 
-/// Inheritable standard-control defaults. These are the same typed defaults
-/// already supplied by Theme; per-instance width/height/Flex/Grid/scroll state
-/// and availability/callback/model state are intentionally not representable.
+/// Sparse inheritable standard-control metrics.
+///
+/// All float values use logical UI units. Per-instance layout constraints,
+/// scroll/model/callback/availability state are intentionally not inheritable.
 struct StyleScopeControlOverrides {
+    /// Standard minimum control width; layout-affecting.
     std::optional<float> minimum_width;
+    /// Standard control height; layout-affecting.
     std::optional<float> control_height;
+    /// Minimum interactive target size; layout-affecting.
     std::optional<float> minimum_hit_target;
+    /// Standard slider thumb diameter.
     std::optional<float> thumb_diameter;
+    /// Standard track thickness.
     std::optional<float> track_thickness;
+    /// Standard border thickness.
     std::optional<float> border_width;
+    /// Standard focus-ring thickness.
     std::optional<float> focus_ring_width;
 
+    /// Exact token equality.
     [[nodiscard]] bool operator==(const StyleScopeControlOverrides&) const = default;
 };
 
-/// One lexical scope patch. Empty fields inherit from the nearest outer scope
-/// or, ultimately, the owning UI Theme. Applying multiple values outer-to-inner
-/// therefore implements nearest-scope-wins independently for each field.
+/// One complete sparse lexical-scope patch.
+///
+/// Empty fields inherit from the nearest outer scope/root Theme. Applying
+/// patches outer-to-inner implements nearest-scope-wins independently per
+/// field; the object is ordinary owned value data with no retained identity.
 struct StyleScopeOverrides {
+    /// Inheritable palette fields.
     StyleScopePaletteOverrides palette;
+    /// Inheritable typography fields.
     StyleScopeTypographyOverrides typography;
+    /// Inheritable spacing tokens.
     StyleScopeSpacingOverrides spacing;
+    /// Inheritable corner-radius tokens.
     StyleScopeRadiiOverrides radii;
+    /// Inheritable standard-control metrics.
     StyleScopeControlOverrides controls;
 
+    /// Exact field-wise value equality.
     [[nodiscard]] bool operator==(const StyleScopeOverrides&) const = default;
 };
 
@@ -133,9 +196,13 @@ inline void apply_scope_value(T& target, const std::optional<T>& value) {
 
 } // namespace detail
 
-/// Apply one typed scope patch to an already-resolved inherited Theme value.
-/// Call this outermost-to-innermost to obtain the lexical scope result. T038
-/// component-local recipes still apply afterwards in each widget resolver.
+/// Apply one scope patch to an already-resolved inherited Theme value.
+///
+/// `inherited` is passed by value and the returned Theme owns all copied data;
+/// the input Theme/overrides may be destroyed immediately after return. Empty
+/// optionals preserve inherited fields. Call outer-to-inner for nested scopes.
+/// The function invokes no callbacks/native work, but string/vector copies may
+/// allocate and propagate allocation failure.
 [[nodiscard]] inline Theme apply_style_scope_overrides(
     Theme inherited, const StyleScopeOverrides& overrides) {
     detail::apply_scope_value(inherited.palette.background, overrides.palette.background);
@@ -196,8 +263,13 @@ inline void apply_scope_value(T& target, const std::optional<T>& value) {
     return inherited;
 }
 
-/// Classify the effective invalidation caused by replacing one scope patch
-/// under a specific inherited Theme. Equal effective values are a strict no-op.
+/// Classify effective retained work when one scope patch is replaced.
+///
+/// Both patches are resolved against the supplied inherited Theme before
+/// comparison, so syntactically different overrides that produce the same
+/// effective Theme return None. Layout-affecting theme tokens return Layout;
+/// other effective changes return Paint. This pure helper performs no retained
+/// mutation/callbacks, but Theme copies may allocate.
 [[nodiscard]] inline ThemeInvalidation classify_style_scope_change(
     const Theme& inherited,
     const StyleScopeOverrides& before,
@@ -311,28 +383,39 @@ private:
 
 } // namespace detail
 
-/// One explicit lexical style scope. The value form is immutable for the
-/// retained lifetime; the Binding-backed form supports UI-thread replacement
-/// with exact effective no-op/paint/layout invalidation classification. Legacy
-/// State syntax delegates through State::binding() and never retains State*.
+/// Retained lexical style boundary for exactly one child subtree.
+///
+/// The value form owns an immutable patch. Binding/State forms subscribe only
+/// while mounted, apply updates in the UI/main-thread domain, and classify the
+/// effective descendant change as None/Paint/Layout. The scope is transparent
+/// to child constraints/placement and introduces no process-global style state.
 class StyleScope {
 public:
+    /// Construct an immutable scope, owning `overrides` and the child's Spec.
     template <class Child>
     StyleScope(StyleScopeOverrides overrides, Child&& child)
         : overrides_(std::move(overrides)) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+    /// Construct a live scope from a Binding and own the child's Spec.
+    /// The Binding follows the normal State/Binding UI-thread/lifetime contract.
     template <class Child>
     StyleScope(Binding<StyleScopeOverrides> overrides, Child&& child)
         : state_(std::move(overrides)) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+    /// Convenience overload using `overrides.binding()`; no raw State* is kept.
     template <class Child>
     StyleScope(State<StyleScopeOverrides>& overrides, Child&& child)
         : StyleScope(overrides.binding(), std::forward<Child>(child)) {}
 
+    /// Consume the builder and return a retained specification.
+    ///
+    /// The produced Spec owns either the immutable override value or a copy of
+    /// the Binding handle plus the single child Spec. Live subscriptions are
+    /// established by the retained component on mount and released on unmount.
     Spec spec() && {
         if (state_) {
             auto state = *state_;
