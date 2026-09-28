@@ -1,6 +1,6 @@
 # NativeUI 1.0 resources, services, testing and limits
 
-This chapter documents stable NativeUI 1.0 resource/service contracts, the project testing and debugging model, and the supported/deferred platform boundary. The landed state/binding contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md), and the current package/CMake contract is documented in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md). This chapter deliberately does not duplicate the canonical Getting Started/reference application owned by T070 or the exact release-candidate policy owned by T071.
+This chapter documents stable NativeUI 1.0 resource/service contracts, the project testing and debugging model, and the supported/deferred platform boundary. The landed state/binding contract is documented in [`v1-state-and-binding.md`](v1-state-and-binding.md), and the current package/CMake contract is documented in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md). A canonical Getting Started/reference application and replacement release-qualification plan are not currently delivered: T070 and T071 are closed as not planned, and the roadmap explicitly requires both paths to be replanned.
 
 ## Resources
 
@@ -22,7 +22,7 @@ Invalid tables fail as a whole rather than exposing a valid prefix. Direct `find
 
 `ResourceManagerProvider` is the compatibility adapter for APIs that require owned resource bytes. A successful non-empty load copies the selected payload into an owned vector. That operation may allocate and is explicitly a resource-preparation/UI-side operation, not a real-time audio operation.
 
-The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) demonstrates the public resource lookup boundary and its deterministic `--self-test` path. Package/CMake guidance lives in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md); the final copy-pasteable Getting Started/reference application remains T070-owned, so this chapter does not duplicate that tutorial surface.
+The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) demonstrates the public resource lookup boundary and its deterministic `--self-test` path. Package/CMake guidance lives in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md); until the replanned reference-application track produces a maintained Getting Started artifact, this chapter does not invent that tutorial surface.
 
 ## Dispatcher: worker-to-UI handoff
 
@@ -104,7 +104,7 @@ Feature examples follow two complementary modes:
 - normal interactive mode demonstrates the public API as an application developer would use it;
 - `--self-test` performs deterministic non-interactive acceptance checks and returns a non-zero result on failure.
 
-The focused example remains the canonical small demonstration for its feature. T122 documentation should link to those examples rather than copying large code snippets that can silently drift. The final copy-pasteable Getting Started application belongs to T070.
+The focused example remains the canonical small demonstration for its feature. T122 documentation should link to those examples rather than copying large code snippets that can silently drift. A copy-pasteable Getting Started application should be linked only when the replanned T133–T137 track produces one.
 
 ### Component gallery
 
@@ -182,9 +182,9 @@ Direct Skia, Pugl, AppKit, Win32/X11 or `nativeui/detail/` implementation APIs a
 
 This chapter is reconciled with the landed state/binding and package/public-surface work represented by current `main`. Those contracts should be kept synchronized as the implementation evolves rather than treated as future freeze gates.
 
-T122 still needs final release-facing reconciliation with:
+The remaining release-facing dependencies are replacement plans, not T070/T071 gates:
 
-- T070 for the canonical reference application, Getting Started path and navigation boundary;
-- T071 for final NativeUI 1.0 release/support wording and exact release-candidate policy.
+- replan the canonical reference application / Getting Started path after T070 closed as not planned; T133–T137 remain unresolved;
+- define the replacement NativeUI 1.0 release-qualification/readiness ticket after T071 closed as not planned, then use current repository policy and exact-head evidence.
 
-Until those remaining release artifacts land, this chapter links to stable implementation-facing sources of truth and avoids inventing their final tutorial or release wording.
+Until those replacement artifacts exist, this chapter links to stable implementation-facing sources of truth and avoids inventing their final tutorial or release wording.
