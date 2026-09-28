@@ -2,6 +2,13 @@
 
 A C++20 UI-only framework proof of concept for standalone applications and embedded/plugin views.
 
+## Documentation
+
+The NativeUI 1.0 documentation entry point is [`docs/v1-documentation-index.md`](docs/v1-documentation-index.md). It links the current chapters for application lifetime, composition/layout/widgets, state and binding, rendering/styling/animation, packaging/CMake, services/testing/platform limits, accessibility and performance.
+
+For contributors, start with [`AGENTS.md`](AGENTS.md), [`CODE_REVIEW.md`](CODE_REVIEW.md), [`ROADMAP.md`](ROADMAP.md) and [`VALIDATION.md`](VALIDATION.md).
+
+
 ## Architecture
 
 - **Pugl**: native windowing, parent/child embedding, input, clipboard and event pump.
@@ -360,7 +367,7 @@ the project.
 
 ## Project continuation / agent recovery
 
-The backlog is available as [52 GitHub issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue),
+The backlog is available in [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue),
 organized by priority, status and [roadmap milestone](https://github.com/hemduf/nativeui/milestones?state=all).
 GitHub is the source of truth for ticket descriptions, status, dependencies and
 discussion. Local `TICKETS.md` and `tickets/` copies may exist for offline recovery,
@@ -369,13 +376,13 @@ but are ignored by Git and are not required after cloning.
 The repository contains the continuation documentation:
 
 - `AGENTS.md` — mandatory development/TDD/review/recovery workflow;
-- `CODE_REVIEW.md` — mandatory plug-in-host-safe C++/platform/Objective-C review gate;
-- `CONTEXT.md` — compact current-state context for resuming without chat history;
-- `ROADMAP.md` — milestone roadmap from POC to reusable toolkit;
-- `PLAN.md` — implementation sequencing and rationale;
+- `CODE_REVIEW.md` — mandatory C++/platform/Objective-C review gate;
+- `ROADMAP.md` — milestone roadmap and current delivery frontier;
+- `VALIDATION.md` — validation commands and qualification expectations;
+- `DESIGN.md` — architecture and design constraints;
 - [GitHub Issues](https://github.com/hemduf/nativeui/issues?q=is%3Aissue) — actionable tickets with status, dependencies, acceptance criteria and tests.
 
-Any agent resuming the project should start with `AGENTS.md`, then `CODE_REVIEW.md`, then `CONTEXT.md`, and follow the dependency-driven ticket selection rules in `AGENTS.md`. Read the selected GitHub issue for updates; synchronize optional local recovery copies if present.
+Any agent resuming the project should start with `AGENTS.md`, `CODE_REVIEW.md` and `ROADMAP.md`, then read the selected GitHub issue and follow the dependency-driven ticket selection rules in `AGENTS.md`.
 
 
 ## Feature examples
