@@ -4,6 +4,7 @@
 #include <nativeui/shader.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <span>
 
 namespace ui::detail {
@@ -19,6 +20,16 @@ struct ShaderBrushAccess {
     [[nodiscard]] static const Brush* child(
         const Brush& brush,
         std::size_t index) noexcept;
+
+    [[nodiscard]] static const std::shared_ptr<const ShaderBrushSnapshot>*
+    snapshot(const Brush& brush) noexcept;
+
+    [[nodiscard]] static std::size_t semantic_hash(
+        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept;
+
+    [[nodiscard]] static bool semantic_equal(
+        const std::shared_ptr<const ShaderBrushSnapshot>& a,
+        const std::shared_ptr<const ShaderBrushSnapshot>& b) noexcept;
 };
 
 } // namespace ui::detail

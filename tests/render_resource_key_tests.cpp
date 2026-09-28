@@ -1,4 +1,5 @@
 #include "src/detail/image_texture_cache_key.hpp"
+#include "src/detail/shader_brush_access.hpp"
 #include "test_support.hpp"
 
 #include <array>
@@ -153,6 +154,96 @@ void signed_zero_is_semantically_equal_and_hash_consistent() {
         ui::detail::ImageTextureCacheKeyHash{}(*b));
 }
 
+void shader_snapshot_semantics_are_stable() {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        uniform float gain;
+        uniform shader child;
+        half4 main(float2 p) {
+            return child.eval(p) * gain;
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+    const ui::Brush image_child{base_texture(image)};
+
+    ui::ShaderInstance first{compiled.program};
+    NUI_CHECK(first.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
+    NUI_CHECK(first.set_child("child", image_child) == ui::ShaderSetResult::Ok);
+
+    ui::ShaderInstance second{compiled.program};
+    NUI_CHECK(second.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
+    NUI_CHECK(second.set_child("child", image_child) == ui::ShaderSetResult::Ok);
+
+    const ui::Brush a{first};
+    const ui::Brush b{second};
+    const auto* a_snapshot = ui::detail::ShaderBrushAccess::snapshot(a);
+    const auto* b_snapshot = ui::detail::ShaderBrushAccess::snapshot(b);
+    NUI_CHECK(a_snapshot && *a_snapshot && b_snapshot && *b_snapshot);
+    NUI_CHECK(ui::detail::ShaderBrushAccess::semantic_equal(
+        *a_snapshot, *b_snapshot));
+    NUI_CHECK(
+        ui::detail::ShaderBrushAccess::semantic_hash(*a_snapshot) ==
+        ui::detail::ShaderBrushAccess::semantic_hash(*b_snapshot));
+
+    second.set_float("gain", 0.75f);
+    const ui::Brush changed_binding{second};
+    const auto* changed_binding_snapshot =
+        ui::detail::ShaderBrushAccess::snapshot(changed_binding);
+    NUI_CHECK(changed_binding_snapshot && *changed_binding_snapshot);
+    NUI_CHECK(!ui::detail::ShaderBrushAccess::semantic_equal(
+        *a_snapshot, *changed_binding_snapshot));
+
+    auto data_texture = base_texture(image);
+    data_texture.set_interpretation(ui::TextureInterpretation::Data);
+    ui::ShaderInstance changed_child{compiled.program};
+    NUI_CHECK(changed_child.set_float("gain", 0.5f) == ui::ShaderSetResult::Ok);
+    NUI_CHECK(changed_child.set_child("child", ui::Brush{data_texture}) ==
+              ui::ShaderSetResult::Ok);
+    const ui::Brush changed_child_brush{changed_child};
+    const auto* changed_child_snapshot =
+        ui::detail::ShaderBrushAccess::snapshot(changed_child_brush);
+    NUI_CHECK(changed_child_snapshot && *changed_child_snapshot);
+    NUI_CHECK(!ui::detail::ShaderBrushAccess::semantic_equal(
+        *a_snapshot, *changed_child_snapshot));
+}
+
+void nested_shader_snapshot_semantics_do_not_flatten_on_lookup() {
+    const auto leaf_compiled = ui::ShaderProgram::compile(R"(
+        uniform float value;
+        half4 main(float2) { return half4(value, value, value, 1.0); }
+    )");
+    const auto parent_compiled = ui::ShaderProgram::compile(R"(
+        uniform shader child;
+        half4 main(float2 p) { return child.eval(p); }
+    )");
+    NUI_CHECK(leaf_compiled.ok() && parent_compiled.ok());
+
+    ui::ShaderInstance leaf_a{leaf_compiled.program};
+    ui::ShaderInstance leaf_b{leaf_compiled.program};
+    NUI_CHECK(leaf_a.set_float("value", 0.25f) == ui::ShaderSetResult::Ok);
+    NUI_CHECK(leaf_b.set_float("value", 0.25f) == ui::ShaderSetResult::Ok);
+
+    ui::ShaderInstance parent_a{parent_compiled.program};
+    ui::ShaderInstance parent_b{parent_compiled.program};
+    NUI_CHECK(parent_a.set_child("child", ui::Brush{leaf_a}) ==
+              ui::ShaderSetResult::Ok);
+    NUI_CHECK(parent_b.set_child("child", ui::Brush{leaf_b}) ==
+              ui::ShaderSetResult::Ok);
+
+    const ui::Brush a{parent_a};
+    const ui::Brush b{parent_b};
+    const auto* a_snapshot = ui::detail::ShaderBrushAccess::snapshot(a);
+    const auto* b_snapshot = ui::detail::ShaderBrushAccess::snapshot(b);
+    NUI_CHECK(a_snapshot && *a_snapshot && b_snapshot && *b_snapshot);
+    NUI_CHECK(ui::detail::ShaderBrushAccess::semantic_equal(
+        *a_snapshot, *b_snapshot));
+    NUI_CHECK(
+        ui::detail::ShaderBrushAccess::semantic_hash(*a_snapshot) ==
+        ui::detail::ShaderBrushAccess::semantic_hash(*b_snapshot));
+}
+
 void invalid_transform_is_never_a_retained_key() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -182,6 +273,8 @@ int main() {
     independently_decoded_images_do_not_alias();
     every_semantic_field_participates();
     signed_zero_is_semantically_equal_and_hash_consistent();
+    shader_snapshot_semantics_are_stable();
+    nested_shader_snapshot_semantics_do_not_flatten_on_lookup();
     invalid_transform_is_never_a_retained_key();
     return 0;
 }
