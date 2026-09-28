@@ -2,7 +2,7 @@
 
 NativeUI provides `State<T>` as an observable UI value and `Binding<T>` as a reference-like handle to one `State<T>` source. Both are retained-UI abstractions: they are intended for the UI/main thread and are not synchronization primitives for audio, worker, or arbitrary cross-thread data flow.
 
-This page documents behavior already merged on `main`. T069 still owns the final 1.0 public-header/API inventory and naming freeze; this page does not widen that future inventory or define the separate retained callback/lifecycle exception contracts being closed by T125/T130.
+This page documents behavior already merged on `main`. The current validated public/package surface on `main` is authoritative; T069 is no longer treated as a future freeze gate. The retained callback/lifecycle exception-safety work tracked by T125/T130 has also landed, so this page can state the final state/binding contract without preserving those historical blocker assumptions.
 
 ## State values
 
@@ -118,14 +118,13 @@ A practical ownership split is:
 
 Legacy component entry points that accept `State<T>&` remain source-compatible where the corresponding migration was delivered; internally, migrated writable stateful components can retain bindings instead of borrowing the `State<T>` object lifetime.
 
-## Freeze boundary
+## Scope boundary
 
 This document deliberately does not define:
 
 - a cross-thread or real-time synchronization contract for state;
 - automatic retry of arbitrary callbacks after an exception;
-- the final exhaustive list of 1.0 public headers, overloads, or compatibility aliases owned by T069;
-- retained input/reconciliation exception behavior owned by T125;
-- component lifecycle/layout/paint/native teardown exception behavior owned by T130.
+- an exhaustive inventory of every public header, overload or compatibility alias outside the state/binding surface;
+- renderer, platform or retained-tree implementation mechanisms that remain private even though their exception-safety contracts have landed.
 
-Those boundaries keep the already-merged `State<T>` / `Binding<T>` value and lifetime contract documented without prematurely freezing unrelated active pre-1.0 work.
+The current `main` public/package surface and exact-head validation remain authoritative. This chapter documents the supported `State<T>` / `Binding<T>` value, lifetime, reentrancy and exception behavior without widening unrelated APIs.
