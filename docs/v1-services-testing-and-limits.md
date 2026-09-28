@@ -4,6 +4,12 @@ This chapter documents stable NativeUI 1.0 resource/service contracts, the proje
 
 ## Resources
 
+NativeUI separates the generic resource-provider seam from its zero-copy embedded resource manager.
+
+[`ResourceProvider`](../include/nativeui/resource.hpp) is the polymorphic provider contract for APIs that need owned encoded bytes. `load(resource_id)` performs an exact application-defined lookup and returns an owned `std::vector<std::byte>` or `std::nullopt` when unavailable. Provider storage policy is intentionally open: files, bundles, archives, generated memory and other backends can implement the same seam.
+
+Because a provider may allocate or perform I/O, `load()` is a resource-preparation/UI-side operation unless a concrete provider documents a stronger contract. It must not be assumed real-time safe.
+
 NativeUI can consume immutable embedded resource tables without introducing a process-global registry or runtime filesystem dependency.
 
 [`ui::EmbeddedResourceEntry`](../include/nativeui/embedded_resource.hpp) is the small public metadata type used by generated or application-owned resource tables. Each entry is an immutable view containing a resource ID and byte span.
@@ -112,6 +118,30 @@ The focused example remains the canonical small demonstration for its feature. T
 
 The gallery intentionally does **not** replace the focused feature examples and is not a production application architecture tutorial. Its own deterministic self-test checks construction/wiring of the represented public surface without turning the gallery into a second hidden integration framework.
 
+### Headless rendering
+
+[`HeadlessRenderer`](../include/nativeui/headless.hpp) renders a normal `UI` into a deterministic Skia raster surface without Pugl, OpenGL or a display server.
+
+```cpp
+ui::HeadlessRenderer renderer{{320.0f, 200.0f}, 2.0f};
+
+if (!renderer.render(ui)) {
+    // Raster surface/canvas/pixel view creation failed.
+}
+
+const auto size = renderer.logical_size();   // 320 x 200 logical
+const int width = renderer.pixel_width();    // rounded physical width
+const ui::Rgba8 sample = renderer.pixel(10, 10);
+```
+
+Constructor/resize inputs must use finite positive logical dimensions and scale; invalid values throw `std::invalid_argument`. Physical dimensions are rounded from logical size × scale and kept at least one pixel.
+
+`render(UI&)` resizes the UI to the renderer's logical viewport, clears the raster target, applies the configured scale and runs the normal NativeUI paint path. It returns `false` only when the backing raster surface/canvas/pixel view cannot be produced; ordinary component/layout/paint exceptions remain C++ exceptions.
+
+`rgba_pixels()` returns a borrowed tightly packed RGBA8888 buffer in top-to-bottom, left-to-right order. The reference is tied to the renderer's current snapshot and may be invalidated by render/resize/move/destruction. `pixel(x,y)` samples physical raster coordinates and throws `std::out_of_range` outside the surface.
+
+This API is intended for deterministic tests, golden/reference images and offscreen validation. It is not an audio-thread facility.
+
 ### Headless, golden, lifecycle and platform validation
 
 The repository validation model uses complementary layers:
@@ -128,9 +158,19 @@ Remote CI is a qualification layer rather than the inner RED/GREEN loop. Active 
 
 ## Debug inspector
 
-The T050 inspector is an optional developer diagnostic surface. `NATIVEUI_ENABLE_INSPECTOR` defaults **OFF**; when disabled there is no runtime activation path and normal production behavior is unchanged.
+[`inspector.hpp`](../include/nativeui/inspector.hpp) is an optional developer diagnostic surface. `NATIVEUI_ENABLE_INSPECTOR` defaults **OFF**; when disabled the runtime inspector functions are not declared and normal production behavior is unchanged.
 
 When compiled in, inspector state belongs to each `UI` independently. It snapshots copied retained-tree diagnostics and paints a passive post-content overlay. It does not become a second component tree, consume application overlay slots, receive hit testing/focus, or run a persistent timer/redraw loop. Missing/stale node IDs are handled safely through value-based snapshots rather than raw retained-tree pointers.
+
+The public debug value model is fully owned:
+
+- `debug::InspectorNode` copies NodeId/parent identity, bounds/clip, dirty flags, focus/capture flags, effective availability, child order and depth;
+- `debug::InspectorSnapshot` owns its node list and dirty-region list, so callers can retain a snapshot after the live tree changes;
+- `InspectorSnapshot::find(id)` returns a pointer borrowed only from that snapshot;
+- `debug::inspector_snapshot(ui)` copies the current diagnostic state;
+- `set_inspector_enabled()` and `set_inspector_selected_node()` affect only that UI instance and request repaint.
+
+Stale/missing selected NodeIds are safe diagnostic values; the inspector does not keep retained nodes alive.
 
 Use the inspector to understand bounds, clips, dirty state, focus/capture and retained hierarchy while debugging. Do not build application behavior that depends on the inspector being present.
 

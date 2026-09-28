@@ -18,6 +18,11 @@ class ResourceProvider {
 public:
     virtual ~ResourceProvider() = default;
 
+    /// Load one encoded resource payload by exact application-defined ID.
+    ///
+    /// Return owned bytes on success or nullopt when the resource is unavailable
+    /// to this provider. Implementations may allocate and perform backend I/O;
+    /// callers must not assume real-time safety.
     [[nodiscard]] virtual std::optional<std::vector<std::byte>> load(
         std::string_view resource_id) = 0;
 };
