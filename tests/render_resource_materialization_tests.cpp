@@ -76,6 +76,39 @@ void retained_hit_skips_backend_creation() {
     NUI_CHECK(context.retained_accounted_bytes() == 0);
 }
 
+void retained_hit_reuses_backend_resource_across_frames() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    int creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return SkShaders::Color(SK_ColorRED);
+    };
+
+    context.begin_frame();
+    {
+        auto first = context.acquire_image_texture(texture(image), factory);
+        NUI_CHECK(first && first.retained && !first.hit);
+        NUI_CHECK(first.frame_lease);
+        NUI_CHECK(creates == 1);
+    }
+    context.end_frame();
+
+    context.begin_frame();
+    {
+        auto warm = context.acquire_image_texture(texture(image), factory);
+        NUI_CHECK(warm && warm.retained && warm.hit);
+        NUI_CHECK(warm.frame_lease);
+        NUI_CHECK(creates == 1);
+    }
+    context.end_frame();
+
+    NUI_CHECK(context.retained_entries() == 1);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+}
+
 void frame_lease_survives_cache_clear() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -231,6 +264,7 @@ void clear_is_instance_local() {
 
 int main() {
     retained_hit_skips_backend_creation();
+    retained_hit_reuses_backend_resource_across_frames();
     frame_lease_survives_cache_clear();
     different_semantics_create_independent_entries();
     invalid_texture_is_transient_and_never_retained();
