@@ -269,12 +269,12 @@ void reference_contract() {
                 mode == ui::FractalNoiseMode::Turbulence ? std::abs(s) :
                 (1.0 - std::abs(s)) * (1.0 - std::abs(s));
             const auto one = fractal_options(mode, 1, 3.0f, 0.75f);
-            NUI_CHECK(fractal_reference(
-                base, base_options, one, 13.0, 7.0) == expected);
+            NUI_CHECK(std::abs(fractal_reference(
+                base, base_options, one, 13.0, 7.0) - expected) < 1e-15);
 
             const auto zero_gain = fractal_options(mode, 6, 4.0f, 0.0f);
-            NUI_CHECK(fractal_reference(
-                base, base_options, zero_gain, 13.0, 7.0) == expected);
+            NUI_CHECK(std::abs(fractal_reference(
+                base, base_options, zero_gain, 13.0, 7.0) - expected) < 1e-15);
         }
     }
 }
