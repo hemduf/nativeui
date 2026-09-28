@@ -103,6 +103,28 @@ The current retained drawing model supports operations such as:
 
 Application code should express drawing in logical coordinates and let the owning window/view handle framebuffer scale below the retained component layer.
 
+## Brushes, effects and runtime shaders
+
+The installed v1 headers expose higher-level fill/effect primitives in [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp) and explicit runtime-shader preparation in [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp).
+
+`Brush` is the common fill source used by retained painting. It can snapshot:
+
+- a solid `Color`;
+- a `LinearGradient` or `RadialGradient`;
+- an `ImageTexture`;
+- a prepared `ShaderInstance`.
+
+`PaintOptions` supplies bounded opacity plus the documented blend modes `SourceOver`, `Multiply`, `Screen` and `Plus`. Layer effects are explicit values: `Effect::gaussian_blur(...)`, `Effect::drop_shadow(...)` and `Effect::drop_shadow_only(...)`. The effect's `visual_outset()` reports the conservative visual expansion that retained invalidation/layout code can account for; effects do not create an application-owned renderer loop.
+
+Runtime shaders use a two-stage contract:
+
+1. `ShaderProgram::compile(sksl)` performs explicit compilation/resource preparation and returns owned diagnostics plus an immutable program;
+2. `ShaderInstance` owns one mutable binding set for that program and is then snapshotted into a `Brush` for painting.
+
+Compilation may allocate and is explicitly not an audio-real-time operation. Rendering does not compile shader source implicitly. Program reflection exposes supported uniform and child names/types through NativeUI-owned metadata. Numeric uniform setters are `noexcept` and do not allocate; binding a child `Brush` may allocate. Mutation of one `ShaderInstance` is ordinary UI/resource-preparation work and is not synchronized for concurrent writers.
+
+Keep shader source compilation, image preparation and effect construction outside audio/DSP callbacks. Once prepared, use the resulting NativeUI values through `Brush`/retained painting rather than passing backend shader/compiler objects through application state.
+
 ### Backend boundary
 
 Do not make direct Skia types, canvases or backend objects part of application/component contracts. T069 has been retired as a standalone freeze gate; the current validated public/package surface on `main` is authoritative. The stable rule remains the abstraction boundary: normal consumers paint through NativeUI, while renderer/platform objects remain implementation details.
@@ -190,6 +212,7 @@ The table describes the stable design intent; the component/style implementation
 | common typed widget state/style resolution | [`include/nativeui/style.hpp`](../include/nativeui/style.hpp) |
 | widget-family style recipes | `include/nativeui/*_style.hpp` families |
 | drawing/path/paint style | [`include/nativeui/paint.hpp`](../include/nativeui/paint.hpp), [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp), [`include/nativeui/path.hpp`](../include/nativeui/path.hpp) |
+| runtime shaders and per-instance bindings | [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp) |
 | text presentation | [`include/nativeui/text.hpp`](../include/nativeui/text.hpp) |
 | image/vector presentation | [`include/nativeui/image.hpp`](../include/nativeui/image.hpp), [`include/nativeui/svg.hpp`](../include/nativeui/svg.hpp) |
 | retained animation | [`include/nativeui/animation.hpp`](../include/nativeui/animation.hpp) |
@@ -219,8 +242,8 @@ The safety and freeze assumptions that originally bounded this chapter have chan
 - T123/T124 and related binding follow-ups are complete, so state/binding wording can now be reconciled against landed behavior;
 - T125/T130 are complete, so retained callback/lifecycle/layout/paint/teardown exception guarantees no longer need to be described as pending;
 - T069 is deprecated as a standalone public-API freeze gate; current validated public/package contracts on `main` are authoritative;
-- T070 still owns the canonical copy-pasteable Getting Started/reference application;
-- T071 still owns release-candidate procedure and final release-readiness wording;
+- T070 is closed as not planned without delivering the reference application/guide; T133–T137 remain the separate open follow-up track for that work;
+- T071 is closed as not planned; release/readiness wording follows the active repository validation policies and exact-head evidence instead of waiting on that retired gate;
 - T068 native accessibility bridges remain deferred to NativeUI 1.2.
 
 T122 completion should therefore focus on cross-document consistency, navigation, examples and release-facing accuracy rather than preserving historical blocker wording.
