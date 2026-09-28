@@ -203,7 +203,7 @@ post-1.0 / later-release work already landed:
   T074(done) -----------------------------------------> NativeUI 1.1 foundation
   T075(done) -----------------------------------------> NativeUI 1.1 foundation
   T076(done) -> T077(done) -> T078(done) -> T094(done) --+
-  T095(done) ---------------------------------------------------+-> T096(doing) -> NativeUI 1.1 effects
+  T095(done) ---------------------------------------------------+-> T096(done) -> NativeUI 1.1 effects
   T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
   T073(done) + T079(done) -> T088(done) -> T089(done) -> T090(done) -> T091(done) -> T092(review closeout) -> T093(blocked on T092 closeout)
   T098(done) ---------------------------------------------------------------> T086(done)
