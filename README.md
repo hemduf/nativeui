@@ -4,7 +4,7 @@ NativeUI builds standalone applications and native views embedded by an external
 
 ## Documentation
 
-The NativeUI 1.0 documentation entry point is [`docs/v1-documentation-index.md`](docs/v1-documentation-index.md). It links the chapters for application lifetime, composition/layout/widgets, state and binding, rendering/styling/animation, packaging/CMake, services/testing/platform limits, accessibility and performance.
+The NativeUI 1.0 documentation entry point is [`docs/v1-documentation-index.md`](docs/v1-documentation-index.md). It links the chapters for application lifetime, composition/layout/widgets, state and binding, rendering/styling/animation, packaging/CMake, services/testing/platform limits, and release/validation status.
 
 
 ## Architecture
