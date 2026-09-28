@@ -87,6 +87,8 @@ A style field that participates in control measurement must trigger layout when 
 
 Do not assume every visual property is paint-only merely because it is named "style". Typography, control height, minimum size, padding or similar metrics can alter layout.
 
+For field-by-field standard-widget recipes and examples, see [Widget style reference](v1-widget-style-reference.md).
+
 ## Custom painting boundary
 
 Custom components paint through NativeUI's retained paint callback and drawing abstractions. [`include/nativeui/paint.hpp`](../include/nativeui/paint.hpp), [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp) and [`include/nativeui/path.hpp`](../include/nativeui/path.hpp) contain the current drawing surface.
@@ -293,7 +295,7 @@ The table describes the stable design intent; the component/style implementation
 | root theme tokens and invalidation classification | [`include/nativeui/theme.hpp`](../include/nativeui/theme.hpp) |
 | lexical inheritable overrides | [`include/nativeui/style_scope.hpp`](../include/nativeui/style_scope.hpp) |
 | common typed widget state/style resolution | [`include/nativeui/style.hpp`](../include/nativeui/style.hpp) |
-| widget-family style recipes | `include/nativeui/*_style.hpp` families |
+| widget-family style recipes | [Widget style reference](v1-widget-style-reference.md) |
 | drawing/path/paint style | [`include/nativeui/paint.hpp`](../include/nativeui/paint.hpp), [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp), [`include/nativeui/path.hpp`](../include/nativeui/path.hpp) |
 | runtime shaders and per-instance bindings | [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp) |
 | text presentation | [`include/nativeui/text.hpp`](../include/nativeui/text.hpp) |

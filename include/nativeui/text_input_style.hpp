@@ -42,6 +42,8 @@ struct TextInputStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete single-line TextInput recipe. Patches may alter paint,
+/// typography and measurement/editor geometry.
 struct TextInputStyle {
     TextInputStylePatch base;
     TextInputStylePatch hovered;
@@ -51,6 +53,7 @@ struct TextInputStyle {
     TextInputStylePatch focused;
 };
 
+/// Concrete single-line editor presentation/measurement values after resolution.
 struct ResolvedTextInputStyle {
     Color field_fill{};
     Color border{};

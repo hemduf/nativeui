@@ -13,6 +13,7 @@ This page is the navigation entry point for the NativeUI 1.0 documentation set t
 | Handle input, pointer capture, focus and editing commands | [Input, focus and commands](v1-input-focus-and-commands.md) | Normalized events, bubbling, IME, pointer metadata/capture, focus scopes and semantic command routing |
 | Understand observable state and UI bindings | [State and binding](v1-state-and-binding.md) | `State<T>`, `Binding<T>`, notification/lifetime rules, reentrancy and widget binding boundaries |
 | Customize drawing, styling and animation | [Rendering, styling and animation](v1-rendering-styling-and-animation.md) | Theme/style resolution, retained invalidation, custom painting and animation ownership |
+| Customize standard widget recipes | [Widget style reference](v1-widget-style-reference.md) | Slider/progress/toggle/scrollbar/list/tabs/combo/text-editor typed style fields and resolution |
 | Consume NativeUI from CMake | [Packaging and CMake](v1-packaging-and-cmake.md) | Installed/build-tree package concepts, public targets/helpers, platform attachment and binary resources |
 | Use services, tests and platform-specific limits | [Services, testing and limits](v1-services-testing-and-limits.md) | Resources, Dispatcher, DesktopServices, inspector/testing paths, supported/deferred platform scope |
 | Understand release status and qualification evidence | [Release and validation](v1-release-and-validation.md) | Active validation sources, exact-head evidence, retired release gates and remaining reference-app/Getting Started work |

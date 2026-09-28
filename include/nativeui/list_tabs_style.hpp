@@ -28,6 +28,8 @@ struct ListViewStylePatch {
     std::optional<float> separator_inset;
 };
 
+/// Complete ListView recipe. Selected/read-only/focused state remains
+/// orthogonal to the shared interaction branch.
 struct ListViewStyle {
     ListViewStylePatch base;
     ListViewStylePatch selected;
@@ -38,6 +40,7 @@ struct ListViewStyle {
     ListViewStylePatch focused;
 };
 
+/// Concrete ListView surface/row/separator presentation after resolution.
 struct ResolvedListViewStyle {
     Color surface_fill{};
     Color surface_border{};
@@ -101,6 +104,7 @@ struct TabsStylePatch {
     std::optional<float> text_size;
 };
 
+/// Complete Tabs recipe for header, tabs, selected underline and panel.
 struct TabsStyle {
     TabsStylePatch base;
     TabsStylePatch selected;
@@ -111,6 +115,7 @@ struct TabsStyle {
     TabsStylePatch focused;
 };
 
+/// Concrete Tabs presentation and measurement values after state resolution.
 struct ResolvedTabsStyle {
     Color header_fill{};
     Color header_border{};

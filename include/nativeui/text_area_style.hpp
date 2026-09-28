@@ -44,6 +44,8 @@ struct TextAreaStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete multiline TextArea recipe. Patches may alter paint, typography and
+/// measurement fields.
 struct TextAreaStyle {
     TextAreaStylePatch base;
     TextAreaStylePatch hovered;
@@ -53,6 +55,7 @@ struct TextAreaStyle {
     TextAreaStylePatch focused;
 };
 
+/// Concrete multiline editor presentation/measurement values after resolution.
 struct ResolvedTextAreaStyle {
     Color field_fill{};
     Color border{};

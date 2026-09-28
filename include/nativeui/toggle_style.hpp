@@ -33,6 +33,8 @@ struct ToggleStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete Toggle recipe. Checked/read-only/focused state layers over the
+/// shared normal/hovered/pressed/disabled interaction branch.
 struct ToggleStyle {
     ToggleStylePatch base;
     ToggleStylePatch checked;
@@ -43,6 +45,7 @@ struct ToggleStyle {
     ToggleStylePatch focused;
 };
 
+/// Concrete Toggle presentation and measurement values after style resolution.
 struct ResolvedToggleStyle {
     Color fill{};
     Color border{};

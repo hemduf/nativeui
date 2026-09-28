@@ -24,6 +24,7 @@ struct ProgressStylePatch {
     std::optional<Size> vertical_formatted_size;
 };
 
+/// Complete ProgressBar style recipe using the shared progress field model.
 struct ProgressBarStyle {
     ProgressStylePatch base;
     ProgressStylePatch hovered;
@@ -33,6 +34,7 @@ struct ProgressBarStyle {
     ProgressStylePatch focused;
 };
 
+/// Complete Meter style recipe using the shared progress field model.
 struct MeterStyle {
     ProgressStylePatch base;
     ProgressStylePatch hovered;
@@ -42,6 +44,7 @@ struct MeterStyle {
     ProgressStylePatch focused;
 };
 
+/// Concrete ProgressBar/Meter presentation consumed by measurement and paint.
 struct ResolvedProgressStyle {
     Color track{};
     Color fill{};
@@ -159,6 +162,7 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
     return style;
 }
 
+/// Resolve inherited + explicit ProgressBar recipes for one VisualState.
 [[nodiscard]] inline ResolvedProgressStyle resolve_progress_bar_style(
     const ProgressBarStyle& inherited,
     const ProgressBarStyle& explicit_style,
@@ -166,6 +170,7 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
     return detail::resolve_progress_style(inherited, explicit_style, state);
 }
 
+/// Resolve inherited + explicit Meter recipes for one VisualState.
 [[nodiscard]] inline ResolvedProgressStyle resolve_meter_style(
     const MeterStyle& inherited,
     const MeterStyle& explicit_style,

@@ -20,6 +20,8 @@ struct SliderStylePatch {
     std::optional<float> focus_ring_width;
 };
 
+/// Complete Slider/RangeSlider style recipe. `base` establishes normal
+/// presentation; interaction, read-only and focus patches selectively override it.
 struct SliderStyle {
     SliderStylePatch base;
     SliderStylePatch hovered;
@@ -29,6 +31,7 @@ struct SliderStyle {
     SliderStylePatch focused;
 };
 
+/// Concrete Slider/RangeSlider presentation after inherited/local/state resolution.
 struct ResolvedSliderStyle {
     Color track{};
     Color active{};

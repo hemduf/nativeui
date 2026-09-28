@@ -26,6 +26,7 @@ struct ComboBoxStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete ComboBox anchor recipe with interaction/read-only/focus variants.
 struct ComboBoxStyle {
     ComboBoxStylePatch base;
     ComboBoxStylePatch hovered;
@@ -35,6 +36,7 @@ struct ComboBoxStyle {
     ComboBoxStylePatch focused;
 };
 
+/// Concrete ComboBox visual and measurement values after style resolution.
 struct ResolvedComboBoxStyle {
     Color fill{};
     Color border{};
@@ -87,6 +89,8 @@ struct MenuItemStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete popup MenuItem recipe. Selected/focused/read-only state layers
+/// independently from the shared interaction branch.
 struct MenuItemStyle {
     MenuItemStylePatch base;
     MenuItemStylePatch selected;
@@ -97,6 +101,7 @@ struct MenuItemStyle {
     MenuItemStylePatch focused;
 };
 
+/// Concrete popup-row visual and measurement values after style resolution.
 struct ResolvedMenuItemStyle {
     Color fill{};
     Color text{};

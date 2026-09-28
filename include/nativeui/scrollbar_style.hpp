@@ -17,6 +17,7 @@ struct ScrollbarStylePatch {
     std::optional<float> corner_radius;
 };
 
+/// Complete ScrollView scrollbar recipe with interaction/read-only variants.
 struct ScrollbarStyle {
     ScrollbarStylePatch base;
     ScrollbarStylePatch hovered;
@@ -25,6 +26,7 @@ struct ScrollbarStyle {
     ScrollbarStylePatch read_only;
 };
 
+/// Concrete scrollbar colors and geometry after style resolution.
 struct ResolvedScrollbarStyle {
     Color track{};
     Color thumb{};
