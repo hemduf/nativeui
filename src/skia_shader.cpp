@@ -568,8 +568,6 @@ std::size_t ShaderInstanceAccess::depth(
     return instance.depth_;
 }
 
-namespace {
-
 std::size_t ShaderBrushAccess::semantic_hash(const Brush& brush) noexcept {
     return std::visit(
         [&brush](const auto& source) noexcept -> std::size_t {
@@ -661,6 +659,8 @@ bool ShaderBrushAccess::semantic_equal(const Brush& a, const Brush& b) noexcept 
         },
         a.value_, b.value_);
 }
+
+namespace {
 
 [[nodiscard]] SkColor4f child_sk_color(Color color) noexcept {
     return SkColor4f{color.r, color.g, color.b, color.a};
