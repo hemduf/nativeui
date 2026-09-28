@@ -6,6 +6,7 @@
 #include "detail/pugl_button_translation.hpp"
 #include "detail/pugl_pointer_translation.hpp"
 #include "detail/scoped_borrow_state.hpp"
+#include "detail/scene_damage.hpp"
 #include "detail/window_control_state.hpp"
 
 #if defined(__APPLE__)
@@ -29,6 +30,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <mutex>
 #include <vector>
 

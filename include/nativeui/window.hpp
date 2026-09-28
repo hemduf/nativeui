@@ -23,6 +23,10 @@ using NativeParentHandle = std::uintptr_t;
 using NativeViewHandle = std::uintptr_t;
 using PreferredSizeCallback = std::function<void(Size)>;
 
+struct EmbeddedViewOptions {
+    bool initially_visible{true};
+};
+
 struct WindowDesc {
     std::string title{"NativeUI"};
     Size size{720.0f, 520.0f};
@@ -191,6 +195,11 @@ public:
                  NativeParentHandle parent,
                  Size size,
                  std::shared_ptr<DesktopServicesBackend> desktop_services_backend);
+    EmbeddedView(UI& ui,
+                 NativeParentHandle parent,
+                 Size size,
+                 std::shared_ptr<DesktopServicesBackend> desktop_services_backend,
+                 EmbeddedViewOptions options);
     ~EmbeddedView() override;
 
     EmbeddedView(const EmbeddedView&) = delete;
@@ -199,6 +208,11 @@ public:
     EmbeddedView& operator=(EmbeddedView&&) = delete;
 
     bool poll(); // always non-blocking
+    /// Hide preserves the realized child, UI and Dispatcher. Polling remains
+    /// host-owned. Show is passive and never raises the embedding host window.
+    bool show();
+    bool hide();
+    [[nodiscard]] bool visible() const noexcept;
     void request_close();
 
     [[nodiscard]] bool should_close() const noexcept;

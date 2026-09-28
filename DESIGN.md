@@ -277,9 +277,11 @@ This avoids custom platform presenters such as:
 - X11 `XImage` / MIT-SHM presentation;
 - NativeUI-owned platform OpenGL context creation.
 
-The Pugl expose callback is the normal render entry point. NativeUI owns one optional RGBA8888/sRGB scene target per view and wraps Pugl's current framebuffer only as a borrowed presentation target. Pugl still owns context enter/leave and platform swap. A clean expose copies the last complete scene to the current framebuffer without walking the retained tree. A UI, size or scale invalidation rebuilds the complete scene; partial repaint belongs to T096.
+The Pugl expose callback is the normal render entry point. NativeUI owns one optional RGBA8888/sRGB scene target per view and wraps Pugl's current framebuffer only as a borrowed presentation target. Pugl still owns context enter/leave and platform swap. A clean expose copies the last complete scene to the current framebuffer without walking the retained tree. A localized paint invalidation can update a conservative device-pixel rectangle in the existing scene target; surface creation/recreation, size or scale changes, layout/structure preparation, overlays, inspector painting, invalid damage mapping and effect cases without proven input support use the full-scene path.
 
-Every rebuild resets the offscreen scene to opaque black, restores the framework canvas state, scales logical geometry once, paints the retained tree and checks Ganesh scene submission before marking the scene complete. The snapshot used for presentation is cached across clean exposes and released before the next paint to avoid retaining a copy-on-write reference. Skia may still materialize transient GPU storage internally. Presentation uses a full physical-pixel copy with source blending and nearest sampling. The renderer restores the borrowed framebuffer binding before Pugl leaves the expose callback.
+For a partial update, NativeUI prepares layout and retained geometry before capturing the bounded Tree damage set. It maps the continuous logical bounds to an outward-rounded physical clip with an antialias guard, clears that clip to opaque black with source blending, and uses T094 to skip unrelated retained paint callbacks. The traversal query is the outward-rounded inverse of the actual device clip, including the antialias guard. Filtered painting encountered during a partial pass aborts that publication and retains the captured work for a full repaint; a scene already known to contain effects also stays on the full-scene path, so a filter's discrete fringe cannot be skipped by a partial traversal. The scene token commits only after checked Ganesh submission. Any earlier failure restores captured damage alongside later/reentrant invalidations and leaves the scene invalid for a full retry.
+
+Every full rebuild resets the offscreen scene to opaque black, restores the framework canvas state, scales logical geometry once, paints the retained tree and checks Ganesh scene submission before marking the scene complete. The snapshot used for presentation is cached across clean exposes and released before scene mutation to avoid retaining a copy-on-write reference. Skia may still materialize transient GPU storage internally. Presentation uses a full physical-pixel copy with source blending and nearest sampling. The renderer restores the borrowed framebuffer binding before Pugl leaves the expose callback.
 
 An allocation or paint/submission failure keeps full repaint pending; a failure after a valid scene commit but within the observable copy/submission path keeps presentation pending and can retry without retained painting. The view remains open and waits for a later expose. Invalidation raised during successful paint gets one coalesced redraw request at the next Pugl update checkpoint. No timer or failure retry loop runs at idle. Pugl may swap even after an expose callback reports an error, and an unreported OS swap failure cannot be detected by this renderer.
 
@@ -334,6 +336,54 @@ normalization are normative, so CPU, raster and GPU cannot choose
 incompatible kernels; the double-precision CPU oracle implements the exact
 contract and raster/GPU float paths are compared with it within the single
 documented tolerance pair.
+
+T090 adds a simplex-style gradient kernel on the same hash and gradient table:
+local logical coordinates are scaled by `feature_size`, skewed with
+`F2 = (sqrt(3) - 1) / 2` and unskewed with `G2 = (3 - sqrt(3)) / 6` on one
+simplex lattice, and the exact `x0 > y0` branch (equality takes the second
+branch) selects the second and third lattice corners. Each corner contributes
+`q > 0 ? q^4 * dot(g, d) : 0` with `q = 0.5 - |d|^2`, and the public scalar is
+exactly `clamp(0.5 + 0.5 * 70 * (n0 + n1 + n2), 0, 1)`. Non-finite skew
+intermediates and lattice coordinates outside `[INT32_MIN, INT32_MAX - 1]`
+produce exactly 0.5 before any conversion; the ES2 float path checks the skewed
+coordinates before `floor` because it cannot represent the tighter integer
+bound. The same double-precision oracle and the same documented tolerance pair
+cover CPU, raster and GPU.
+
+
+T091 adds bounded cellular/Worley F1 and F2 variants without changing the
+immutable procedural-source ownership model. Each scalar evaluation hashes
+exactly one feature point for each of the fixed row-major 3x3 neighbor cells,
+using salts `0xA511E9B3` and `0x63D83595` with the frozen T088 hash/high-24
+mapping. Distances are evaluated in center-cell-local coordinates, the two
+smallest squared Euclidean distances use strict insertion order, and both F1/F2
+normalize by `sqrt(8)`. Center lattice coordinates are range-checked before
+signed conversion or byte-lane +/-1. The ES2 path performs candidate lattice
+steps on exact byte lanes, never by adding/subtracting one from a large float
+lattice index.
+
+T092 adds bounded fractal composition as a creation-time specialization of the
+same immutable source model. `NoiseSource::create_fractal()` accepts only the
+frozen Value, Perlin and Simplex kernels, with 1..6 octaves and the exact
+iterative frequency/amplitude recurrence defined by T092. fBm, Turbulence and
+Ridged modes are generated as one combined SkSL program and compiled exactly
+once before publication. Fractal configuration is a value-only, allocation-free
+`FractalNoiseOptions`; no octave resource, seed salt, mutable cache or
+paint-time compilation is introduced. Worley F1/F2 remain explicitly excluded
+as NativeUI 1.1 fractal bases.
+
+T093 adds `ScalarSource` as the backend-neutral immutable numeric-source
+counterpart to `Brush`. A scalar source stores either an unclamped float or a
+channel selection from an immutable Brush snapshot; `from_noise()` reuses the
+existing opaque-black-to-white NoiseSource Brush semantics and does not compile
+or materialize a second source. Constants, moved-from values and invalid channel
+enumerators have deterministic value semantics, while Brush-backed sources keep
+the same Painter-local coordinates, Color/Data interpretation and renderer-owned
+materialization/failure behavior as ordinary Brush child sampling. ScalarSource
+does not apply destination coverage/blending, color conversion, alpha
+unpremultiplication or material-specific physical clamping. It introduces no
+public backend type, callback, mutable global registry or renderer ownership;
+later Material consumers own per-property sanitization and physical ranges.
 
 ---
 
@@ -738,6 +788,8 @@ Embedded-font registration owns/copies the supplied font bytes. Shared registry 
 ### 17.4 Committed text and advanced IME
 
 Pugl `PUGL_TEXT` provides committed Unicode text and is the normal insertion path, including dead-key/input-method sequences that produce committed text.
+
+`TextInput::on_key_down` can reserve a navigation key for its containing view. The callback runs before the built-in cursor commands and returns `Handled` to consume the key or `Ignored` to keep normal text editing. Active IME composition retains ownership of its navigation keys, so the callback does not run for those keys until composition ends.
 
 Full IME pre-edit/composition remains a separate future platform-extension feature. This includes marked/pre-edit text and candidate-rectangle behavior that the pinned Pugl API does not fully expose.
 
@@ -1294,6 +1346,18 @@ The main platform risks remain isolated rather than allowed to distort the toolk
 3. the legacy independent-PROGRAM-world standalone constructor remains only until T069 and must not become a second multi-window ownership model.
 
 None of these currently justifies reimplementing Win32, Cocoa and X11 windowing inside NativeUI.
+
+---
+
+## Value edit lifetimes and embedded visibility
+
+The [value editing contract](docs/value-editing.md) defines generic `EditSession<T>`
+notifications, standard control input boundaries, exception/reentrancy policy,
+and optional hidden `EmbeddedView` construction. State and editing remain
+UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The pinned macOS Pugl backend owns embedded visibility and focus behavior
+directly. NativeUI consumes that exact source commit without build-time source
+rewriting.
 
 ---
 

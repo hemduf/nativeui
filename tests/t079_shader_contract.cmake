@@ -86,21 +86,88 @@ foreach(_path IN LISTS _production_files)
     "${_content}")
   if(NOT _implicit_compile STREQUAL "")
     if(_name STREQUAL "skia_noise.cpp")
-      # T088 explicitly compiles its built-in source at creation time. Keep the
-      # T079 no-implicit-paint-compilation rule for every other production file.
+      # Built-in noise programs may compile only at explicit NoiseSource
+      # creation boundaries. Neither path may defer source compilation to
+      # as_brush()/paint.
       string(REGEX MATCHALL
         "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
         _noise_compile_calls "${_content}")
       list(LENGTH _noise_compile_calls _noise_compile_count)
-      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create" _noise_create)
-      string(FIND "${_content}" "ShaderProgram::compile(source)" _noise_compile)
+      string(FIND "${_content}" "void append_fractal_kernel" _fractal_kernel)
+      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create(" _noise_create)
+      string(FIND "${_content}" "NoiseCreateResult NoiseSource::create_fractal(" _fractal_create)
       string(FIND "${_content}" "Brush NoiseSource::as_brush" _noise_brush)
-      if(NOT _noise_compile_count EQUAL 1 OR _noise_create EQUAL -1 OR
-         _noise_compile EQUAL -1 OR _noise_brush EQUAL -1 OR
-         _noise_compile LESS _noise_create OR
-         _noise_compile GREATER _noise_brush)
+
+      if(_fractal_kernel EQUAL -1 OR _noise_create EQUAL -1 OR
+         _fractal_create EQUAL -1 OR
+         _noise_brush EQUAL -1 OR
+         _fractal_kernel GREATER _noise_create OR
+         _fractal_create LESS _noise_create OR
+         _noise_brush LESS _fractal_create)
         message(FATAL_ERROR
-          "T079: T088 built-in shader must compile exactly once in NoiseSource::create")
+          "Noise shader contract: creation/materialization boundaries are missing or reordered")
+      endif()
+
+      math(EXPR _fractal_kernel_region_length "${_noise_create} - ${_fractal_kernel}")
+      string(SUBSTRING "${_content}" ${_fractal_kernel}
+        ${_fractal_kernel_region_length} _fractal_kernel_region)
+      set(_fractal_kernel_compact "${_fractal_kernel_region}")
+      string(REPLACE " " "" _fractal_kernel_compact "${_fractal_kernel_compact}")
+      string(REPLACE "\t" "" _fractal_kernel_compact "${_fractal_kernel_compact}")
+      string(REPLACE "\r" "" _fractal_kernel_compact "${_fractal_kernel_compact}")
+      string(REPLACE "\n" "" _fractal_kernel_compact "${_fractal_kernel_compact}")
+      string(FIND "${_fractal_kernel_compact}" "pow(" _fractal_pow)
+      string(FIND "${_fractal_kernel_compact}" "powf(" _fractal_powf)
+      string(FIND "${_fractal_kernel_compact}" "exp(" _fractal_exp)
+      string(FIND "${_fractal_kernel_compact}" "expf(" _fractal_expf)
+      string(FIND "${_fractal_kernel_compact}" "exp2(" _fractal_exp2)
+      string(FIND "${_fractal_kernel_compact}" "exp2f(" _fractal_exp2f)
+      string(FIND "${_fractal_kernel_compact}" "log(" _fractal_log)
+      string(FIND "${_fractal_kernel_compact}" "logf(" _fractal_logf)
+      string(FIND "${_fractal_kernel_compact}" "log2(" _fractal_log2)
+      string(FIND "${_fractal_kernel_compact}" "log2f(" _fractal_log2f)
+      string(FIND "${_fractal_kernel_compact}" "ldexp(" _fractal_ldexp)
+      string(FIND "${_fractal_kernel_compact}" "ldexpf(" _fractal_ldexpf)
+      string(FIND "${_fractal_kernel_compact}"
+        "fractal_base(p*frequency)" _fractal_scaled_coordinates)
+      if(NOT _fractal_pow EQUAL -1 OR
+         NOT _fractal_powf EQUAL -1 OR
+         NOT _fractal_exp EQUAL -1 OR
+         NOT _fractal_expf EQUAL -1 OR
+         NOT _fractal_exp2 EQUAL -1 OR
+         NOT _fractal_exp2f EQUAL -1 OR
+         NOT _fractal_log EQUAL -1 OR
+         NOT _fractal_logf EQUAL -1 OR
+         NOT _fractal_log2 EQUAL -1 OR
+         NOT _fractal_log2f EQUAL -1 OR
+         NOT _fractal_ldexp EQUAL -1 OR
+         NOT _fractal_ldexpf EQUAL -1 OR
+         _fractal_scaled_coordinates EQUAL -1)
+        message(FATAL_ERROR
+          "Fractal noise must use iterative frequency scaling without exponentiation")
+      endif()
+
+      math(EXPR _base_region_length "${_fractal_create} - ${_noise_create}")
+      string(SUBSTRING "${_content}" ${_noise_create} ${_base_region_length}
+        _base_create_region)
+      math(EXPR _fractal_region_length "${_noise_brush} - ${_fractal_create}")
+      string(SUBSTRING "${_content}" ${_fractal_create} ${_fractal_region_length}
+        _fractal_create_region)
+
+      string(REGEX MATCHALL
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+        _base_compile_calls "${_base_create_region}")
+      string(REGEX MATCHALL
+        "ShaderProgram[ \t\r\n]*::[ \t\r\n]*compile[ \t\r\n]*\\("
+        _fractal_compile_calls "${_fractal_create_region}")
+      list(LENGTH _base_compile_calls _base_compile_count)
+      list(LENGTH _fractal_compile_calls _fractal_compile_count)
+
+      if(NOT _noise_compile_count EQUAL 2 OR
+         NOT _base_compile_count EQUAL 1 OR
+         NOT _fractal_compile_count EQUAL 1)
+        message(FATAL_ERROR
+          "Noise shader contract: built-in programs must compile exactly once in each explicit creation path")
       endif()
     else()
       message(FATAL_ERROR

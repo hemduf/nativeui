@@ -675,6 +675,29 @@ detail::PlatformTestAccess::take_gpu_readback(
     return window.impl_->core->take_gpu_readback();
 }
 
+bool detail::PlatformTestAccess::request_gpu_readback_region(
+    StandaloneWindow& window,
+    int x,
+    int y,
+    int width,
+    int height) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->request_gpu_readback_region(x, y, width, height);
+}
+
+std::optional<detail::PlatformReadbackRegion>
+detail::PlatformTestAccess::take_gpu_readback_region(
+    StandaloneWindow& window) noexcept {
+    if (!window.impl_ || !window.impl_->core) return std::nullopt;
+    return window.impl_->core->take_gpu_readback_region();
+}
+
+bool detail::PlatformTestAccess::suppress_platform_focus(
+    StandaloneWindow& window, bool suppressed) noexcept {
+    return window.impl_ && window.impl_->core &&
+           window.impl_->core->suppress_platform_focus(suppressed);
+}
+
 bool detail::PlatformTestAccess::inject_scene_fault(
     StandaloneWindow& window,
     detail::SceneFaultStage stage) noexcept {
@@ -1106,13 +1129,14 @@ void StandaloneWindow::reject_drop(Rect region) {
 }
 
 struct EmbeddedView::Impl final : PlatformServices, DispatcherProvider {
-    Impl(UI& ui, NativeParentHandle parent, Size size)
+    Impl(UI& ui, NativeParentHandle parent, Size size, EmbeddedViewOptions options)
         : dispatcher_owner(std::make_shared<detail::DispatcherOwner>()),
           core(ui,
                *this,
                PUGL_MODULE,
                WindowDesc{"NativeUI Embedded", size, true, std::nullopt, std::nullopt},
-               parent) {
+               parent, nullptr, {}, detail::NativeViewConstructionFaultStage::AfterViewCreation,
+               nullptr, options.initially_visible) {
         core.bind_semantics(dispatcher_owner->dispatcher());
     }
 
@@ -1215,7 +1239,12 @@ bool detail::PlatformTestAccess::override_embedded_screen_origin_query(
 #endif
 
 EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size)
-    : impl_(std::make_unique<Impl>(ui, parent, size)) {}
+    : EmbeddedView(ui, parent, size, {}, {}) {}
+EmbeddedView::EmbeddedView(UI& ui, NativeParentHandle parent, Size size,
+                           std::shared_ptr<DesktopServicesBackend> backend,
+                           EmbeddedViewOptions options)
+    : impl_(std::make_unique<Impl>(ui, parent, size, options)),
+      desktop_services_backend_(std::move(backend)) {}
 EmbeddedView::~EmbeddedView() = default;
 
 bool EmbeddedView::poll() {
@@ -1276,6 +1305,9 @@ void EmbeddedView::request_close() {
     if (impl_->dispatcher_owner) impl_->dispatcher_owner->shutdown();
 }
 bool EmbeddedView::should_close() const noexcept { return !impl_ || impl_->core.should_close(); }
+bool EmbeddedView::show() { return impl_ && impl_->core.show(); }
+bool EmbeddedView::hide() { return impl_ && impl_->core.hide(); }
+bool EmbeddedView::visible() const noexcept { return impl_ && impl_->core.visible(); }
 Size EmbeddedView::size() const noexcept { return impl_ ? impl_->core.size() : Size{}; }
 float EmbeddedView::scale_factor() const noexcept { return impl_ ? impl_->core.scale_factor() : 1.0f; }
 NativeViewHandle EmbeddedView::native_handle() const noexcept { return impl_ ? impl_->core.native_handle() : 0; }

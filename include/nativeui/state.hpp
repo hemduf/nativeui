@@ -47,6 +47,9 @@ template <detail::StateValue T>
 class Binding;
 
 template <detail::StateValue T>
+class EditSession;
+
+template <detail::StateValue T>
 class State {
     struct Listener {
         std::size_t id{};
@@ -289,6 +292,7 @@ private:
     std::shared_ptr<typename State<T>::Control> control_;
 
     friend class State<T>;
+    friend class EditSession<T>;
 };
 
 template <detail::StateValue T>

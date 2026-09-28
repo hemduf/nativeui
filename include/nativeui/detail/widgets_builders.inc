@@ -159,14 +159,28 @@ public:
         return std::move(*this);
     }
 
+    Knob&& on_edit(EditCallbacks<float> callbacks) && {
+        callbacks_ = std::move(callbacks);
+        return std::move(*this);
+    }
+
+    Knob&& wheel_enabled(bool value = true) && {
+        wheel_enabled_ = value;
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto state = std::move(state_);
         const float minimum = minimum_;
         const float maximum = maximum_;
-        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum]() mutable {
+        auto callbacks = std::move(callbacks_);
+        const bool wheel_enabled = wheel_enabled_;
+        return Spec{[label = std::move(label), state = std::move(state), minimum, maximum,
+                     callbacks = std::move(callbacks), wheel_enabled]() mutable {
                         return std::make_unique<KnobComponent>(
-                            std::move(label), std::move(state), minimum, maximum);
+                            std::move(label), std::move(state), minimum, maximum,
+                            std::move(callbacks), wheel_enabled);
                     },
                     {}};
     }
@@ -176,6 +190,8 @@ private:
     Binding<float> state_;
     float minimum_{0.0f};
     float maximum_{1.0f};
+    EditCallbacks<float> callbacks_;
+    bool wheel_enabled_{};
 };
 
 
@@ -192,13 +208,20 @@ public:
         return std::move(*this);
     }
 
+    Toggle&& on_edit(EditCallbacks<bool> callbacks) && {
+        callbacks_ = std::move(callbacks);
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto label = std::move(label_);
         auto state = std::move(state_);
         auto style = std::move(style_);
-        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style)]() mutable {
+        auto callbacks = std::move(callbacks_);
+        return Spec{[label = std::move(label), state = std::move(state), style = std::move(style),
+                     callbacks = std::move(callbacks)]() mutable {
                         return std::make_unique<ToggleComponent>(
-                            std::move(label), std::move(state), std::move(style));
+                            std::move(label), std::move(state), std::move(style), std::move(callbacks));
                     },
                     {}};
     }
@@ -207,12 +230,14 @@ private:
     std::string label_;
     Binding<bool> state_;
     ToggleStyle style_;
+    EditCallbacks<bool> callbacks_;
 };
 
 
 class TextInput {
 public:
     using SubmitCallback = TextInputComponent::SubmitCallback;
+    using KeyDownCallback = TextInputComponent::KeyDownCallback;
 
     TextInput(std::string label, Binding<std::string> state)
         : label_(std::move(label)), state_(std::move(state)) {}
@@ -235,6 +260,13 @@ public:
         return std::move(*this);
     }
 
+    /// Handle selected KeyDown events before the built-in cursor/edit commands.
+    /// Return Ignored to preserve the standard text-input behavior.
+    TextInput&& on_key_down(KeyDownCallback callback) && {
+        on_key_down_ = std::move(callback);
+        return std::move(*this);
+    }
+
     TextInput&& style(TextInputStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
@@ -245,13 +277,15 @@ public:
         auto state = std::move(state_);
         auto placeholder = std::move(placeholder_);
         auto callback = std::move(on_submit_);
+        auto key_down = std::move(on_key_down_);
         auto style = std::move(style_);
         const auto max_length = max_length_;
         return Spec{[label = std::move(label), state = std::move(state), placeholder = std::move(placeholder),
-                     max_length, callback = std::move(callback), style = std::move(style)]() mutable {
+                     max_length, callback = std::move(callback), key_down = std::move(key_down),
+                     style = std::move(style)]() mutable {
                         return std::make_unique<TextInputComponent>(
                             std::move(label), std::move(state), std::move(placeholder), max_length,
-                            std::move(callback), std::move(style));
+                            std::move(callback), std::move(key_down), std::move(style));
                     },
                     {}};
     }
@@ -262,6 +296,7 @@ private:
     std::string placeholder_;
     std::size_t max_length_{256};
     SubmitCallback on_submit_;
+    KeyDownCallback on_key_down_;
     TextInputStyle style_;
 };
 

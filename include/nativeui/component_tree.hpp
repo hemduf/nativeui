@@ -5,6 +5,7 @@
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/interaction_observer.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/raster_cache_epoch.hpp>
 #include <nativeui/detail/semantic_live_action.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/transient_presentation.hpp>
@@ -14,6 +15,7 @@
 #endif
 
 #include <array>
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -22,7 +24,9 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace ui {
 
@@ -31,6 +35,7 @@ inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* pare
 struct DynamicReconcileFaultAccess;
 struct SemanticTreeActionAccess;
 struct DynamicFaultAccess;
+struct RasterCacheAccess;
 } // namespace detail
 
 class Dialog;
@@ -51,6 +56,7 @@ private:
     friend struct TreeTestAccess;
     friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
+    friend struct detail::RasterCacheAccess;
     friend struct detail::SemanticTreeActionAccess;
 #include <nativeui/detail/tree_semantic_private.inc>
 #include <nativeui/detail/tree_theme_private.inc>
@@ -66,6 +72,7 @@ private:
 #include <nativeui/detail/tree_retained_invalidation.inc>
 #include <nativeui/detail/tree_paint_culling_private.inc>
 #include <nativeui/detail/tree_lifecycle_transaction.inc>
+#include <nativeui/detail/tree_raster_cache_private.inc>
 #include <nativeui/detail/tree_layout_transaction.inc>
 
     // Keep the currently executing callback alive across re-entrant replacement

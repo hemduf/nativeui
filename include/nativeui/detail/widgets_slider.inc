@@ -5,6 +5,7 @@
 #include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/slider_value.hpp>
 #include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/edit.hpp>
 #include <nativeui/slider_style.hpp>
 #include <nativeui/state.hpp>
 
@@ -139,12 +140,16 @@ public:
         float step,
         SliderOrientation orientation,
         Formatter formatter,
-        SliderStyle style)
+        SliderStyle style,
+        EditCallbacks<float> callbacks = {},
+        bool wheel_enabled = false)
         : state_(std::move(state)),
+          edit_(state_, std::move(callbacks)),
           domain_(minimum, maximum, step),
           orientation_(orientation),
           formatter_(std::move(formatter)),
-          style_(std::move(style)) {}
+          style_(std::move(style)),
+          wheel_enabled_(wheel_enabled) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
@@ -223,26 +228,40 @@ public:
             [invalidate = std::move(invalidate)](const float&) { invalidate(); });
     }
 
-    void unmount(LifecycleContext&) override { subscription_.reset(); }
+    void unmount(LifecycleContext&) override {
+        subscription_.reset();
+        dragging_ = false;
+        edit_.cancel();
+    }
 
     void focus_changed(bool focused, FocusContext& context) override {
         if (focused_ == focused) return;
         const auto before = resolved_style(focused_);
         focused_ = focused;
         invalidate_style_transition(before, resolved_style(focused_), context, true);
+        if (!focused) { dragging_ = false; edit_.cancel(); }
     }
 
     void deactivate(LifecycleContext& context) override {
-        if (!dragging_ && !hovered_ && !focused_) return;
+        if (!dragging_ && !hovered_ && !focused_ && !edit_.active()) return;
         const auto before = resolved_style(focused_);
         const bool focus_changed = focused_;
         dragging_ = false;
         hovered_ = false;
         focused_ = false;
         invalidate_style_transition(before, resolved_style(focused_), context, focus_changed);
+        edit_.cancel();
     }
 
-    EventResult input(const InputEvent& event, InputContext& context) override {
+    EventResult input(const InputEvent& event, InputContext& context) override try {
+        if (event.type == InputType::KeyDown && event.key == Key::Escape && dragging_) {
+            const auto before = resolved_style(focused_);
+            dragging_ = false;
+            context.release_pointer();
+            invalidate_style_transition(before, resolved_style(focused_), context);
+            edit_.cancel();
+            return EventResult::Handled;
+        }
         if (effective_read_only() && mutating_input(event)) {
             const auto before = resolved_style(focused_);
             const bool release_capture = dragging_;
@@ -253,6 +272,7 @@ public:
             }
             if (release_capture) context.release_pointer();
             invalidate_style_transition(before, resolved_style(focused_), context);
+            edit_.cancel();
             return EventResult::Handled;
         }
 
@@ -273,15 +293,31 @@ public:
                 dragging_ = false;
                 hovered_ = false;
                 invalidate_style_transition(before, resolved_style(focused_), context);
+                edit_.cancel();
                 return EventResult::Handled;
             }
 
             case InputType::KeyDown:
                 return key_down(event, context);
 
+            case InputType::PointerWheel:
+                if (!wheel_enabled_ || !std::isfinite(event.delta.y)) return EventResult::Ignored;
+                if (!effective_read_only()) {
+                    const auto target = domain_.normalize(
+                        domain_.effective_external(state_.get()) +
+                        event.delta.y * domain_.keyboard_increment(event.shift));
+                    edit_.set(target, EditSource::Wheel);
+                }
+                return EventResult::Handled;
+
             default:
                 return EventResult::Ignored;
         }
+    } catch (...) {
+        dragging_ = false;
+        try { context.release_pointer(); } catch (...) {}
+        try { edit_.cancel(); } catch (...) {}
+        throw;
     }
 
     [[nodiscard]] SliderVisualState visual_state(bool focused) const noexcept {
@@ -434,12 +470,11 @@ private:
     EventResult begin_drag(const InputEvent& event, InputContext& context) {
         const auto before = resolved_style(focused_);
         const float target = value_from_pointer(event, context);
-        auto state = state_;
         dragging_ = true;
         hovered_ = true;
         context.capture_pointer();
         invalidate_style_transition(before, resolved_style(focused_), context);
-        if (state.get() != target) state.set(target);
+        if (edit_.begin(EditSource::Pointer)) edit_.update(target);
         return EventResult::Handled;
     }
 
@@ -461,14 +496,13 @@ private:
         const ResolvedSliderStyle& before = {}) {
         const auto effective_before = release ? resolved_style(focused_) : before;
         const float target = value_from_pointer(event, context);
-        auto state = state_;
         if (release) {
             hovered_ = context.bounds().contains(event.position);
             dragging_ = false;
             context.release_pointer();
         }
         invalidate_style_transition(effective_before, resolved_style(focused_), context);
-        if (state.get() != target) state.set(target);
+        if (release) edit_.finish(target); else edit_.update(target);
         return EventResult::Handled;
     }
 
@@ -497,15 +531,17 @@ private:
                 return EventResult::Ignored;
         }
 
-        if (state.get() != target) state.set(target);
+        edit_.set(target, EditSource::Keyboard);
         return EventResult::Handled;
     }
 
     Binding<float> state_;
+    EditSession<float> edit_;
     SliderDomain domain_;
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     Formatter formatter_;
     SliderStyle style_;
+    bool wheel_enabled_{};
     Binding<float>::Subscription subscription_;
     bool focused_{};
     bool dragging_{};
@@ -547,6 +583,16 @@ public:
         return std::move(*this);
     }
 
+    Slider&& on_edit(EditCallbacks<float> callbacks) && {
+        callbacks_ = std::move(callbacks);
+        return std::move(*this);
+    }
+
+    Slider&& wheel_enabled(bool value = true) && {
+        wheel_enabled_ = value;
+        return std::move(*this);
+    }
+
     Spec spec() && {
         auto state = std::move(state_);
         const float minimum = minimum_;
@@ -555,9 +601,12 @@ public:
         const auto orientation = orientation_;
         auto formatter = std::move(formatter_);
         auto style = std::move(style_);
+        auto callbacks = std::move(callbacks_);
+        const bool wheel_enabled = wheel_enabled_;
         return Spec{
             [state = std::move(state), minimum, maximum, step, orientation,
-             formatter = std::move(formatter), style = std::move(style)]() mutable {
+             formatter = std::move(formatter), style = std::move(style),
+             callbacks = std::move(callbacks), wheel_enabled]() mutable {
                 return std::make_unique<detail::SliderComponent>(
                     std::move(state),
                     minimum,
@@ -565,7 +614,7 @@ public:
                     step,
                     orientation,
                     std::move(formatter),
-                    std::move(style));
+                    std::move(style), std::move(callbacks), wheel_enabled);
             },
             {}};
     }
@@ -578,6 +627,8 @@ private:
     SliderOrientation orientation_{SliderOrientation::Horizontal};
     Formatter formatter_;
     SliderStyle style_;
+    EditCallbacks<float> callbacks_;
+    bool wheel_enabled_{};
 };
 
 } // namespace ui

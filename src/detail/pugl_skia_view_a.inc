@@ -59,10 +59,12 @@ public:
              PuglWorld* shared_world = nullptr,
              std::function<void()> close_callback = {},
              NativeViewConstructionFaultStage fault_stage = NativeViewConstructionFaultStage::AfterViewCreation,
-             NativeViewConstructionFaultResult* fault_result = nullptr)
+             NativeViewConstructionFaultResult* fault_result = nullptr,
+             bool initially_visible = true)
         : ui_(ui),
           services_(services),
           geometry_(validated_initial_size(desc)),
+          embedded_(world_type == PUGL_MODULE),
           close_callback_(std::move(close_callback)) {
         if (!size_constraints_.update(desc.min_size, desc.max_size)) {
             throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
@@ -177,20 +179,22 @@ public:
         if (fault_result) ++fault_result->initial_resize_completed;
         maybe_inject(NativeViewConstructionFaultStage::AfterInitialResize);
 
-        if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
-            throw_pugl(status, "puglShow failed");
+        if (initially_visible) {
+            if (const auto status = puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
+                throw_pugl(status, "puglShow failed");
+            }
+            visibility_.set_visible(true);
         }
-        visible_ = true;
         if (fault_result) ++fault_result->show_completed;
         maybe_inject(NativeViewConstructionFaultStage::AfterShow);
 
-        // Attach exposure scheduling only after the native view is visible.
+        // Attach exposure scheduling after realization, also for hidden views.
         // The callback replays the already accumulated initial dirty region,
         // so no redundant whole-view redraw request is needed here.
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
             if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
-            if (renderer_.invalidate_from_ui()) request_redraw(rect);
+            if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
         maybe_inject(NativeViewConstructionFaultStage::AfterInvalidationCallback);
@@ -380,6 +384,28 @@ public:
         detail::EmbeddedNativeScreenOriginQuery query) noexcept {
         embedded_screen_origin_query_for_test_ = query;
     }
+
+    [[nodiscard]] bool request_gpu_readback_region(int x,
+                                                   int y,
+                                                   int width,
+                                                   int height) noexcept {
+        if (!view_) return false;
+        if (!renderer_.request_readback_region(x, y, width, height)) return false;
+        const auto logical = geometry_.logical_size();
+        request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
+        return true;
+    }
+
+    [[nodiscard]] std::optional<PlatformReadbackRegion>
+    take_gpu_readback_region() noexcept {
+        return renderer_.take_readback_region();
+    }
+
+    [[nodiscard]] bool suppress_platform_focus(bool suppressed) noexcept {
+        if (!view_) return false;
+        suppress_platform_focus_ = suppressed;
+        return true;
+    }
 #endif
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
@@ -391,17 +417,69 @@ public:
 
     bool show() {
         if (!native_view_open()) return false;
-        if (visible_) return true;
-        if (puglShow(view_, PUGL_SHOW_RAISE) != PUGL_SUCCESS) return false;
-        visible_ = true;
+        if (visibility_.visible()) return true;
+
+        const auto generation = visibility_.begin_show();
+        const auto status =
+            puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
+        if (status != PUGL_SUCCESS) {
+            visibility_.rollback_show(generation);
+            return false;
+        }
+
+        // A synchronous native callback may have performed a newer visibility
+        // transition or closed the view. The newest transition owns follow-up.
+        if (!visibility_.current(generation) ||
+            !visibility_.visible() ||
+            !native_view_open()) {
+            return true;
+        }
+
+        renderer_.invalidate();
+        const auto logical = geometry_.logical_size();
+        request_redraw({0.0f, 0.0f, logical.w, logical.h});
         return true;
+    }
+
+    [[nodiscard]] bool visible() const noexcept {
+        return native_view_open() && visibility_.visible();
     }
 
     bool hide() {
         if (!native_view_open()) return false;
-        if (!visible_) return true;
-        if (puglHide(view_) != PUGL_SUCCESS) return false;
-        visible_ = false;
+        if (!visibility_.visible()) return true;
+
+        const auto generation = visibility_.begin_hide();
+        PuglStatus hide_status = PUGL_SUCCESS;
+        {
+            detail::ScopedBooleanState suppress_focus_cleanup{
+                suppress_embedded_focus_cleanup_,
+                suppress_embedded_focus_cleanup_ || embedded_};
+            hide_status = puglHide(view_);
+        }
+
+        if (hide_status != PUGL_SUCCESS) {
+            visibility_.rollback_hide(generation);
+            return false;
+        }
+
+        // If a Pugl callback re-entered show/hide (or closed the native view),
+        // that newer transition owns cleanup. Never deactivate a view that a
+        // nested show just made visible again.
+        if (!visibility_.current(generation) ||
+            visibility_.visible() ||
+            !view_) {
+            return true;
+        }
+
+        std::exception_ptr failure;
+        const auto complete = [&](auto&& operation) {
+            try { operation(); } catch (...) { if (!failure) failure = std::current_exception(); }
+        };
+        complete([&] { (void)ui_.cancel_pointer(services_); });
+        complete([&] { ui_.deactivate(services_); });
+        complete([&] { set_text_input(false, {}, 0.0f); });
+        if (failure) std::rethrow_exception(failure);
         return true;
     }
 
@@ -437,7 +515,7 @@ public:
 
         if (!view_) {
             should_close_ = true;
-            visible_ = false;
+            visibility_.set_visible(false);
             return false;
         }
 
@@ -479,7 +557,7 @@ public:
         renderer_.abandon();
         puglFreeView(view_);
         view_ = nullptr;
-        visible_ = false;
+        visibility_.set_visible(false);
         should_close_ = true;
         return true;
     }
@@ -832,7 +910,7 @@ private:
             cleanup.view_acquired = false;
             if (cleanup.fault_result) ++cleanup.fault_result->view_released;
         }
-        visible_ = false;
+        visibility_.set_visible(false);
         if (world_ && owns_world_) {
             puglFreeWorld(world_);
             world_ = nullptr;

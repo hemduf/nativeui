@@ -14,6 +14,7 @@
     }
 
     void bind_theme(Node& node, const Theme& inherited) noexcept {
+        invalidate_raster_cache_ancestry(&node);
         const Theme* descendants = &inherited;
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
             binding->bind_theme(inherited);
