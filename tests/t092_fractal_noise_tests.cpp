@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -131,6 +132,20 @@ void option_contract() {
     NUI_CHECK(options.mode() == ui::FractalNoiseMode::Ridged);
     options.set_lacunarity(nan);
     NUI_CHECK(std::isnan(options.lacunarity()));
+
+    // Setters are value-only: representative finite payloads round-trip as
+    // exact float values without validation or canonicalization.
+    constexpr std::uint32_t lacunarity_bits = 0x3f123456u;
+    constexpr std::uint32_t gain_bits = 0xbf654321u;
+    const float finite_lacunarity = std::bit_cast<float>(lacunarity_bits);
+    const float finite_gain = std::bit_cast<float>(gain_bits);
+    options.set_lacunarity(finite_lacunarity).set_gain(finite_gain);
+    NUI_CHECK(std::bit_cast<std::uint32_t>(options.lacunarity()) ==
+              lacunarity_bits);
+    NUI_CHECK(std::bit_cast<std::uint32_t>(options.gain()) == gain_bits);
+    options.set_gain(-0.0f);
+    NUI_CHECK(std::bit_cast<std::uint32_t>(options.gain()) ==
+              std::bit_cast<std::uint32_t>(-0.0f));
 }
 
 void validation_contract() {
@@ -219,6 +234,39 @@ void recurrence_contract() {
         NUI_CHECK(weight_sum == expected_weight[i]);
         frequency = frequency * 2.5;
         amplitude = amplitude * 0.25;
+    }
+}
+
+void same_seed_octave_contract() {
+    constexpr ui::NoiseOptions base_options{
+        .feature_size = 48.0f, .seed = 0x12345678u};
+    const auto two = fractal_options(
+        ui::FractalNoiseMode::FBm, 2, 2.0f, 0.5f);
+    constexpr double x = 13.0;
+    constexpr double y = 7.0;
+
+    for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
+                      ui::NoiseType::Simplex}) {
+        const double n0 = base_reference(
+            base, base_options.seed, base_options.feature_size, x, y);
+        const double n1 = base_reference(
+            base, base_options.seed, base_options.feature_size,
+            x * 2.0, y * 2.0);
+        const double expected =
+            0.5 + 0.5 * (((2.0 * n0 - 1.0) +
+                           0.5 * (2.0 * n1 - 1.0)) / 1.5);
+        NUI_CHECK(std::abs(fractal_reference(
+            base, base_options, two, x, y) - expected) < 1e-15);
+
+        // Raster parity against the same-seed oracle makes an undocumented
+        // per-octave seed salt observable.
+        const auto source = ui::NoiseSource::create_fractal(
+            base, base_options, two);
+        NUI_CHECK(source.ok());
+        const auto pixel = render_pixel(source.noise.as_brush(), 12, 6);
+        const double raster_expected = fractal_reference(
+            base, base_options, two, 12.5, 6.5);
+        NUI_CHECK(std::abs(double(pixel.r) / 255.0 - raster_expected) < 0.015);
     }
 }
 
@@ -449,6 +497,7 @@ int main(int argc, char** argv) {
         option_contract();
         validation_contract();
         recurrence_contract();
+        same_seed_octave_contract();
         reference_contract();
         raster_contract();
         degeneracy_contract();

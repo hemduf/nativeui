@@ -80,6 +80,41 @@ void value_only_options_contract() {
           "FractalNoiseOptions setter allocated");
     check(ui::detail::shader_compile_call_count_for_test() == compiles_before,
           "FractalNoiseOptions setter compiled source");
+
+    const auto allocations_after_setters =
+        allocation_count.load(std::memory_order_relaxed);
+    const auto compiles_after_setters =
+        ui::detail::shader_compile_call_count_for_test();
+    check(value.octaves() == 6 && value.lacunarity() == 4.0f &&
+              value.gain() == 1.0f &&
+              value.mode() == ui::FractalNoiseMode::Ridged,
+          "FractalNoiseOptions getter changed stored values");
+    check(allocation_count.load(std::memory_order_relaxed) ==
+              allocations_after_setters,
+          "FractalNoiseOptions getter allocated");
+    check(ui::detail::shader_compile_call_count_for_test() ==
+              compiles_after_setters,
+          "FractalNoiseOptions getter compiled source");
+}
+
+void compile_count_is_independent_of_octaves() {
+    const auto before = ui::detail::shader_compile_call_count_for_test();
+
+    auto one = options();
+    one.set_octaves(1);
+    const auto one_result = ui::NoiseSource::create_fractal(
+        ui::NoiseType::Value, {}, one);
+    check(one_result.ok(), "one-octave fractal creation failed");
+    check(ui::detail::shader_compile_call_count_for_test() == before + 1,
+          "one-octave fractal did not compile exactly once");
+
+    auto six = options();
+    six.set_octaves(6);
+    const auto six_result = ui::NoiseSource::create_fractal(
+        ui::NoiseType::Value, {}, six);
+    check(six_result.ok(), "six-octave fractal creation failed");
+    check(ui::detail::shader_compile_call_count_for_test() == before + 2,
+          "six-octave fractal did not compile exactly once");
 }
 
 void invalid_does_not_compile() {
@@ -148,6 +183,7 @@ void fault_and_recovery() {
 int main() {
     try {
         value_only_options_contract();
+        compile_count_is_independent_of_octaves();
         invalid_does_not_compile();
         fault_and_recovery();
         return 0;
