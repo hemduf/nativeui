@@ -38,6 +38,13 @@ namespace ui::detail {
 /// effective ReadOnly keeps navigation/focus behavior but removes semantic
 /// actions that mutate application values. The tree-provided focus flag is
 /// authoritative and is only exposed for an enabled, focusable node.
+///
+/// One role-specific refinement is layered on the frozen generic
+/// classification: a read-only ComboBox never opens (T035
+/// `dismiss_overlay_when_read_only` and the input path reject opening), so its
+/// `Expand`/`Collapse` projections would advertise an action that can never
+/// execute. They are removed here for this role only; `Select` remains a
+/// mutating action and is already filtered by the generic rule.
 [[nodiscard]] inline SemanticInfo normalize_semantic_info(
     SemanticInfo info,
     bool effective_enabled,
@@ -61,6 +68,13 @@ namespace ui::detail {
         }
         return info.read_only && semantic_action_mutates_value(action);
     });
+
+    if (info.read_only && info.role == SemanticRole::ComboBox) {
+        std::erase_if(info.actions, [](SemanticAction action) {
+            return action == SemanticAction::Expand ||
+                   action == SemanticAction::Collapse;
+        });
+    }
 
     return info;
 }

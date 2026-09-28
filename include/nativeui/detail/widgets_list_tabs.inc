@@ -137,13 +137,20 @@ public:
 
     [[nodiscard]] bool perform_semantic_action(
         const SemanticActionRequest& request) override {
-        if (!effective_enabled() || effective_read_only()) return false;
+        if (!effective_enabled()) return false;
 
         auto runtime = runtime_;
         switch (request.action) {
         case SemanticAction::Select:
+            // `Select` is a value-changing action in the frozen T045/T059
+            // classification, so a read-only row keeps it rejected here as well
+            // as filtered from the projection.
+            if (effective_read_only()) return false;
             return runtime->select(index_);
         case SemanticAction::Activate:
+            // T036: a read-only ListView still runs Space/`.on_activate`, so
+            // Activate stays executable and follows the same selection-then-
+            // callback policy as the input path.
             if (!runtime->activation_callback) return false;
             return runtime->activate(index_);
         default:

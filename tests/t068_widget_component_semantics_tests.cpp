@@ -579,6 +579,122 @@ void popup_menu_component_projection_contract() {
     T068_CHECK(placements[2].bounds.y >= placements[1].bounds.y + placements[1].bounds.h);
 }
 
+void combo_box_read_only_projection_is_focus_only() {
+    ui::State<bool> read_only{true};
+    ui::State<int> selection{99};
+    const std::vector<ui::ComboBoxOption<int>> options{{1, "One", true}};
+    auto root = ui::compile(ui::make_spec(
+        ui::ReadOnly{read_only, ui::ComboBox<int>{selection, options}}));
+    ui::Node* root_ptr = root.get();
+    const auto combo_id = static_cast<ui::SemanticId>(root_ptr->children.front()->id);
+
+    ui::Tree tree{std::move(root)};
+    tree.mount();
+
+    const auto snapshot = ui::detail::build_semantic_tree_snapshot(
+        *root_ptr, ui::kInvalidNodeId);
+    const auto* node = find_role(snapshot, ui::SemanticRole::ComboBox);
+    T068_CHECK(node != nullptr);
+    T068_CHECK(node->info.read_only);
+    T068_CHECK(node->info.enabled);
+    T068_CHECK(node->info.focusable);
+    T068_CHECK(node->info.expanded == ui::SemanticExpandedState::Collapsed);
+    T068_CHECK(node->info.actions ==
+               std::vector<ui::SemanticAction>{ui::SemanticAction::Focus});
+    T068_CHECK(!node->info.supports(ui::SemanticAction::Expand));
+    T068_CHECK(!node->info.supports(ui::SemanticAction::Collapse));
+    T068_CHECK(!node->info.supports(ui::SemanticAction::Select));
+
+    // The live re-resolution used by the action router applies the same
+    // ComboBox read-only projection, so no ExpandCollapse/Selection request can
+    // reach the widget handler.
+    const ui::detail::SemanticIdentity identity{combo_id, std::nullopt};
+    const auto live = ui::detail::SemanticTreeActionAccess::current_semantics(
+        tree, identity);
+    T068_CHECK(live.has_value());
+    T068_CHECK(live->actions ==
+               std::vector<ui::SemanticAction>{ui::SemanticAction::Focus});
+
+    for (const auto action : {ui::SemanticAction::Expand,
+                              ui::SemanticAction::Collapse,
+                              ui::SemanticAction::Select}) {
+        T068_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+            tree, identity, action_request(action)));
+    }
+    T068_CHECK(selection.get() == 99);
+}
+
+void list_view_read_only_activate_executes_once() {
+    ui::State<bool> visible{true};
+    ui::State<bool> read_only{true};
+    ui::State<std::optional<std::string>> selection{std::nullopt};
+    int activations = 0;
+    std::string activated_key;
+    auto root = ui::compile(ui::make_spec(ui::If{
+        visible,
+        ui::ReadOnly{
+            read_only,
+            ui::ListView<std::string>{selection}
+                .item("one", ui::Label{"One"})
+                .item("two", ui::Label{"Two"})
+                .item("three", ui::Label{"Three"}, false)
+                .on_activate([&](const std::string& key) {
+                    ++activations;
+                    activated_key = key;
+                })}}));
+    ui::Node* root_ptr = root.get();
+    ui::Tree tree{std::move(root)};
+    tree.mount();
+
+    const auto snapshot = ui::detail::build_semantic_tree_snapshot(
+        *root_ptr, ui::kInvalidNodeId);
+    const auto* one = find_named_role(snapshot, ui::SemanticRole::ListItem, "one");
+    const auto* three = find_named_role(snapshot, ui::SemanticRole::ListItem, "three");
+    T068_CHECK(one != nullptr);
+    T068_CHECK(three != nullptr);
+    T068_CHECK(one->info.read_only);
+    T068_CHECK(one->info.actions == std::vector<ui::SemanticAction>({
+        ui::SemanticAction::Focus,
+        ui::SemanticAction::Activate,
+    }));
+    T068_CHECK(!one->info.supports(ui::SemanticAction::Select));
+    T068_CHECK(three->info.actions.empty());
+
+    const ui::detail::SemanticIdentity one_identity{one->id, std::nullopt};
+    const ui::detail::SemanticIdentity three_identity{three->id, std::nullopt};
+
+    // Read-only Activate follows the T036 Space/`.on_activate` policy: the row
+    // is selected and the callback runs exactly once per request.
+    T068_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, one_identity, action_request(ui::SemanticAction::Activate)));
+    T068_CHECK(activations == 1);
+    T068_CHECK(activated_key == "one");
+    T068_CHECK(selection.get().has_value());
+    T068_CHECK(*selection.get() == "one");
+
+    T068_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, one_identity, action_request(ui::SemanticAction::Activate)));
+    T068_CHECK(activations == 2);
+
+    // The value-changing Select stays rejected for read-only rows.
+    T068_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, one_identity, action_request(ui::SemanticAction::Select)));
+    T068_CHECK(activations == 2);
+
+    // Disabled rows reject Activate.
+    T068_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, three_identity, action_request(ui::SemanticAction::Activate)));
+    T068_CHECK(activations == 2);
+
+    // Removing the retained subtree retires the row identity; a retained
+    // native-proxy request fails closed.
+    visible.set(false);
+    tree.layout({200.0f, 120.0f});
+    T068_CHECK(!ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
+        tree, one_identity, action_request(ui::SemanticAction::Activate)));
+    T068_CHECK(activations == 2);
+}
+
 } // namespace
 
 int main() {
@@ -587,6 +703,8 @@ int main() {
         text_area_component_projection_contract();
         semantic_value_writes_revalidate_read_only();
         disabled_widget_projection_removes_actions();
+        combo_box_read_only_projection_is_focus_only();
+        list_view_read_only_activate_executes_once();
         tabs_component_projection_contract();
         tabs_focus_action_targets_the_composite_owner();
         list_view_component_projection_contract();
