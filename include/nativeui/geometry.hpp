@@ -7,40 +7,57 @@
 
 namespace ui {
 
+/// Single-precision pi constant used by NativeUI geometry helpers.
 constexpr float kPi = 3.14159265358979323846f;
 
 // -----------------------------------------------------------------------------
 // Geometry / colors / input
 // -----------------------------------------------------------------------------
 
+/// Width/height pair expressed in NativeUI logical pixels unless an API states
+/// another coordinate space explicitly.
 struct Size {
     float w{};
     float h{};
 };
 
+/// Two-dimensional point expressed in NativeUI logical coordinates unless an
+/// API states another coordinate space explicitly.
 struct Point {
     float x{};
     float y{};
 };
 
+/// Axis-aligned rectangle in logical coordinates.
+///
+/// `x`/`y` identify the top-left origin and `w`/`h` are extents. A rectangle
+/// is empty unless both extents are strictly positive.
 struct Rect {
     float x{};
     float y{};
     float w{};
     float h{};
 
+    /// Returns true when either extent is zero, negative, NaN, or otherwise not
+    /// strictly positive.
     [[nodiscard]] bool empty() const noexcept { return !(w > 0.0f && h > 0.0f); }
 
+    /// Returns whether `p` lies inside or on the rectangle edges.
     [[nodiscard]] bool contains(Point p) const noexcept {
         return p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
     }
 
+    /// Returns whether the complete non-empty `other` rectangle lies inside
+    /// this rectangle, including coincident edges. Empty rectangles are never
+    /// considered contained.
     [[nodiscard]] bool contains(Rect other) const noexcept {
         return !other.empty() && other.x >= x && other.y >= y &&
                other.x + other.w <= x + w && other.y + other.h <= y + h;
     }
 };
 
+/// Returns the positive-area intersection of two rectangles, or `Rect{}` when
+/// they do not overlap with positive area. Merely touching edges has no area.
 [[nodiscard]] inline Rect intersect(Rect a, Rect b) noexcept {
     // Keep public geometry usable even when a consumer included windows.h
     // without NOMINMAX before NativeUI. Parenthesized std::min/std::max names
@@ -54,6 +71,8 @@ struct Rect {
         : Rect{};
 }
 
+/// Returns the smallest axis-aligned rectangle covering both inputs. An empty
+/// input is ignored; if both are empty the result is empty.
 [[nodiscard]] inline Rect unite(Rect a, Rect b) noexcept {
     if (a.empty()) return b;
     if (b.empty()) return a;
@@ -64,6 +83,8 @@ struct Rect {
     return Rect{left, top, right - left, bottom - top};
 }
 
+/// Returns true when two non-empty rectangles overlap or touch at an edge or
+/// corner. Empty rectangles never overlap or touch.
 [[nodiscard]] inline bool overlaps_or_touches(Rect a, Rect b) noexcept {
     if (a.empty() || b.empty()) return false;
     return a.x <= b.x + b.w && b.x <= a.x + a.w &&
@@ -71,6 +92,11 @@ struct Rect {
 }
 
 
+/// Affine 2D transform stored as the upper two rows of a 3x3 matrix:
+/// `[m00 m01 m02; m10 m11 m12; 0 0 1]`.
+///
+/// Points are treated as column vectors. For `a * b`, `b` is applied first
+/// and `a` second.
 struct Transform2D {
     float m00{1.0f};
     float m01{};
@@ -79,14 +105,19 @@ struct Transform2D {
     float m11{1.0f};
     float m12{};
 
+    /// Returns the identity transform.
     [[nodiscard]] static constexpr Transform2D identity() noexcept { return {}; }
+    /// Returns a translation by `x` and `y` logical units.
     [[nodiscard]] static constexpr Transform2D translation(float x, float y) noexcept {
         return Transform2D{1.0f, 0.0f, x, 0.0f, 1.0f, y};
     }
+    /// Returns independent X/Y scaling around the origin.
     [[nodiscard]] static constexpr Transform2D scaling(float x, float y) noexcept {
         return Transform2D{x, 0.0f, 0.0f, 0.0f, y, 0.0f};
     }
 
+    /// Returns a rotation around the origin. Non-finite input falls back to the
+    /// identity transform rather than propagating invalid matrix values.
     [[nodiscard]] static Transform2D rotation(float radians) noexcept {
         if (!std::isfinite(radians)) return identity();
 
@@ -100,12 +131,15 @@ struct Transform2D {
             static_cast<float>(sine), static_cast<float>(cosine), 0.0f};
     }
 
+    /// Maps one point through this affine transform.
     [[nodiscard]] Point map_point(Point point) const noexcept {
         return Point{
             m00 * point.x + m01 * point.y + m02,
             m10 * point.x + m11 * point.y + m12};
     }
 
+    /// Returns the inverse transform when it is finite, numerically invertible,
+    /// and representable as `float`; otherwise returns `std::nullopt`.
     [[nodiscard]] std::optional<Transform2D> inverse() const noexcept {
         const double a = static_cast<double>(m00);
         const double c = static_cast<double>(m01);
@@ -167,6 +201,7 @@ struct Transform2D {
     }
 };
 
+/// Composes two transforms. The result applies `b` first and then `a`.
 [[nodiscard]] inline Transform2D operator*(const Transform2D& a,
                                            const Transform2D& b) noexcept {
     return Transform2D{
@@ -179,6 +214,8 @@ struct Transform2D {
     };
 }
 
+/// RGBA color value. Alpha defaults to fully opaque; consuming APIs define
+/// any additional clamping or color-space behavior.
 struct Color {
     float r{};
     float g{};
@@ -186,6 +223,7 @@ struct Color {
     float a{1.0f};
 };
 
+/// Built-in convenience palette used by NativeUI's default visual language.
 namespace colors {
 constexpr Color background{0.055f, 0.060f, 0.070f, 1.0f};
 constexpr Color panel{0.090f, 0.098f, 0.112f, 1.0f};
