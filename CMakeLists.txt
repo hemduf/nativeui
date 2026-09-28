@@ -127,6 +127,7 @@ add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
   src/skia_shader.cpp
+  src/skia_painter.cpp
   src/skia_noise.cpp
   src/skia_svg.cpp
   src/headless.cpp

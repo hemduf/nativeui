@@ -1,0 +1,25 @@
+#pragma once
+
+#include <nativeui/paint_style.hpp>
+
+#include "include/core/SkImageFilter.h"
+#include "include/core/SkShader.h"
+
+#include <memory>
+
+namespace ui::detail {
+
+struct ShaderBrushSnapshot;
+
+struct PainterPrivateHooks final {
+    void* state{};
+    sk_sp<SkShader> (*materialize_image_texture)(
+        void* state, const ImageTexture& texture){};
+    sk_sp<SkShader> (*materialize_shader_brush)(
+        void* state,
+        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot){};
+    sk_sp<SkImageFilter> (*materialize_effect_filter)(
+        void* state, const Effect& effect){};
+};
+
+} // namespace ui::detail

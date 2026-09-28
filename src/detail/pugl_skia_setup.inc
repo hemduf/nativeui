@@ -19,6 +19,7 @@
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
 
+#include "painter_private_hooks.hpp"
 #include "render_resource_materialization.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"

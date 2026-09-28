@@ -52,16 +52,7 @@ struct ShaderBrushSnapshot;
 [[nodiscard]] sk_sp<SkShader> materialize_image_texture(
     const ImageTexture& texture);
 
-struct PainterPrivateHooks final {
-    void* state{};
-    sk_sp<SkShader> (*materialize_image_texture)(
-        void* state, const ImageTexture& texture){};
-    sk_sp<SkShader> (*materialize_shader_brush)(
-        void* state,
-        const std::shared_ptr<const ShaderBrushSnapshot>& snapshot){};
-    sk_sp<SkImageFilter> (*materialize_effect_filter)(
-        void* state, const Effect& effect){};
-};
+struct PainterPrivateHooks;
 
 struct ResolvedTextRun {
     std::size_t byte_offset{};
@@ -648,36 +639,7 @@ private:
     }
 
     [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
-        const Effect& effect) {
-        if (private_hooks_ && private_hooks_->materialize_effect_filter) {
-            return private_hooks_->materialize_effect_filter(
-                private_hooks_->state, effect);
-        }
-        switch (effect.kind_) {
-            case Effect::Kind::GaussianBlur:
-                return SkImageFilters::Blur(
-                    effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
-            case Effect::Kind::DropShadow:
-                return SkImageFilters::DropShadow(
-                    effect.offset_.x,
-                    effect.offset_.y,
-                    effect.sigma_x_,
-                    effect.sigma_y_,
-                    to_sk_color(effect.color_),
-                    nullptr,
-                    nullptr);
-            case Effect::Kind::DropShadowOnly:
-                return SkImageFilters::DropShadowOnly(
-                    effect.offset_.x,
-                    effect.offset_.y,
-                    effect.sigma_x_,
-                    effect.sigma_y_,
-                    to_sk_color(effect.color_),
-                    nullptr,
-                    nullptr);
-        }
-        return nullptr;
-    }
+        const Effect& effect);
 
     [[nodiscard]] bool effect_source_device_bounds(
         const SkRect& source_bounds,
@@ -842,33 +804,11 @@ private:
         });
     }
 
-    void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
-        auto shader =
-            private_hooks_ && private_hooks_->materialize_image_texture
-            ? private_hooks_->materialize_image_texture(
-                  private_hooks_->state, texture)
-            : detail::materialize_image_texture(texture);
-        if (!shader) {
-            throw std::runtime_error(
-                "NativeUI image texture materialization returned no shader");
-        }
-        paint.setShader(std::move(shader));
-    }
+    void apply_fill_source(SkPaint& paint, const ImageTexture& texture);
 
     void apply_fill_source(
         SkPaint& paint,
-        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-        auto shader =
-            private_hooks_ && private_hooks_->materialize_shader_brush
-            ? private_hooks_->materialize_shader_brush(
-                  private_hooks_->state, snapshot)
-            : detail::materialize_shader_brush(snapshot);
-        if (!shader) {
-            throw std::runtime_error(
-                "NativeUI runtime shader materialization returned no shader");
-        }
-        paint.setShader(std::move(shader));
-    }
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot);
 
     [[nodiscard]] static SkPaint make_fill_paint(Color color, PaintOptions options) {
         SkPaint paint;
