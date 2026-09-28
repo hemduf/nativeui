@@ -81,6 +81,12 @@ public:
         return tree_.measure_overlay_content(constraints);
     }
     void resize(Size viewport) {
+        if (tree_.lifecycle_transition_active()) {
+            pending_viewport_resize_ = viewport;
+            pending_viewport_resize_valid_ = true;
+            tree_.invalidate();
+            return;
+        }
         viewport_ = viewport;
         prepare_overlay_layout();
     }
@@ -321,6 +327,7 @@ public:
     void invalidate_layout() { tree_.invalidate_layout(); }
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return;
+        (void)apply_pending_viewport_resize();
         if (!overlay_state_->entries.empty()) {
             prepare_overlay_layout();
             enforce_new_modal_capture_barrier(platform);
@@ -359,8 +366,101 @@ private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
 
+    class ScenePaintTransaction final {
+        friend class UI;
+        friend class detail::SkiaGlRenderer;
+
+        explicit ScenePaintTransaction(Tree::PaintDamageTransaction transaction) noexcept
+            : tree_(std::move(transaction)) {}
+
+        Tree::PaintDamageTransaction tree_;
+    };
+
     [[nodiscard]] bool scene_paint_blocked() const noexcept {
         return tree_.lifecycle_transition_active();
+    }
+
+    [[nodiscard]] bool scene_partial_paint_supported() const noexcept {
+        if (!overlay_state_->entries.empty()) return false;
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+        if (inspector_enabled_) return false;
+#endif
+        return true;
+    }
+
+    [[nodiscard]] bool prepare_scene_paint(PlatformServices& platform,
+                                           bool& requires_full_repaint) {
+        if (!scene_partial_paint_supported() || scene_paint_blocked()) return false;
+        const bool resized = apply_pending_viewport_resize();
+        tree_.prepare_scene_paint(platform, requires_full_repaint);
+        requires_full_repaint = requires_full_repaint || resized;
+        return true;
+    }
+
+    bool apply_pending_viewport_resize() {
+        if (!pending_viewport_resize_valid_) return false;
+
+        const Size previous = viewport_;
+        const Size requested = pending_viewport_resize_;
+        pending_viewport_resize_valid_ = false;
+        viewport_ = requested;
+        try {
+            prepare_overlay_layout();
+        } catch (...) {
+            viewport_ = previous;
+            pending_viewport_resize_ = requested;
+            pending_viewport_resize_valid_ = true;
+            throw;
+        }
+        return true;
+    }
+
+    [[nodiscard]] ScenePaintTransaction begin_scene_paint_transaction() {
+        return ScenePaintTransaction{tree_.begin_paint_damage_transaction()};
+    }
+
+    [[nodiscard]] bool scene_paint_transaction_valid(
+        const ScenePaintTransaction& transaction) const noexcept {
+        return transaction.tree_.valid();
+    }
+
+    [[nodiscard]] bool scene_paint_transaction_has_damage(
+        const ScenePaintTransaction& transaction) const noexcept {
+        return transaction.tree_.has_damage();
+    }
+
+    [[nodiscard]] Rect scene_paint_transaction_damage(
+        const ScenePaintTransaction& transaction) const noexcept {
+        return transaction.tree_.damage_bounds();
+    }
+
+    [[nodiscard]] bool scene_paint_transaction_damage_valid(
+        const ScenePaintTransaction& transaction) const noexcept {
+        return transaction.tree_.damage_bounds_valid();
+    }
+
+    [[nodiscard]] bool paint_full_scene_prepared(
+        ScenePaintTransaction& transaction,
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        bool& used_effects) {
+        return transaction.tree_.valid() &&
+               tree_.paint_full_scene_prepared(canvas, platform, used_effects);
+    }
+
+    [[nodiscard]] bool paint_partial_scene_prepared(
+        ScenePaintTransaction& transaction,
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        Rect repaint_region,
+        bool& used_effects) {
+        return transaction.tree_.valid() &&
+               tree_.paint_partial_scene_prepared(
+                   canvas, platform, repaint_region, used_effects);
+    }
+
+    void commit_scene_paint(ScenePaintTransaction& transaction) noexcept {
+        transaction.tree_.commit();
     }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
     friend bool debug::inspector_enabled(const UI& ui) noexcept;
@@ -775,6 +875,8 @@ private:
     OverlayPresenter overlay_presenter_;
     Tree tree_;
     Size viewport_{};
+    Size pending_viewport_resize_{};
+    bool pending_viewport_resize_valid_{};
     std::uint64_t last_modal_capture_barrier_id_{};
     std::optional<PendingOverlayCommand> overlay_command_retry_;
 #if defined(NATIVEUI_ENABLE_INSPECTOR)

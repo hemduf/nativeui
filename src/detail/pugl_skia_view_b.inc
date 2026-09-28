@@ -24,12 +24,17 @@
                 scene_error_active_ = false;
             }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            // Fixtures may drive activation explicitly; background windows do
+            // not reliably retain OS key focus across the test process.
+            if (!suppress_platform_focus_) ui_.refresh_focus(services_);
+#else
             ui_.refresh_focus(services_);
+#endif
             preferred_measure_dirty_ = true;
             flush_preferred_size_notification();
             return PUGL_SUCCESS;
         }
-
         case PUGL_UPDATE:
             nativeuiImeFlushPendingCancel(ime_bridge_);
             flush_preferred_size_notification();
@@ -99,11 +104,17 @@
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_IN:
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (suppress_platform_focus_) return PUGL_SUCCESS;
+#endif
             ui_.activate(services_);
             ui_.refresh_focus(services_);
             return PUGL_SUCCESS;
 
         case PUGL_FOCUS_OUT:
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (suppress_platform_focus_) return PUGL_SUCCESS;
+#endif
             clear_raw_pointer_positions();
             ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
@@ -406,6 +417,7 @@
     bool recreate_renderer_on_expose_{};
     std::optional<float> scene_scale_override_;
     bool reject_deferred_redraw_once_{};
+    bool suppress_platform_focus_{};
 #endif
     bool text_input_active_{};
     Rect text_input_logical_area_{};
