@@ -62,6 +62,22 @@ If a plug-in or audio application needs a real-time boundary, its adapter/applic
 
 The focused executable [`t065_ui_dispatcher`](../examples/features/t065_ui_dispatcher.cpp) is the maintained feature demonstration and self-test for worker posting, timers and deterministic fake-time behavior.
 
+## PlatformServices callback bridge
+
+[`PlatformServices`](../include/nativeui/paint.hpp) is the platform-neutral service interface borrowed by retained paint/input/focus execution. It is **not owned** by a component or callback context: the concrete implementation must stay alive for every UI/Tree operation that can invoke it. The interface crosses native UI facilities and is UI/main-thread work, not an audio-real-time service.
+
+Text measurement has backend-neutral defaults. `text_metrics(text, style)` delegates to `TextService::measure(text, style)`, while `text_width(text, size)` is the width-only convenience form. Results use logical UI units and own their numeric result; incoming string views are borrowed only for the call.
+
+`set_text_input(active, area, cursor_offset)` mirrors focused retained editing into the platform IME/text-input bridge. `area` and `cursor_offset` are logical geometry; the concrete view converts them to device/platform coordinates. Disabling input allows zero/default geometry. Custom/headless services may keep the default no-op implementation when they have no native IME integration.
+
+Pointer capture remains **retained-tree owned**. `begin_pointer_capture()` and `end_pointer_capture()` are noexcept platform lifecycle hooks for the real none↔owner transition; they carry no target identity and must not become a second platform-owned capture registry.
+
+Clipboard operations are request-oriented. `set_clipboard_text(text)` publishes UTF-8 plain text; the string view is borrowed for the duration of the call, so an asynchronous implementation must copy it before returning. `request_clipboard_text()` initiates platform delivery through the normal input/data path and deliberately returns no synchronous string value.
+
+Drag/drop is synchronous at offer time. `accept_drop(type, region)` receives a borrowed offered type plus the logical target region and returns whether the current offer was accepted; the default implementation rejects support. `reject_drop(region)` explicitly rejects the current offer and defaults to a no-op for backends without drag/drop support.
+
+These low-level services are normally surfaced to components through borrowed `PaintContext`, `InputContext` and `FocusContext` operations. Application code should prefer those callback contexts instead of retaining a `PlatformServices&` beyond the callback/lifecycle that supplied it.
+
 ## Desktop services
 
 [`DesktopServices`](../include/nativeui/desktop_services.hpp) provides bounded asynchronous desktop integration for standalone NativeUI windows. The public service covers:

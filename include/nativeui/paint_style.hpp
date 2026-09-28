@@ -221,11 +221,11 @@ public:
 
     // Preserve the original two-stop convenience surface while generalized
     // gradients expose their complete immutable stop list through stops().
-    /// First stored stop color, or default transparent Color when empty.
+    /// First stored stop color, or default Color{} (opaque black) when empty.
     [[nodiscard]] Color start_color() const noexcept {
         return stops_.empty() ? Color{} : stops_.front().color;
     }
-    /// Last stored stop color, or default transparent Color when empty.
+    /// Last stored stop color, or default Color{} (opaque black) when empty.
     [[nodiscard]] Color end_color() const noexcept {
         return stops_.empty() ? Color{} : stops_.back().color;
     }

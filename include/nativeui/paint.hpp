@@ -1168,30 +1168,73 @@ private:
     bool used_effects_{};
 };
 
+/// Platform-neutral services used by retained input/focus/paint callbacks.
+///
+/// UI/Tree code borrows a PlatformServices implementation; ownership is not
+/// transferred. The implementation must remain alive for every callback or UI
+/// operation that can invoke it. These services are UI/main-thread facilities,
+/// may cross native platform boundaries, and are not audio-real-time safe.
+///
+/// Custom/headless backends may override only the services they support. Text
+/// measurement has a TextService fallback, text-input and native pointer-capture
+/// hooks default to no-op, drag/drop defaults to rejection, while clipboard
+/// write/request are required operations.
 class PlatformServices {
 public:
+    /// Polymorphic destructor for platform-service implementations.
     virtual ~PlatformServices() = default;
+    /// Measure UTF-8 text in logical units using `style`.
+    ///
+    /// The default implementation delegates to TextService::measure(). The
+    /// returned value is owned by the caller; `text` is borrowed only for the call.
     [[nodiscard]] virtual TextMetrics text_metrics(std::string_view text, const TextStyle& style) {
         return TextService::measure(text, style);
     }
+    /// Width-only convenience measurement in logical units.
+    ///
+    /// The default implementation delegates to TextService::measure().
     [[nodiscard]] virtual float text_width(std::string_view text, float size) {
         return TextService::measure(text, size).width;
     }
+    /// Enable/disable native text/IME integration for the focused editor.
+    ///
+    /// `area` is the logical text-input rectangle and `cursor_offset` a logical
+    /// caret offset used by the platform bridge for candidate/caret placement.
+    /// Disabling text input permits callers to pass zero/default geometry.
     virtual void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         (void)active; (void)area; (void)cursor_offset;
     }
     // Pointer capture remains owned by the retained tree. These platform-neutral
     // lifecycle hooks let a concrete native view mirror only real none<->owner
     // transitions when its OS requires an explicit native pointer grab.
+    /// Mirror a retained none->owner pointer-capture transition to the OS.
+    ///
+    /// Retained Tree state remains authoritative; this hook carries no target
+    /// identity and must not create a second platform-owned capture model.
     virtual void begin_pointer_capture() noexcept {}
+    /// Mirror the retained owner->none pointer-capture transition to the OS.
     virtual void end_pointer_capture() noexcept {}
+    /// Publish UTF-8 plain text to the platform clipboard.
+    ///
+    /// `text` is borrowed for this call; an asynchronous backend must make its
+    /// own copy before returning.
     virtual void set_clipboard_text(std::string_view text) = 0;
+    /// Request clipboard text delivery through the normal platform input/data path.
+    ///
+    /// This is a request, not a synchronous getter; no text is returned here.
     virtual void request_clipboard_text() = 0;
     // Drag-and-drop is synchronous at offer time. The default implementation
     // rejects support so headless/custom platform services need no DnD code.
+    /// Accept the current synchronous drag/drop offer for MIME/data `type`.
+    ///
+    /// `region` is the logical target region. Returns true only when the backend
+    /// accepted the current offer; the default implementation rejects it.
     virtual bool accept_drop(std::string_view type, Rect region) {
         (void)type; (void)region; return false;
     }
+    /// Explicitly reject the current drag/drop offer for a logical target region.
+    ///
+    /// The default implementation is a no-op for backends without drop support.
     virtual void reject_drop(Rect region) { (void)region; }
 };
 
