@@ -437,7 +437,7 @@ int main() {
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 1ms);
         const auto elapsed = std::chrono::steady_clock::now() - begin;
         if (!discovery_matches(discovery, LinuxDbusErrorCode::Timeout, {}) ||
-            !wait_for_exact_call_count(service, 11, 2s) || elapsed >= 5s) {
+            !wait_for_exact_call_count(service, 9, 2s) || elapsed >= 5s) {
             return EXIT_FAILURE;
         }
     }
@@ -448,7 +448,7 @@ int main() {
         const auto discovery =
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
         if (!discovery_matches(discovery, LinuxDbusErrorCode::None, session_address) ||
-            !wait_for_exact_call_count(service, 9, 2s)) {
+            !wait_for_exact_call_count(service, 10, 2s)) {
             return EXIT_FAILURE;
         }
     }
@@ -464,7 +464,7 @@ int main() {
             LinuxDbusTransport::discover_accessibility_bus_address(nullptr, 5s);
         if (!discovery_matches(discovery, LinuxDbusErrorCode::None, long_address) ||
             discovery.address.size() != long_address.size() ||
-            !wait_for_exact_call_count(service, 10, 2s)) {
+            !wait_for_exact_call_count(service, 11, 2s)) {
             return EXIT_FAILURE;
         }
         service.set_reply_address(session_address);
