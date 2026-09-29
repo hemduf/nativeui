@@ -231,7 +231,7 @@ post-1.0 / later-release work already landed:
 ### NativeUI 1.1 advanced-rendering documentation frontier
 
 - **T119 / #206 — Blocked parent:** the sixteen-chapter NativeUI 1.1 advanced-rendering guide remains blocked until T165–T168 and their implementation/evidence dependencies are complete. T119 is documentation/integration only and must not redefine runtime/API contracts.
-- **T165 / #330 / PR #482 — Doing:** chapters 1–4 cover the shipped rendering model, Brush/gradients/strokes, bounded clips/layers/effects and the public SkSL profile. Canonical gradient and runtime-shader snippets plus backend/private-boundary and link contracts are present as tests-as-code. T165 remains Doing until those documentation tests are executed on the exact candidate and the mandatory final review is complete.
+- **T165 / #330 / PR #482 — Done:** chapters 1–4 cover the shipped rendering model, Brush/gradients/strokes, bounded clips/layers/effects and the public SkSL profile. Canonical gradient and runtime-shader snippets plus backend/private-boundary and link contracts are present as tests-as-code. PR #482 merged into `main` as `e0b189b586c6b4927fe633d3f7c0a886451a2020` from exact candidate `0bd370cc10b0cd0c1ad03983723568d0425314c1`; Advanced Rendering Docs Validation run `36531633097` passed its compile-snippets/contracts job, and issue #330 is closed `completed` with `status:done`.
 - **T166 / #331, T167 / #332, T168 / #333 — Blocked:** later documentation slices wait for their exact implementation/evidence dependencies; T168 performs whole-guide reconciliation after T114, T118 and T182.
 
 ### Milestone 4 — Text system
