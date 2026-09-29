@@ -356,15 +356,49 @@ if (handle) {
 
 ## Tooltip
 
-[`include/nativeui/tooltip.hpp`](../include/nativeui/tooltip.hpp) builds tooltip behavior on the retained interaction/overlay and Dispatcher timer services. Tooltip state and timing are per controller/UI; there is deliberately no process-wide current-tooltip or shared warm-up singleton.
+[`include/nativeui/tooltip.hpp`](../include/nativeui/tooltip.hpp) exposes `Tooltip` as an owned one-child retained decorator. It is a value builder, not a handle to a live tooltip window: construction and `delay()` mutate only detached configuration, while `spec() &&` consumes that configuration and transfers it into retained composition.
 
-At a public-contract level:
+### Builder, ownership and units
 
-- hover or focus can make a tooltip eligible after its delay;
-- pointer-button interaction suppresses hover presentation during the interaction;
-- an unavailable anchor cancels pending/visible presentation;
-- pointer-down dismissal remains suppressed until a real eligibility transition instead of immediately reappearing under a stationary pointer;
-- teardown cancels pending presentation work.
+`Tooltip(std::string text, Child&& child)` owns the UTF-8 text and immediately converts the child with `make_spec()`; the original text buffer and child argument do not need to outlive construction. V1 accepts plain UTF-8 text only. Empty text is valid and suppresses visual presentation and semantic description rather than inventing fallback content.
+
+`kDefaultDelay` is **500 milliseconds**. Both `delay(...)` overloads accept `std::chrono::milliseconds`, clamp negative values to zero, and return the same builder for fluent composition. `delay() const` reports the already-clamped value. `text() const` returns a borrowed reference to builder-owned storage; do not retain that reference after moving/destroying the builder or after consuming it with `spec() &&`.
+
+`kDefaultMaxWidth` is **320 logical UI pixels**. It is the built-in v1 tooltip-surface wrap width, not an anchor constraint or physical-pixel measurement. Tooltip placement/clamping remains the overlay service's responsibility.
+
+`spec() &&` is intentionally consuming. The returned `Spec` owns the moved text, configured delay, and child specification; it does not borrow the `Tooltip` builder. Construction/spec materialization can allocate and allocation failure propagates rather than silently dropping the tooltip. Builder operations invoke no application callbacks and do not re-enter retained dispatch.
+
+```cpp
+auto tooltip = ui::Tooltip{"Reset to default", reset_button}
+    .delay(std::chrono::milliseconds{350});
+
+const auto configured_delay = tooltip.delay(); // 350 ms
+const auto& borrowed_text = tooltip.text();     // valid until tooltip is moved/consumed
+
+ui::Spec decorated = std::move(tooltip).spec();
+// borrowed_text must not be used after the consuming move.
+```
+
+### Eligibility, dismissal and lifetime
+
+Tooltip state and timing are per retained instance/UI; there is no process-wide current-tooltip or shared warm-up singleton. Hover or focus creates eligibility and arms one full configured delay. A presentation is a non-modal, pointer-transparent overlay anchored to the decorated retained node.
+
+The dismissal contract is deliberately conservative:
+
+- pointer-button interaction makes hover presentation ineligible while interaction is active;
+- an anchor that becomes hidden, collapsed, or disabled cancels pending work and dismisses visible presentation;
+- pointer-down dismissal suppresses the current continuous eligibility interval, so a stationary pointer does not immediately re-arm the tooltip;
+- a real ineligible → eligible hover/focus transition is required before the next delayed presentation attempt;
+- deactivation/unmount/teardown cancels pending work and drops presentation state;
+- if the overlay closes externally because the anchor/UI disappears, the controller reconciles to hidden state instead of retaining a stale handle.
+
+The decorator does not capture pointer or focus, does not keep the owning UI alive, and does not export the overlay handle. Text is also surfaced as semantic description while non-empty.
+
+### Threading, reentrancy and failures
+
+Detached builder operations do not require a live UI, but retained materialization, Dispatcher timer callbacks, hover/focus reconciliation, overlay publication/dismissal and teardown belong to the owning UI/main-thread domain. These paths can allocate and are **not** audio/DSP real-time safe.
+
+Overlay publication is transactional at the overlay-service boundary. If publication fails before commit, the controller does not retain a usable visible state. Post-commit layout invalidation is best-effort and cannot roll a committed overlay back into a half-visible controller state. Teardown is a no-unwind boundary for the internal controller; application code receives no tooltip callback surface to invoke reentrantly.
 
 [`t062_tooltip`](../examples/features/t062_tooltip.cpp) is the focused tooltip example.
 
