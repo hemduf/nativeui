@@ -276,6 +276,8 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_fractal_noise_tests ${PROJECT_SOURCE_DIR}/tests/fractal_noise_tests.cpp)
   nativeui_add_core_test(nativeui_scalar_source_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_tests.cpp)
   target_include_directories(nativeui_scalar_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_scalar_source_fault_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_fault_tests.cpp)
+  target_include_directories(nativeui_scalar_source_fault_tests PRIVATE ${PROJECT_SOURCE_DIR})
   add_executable(nativeui_scalar_source_source_tests
     ${PROJECT_SOURCE_DIR}/tests/scalar_source_source_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
