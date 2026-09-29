@@ -6,10 +6,10 @@ if(NATIVEUI_BUILD_PLATFORM)
   # -----------------------------------------------------------------------------
   # Pugl: source dependency managed by CPM, compiled statically by NativeUI.
   # -----------------------------------------------------------------------------
-  # 9498280 retains the Emscripten input/context-menu and multi-view focus
-  # fixes while adding the reviewed iOS/iPadOS raw multi-pointer API.
+  # This pin includes the reviewed iOS/iPadOS input work and the macOS
+  # embedded visibility/focus lifecycle used directly by NativeUI.
   set(NATIVEUI_PUGL_COMMIT
-      "94982803985eefcbaeb0a1c8d0136ec862d7cb59"
+      "c1d7ddd13f74613c83cbbeee9028ca017b50ff0e"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
@@ -27,14 +27,9 @@ if(NATIVEUI_BUILD_PLATFORM)
   if(NOT EXISTS "${pugl_src_SOURCE_DIR}/include/pugl/pugl.h")
     message(FATAL_ERROR "Invalid Pugl source tree: ${pugl_src_SOURCE_DIR}")
   endif()
-  # T053's consumer platform module and T047's installed-package helper use the
-  # same resolved pinned source root. This is build/configure data only.
+  # The consumer platform module and installed-package helper use the exact
+  # resolved pinned source root. NativeUI never rewrites dependency sources.
   set(NATIVEUI_PUGL_SOURCE_DIR "${pugl_src_SOURCE_DIR}")
-  if(APPLE)
-    include("${CMAKE_CURRENT_LIST_DIR}/NativeUIPuglVisibility.cmake")
-    set(NATIVEUI_PUGL_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/nativeui-pugl")
-    nativeui_prepare_pugl_visibility("${pugl_src_SOURCE_DIR}" "${NATIVEUI_PUGL_SOURCE_DIR}")
-  endif()
 
   add_library(nativeui_opengl INTERFACE)
   add_library(NativeUI::OpenGL ALIAS nativeui_opengl)

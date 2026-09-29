@@ -1,0 +1,65 @@
+name: Pugl Integration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pugl-integration.yml'
+      - 'cmake/Dependencies.cmake'
+      - 'src/pugl_skia.cpp'
+      - 'src/detail/pugl_skia_view_a.inc'
+      - 'src/detail/pugl_skia_view_b.inc'
+      - 'src/detail/window_control_state.hpp'
+      - 'tests/CMakeLists.txt'
+      - 'tests/embedded_visibility_macos_tests.mm'
+      - 'tests/window_control_state_tests.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  macos:
+    name: macOS embedded lifecycle
+    runs-on: macos-15
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-pugl-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-pugl-${{ runner.os }}-${{ runner.arch }}-
+            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=OFF
+          -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Build focused targets
+        run: >-
+          cmake --build build --config Release
+          --target nativeui_window_control_state_tests nativeui_embedded_visibility_tests
+
+      - name: Run focused tests
+        run: >-
+          ctest --test-dir build --output-on-failure -C Release
+          -R '^(nativeui_window_control_state_tests|nativeui_embedded_visibility_tests)$'
