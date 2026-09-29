@@ -1,15 +1,23 @@
 name: Advanced Rendering Docs Validation
 
 on:
-  push:
-    branches:
-      - docs/advanced-rendering-foundations-guide
+  pull_request:
+    paths:
+      - '.github/workflows/advanced-rendering-docs-validation.yml'
+      - 'docs/advanced-rendering.md'
+      - 'tests/advanced_rendering_docs_contract.cmake'
+      - 'tests/advanced_rendering_docs_snippets.cpp'
+      - 'tests/CMakeLists.txt'
+      - 'include/nativeui/paint.hpp'
+      - 'include/nativeui/paint_style.hpp'
+      - 'include/nativeui/shader.hpp'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
