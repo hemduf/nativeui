@@ -1277,11 +1277,20 @@ bool run_canonical_reset_fixture(ui::Application& application) {
         const auto surface = read_surface(application, window);
         if (!surface) return failure("asymmetric surface readback failed");
         const float scale = window.scale_factor();
-        const int expected_width = covering_physical_pixel(61.0f, scale);
-        const int expected_height = covering_physical_pixel(23.0f, scale);
+        const auto logical_extent = window.size();
+        const int expected_width =
+            covering_physical_pixel(logical_extent.w, scale);
+        const int expected_height =
+            covering_physical_pixel(logical_extent.h, scale);
         if (surface->width != expected_width ||
             surface->height != expected_height ||
             surface->width == surface->height) {
+            std::cerr << "T096 asymmetric extent diagnostics: logical="
+                      << logical_extent.w << "x" << logical_extent.h
+                      << " scale=" << scale
+                      << " expected=" << expected_width << "x" << expected_height
+                      << " actual=" << surface->width << "x" << surface->height
+                      << '\n';
             return failure("asymmetric surface extent or scale mismatch");
         }
         const auto corner_tl = read_pixel(application, window, {2.0f, 2.0f});

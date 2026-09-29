@@ -95,13 +95,11 @@ deactivate the retained UI; losing focus cancels an active gesture. Hiding the
 focused child clears its native responder, and showing it again remains passive.
 Window notifications are scoped to that child's current host window and removed
 on detach/destruction. NativeUI does not replace the host window delegate.
-The pinned Pugl backend lacks that contract; `NativeUIPuglVisibility.cmake`
-applies checked source substitutions to a build-private Pugl staging tree.
-The CPM cache/source override is unchanged, and installed packages include the
-corrected sources. A mismatched Pugl source fails configuration for review instead
-of silently applying an uncertain patch. Remove the shim after upstream Pugl
-provides the same behavior. Windows/X11/WebAssembly continue to use their
-existing Pugl show/hide implementations; this change is validated on macOS.
+The pinned Pugl backend implements that contract directly. NativeUI consumes
+the exact Pugl source commit through CPM (or `NATIVEUI_PUGL_SOURCE`) without
+staging or source rewriting, and installed packages carry the same pinned sources.
+Windows/X11/WebAssembly continue to use their existing Pugl show/hide
+implementations; this behavior is validated on macOS.
 
 Public examples: `examples/features/value_edit_sessions.cpp` and
 `examples/features/embedded_visibility.cpp`, both with displayless `--self-test`.

@@ -65,6 +65,12 @@ Delivered contract:
 
 Exact-head normal/path qualification is green for CI `35343703682`, T050 `35343703732`, T060 `35343703732`, T064 `35343703852`, T065 `35343703617`, T072 `35343703816` and Package Contracts `35343703787`. Final T042 Lifecycle Stress `35345455301` and release qualification v0.1 Release Gate `35345455659` are green. Final review reports zero remaining Blocking/Important findings.
 
+### T183 — Done (NativeUI 1.1 retained raster-cache foundation)
+
+**T183 / issue #470 / PR #474 merged as `8c0f9f1264cfd026f023ebbb881baf7ab320166f` from final head `6a0634e1486d5efece315b1738f69993574c02b7`.**
+
+Delivered the private retained cache-boundary generation/invalidation foundation required by T182: per-Tree lifetime identity, nested invalidation propagation, transaction-safe capture/publication, translation-preserving content generations, teardown/remount safety and no backend/public cache handles. Final CODE_REVIEW.md closeout records Blocking 0 / Important 0. Integrated `main` passed Main Smoke `36567076222`, Package Contracts `36567076181` and WebAssembly `36567076191`. T184 remains blocked on T097 and must reuse its bounded per-view resource-cache model.
+
 ### T073 — Done (post-1.0 rendering foundation)
 
 **T073 / issue #156 / PR #420 merged as `5c769749f280f18f60e8176ec5eadbc38881acc7`.**
@@ -207,6 +213,7 @@ post-1.0 / later-release work already landed:
   T079(done) -> T080(done) -> T081(done) -> T082(done) -> T083(done) -> T084(done) -> T085(done) -> T086(done) -> T087(done) -> NativeUI 1.1 shaders
   T073(done) + T079(done) -> T088(done) -> T089(done) -> T090(done) -> T091(done) -> T092(regression gate #479) -> T093(blocked on T092 closeout)
   T098(done) ---------------------------------------------------------------> T086(done)
+  T183(done) -> T184(blocked on T097) -> T185 -> T186 -> T182(closeout)
   T068 ----------------------------------------------> 1.2
 ```
 
@@ -231,7 +238,7 @@ post-1.0 / later-release work already landed:
 ### NativeUI 1.1 advanced-rendering documentation frontier
 
 - **T119 / #206 — Blocked parent:** the sixteen-chapter NativeUI 1.1 advanced-rendering guide remains blocked until T165–T168 and their implementation/evidence dependencies are complete. T119 is documentation/integration only and must not redefine runtime/API contracts.
-- **T165 / #330 / PR #482 — Done:** chapters 1–4 cover the shipped rendering model, Brush/gradients/strokes, bounded clips/layers/effects and the public SkSL profile. Canonical gradient and runtime-shader snippets plus backend/private-boundary and link contracts are present as tests-as-code. PR #482 merged into `main` as `e0b189b586c6b4927fe633d3f7c0a886451a2020` from exact candidate `0bd370cc10b0cd0c1ad03983723568d0425314c1`; Advanced Rendering Docs Validation run `36531633097` passed its compile-snippets/contracts job, and issue #330 is closed `completed` with `status:done`.
+- **T165 / #330 / PR #482 — Done:** chapters 1–4 cover the shipped rendering model, Brush/gradients/strokes, bounded clips/layers/effects and the public SkSL profile. Canonical gradient and runtime-shader snippets plus backend/private-boundary and link contracts are present as tests-as-code. PR #482 merged into `main` as `e0b189b586c6b4927fe633d3f7c0a886451a2020` from exact candidate `0bd370cc10b0cd0c1ad03983723568d0425314c1`; Advanced Rendering Docs Validation run `36531633097` passed, and issue #330 is closed `completed` with `status:done`.
 - **T166 / #331, T167 / #332, T168 / #333 — Blocked:** later documentation slices wait for their exact implementation/evidence dependencies; T168 performs whole-guide reconciliation after T114, T118 and T182.
 
 ### Milestone 4 — Text system
