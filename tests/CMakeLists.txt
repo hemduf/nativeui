@@ -276,6 +276,8 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_fractal_noise_tests ${PROJECT_SOURCE_DIR}/tests/fractal_noise_tests.cpp)
   nativeui_add_core_test(nativeui_scalar_source_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_tests.cpp)
   target_include_directories(nativeui_scalar_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_scalar_source_source_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_source_tests.cpp)
+  target_include_directories(nativeui_scalar_source_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
   target_include_directories(nativeui_fractal_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
 
   # Fault controls remain in this isolated executable, never NativeUI::Core.
