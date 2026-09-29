@@ -79,6 +79,55 @@ There is no hidden mutable "current application", current-window singleton, proc
 
 The public declarations are in [`include/nativeui/window.hpp`](../include/nativeui/window.hpp) and [`include/nativeui/ui.hpp`](../include/nativeui/ui.hpp).
 
+## Native-window descriptor and operation contracts
+
+The public native-view surface uses **logical pixels** for every `Size`, `Rect`, minimum/maximum constraint, text-input rectangle and preferred-size notification. `scale_factor()` is the device conversion snapshot used at the platform boundary; application code should not pre-scale geometry before calling these APIs. Native configure events remain authoritative for the size reported by `size()`, so a successful `set_size()` is a submitted request rather than a synchronous guarantee that the OS has already configured that exact extent.
+
+`WindowDesc` is consumed during standalone construction. Its title is copied, optional bounds are values, and no descriptor field is borrowed after construction. Invalid/non-finite size constraints or a minimum larger than the maximum are rejected by the view geometry layer. The explicit `StandaloneWindow(Application&, UI&, WindowDesc)` path records normal platform/descriptor construction failure in `valid()/last_error()` while allocation failure may propagate; embedded construction is not a status-returning factory and may propagate construction errors.
+
+| API family | Ownership/lifetime | Failure/result semantics | Reentrancy/threading |
+| --- | --- | --- | --- |
+| `Application::run/poll` | application owns one program world; windows are separately owned | `run()` returns non-zero for invalid/terminal failure; `poll()` becomes false at quit/terminal failure | UI/main thread; pumps dispatchers and may enter user callbacks |
+| `StandaloneWindow::dispatcher()` / `EmbeddedView::dispatcher()` | returned dispatcher is a value facade; it does not extend native-view lifetime | shutdown rejects later work according to Dispatcher contract | callbacks run at dispatcher checkpoints, not on an audio thread |
+| `native_handle()` | borrowed opaque child/top-level native identifier owned by the wrapper | zero means no usable native view; any prior value becomes stale at teardown | UI/main-thread integration only |
+| `last_error()` | borrowed `string_view` into wrapper/application storage | empty means no stored diagnostic; later operations may replace the backing string | copy the text if it must survive later mutation/destruction |
+| `show()/hide()` | keep the same realized retained/native view | idempotent on the current visibility state; false reports unavailable/platform failure | may synchronously enter native callbacks; hide restores pointer/focus/IME invariants before propagating cleanup exceptions |
+| `set_size()/set_min_size()/set_max_size()` | consume value geometry; retain no caller reference | requests use logical pixels; size is clamped to active bounds; invalid constraint pairs/native submission return false | UI/main-thread platform calls, not RT safe |
+| preferred-size callback | wrapper owns the `std::function`; callback receives an owned `Size` | advisory only; host may ignore/clamp and NativeUI never resizes the host parent | delivered on UI/main thread at a safe checkpoint; standalone callback may synchronously call `set_size()` |
+
+The `QuitPolicy` and close APIs deliberately separate **event-loop lifetime** from **native-window lifetime**. `QuitPolicy::OnLastWindowClosed` only requests application quit when the last registered window actually completes close/unregistration. `ExplicitOnly` leaves an empty application runnable. Conversely, `Application::request_quit()` never destroys windows.
+
+For a standalone window, `request_close()` is an accepted programmatic close and never calls the user-close veto. Native/user close requests go through `on_close_request()`; returning `CloseDecision::Cancel` keeps the window open, while `Accept` schedules close at a safe checkpoint. `should_close()` therefore means “terminal close is pending/requested or the native backend wants termination”, whereas `is_closed()` means the NativeUI close sequence has actually completed. `on_closed()` runs exactly once for accepted close while the C++ wrapper still exists; direct destructor teardown is intentionally silent.
+
+```cpp
+ui::Application app;
+if (!app.valid()) {
+    // Copy if the diagnostic must outlive the next application operation.
+    const std::string error{app.last_error()};
+    return 1;
+}
+
+ui::UI editor{/* root spec */};
+ui::StandaloneWindow window{
+    app,
+    editor,
+    ui::WindowDesc{
+        .title = "Editor",
+        .size = {900.0f, 620.0f},
+        .resizable = true,
+        .min_size = ui::Size{480.0f, 320.0f},
+        .max_size = std::nullopt,
+    }};
+
+window.on_close_request([] { return ui::CloseDecision::Accept; });
+window.set_preferred_size_callback(
+    [&window](ui::Size preferred) { (void)window.set_size(preferred); });
+
+return app.run();
+```
+
+All methods above are platform/UI-domain operations. None is an audio/DSP real-time API, and callers must not retain borrowed `string_view`, native handles, service references, or host/application/UI references beyond the lifetime documented by their owner.
+
 ## Standalone: one Application, multiple windows
 
 `Application` is the sole normal NativeUI 1.0 owner of the standalone event loop. It is non-copyable and non-movable and owns exactly one standalone program world. Multiple top-level windows share only that application/world/event-pump domain; their mutable retained UI, focus, capture, text, rendering and close state remain per-window/per-UI.
