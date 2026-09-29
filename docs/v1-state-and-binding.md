@@ -157,6 +157,42 @@ if (auto exposure = dirty.add({20, 20, 100, 40}, viewport)) {
 
 `add()` clips to the supplied bounds, returns `std::nullopt` for empty/already-covered input and performs no allocation after successful DirtyRegion construction. `rects()` returns a borrowed vector reference that is invalidated by later mutation/assignment/destruction.
 
+
+## Generic edit sessions
+
+[`edit.hpp`](../include/nativeui/edit.hpp) adds explicit user-edit lifetimes around `Binding<T>` without adding plug-in parameter IDs, normalization, host-automation queues, or audio-thread semantics.
+
+`EditSource` labels pointer, keyboard, wheel, or accessibility-originated edits. `EditCallbacks<T>` is owned by the session. The `const T&` supplied to `change` is borrowed only for that callback; copy it if it must survive. Callback captures otherwise follow normal C++ ownership rules.
+
+For a changed value the synchronous order is: begin, State commit and State observers, change with the effective committed value, then exactly one terminal end or cancel. Equal values emit no change. Direct State/Binding writes emit no edit callbacks.
+
+Cancellation is not rollback: the latest committed State value remains. Reentrant begin/update/set/finish attempts are rejected. Reentrant end/cancel requests are deferred until the current callback returns, with cancel taking precedence. A throwing begin/change/State observer cancels once and rethrows the original error; terminal callbacks are not retried. Destructor cancellation is no-throw.
+
+`set(value, source)` is the discrete-command form. `finish(value)` commits a final value and ends while retaining internal lifetime state so observer-driven owner destruction is safe. Destroying the originating State invalidates future mutation and causes an active session to cancel when it next observes that invalid source.
+
+```cpp
+ui::State<double> gain{0.5};
+ui::EditSession<double> edit{
+    gain.binding(),
+    {
+        .begin = [](ui::EditSource) {},
+        .change = [](const double& committed, ui::EditSource) {
+            (void)committed; // borrowed only for this callback
+        },
+        .end = [](ui::EditSource) {},
+        .cancel = [](ui::EditSource) {},
+    }};
+
+edit.begin(ui::EditSource::Pointer);
+edit.update(0.7);
+edit.finish(0.8);
+
+// Model synchronization does not create an edit lifetime.
+gain.set(0.25);
+```
+
+Edit sessions are UI/main-thread operations. They may allocate and invoke application callbacks, so they are neither cross-thread synchronization nor audio/DSP real-time APIs.
+
 ## Threading boundary
 
 `State<T>` and `Binding<T>` do not add mutexes, atomics, or cross-thread scheduling. Their values and listener registries are UI/main-thread state.

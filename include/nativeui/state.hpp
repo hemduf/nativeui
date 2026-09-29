@@ -46,6 +46,9 @@ concept StateValue = requires(const T& lhs, const T& rhs) {
 template <detail::StateValue T>
 class Binding;
 
+template <detail::StateValue T>
+class EditSession;
+
 /// Observable retained-UI value with synchronous, deterministic notification.
 ///
 /// `T` must be equality comparable. State is UI/main-thread confined: it
@@ -327,6 +330,7 @@ private:
     std::shared_ptr<typename State<T>::Control> control_;
 
     friend class State<T>;
+    friend class EditSession<T>;
 };
 
 template <detail::StateValue T>

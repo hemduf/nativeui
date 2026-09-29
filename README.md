@@ -127,6 +127,11 @@ view.set_size({800, 500});
 
 Pugl is created with `PUGL_MODULE` for embedded views and `puglUpdate(..., 0.0)` is used by `EmbeddedView::poll()`. Construction, use and destruction of the platform view are UI/main-thread operations.
 
+Generic value editing is available through `EditSession<T>` and `.on_edit(...)` on
+Knob, Slider and Toggle. Embedded hosts can opt into initially hidden construction
+and use `show()`, `hide()` and `visible()`. See [the editing and visibility
+contract](docs/value-editing.md) for API examples, lifecycle and platform details.
+
 ## Dependencies with CPM
 
 The project bootstraps CPM.cmake, then:

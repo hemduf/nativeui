@@ -8,20 +8,54 @@
 
 namespace ui {
 
-enum class EditSource { Pointer, Keyboard, Wheel, Accessibility };
+/// Origin of one user-facing edit lifetime.
+///
+/// The tag is callback metadata only; it adds no host-automation, normalization,
+/// accessibility transport, or cross-thread semantics.
+enum class EditSource {
+    /// Pointer press or drag interaction.
+    Pointer,
+    /// Keyboard command or key-repeat interaction.
+    Keyboard,
+    /// Mouse-wheel or equivalent scrolling interaction.
+    Wheel,
+    /// Semantic action initiated by an accessibility adapter.
+    Accessibility
+};
 
+/// Synchronous notifications owned by an `EditSession<T>`.
+///
+/// Stored callbacks own their captures according to normal C++ rules. Objects
+/// captured by reference or pointer are not kept alive by NativeUI. Callbacks
+/// run on the UI thread and may allocate or throw.
 template <detail::StateValue T>
 struct EditCallbacks {
+    /// Called once after an edit successfully becomes active.
     std::function<void(EditSource)> begin;
+    /// Called after State observers for an effective committed value change.
+    ///
+    /// The value reference is borrowed from the State control block for this
+    /// callback only; copy it if the value must survive the call.
     std::function<void(const T&, EditSource)> change;
+    /// Called once when an active edit completes normally.
     std::function<void(EditSource)> end;
+    /// Called once when an active edit is interrupted.
+    ///
+    /// Cancellation is a lifetime event and does not roll the State back.
     std::function<void(EditSource)> cancel;
 };
 
-/// UI-thread value editing, with no parameter, normalization or host semantics.
-/// Direct State/Binding writes never emit these callbacks. Cancellation keeps
-/// the last committed value. Each begun interaction has exactly one terminal
-/// end/cancel notification, including owner destruction (no-throw cancellation).
+/// Owns one generic UI-thread edit lifetime around a `Binding<T>`.
+///
+/// The Binding and callbacks are retained by value, while the originating
+/// `State<T>` remains the logical value owner. Direct State/Binding writes never
+/// emit edit callbacks. Cancellation keeps the latest committed value. Each begun
+/// interaction receives exactly one terminal end/cancel notification, including
+/// no-throw owner destruction.
+///
+/// Sessions sharing one State are independent. Calls may allocate and invoke
+/// application callbacks; this is UI/main-thread infrastructure, not an
+/// audio/DSP real-time or cross-thread transport.
 ///
 /// begin/update/set are rejected during callbacks or while this State is
 /// delivering another notification transaction. Reentrant end/cancel is
@@ -49,6 +83,10 @@ class EditSession final {
     using Owner = std::shared_ptr<Control>;
 
 public:
+    /// Construct an inactive session, owning the Binding and callbacks by value.
+    ///
+    /// Allocation failure propagates normally. If the originating State later
+    /// dies, mutation is rejected and an active edit is cancelled when observed.
     explicit EditSession(Binding<T> state, EditCallbacks<T> callbacks = {})
         : control_(std::make_shared<Control>(std::move(state), std::move(callbacks))) {}
     EditSession(const EditSession&) = delete;
@@ -56,20 +94,40 @@ public:
     EditSession(EditSession&&) = delete;
     EditSession& operator=(EditSession&&) = delete;
 
+    /// Cancel an active edit without allowing terminal callback errors to escape.
     ~EditSession() noexcept {
         const auto control = control_;
         control->alive = false;
         cancel_noexcept(control);
     }
 
+    /// Return whether this session currently owns an unterminated edit.
     [[nodiscard]] bool active() const noexcept { return control_->active; }
+
+    /// Begin an edit tagged with `source`.
+    ///
+    /// Returns false for an already-active or invalid session, during callback
+    /// dispatch, or while the backing State is already notifying observers.
     bool begin(EditSource source) { return begin_control(control_, source); }
+
+    /// Commit `value` through the Binding and report effective value change.
+    ///
+    /// State observers run before `change`; equal values produce no change
+    /// callback. Invalid, inactive, or reentrant updates return false.
     bool update(T value) { return update_control(control_, std::move(value)); }
+
+    /// Request normal termination; reentrant requests are deferred.
     void end() { const auto control = control_; terminate(control, Terminal::End); }
+
+    /// Request cancellation without restoring an earlier State value.
+    ///
+    /// A reentrant cancel is deferred and wins over a competing deferred end.
     void cancel() { const auto control = control_; terminate(control, Terminal::Cancel); }
 
-    /// Commit a final pointer value and end without accessing a deleted owner
-    /// if an observer/callback removes the component during the commit.
+    /// Commit a final value and then end while retaining internal lifetime state.
+    ///
+    /// Safe when an observer or callback removes the owning component during the
+    /// commit. The return value reports whether the effective State value changed.
     bool finish(T value) {
         const auto control = control_;
         if (control->dispatching) return false;
@@ -78,8 +136,9 @@ public:
         return changed;
     }
 
-    /// One atomic keyboard/wheel/semantic command. An unchanged value does not
-    /// begin an interaction. An already-active session is never interrupted.
+    /// Perform one atomic begin/update/end command for a discrete interaction.
+    ///
+    /// Equal values emit nothing and an already-active session is not interrupted.
     bool set(T value, EditSource source) {
         const auto control = control_;
         if (!control->alive || !control->state.valid() || control->state.control_->dispatching || control->active ||

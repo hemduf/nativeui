@@ -418,6 +418,9 @@ void degeneracy_contract() {
 void six_octave_grid_contract() {
     constexpr ui::NoiseOptions base_options{
         .feature_size = 37.0f, .seed = 0x6a09e667u};
+    constexpr std::array<std::array<int, 2>, 6> raster_samples{{
+        {0, 0}, {5, 11}, {13, 7}, {23, 31}, {37, 19}, {47, 47}
+    }};
 
     for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
                       ui::NoiseType::Simplex}) {
@@ -443,6 +446,15 @@ void six_octave_grid_contract() {
                 base, base_options, options);
             NUI_CHECK(first.ok() && second.ok());
 
+            const auto first_brush = first.noise.as_brush();
+            ui::UI first_tree{ui::Canvas{48.0f, 48.0f,
+                [first_brush](ui::CanvasContext2D& g) {
+                    g.fill_rect({0, 0, 48, 48}, first_brush);
+                }}};
+            ui::HeadlessRenderer first_renderer{{48, 48}, 1.0f};
+            NUI_CHECK(first_renderer.render(first_tree));
+            const auto pixels_a = first_renderer.rgba_pixels();
+
             const auto render = [](const ui::Brush& brush) {
                 ui::UI tree{ui::Canvas{48.0f, 48.0f,
                     [brush](ui::CanvasContext2D& g) {
@@ -452,10 +464,22 @@ void six_octave_grid_contract() {
                 NUI_CHECK(renderer.render(tree));
                 return renderer.rgba_pixels();
             };
-            const auto pixels_a = render(first.noise.as_brush());
             const auto pixels_b = render(second.noise.as_brush());
             NUI_CHECK(pixels_a == pixels_b);
             NUI_CHECK(!pixels_a.empty());
+
+            for (const auto& xy : raster_samples) {
+                const auto pixel = first_renderer.pixel(xy[0], xy[1]);
+                const double expected = fractal_reference(
+                    base, base_options, options,
+                    double(xy[0]) + 0.5, double(xy[1]) + 0.5);
+                NUI_CHECK(std::isfinite(expected));
+                NUI_CHECK(expected >= 0.0 && expected <= 1.0);
+                NUI_CHECK(
+                    std::abs(double(pixel.r) / 255.0 - expected) < 0.015);
+                NUI_CHECK(pixel.r == pixel.g && pixel.r == pixel.b);
+                NUI_CHECK(pixel.a == 255);
+            }
         }
     }
 }
