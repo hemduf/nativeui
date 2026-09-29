@@ -248,6 +248,45 @@ void brush_sampling_contract() {
 }
 
 
+void source_before_destination_compositing_contract() {
+    const ui::Brush source{ui::Color{0.2f, 0.8f, 0.4f, 1.0f}};
+    const auto scalar =
+        ui::ScalarSource::from_brush(source, ui::ScalarChannel::Green);
+    const auto probe = scalar_probe(scalar);
+    const auto raw_before = render_probe(probe, 8, 8);
+
+    const auto info = SkImageInfo::Make(
+        24, 16, kRGBA_F32_SkColorType, kPremul_SkAlphaType,
+        SkColorSpace::MakeSRGBLinear());
+    auto surface = SkSurfaces::Raster(info);
+    check(surface != nullptr, "ScalarSource compositing surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "ScalarSource compositing canvas missing");
+
+    ui::Painter painter{*canvas};
+    painter.fill_rounded_rect(
+        {0.0f, 0.0f, 24.0f, 16.0f}, 0.0f,
+        ui::Color{0.1f, 0.1f, 0.1f, 1.0f});
+    painter.fill_rounded_rect(
+        {0.0f, 0.0f, 8.0f, 16.0f}, 0.0f, probe,
+        ui::PaintOptions{.opacity = 0.25f, .blend = ui::BlendMode::Plus});
+
+    SkPixmap pixmap;
+    check(surface->peekPixels(&pixmap), "ScalarSource compositing pixels missing");
+    const auto inside = pixmap.getColor4f(4, 8);
+    const auto outside = pixmap.getColor4f(16, 8);
+    check(inside.fR > outside.fR + 0.05f,
+          "ScalarSource destination compositing was not applied after sampling");
+    check(inside.fR < raw_before[0] - 0.1f,
+          "ScalarSource sampled a destination-composited value");
+    check(std::abs(outside.fR - 0.1f) <= 0.01f,
+          "ScalarSource geometry coverage leaked outside the draw");
+
+    const auto raw_after = render_probe(probe, 8, 8);
+    check_pixel_near(raw_after, raw_before);
+}
+
+
 void nonfinite_shader_channel_contract() {
     const auto program = compile_probe(R"(
         uniform float zero;
@@ -634,6 +673,7 @@ void independent_source_contract() {
 int main() {
     source_creation_contract();
     brush_sampling_contract();
+    source_before_destination_compositing_contract();
     nonfinite_shader_channel_contract();
     source_construction_side_effect_contract();
     data_texture_channel_contract();
