@@ -68,10 +68,8 @@ private:
     std::optional<Size> max_size_;
 };
 
-/// Bookkeeping for one best-effort Dispatcher post used only as an optimization
-/// for window lifecycle control. Rejection or exception-before-enqueue clears
-/// the posted bit and leaves the close phase itself as the durable source of
-/// truth for the next owner/platform checkpoint.
+/// Restores a temporary boolean guard to its exact previous value on every
+/// exit path. The destructor only performs a no-throw scalar assignment.
 class ScopedBooleanState final {
 public:
     ScopedBooleanState(bool& slot, bool value) noexcept
@@ -135,6 +133,10 @@ private:
     bool visible_{};
 };
 
+/// Bookkeeping for one best-effort Dispatcher post used only as an optimization
+/// for window lifecycle control. Rejection or exception-before-enqueue clears
+/// the posted bit and leaves the close phase itself as the durable source of
+/// truth for the next owner/platform checkpoint.
 class WindowControlPostState final {
 public:
     template <class Post>
