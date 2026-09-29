@@ -45,4 +45,9 @@ jobs:
       - name: Build
         run: cmake --build build-edit --target nativeui_edit_session_tests
       - name: Test
-        run: ctest --test-dir build-edit -V -R '^nativeui_edit_session_tests$'
+        shell: pwsh
+        run: |
+          & .\build-edit\tests\nativeui_edit_session_tests.exe
+          $code = $LASTEXITCODE
+          Write-Host "direct-exit-code=$code"
+          if ($code -ne 0) { exit $code }
