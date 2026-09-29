@@ -14,7 +14,7 @@ This layer is not a general 3D scene API. Perspective, depth-buffer behavior and
 
 ## 2. Brush, colors and gradients
 
-A `ui::Brush` can hold a `ui::Color`, `ui::LinearGradient`, `ui::RadialGradient`, or a snapshot of a `ui::ShaderInstance`. `ui::PaintOptions` supplies opacity and a public blend mode: `SourceOver`, `Multiply`, `Screen`, or `Plus`.
+A `ui::Brush` can hold a `ui::Color`, `ui::LinearGradient`, `ui::RadialGradient`, `ui::ImageTexture`, or a snapshot of a `ui::ShaderInstance`. This slice covers colors, gradients and runtime-shader snapshots; the detailed ImageTexture tiling, sampling and interpretation contract belongs to the later texture documentation slice. `ui::PaintOptions` supplies opacity and a public blend mode: `SourceOver`, `Multiply`, `Screen`, or `Plus`.
 
 Gradient stops use `ui::GradientStop`. Linear gradients use two Painter-local points. Radial gradients use a Painter-local center and radius. The same Brush surface is shared by fills and strokes; a multi-segment Path does not remap a gradient independently for each segment.
 
