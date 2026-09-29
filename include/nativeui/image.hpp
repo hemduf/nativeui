@@ -16,6 +16,13 @@ namespace ui {
 class Painter;
 class Image;
 
+/// Mapping policy from a selected source rectangle into a draw destination.
+///
+/// Source geometry is expressed in decoded-image pixels; destinations are in
+/// Painter-local logical UI units. `Fill` stretches independently on both axes.
+/// `Contain` preserves aspect ratio and centers the complete source inside the
+/// destination. `Cover` preserves aspect ratio, fills the destination and
+/// center-crops the source as needed.
 enum class ImageFit {
     Fill,
     Contain,
@@ -88,6 +95,7 @@ static_assert(noexcept(std::declval<TextureSampling&>().set_mipmap(
 static_assert(noexcept(std::declval<const TextureSampling&>().filter()));
 static_assert(noexcept(std::declval<const TextureSampling&>().mipmap()));
 
+/// Resource-cache outcome for raster-image loading.
 enum class ImageLoadError {
     None,
     NotFound,
@@ -115,14 +123,27 @@ void draw_image(Painter& painter,
 /// real-time audio callback operation.
 class Image {
 public:
+    /// Construct an invalid, empty handle. `size()` returns {0, 0}.
     Image() = default;
 
+    /// Eagerly decode encoded raster bytes into immutable owned pixel backing.
+    ///
+    /// `encoded` is borrowed only for this call; successful decoding copies and
+    /// realizes the pixels before returning. Empty, malformed, unsupported, or
+    /// backend-decode failure returns an invalid Image. Normal decode failures
+    /// are represented by an invalid handle; C++ allocation exceptions may
+    /// still propagate. This operation may allocate and is not audio-RT safe.
     [[nodiscard]] static Image decode(std::span<const std::byte> encoded);
 
+    /// Whether this handle owns decoded backing.
     [[nodiscard]] bool valid() const noexcept { return static_cast<bool>(data_); }
+    /// Equivalent to `valid()`.
     [[nodiscard]] explicit operator bool() const noexcept { return valid(); }
+    /// Decoded pixel dimensions as float-valued pixel units; invalid Images return zero.
     [[nodiscard]] Size size() const noexcept;
 
+    /// Handle-identity equality: copies of one Image compare equal; separately
+    /// decoded byte-identical images are not required to compare equal.
     friend bool operator==(const Image&, const Image&) = default;
 
 private:
@@ -352,10 +373,14 @@ static_assert(noexcept(std::declval<ImageTexture&>().set_transform(
     Transform2D::identity())));
 static_assert(noexcept(std::declval<const ImageTexture&>().transform()));
 
+/// Owned result returned by ImageCache::load().
 struct ImageLoadResult {
+    /// Decoded shared handle on success; invalid on failure.
     Image image;
+    /// Stable cached outcome for the requested resource identifier.
     ImageLoadError error{ImageLoadError::None};
 
+    /// Success requires both ImageLoadError::None and a valid Image handle.
     [[nodiscard]] explicit operator bool() const noexcept {
         return error == ImageLoadError::None && image.valid();
     }
@@ -373,16 +398,31 @@ struct ImageLoadResult {
 /// domain. Do not call them from a real-time audio callback.
 class ImageCache {
 public:
+    /// Bind a cache to `provider`; the provider is borrowed and must outlive the cache.
     explicit ImageCache(ResourceProvider& provider);
     ~ImageCache();
 
     ImageCache(const ImageCache&) = delete;
     ImageCache& operator=(const ImageCache&) = delete;
+    /// Transfer cache contents and the borrowed provider association.
+    /// The moved-from cache is valid but empty/unbound: load() reports NotFound.
     ImageCache(ImageCache&&) noexcept;
+    /// Transfer cache contents/provider association with the same moved-from contract.
     ImageCache& operator=(ImageCache&&) noexcept;
 
+    /// Load once by exact resource identifier and cache both success and failure.
+    ///
+    /// The identifier is borrowed for the provider call but copied as the cache
+    /// key. `std::nullopt` from ResourceProvider maps to NotFound; returned bytes
+    /// that fail Image::decode(), including an empty vector, map to DecodeFailed.
+    /// A cached entry suppresses provider/decode retries until `clear()`.
+    /// Provider callbacks are synchronous and may throw; allocation/provider
+    /// exceptions propagate and are not cached as an ImageLoadError.
     [[nodiscard]] ImageLoadResult load(std::string_view resource_id);
+    /// Number of cached identifiers, including cached failure entries.
     [[nodiscard]] std::size_t size() const noexcept;
+    /// Remove all cached successes/failures without affecting the provider.
+    /// Existing Image values copied out remain alive via shared backing.
     void clear();
 
 private:

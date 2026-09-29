@@ -328,16 +328,85 @@ T125/T130 have closed the retained dispatch, lifecycle, layout, paint and teardo
 
 ## Text, images and vector content
 
-Text styling and measurement are part of the NativeUI presentation layer and use logical sizes/families/fallbacks rather than platform-native widget typography. The current public source lives in [`include/nativeui/text.hpp`](../include/nativeui/text.hpp).
+Text, raster images and SVGs remain backend-neutral public values. Preparation may allocate, parse/decode data, consult platform services or call an application `ResourceProvider`; keep these operations in the UI/resource-preparation domain, never in an audio/DSP real-time callback. Painter/Canvas operations consume prepared handles without exposing Skia/platform objects to application contracts.
 
-Image/SVG/resource loading is deliberately split from presentation ownership:
+### Text and font contracts
 
-- the ResourceManager/resource layer owns lookup/loading/caching policy;
-- image/vector abstractions represent content consumed by NativeUI rendering;
-- components/widgets decide retained layout and paint placement;
-- normal consumers should not acquire renderer-native image/canvas objects as application state.
+[`include/nativeui/text.hpp`](../include/nativeui/text.hpp) uses logical UI units for font sizes and returned metrics. `TextStyle` owns its family and ordered fallback-family strings; no renderer-native font handle is retained. Malformed UTF-8 supplied to measurement/drawing is repaired with U+FFFD through the shared text path.
 
-See [Services, testing and limits](v1-services-testing-and-limits.md) for the resource-lifetime/threading boundary and [Packaging and CMake](v1-packaging-and-cmake.md) for binary-resource packaging.
+`FontManager::register_embedded_font(alias, bytes)` borrows both inputs only for the call and retains its own successful registration. Embedded aliases are process-shared and immutable: registering the same alias with byte-identical data is idempotent, while trying to replace an existing alias with different bytes fails. Plug-ins should namespace aliases when process-wide sharing is not intentional.
+
+Face matching tries the requested family, then non-empty fallback families in order, then platform Unicode fallback. `FontMatch` owns only diagnostic metadata; `glyph_available` must be checked independently from the presence of a resolved family. Font registration/matching may allocate or synchronize and is not audio-RT safe.
+
+`TextService::measure()` borrows the UTF-8 input only for the call and returns owned logical-unit metrics. Color and horizontal alignment do not affect measurement. Allocation failures are not represented by sentinel metrics and may propagate as normal C++ exceptions.
+
+### Raster images
+
+[`include/nativeui/image.hpp`](../include/nativeui/image.hpp) exposes `Image` as a copyable handle to immutable decoded backing. `Image::decode(encoded)` borrows the encoded span only during the call, copies it, eagerly realizes raster pixels, and returns an invalid handle for empty/malformed/unsupported data or ordinary backend decode failure. Successful callers can release the encoded source immediately. Decoding may allocate and is not audio-RT safe.
+
+`Image::size()` reports decoded pixel dimensions; an invalid image reports `{0, 0}`. Equality is handle identity: copies of one decoded image compare equal, but two independent decodes of identical bytes need not.
+
+Image drawing has two coordinate domains:
+
+- source rectangles are decoded-image **pixel coordinates**;
+- destination rectangles are Painter-local **logical UI coordinates**.
+
+`ImageFit::Fill` stretches independently on both axes. `Contain` preserves aspect ratio and centers the complete selected source inside the destination. `Cover` preserves aspect ratio while center-cropping the selected source to fill the destination. Invalid handles and non-drawable geometry are safe no-ops at the drawing boundary.
+
+### ImageTexture
+
+`ImageTexture` is an owned value description layered over shared immutable `Image` backing. The source rectangle must be finite, positive and fully inside the decoded image; the destination rectangle must be finite and positive. Invalid construction canonicalizes to an inert texture. The destination rectangle describes one complete texture period in logical coordinates rather than a clip/bounds rectangle.
+
+Tiling is independent on X/Y (`Clamp`, `Repeat`, `Mirror`, `Decal`). Sampling defaults to linear filtering with no mipmap selection. `TextureInterpretation::Color` uses color-managed RGB with ordinary alpha coverage; `Data` samples normalized numeric channels without color conversion/implicit premultiplication. Texture mutation only changes the public value description; backend shader/mipmap materialization remains renderer-owned.
+
+The optional texture-local `Transform2D` maps texture/pattern coordinates into Painter-local coordinates before the Painter/device transform. NativeUI retains even a non-invertible transform verbatim so it can be inspected/replaced, but `valid()` becomes false until the transform satisfies the shared inversion contract. Copies share the decoded image; moves reset the source object to the inert state.
+
+### ImageCache
+
+`ImageCache` borrows one `ResourceProvider`, which must outlive the cache. `load(resource_id)` copies the identifier as its cache key, calls the provider synchronously only on a cache miss, then caches **both success and failure**:
+
+- provider `std::nullopt` -> `ImageLoadError::NotFound`;
+- returned bytes that fail `Image::decode()`, including an empty byte vector -> `DecodeFailed`;
+- valid decoded image -> `None`.
+
+A repeated identifier does not re-enter the provider or decoder until `clear()`. `size()` therefore counts cached failures as well as successes. `clear()` drops cache entries but does not invalidate `Image` handles already copied out. Provider/allocation exceptions propagate rather than being converted to an `ImageLoadError`.
+
+### SVG icons
+
+[`include/nativeui/svg.hpp`](../include/nativeui/svg.hpp) exposes `SvgIcon` as a copyable handle to an immutable parsed SVG DOM. `SvgIcon::parse(encoded)` borrows bytes only for the call. Empty/malformed SVG, parser failure, or missing/non-positive/non-finite intrinsic geometry returns an invalid handle. NativeUI uses the parsed DOM container size when valid and falls back to a finite positive root `viewBox` width/height when needed.
+
+V1 SVG resources are static and self-contained: NativeUI does not fetch external file/network resources or drive SVG animation. Drawing uses a centered contain-style fit, preserves intrinsic aspect ratio, clips to the requested destination and treats non-positive/non-finite destinations as no-ops.
+
+`SvgCache` has the same lifetime and caching rules as `ImageCache`: it borrows its provider, caches successes and failures per exact identifier, maps provider absence to `NotFound`, maps returned-but-unusable bytes (including empty bytes) to `ParseFailed`, counts all entries in `size()`, and retries only after `clear()`. Existing copied `SvgIcon` handles keep the parsed DOM alive after cache clear/destruction.
+
+### Resource-loading example
+
+```cpp
+class Assets final : public ui::ResourceProvider {
+public:
+    std::optional<std::vector<std::byte>> load(std::string_view id) override;
+};
+
+Assets assets;                    // must outlive both caches
+ui::ImageCache images{assets};
+ui::SvgCache svgs{assets};
+
+const auto logo = images.load("ui/logo.png");
+const auto mark = svgs.load("ui/mark.svg");
+
+if (logo) {
+    canvas.draw_image(
+        logo.image,
+        {0.0f, 0.0f, 96.0f, 48.0f},
+        ui::ImageFit::Contain);
+}
+
+if (mark) {
+    canvas.draw_svg(mark.icon, {104.0f, 0.0f, 48.0f, 48.0f});
+}
+```
+
+See [Services, testing and limits](v1-services-testing-and-limits.md) for the broader resource/provider lifetime and threading boundary and [Packaging and CMake](v1-packaging-and-cmake.md) for binary-resource packaging.
 
 ## Retained invalidation
 
