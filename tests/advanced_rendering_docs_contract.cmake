@@ -55,8 +55,22 @@ function(require_compiled_doc_snippet _name _anchor)
       "advanced-rendering documentation contract: missing C++ block for ${_name}")
   endif()
 
-  set(_doc_snippet "${CMAKE_MATCH_1}")
-  string(FIND "${_snippet_source}" "${_doc_snippet}" _compiled_fixture_pos)
+  set(_compiled_snippet "${CMAKE_MATCH_1}")
+  if(_name STREQUAL "gradient")
+    string(REPLACE
+      "void paint_header("
+      "void advanced_rendering_gradient_snippet("
+      _compiled_snippet
+      "${_compiled_snippet}")
+  elseif(_name STREQUAL "runtime shader")
+    string(REPLACE
+      "ui::Brush make_meter_brush()"
+      "ui::Brush advanced_rendering_shader_snippet()"
+      _compiled_snippet
+      "${_compiled_snippet}")
+  endif()
+
+  string(FIND "${_snippet_source}" "${_compiled_snippet}" _compiled_fixture_pos)
   if(_compiled_fixture_pos EQUAL -1)
     message(FATAL_ERROR
       "advanced-rendering documentation contract: ${_name} snippet is not the compiled fixture")
