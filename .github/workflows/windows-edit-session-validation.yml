@@ -195,20 +195,26 @@ jobs:
           $exe = '.\\build-main\\nativeui_edit_session_tests.exe'
           $codes = @()
           1..5 | ForEach-Object {
-            $process = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru
-            $codes += $process.ExitCode
+            & $exe
+            $codes += $LASTEXITCODE
+            $global:LASTEXITCODE = 0
           }
           Write-Host ("baseline exit codes: " + ($codes -join ","))
           $failed = @($codes | Where-Object { $_ -ne 0 }).Count
           Write-Host "baseline failures: $failed / 5"
-      - name: Instrument CHECK failure exit line
+      - name: Trace CHECK progression on baseline
         shell: pwsh
         run: |
           $path = 'tests/edit_session_tests.cpp'
           $content = Get-Content $path -Raw
-          $content = $content.Replace('std::abort();', 'std::exit(__LINE__);')
+          $needle = '#define CHECK(condition) do { if (!(condition)) {'
+          $replacement = '#define CHECK(condition) do { std::cerr << "check " << __LINE__ << "\\n"; if (!(condition)) {'
+          if (-not $content.Contains($needle)) { throw 'CHECK macro shape changed' }
+          $content = $content.Replace($needle, $replacement)
           Set-Content -Path $path -Value $content -NoNewline
           cmake --build build-main --config Release --target nativeui_edit_session_tests
-          $process = Start-Process -FilePath '.\\build-main\\nativeui_edit_session_tests.exe' -NoNewWindow -Wait -PassThru
-          Write-Host "instrumented CHECK exit code: $($process.ExitCode)"
+          & '.\\build-main\\nativeui_edit_session_tests.exe'
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          Write-Host "instrumented native exit code: $code"
 
