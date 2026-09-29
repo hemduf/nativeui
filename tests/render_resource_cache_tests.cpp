@@ -75,6 +75,40 @@ int ThrowingHash::throw_on_value = -1;
 using ThrowingHashCache =
     ui::detail::RenderResourceCache<ThrowingHashKey, Resource, ThrowingHash>;
 
+struct ThrowingEqualKey {
+    int value{};
+
+    explicit ThrowingEqualKey(int value_in) : value(value_in) {}
+};
+
+struct ThrowingEqualHash {
+    [[nodiscard]] std::size_t operator()(const ThrowingEqualKey&) const noexcept {
+        return 0;
+    }
+};
+
+struct ThrowingEqual {
+    [[nodiscard]] bool operator()(
+        const ThrowingEqualKey& left,
+        const ThrowingEqualKey& right) const {
+        if (left.value == throw_on_self_value &&
+            right.value == throw_on_self_value) {
+            throw std::runtime_error("injected cache equality failure");
+        }
+        return left.value == right.value;
+    }
+
+    static int throw_on_self_value;
+};
+
+int ThrowingEqual::throw_on_self_value = -1;
+
+using ThrowingEqualCache = ui::detail::RenderResourceCache<
+    ThrowingEqualKey,
+    Resource,
+    ThrowingEqualHash,
+    ThrowingEqual>;
+
 void retained_hit_reuses_resource() {
     Cache cache{{.max_entries = 4, .max_accounted_bytes = 64}};
     int creates = 0;
@@ -379,6 +413,52 @@ void eviction_hash_failure_preserves_full_cache_and_lru() {
     NUI_CHECK(cache.contains(ThrowingHashKey{3}));
 }
 
+void eviction_equality_failure_preserves_full_cache_and_lru() {
+    ThrowingEqualCache cache{{.max_entries = 2, .max_accounted_bytes = 16}};
+
+    auto one = cache.acquire(ThrowingEqualKey{1}, 8, [] {
+        return std::make_shared<Resource>(1);
+    });
+    auto two = cache.acquire(ThrowingEqualKey{2}, 8, [] {
+        return std::make_shared<Resource>(2);
+    });
+    NUI_CHECK(one && two && one.retained && two.retained);
+    one.resource.reset();
+    two.resource.reset();
+
+    auto touch_one = cache.acquire(ThrowingEqualKey{1}, 8, [] {
+        return std::make_shared<Resource>(101);
+    });
+    NUI_CHECK(touch_one && touch_one.hit);
+    touch_one.resource.reset();
+
+    ThrowingEqual::throw_on_self_value = 2;
+    bool threw = false;
+    try {
+        static_cast<void>(cache.acquire(ThrowingEqualKey{3}, 8, [] {
+            return std::make_shared<Resource>(3);
+        }));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    ThrowingEqual::throw_on_self_value = -1;
+
+    NUI_CHECK(threw);
+    NUI_CHECK(cache.retained_entries() == 2);
+    NUI_CHECK(cache.retained_accounted_bytes() == 16);
+    NUI_CHECK(cache.contains(ThrowingEqualKey{1}));
+    NUI_CHECK(cache.contains(ThrowingEqualKey{2}));
+    NUI_CHECK(!cache.contains(ThrowingEqualKey{3}));
+
+    auto three = cache.acquire(ThrowingEqualKey{3}, 8, [] {
+        return std::make_shared<Resource>(3);
+    });
+    NUI_CHECK(three && three.retained && !three.hit);
+    NUI_CHECK(cache.contains(ThrowingEqualKey{1}));
+    NUI_CHECK(!cache.contains(ThrowingEqualKey{2}));
+    NUI_CHECK(cache.contains(ThrowingEqualKey{3}));
+}
+
 void factory_failure_preserves_full_cache_and_lru() {
     Cache cache{{.max_entries = 2, .max_accounted_bytes = 16}};
 
@@ -455,6 +535,7 @@ int main() {
     factory_failure_does_not_mutate_cache();
     insertion_failure_preserves_full_cache_and_lru();
     eviction_hash_failure_preserves_full_cache_and_lru();
+    eviction_equality_failure_preserves_full_cache_and_lru();
     factory_failure_preserves_full_cache_and_lru();
     cache_instances_are_lifetime_independent();
     return 0;
