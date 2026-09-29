@@ -1,0 +1,664 @@
+#pragma once
+
+#if defined(_WIN32)
+
+#include <nativeui/desktop_services.hpp>
+
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
+#include <windows.h>
+#include <objbase.h>
+#include <shellapi.h>
+#include <shobjidl.h>
+#include <wrl/client.h>
+
+#include <atomic>
+#include <climits>
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Uuid.lib")
+
+namespace ui::detail {
+namespace windows_desktop_services_detail {
+
+using Microsoft::WRL::ComPtr;
+
+class ComApartment final {
+public:
+    explicit ComApartment(DWORD mode) noexcept
+        : result_(CoInitializeEx(nullptr, mode)),
+          initialized_(SUCCEEDED(result_)) {}
+
+    ~ComApartment() {
+        if (initialized_) CoUninitialize();
+    }
+
+    ComApartment(const ComApartment&) = delete;
+    ComApartment& operator=(const ComApartment&) = delete;
+
+    [[nodiscard]] bool initialized() const noexcept { return initialized_; }
+
+private:
+    HRESULT result_{E_FAIL};
+    bool initialized_{};
+};
+
+[[nodiscard]] inline bool utf8_to_wide(const std::string& text,
+                                       std::wstring& output) {
+    output.clear();
+    if (text.empty()) return true;
+    if (text.size() > static_cast<std::size_t>(INT_MAX)) return false;
+
+    const int source_size = static_cast<int>(text.size());
+    const int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), source_size, nullptr, 0);
+    if (required <= 0) return false;
+
+    output.resize(static_cast<std::size_t>(required));
+    return MultiByteToWideChar(
+               CP_UTF8,
+               MB_ERR_INVALID_CHARS,
+               text.data(),
+               source_size,
+               output.data(),
+               required) == required;
+}
+
+struct FilterStorage final {
+    std::vector<std::wstring> names;
+    std::vector<std::wstring> patterns;
+    std::vector<COMDLG_FILTERSPEC> specs;
+};
+
+[[nodiscard]] inline bool build_filters(const std::vector<FileFilter>& filters,
+                                        FilterStorage& storage) {
+    storage = {};
+    if (filters.empty()) return true;
+
+    storage.names.reserve(filters.size());
+    storage.patterns.reserve(filters.size());
+    for (const auto& filter : filters) {
+        std::wstring pattern;
+        for (const auto& extension : filter.extensions) {
+            std::wstring wide_extension;
+            if (!utf8_to_wide(extension, wide_extension)) return false;
+            if (!pattern.empty()) pattern += L';';
+            pattern += L'*';
+            pattern += wide_extension;
+        }
+        if (pattern.empty()) pattern = L"*.*";
+
+        std::wstring name;
+        if (!filter.description.empty() && !utf8_to_wide(filter.description, name)) {
+            return false;
+        }
+        if (name.empty()) name = pattern;
+
+        storage.names.push_back(std::move(name));
+        storage.patterns.push_back(std::move(pattern));
+    }
+
+    storage.specs.reserve(filters.size());
+    for (std::size_t index = 0; index < filters.size(); ++index) {
+        storage.specs.push_back(COMDLG_FILTERSPEC{
+            storage.names[index].c_str(), storage.patterns[index].c_str()});
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool set_title(IFileDialog& dialog, const std::string& title) {
+    if (title.empty()) return true;
+    std::wstring value;
+    return utf8_to_wide(title, value) && SUCCEEDED(dialog.SetTitle(value.c_str()));
+}
+
+[[nodiscard]] inline bool set_initial_directory(
+    IFileDialog& dialog,
+    const std::optional<std::filesystem::path>& directory) {
+    if (!directory) return true;
+    ComPtr<IShellItem> item;
+    const HRESULT result = SHCreateItemFromParsingName(
+        directory->c_str(), nullptr, IID_PPV_ARGS(&item));
+    return SUCCEEDED(result) && SUCCEEDED(dialog.SetFolder(item.Get()));
+}
+
+[[nodiscard]] inline bool set_filters(IFileDialog& dialog,
+                                      const std::vector<FileFilter>& filters,
+                                      FilterStorage& storage) {
+    if (!build_filters(filters, storage)) return false;
+    if (storage.specs.empty()) return true;
+    return SUCCEEDED(dialog.SetFileTypes(
+        static_cast<UINT>(storage.specs.size()), storage.specs.data()));
+}
+
+[[nodiscard]] inline bool append_shell_item_path(
+    IShellItem& item,
+    std::vector<std::filesystem::path>& paths) {
+    PWSTR raw_path = nullptr;
+    if (FAILED(item.GetDisplayName(SIGDN_FILESYSPATH, &raw_path)) || !raw_path) {
+        return false;
+    }
+    try {
+        paths.emplace_back(raw_path);
+    } catch (...) {
+        CoTaskMemFree(raw_path);
+        return false;
+    }
+    CoTaskMemFree(raw_path);
+    return true;
+}
+
+[[nodiscard]] inline FileDialogResult error_result(std::string message) {
+    FileDialogResult result;
+    result.status = DesktopServiceStatus::Error;
+    result.error = std::move(message);
+    return result;
+}
+
+[[nodiscard]] inline FileDialogResult cancelled_result() {
+    FileDialogResult result;
+    result.status = DesktopServiceStatus::Cancelled;
+    return result;
+}
+
+struct RequestState final {
+    // Exactly one side wins the terminal decision. A successful cancel() owns
+    // the result before it returns true; otherwise the worker owns the native
+    // result before cancel() is allowed to return false. This closes the race
+    // between Show() returning and publication of its result.
+    std::atomic<bool> terminal_claimed{false};
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<bool> worker_finished{false};
+    std::atomic<DWORD> worker_thread_id{0};
+    std::thread worker;
+};
+
+[[nodiscard]] inline bool claim_cancellation(RequestState& state) noexcept {
+    bool expected = false;
+    if (!state.terminal_claimed.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return false;
+    }
+    state.cancel_requested.store(true, std::memory_order_release);
+    return true;
+}
+
+inline void arbitrate_worker_result(RequestState& state,
+                                    FileDialogResult& result) noexcept {
+    bool expected = false;
+    const bool worker_won = state.terminal_claimed.compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+    if (!worker_won || state.cancel_requested.load(std::memory_order_acquire)) {
+        result = cancelled_result();
+    }
+    state.worker_finished.store(true, std::memory_order_release);
+}
+
+struct DialogWindowSearch final {
+    HWND parent{};
+    HWND found{};
+    bool require_parent{};
+};
+
+BOOL CALLBACK find_dialog_window_callback(HWND window, LPARAM data) noexcept {
+    auto* search = reinterpret_cast<DialogWindowSearch*>(data);
+    if (!search || !IsWindowVisible(window)) return TRUE;
+    if (search->require_parent && search->parent != nullptr &&
+        GetWindow(window, GW_OWNER) != search->parent) {
+        return TRUE;
+    }
+    search->found = window;
+    return FALSE;
+}
+
+[[nodiscard]] inline HWND find_dialog_window(DWORD thread_id, HWND parent) noexcept {
+    if (thread_id == 0) return nullptr;
+
+    DialogWindowSearch owned{parent, nullptr, parent != nullptr};
+    (void)EnumThreadWindows(
+        thread_id, &find_dialog_window_callback, reinterpret_cast<LPARAM>(&owned));
+    if (owned.found) return owned.found;
+
+    // Common Item Dialog ownership can be mediated by shell windows on hosted
+    // desktops. The worker is dedicated to exactly one file request, so a
+    // visible top-level fallback on that thread is still request-local.
+    DialogWindowSearch fallback{};
+    (void)EnumThreadWindows(
+        thread_id, &find_dialog_window_callback, reinterpret_cast<LPARAM>(&fallback));
+    return fallback.found;
+}
+
+inline void request_dialog_close(const std::shared_ptr<RequestState>& state,
+                                 HWND parent) noexcept {
+    if (!state || state->worker_finished.load(std::memory_order_acquire)) return;
+
+    // Cancellation may race the tiny interval between the worker checking its
+    // flag and the shell creating the modal HWND. Search only this request's
+    // dedicated worker thread and retry for a small fixed interval. If the
+    // worker observes cancellation before Show(), it exits without a dialog;
+    // if Show() wins the race, WM_CLOSE is delivered to the actual modal HWND.
+    constexpr int kMaxCloseSearchAttempts = 40;
+    constexpr DWORD kCloseSearchSleepMs = 5;
+    for (int attempt = 0; attempt < kMaxCloseSearchAttempts; ++attempt) {
+        if (state->worker_finished.load(std::memory_order_acquire)) return;
+        const DWORD thread_id = state->worker_thread_id.load(std::memory_order_acquire);
+        if (const HWND dialog = find_dialog_window(thread_id, parent)) {
+            (void)PostMessageW(dialog, WM_CLOSE, 0, 0);
+            return;
+        }
+        Sleep(kCloseSearchSleepMs);
+    }
+}
+
+[[nodiscard]] inline FileDialogResult collect_single_result(IFileDialog& dialog) {
+    ComPtr<IShellItem> item;
+    if (FAILED(dialog.GetResult(&item)) || !item) {
+        return error_result("Windows file dialog returned no selected item");
+    }
+
+    FileDialogResult result;
+    result.status = DesktopServiceStatus::Accepted;
+    if (!append_shell_item_path(*item.Get(), result.paths)) {
+        return error_result("Windows file dialog returned an invalid filesystem path");
+    }
+    return result;
+}
+
+[[nodiscard]] inline FileDialogResult collect_multiple_results(IFileOpenDialog& dialog) {
+    ComPtr<IShellItemArray> items;
+    if (FAILED(dialog.GetResults(&items)) || !items) {
+        return error_result("Windows file dialog returned no selected items");
+    }
+
+    DWORD count = 0;
+    if (FAILED(items->GetCount(&count)) || count == 0) {
+        return error_result("Windows file dialog returned an empty selection");
+    }
+
+    FileDialogResult result;
+    result.status = DesktopServiceStatus::Accepted;
+    result.paths.reserve(static_cast<std::size_t>(count));
+    for (DWORD index = 0; index < count; ++index) {
+        ComPtr<IShellItem> item;
+        if (FAILED(items->GetItemAt(index, &item)) || !item ||
+            !append_shell_item_path(*item.Get(), result.paths)) {
+            return error_result("Windows file dialog returned an invalid filesystem path");
+        }
+    }
+    return result;
+}
+
+enum class OpenDialogKind {
+    SingleFile,
+    MultipleFiles,
+    Directory,
+};
+
+inline void run_open_dialog(std::shared_ptr<RequestState> state,
+                            HWND parent,
+                            OpenDialogKind kind,
+                            OpenFileOptions options,
+                            DirectoryOptions directory_options,
+                            FileDialogCallback completion) noexcept {
+    state->worker_thread_id.store(GetCurrentThreadId(), std::memory_order_release);
+    FileDialogResult result;
+    try {
+        ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
+        if (!apartment.initialized()) {
+            result = error_result("COM apartment initialization failed for Windows file dialog");
+        } else {
+            ComPtr<IFileOpenDialog> dialog;
+            if (FAILED(CoCreateInstance(
+                    CLSID_FileOpenDialog,
+                    nullptr,
+                    CLSCTX_INPROC_SERVER,
+                    IID_PPV_ARGS(&dialog))) || !dialog) {
+                result = error_result("IFileOpenDialog creation failed");
+            } else {
+                DWORD flags = 0;
+                if (FAILED(dialog->GetOptions(&flags))) {
+                    result = error_result("IFileOpenDialog GetOptions failed");
+                } else {
+                    flags |= FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM;
+                    if (kind == OpenDialogKind::Directory) {
+                        flags |= FOS_PICKFOLDERS;
+                    } else {
+                        flags |= FOS_FILEMUSTEXIST;
+                        if (kind == OpenDialogKind::MultipleFiles) flags |= FOS_ALLOWMULTISELECT;
+                    }
+
+                    FilterStorage filters;
+                    const std::string& title = kind == OpenDialogKind::Directory
+                        ? directory_options.title
+                        : options.title;
+                    const auto& initial_directory = kind == OpenDialogKind::Directory
+                        ? directory_options.initial_directory
+                        : options.initial_directory;
+                    const bool configured =
+                        SUCCEEDED(dialog->SetOptions(flags)) &&
+                        set_title(*dialog.Get(), title) &&
+                        set_initial_directory(*dialog.Get(), initial_directory) &&
+                        (kind == OpenDialogKind::Directory ||
+                         set_filters(*dialog.Get(), options.filters, filters));
+
+                    if (!configured) {
+                        result = error_result("Windows open dialog configuration failed");
+                    } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                        result = cancelled_result();
+                    } else {
+                        const HRESULT show_result = dialog->Show(parent);
+                        if (state->cancel_requested.load(std::memory_order_acquire) ||
+                            show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                            result = cancelled_result();
+                        } else if (FAILED(show_result)) {
+                            result = error_result("IFileOpenDialog Show failed");
+                        } else if (kind == OpenDialogKind::MultipleFiles) {
+                            result = collect_multiple_results(*dialog.Get());
+                        } else {
+                            result = collect_single_result(*dialog.Get());
+                        }
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        result = error_result("Unexpected Windows open dialog failure");
+    }
+
+    arbitrate_worker_result(*state, result);
+    try {
+        completion(std::move(result));
+    } catch (...) {
+    }
+}
+
+inline void run_save_dialog(std::shared_ptr<RequestState> state,
+                            HWND parent,
+                            SaveFileOptions options,
+                            FileDialogCallback completion) noexcept {
+    state->worker_thread_id.store(GetCurrentThreadId(), std::memory_order_release);
+    FileDialogResult result;
+    try {
+        ComApartment apartment{COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE};
+        if (!apartment.initialized()) {
+            result = error_result("COM apartment initialization failed for Windows save dialog");
+        } else {
+            ComPtr<IFileSaveDialog> dialog;
+            if (FAILED(CoCreateInstance(
+                    CLSID_FileSaveDialog,
+                    nullptr,
+                    CLSCTX_INPROC_SERVER,
+                    IID_PPV_ARGS(&dialog))) || !dialog) {
+                result = error_result("IFileSaveDialog creation failed");
+            } else {
+                DWORD flags = 0;
+                FilterStorage filters;
+                bool configured =
+                    SUCCEEDED(dialog->GetOptions(&flags)) &&
+                    SUCCEEDED(dialog->SetOptions(
+                        flags | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT)) &&
+                    set_title(*dialog.Get(), options.title) &&
+                    set_initial_directory(*dialog.Get(), options.initial_directory) &&
+                    set_filters(*dialog.Get(), options.filters, filters);
+
+                std::wstring suggested;
+                if (configured && options.suggested_filename) {
+                    configured = utf8_to_wide(*options.suggested_filename, suggested) &&
+                                 SUCCEEDED(dialog->SetFileName(suggested.c_str()));
+                }
+
+                if (!configured) {
+                    result = error_result("Windows save dialog configuration failed");
+                } else if (state->cancel_requested.load(std::memory_order_acquire)) {
+                    result = cancelled_result();
+                } else {
+                    const HRESULT show_result = dialog->Show(parent);
+                    if (state->cancel_requested.load(std::memory_order_acquire) ||
+                        show_result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                        result = cancelled_result();
+                    } else if (FAILED(show_result)) {
+                        result = error_result("IFileSaveDialog Show failed");
+                    } else {
+                        result = collect_single_result(*dialog.Get());
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        result = error_result("Unexpected Windows save dialog failure");
+    }
+
+    arbitrate_worker_result(*state, result);
+    try {
+        completion(std::move(result));
+    } catch (...) {
+    }
+}
+
+} // namespace windows_desktop_services_detail
+
+class WindowsDesktopServicesBackend final : public DesktopServicesBackend {
+public:
+    explicit WindowsDesktopServicesBackend(std::uintptr_t parent_window) noexcept
+        : parent_(reinterpret_cast<HWND>(parent_window)) {}
+
+    ~WindowsDesktopServicesBackend() override {
+        using namespace windows_desktop_services_detail;
+        std::vector<std::shared_ptr<RequestState>> requests;
+        {
+            std::lock_guard lock{mutex_};
+            closing_ = true;
+            requests.reserve(active_.size());
+            for (const auto& [id, request] : active_) {
+                (void)id;
+                if (!claim_cancellation(*request)) {
+                    request->cancel_requested.store(true, std::memory_order_release);
+                }
+                requests.push_back(request);
+            }
+            active_.clear();
+        }
+
+        for (const auto& request : requests) {
+            request_dialog_close(request, parent_);
+        }
+        for (const auto& request : requests) {
+            if (request->worker.joinable()) request->worker.join();
+        }
+    }
+
+    DesktopServiceStatus start_open_file(DesktopRequestId request_id,
+                                         const OpenFileOptions& options,
+                                         FileDialogCallback completion) override {
+        return start_open_dialog(request_id,
+                                 windows_desktop_services_detail::OpenDialogKind::SingleFile,
+                                 options,
+                                 {},
+                                 std::move(completion));
+    }
+
+    DesktopServiceStatus start_open_files(DesktopRequestId request_id,
+                                          const OpenFileOptions& options,
+                                          FileDialogCallback completion) override {
+        return start_open_dialog(request_id,
+                                 windows_desktop_services_detail::OpenDialogKind::MultipleFiles,
+                                 options,
+                                 {},
+                                 std::move(completion));
+    }
+
+    DesktopServiceStatus start_save_file(DesktopRequestId request_id,
+                                         const SaveFileOptions& options,
+                                         FileDialogCallback completion) override {
+        using namespace windows_desktop_services_detail;
+        if (request_id == kInvalidDesktopRequestId || !completion) {
+            return DesktopServiceStatus::InvalidArgument;
+        }
+        reap_finished();
+
+        auto state = std::make_shared<RequestState>();
+        {
+            std::lock_guard lock{mutex_};
+            if (closing_ || active_.contains(request_id)) return DesktopServiceStatus::Error;
+            active_.emplace(request_id, state);
+        }
+
+        try {
+            const HWND parent = parent_;
+            state->worker = std::thread(
+                [state, parent, options, completion = std::move(completion)]() mutable {
+                    run_save_dialog(state, parent, options, std::move(completion));
+                });
+        } catch (...) {
+            std::lock_guard lock{mutex_};
+            active_.erase(request_id);
+            return DesktopServiceStatus::Error;
+        }
+        return DesktopServiceStatus::Accepted;
+    }
+
+    DesktopServiceStatus start_select_directory(DesktopRequestId request_id,
+                                                const DirectoryOptions& options,
+                                                FileDialogCallback completion) override {
+        return start_open_dialog(request_id,
+                                 windows_desktop_services_detail::OpenDialogKind::Directory,
+                                 {},
+                                 options,
+                                 std::move(completion));
+    }
+
+    DesktopServiceStatus start_open_url(DesktopRequestId request_id,
+                                        std::string url,
+                                        StatusCallback completion) override {
+        if (request_id == kInvalidDesktopRequestId || !completion) {
+            return DesktopServiceStatus::InvalidArgument;
+        }
+        reap_finished();
+        {
+            std::lock_guard lock{mutex_};
+            if (closing_) return DesktopServiceStatus::Error;
+        }
+
+        std::wstring wide_url;
+        if (!windows_desktop_services_detail::utf8_to_wide(url, wide_url)) {
+            return DesktopServiceStatus::Error;
+        }
+        const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
+            parent_, L"open", wide_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+        if (result <= 32) return DesktopServiceStatus::Error;
+
+        // ShellExecuteW has completed the backend operation at this point. The
+        // facade still marshals the application callback through T065.
+        completion(DesktopServiceStatus::Accepted);
+        return DesktopServiceStatus::Accepted;
+    }
+
+    bool cancel(DesktopRequestId request_id) override {
+        using namespace windows_desktop_services_detail;
+        if (request_id == kInvalidDesktopRequestId) return false;
+        reap_finished();
+
+        std::shared_ptr<RequestState> request;
+        {
+            std::lock_guard lock{mutex_};
+            const auto found = active_.find(request_id);
+            if (closing_ || found == active_.end() || !claim_cancellation(*found->second)) {
+                return false;
+            }
+            request = found->second;
+        }
+        request_dialog_close(request, parent_);
+        return true;
+    }
+
+private:
+    DesktopServiceStatus start_open_dialog(
+        DesktopRequestId request_id,
+        windows_desktop_services_detail::OpenDialogKind kind,
+        OpenFileOptions options,
+        DirectoryOptions directory_options,
+        FileDialogCallback completion) {
+        using namespace windows_desktop_services_detail;
+        if (request_id == kInvalidDesktopRequestId || !completion) {
+            return DesktopServiceStatus::InvalidArgument;
+        }
+        reap_finished();
+
+        auto state = std::make_shared<RequestState>();
+        {
+            std::lock_guard lock{mutex_};
+            if (closing_ || active_.contains(request_id)) return DesktopServiceStatus::Error;
+            active_.emplace(request_id, state);
+        }
+
+        try {
+            const HWND parent = parent_;
+            state->worker = std::thread(
+                [state,
+                 parent,
+                 kind,
+                 options = std::move(options),
+                 directory_options = std::move(directory_options),
+                 completion = std::move(completion)]() mutable {
+                    run_open_dialog(state,
+                                    parent,
+                                    kind,
+                                    std::move(options),
+                                    std::move(directory_options),
+                                    std::move(completion));
+                });
+        } catch (...) {
+            std::lock_guard lock{mutex_};
+            active_.erase(request_id);
+            return DesktopServiceStatus::Error;
+        }
+        return DesktopServiceStatus::Accepted;
+    }
+
+    void reap_finished() {
+        using windows_desktop_services_detail::RequestState;
+        std::vector<std::shared_ptr<RequestState>> finished;
+        {
+            std::lock_guard lock{mutex_};
+            for (auto iterator = active_.begin(); iterator != active_.end();) {
+                if (iterator->second->worker_finished.load(std::memory_order_acquire)) {
+                    finished.push_back(iterator->second);
+                    iterator = active_.erase(iterator);
+                } else {
+                    ++iterator;
+                }
+            }
+        }
+        for (const auto& request : finished) {
+            if (request->worker.joinable()) request->worker.join();
+        }
+    }
+
+    HWND parent_{};
+    std::mutex mutex_;
+    std::unordered_map<
+        DesktopRequestId,
+        std::shared_ptr<windows_desktop_services_detail::RequestState>> active_;
+    bool closing_{};
+};
+
+[[nodiscard]] inline std::shared_ptr<DesktopServicesBackend>
+make_windows_desktop_services_backend(std::uintptr_t parent_window) {
+    return std::make_shared<WindowsDesktopServicesBackend>(parent_window);
+}
+
+} // namespace ui::detail
+
+#endif // defined(_WIN32)
