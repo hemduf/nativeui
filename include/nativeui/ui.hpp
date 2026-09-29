@@ -25,13 +25,19 @@ namespace ui {
 class Dialog;
 namespace detail { class SkiaGlRenderer; }
 
-/// One retained NativeUI component tree.
+/// Retained UI root for one view-domain component tree.
 ///
-/// UI is intentionally confined to the host/platform UI thread. Its retained
-/// tree, focus/input routing, invalidation, layout and painting APIs are not
-/// synchronized and must not be called directly from a VST3/CLAP audio or
-/// worker thread. Plug-in adapters must transfer cross-thread state through an
-/// explicitly reviewed thread-safe bridge and apply it from the UI domain.
+/// UI owns the materialized component hierarchy, layout state, focus/input
+/// routing, overlays/dialog coordination, semantic projection and paint-damage
+/// state for one retained UI domain. Native standalone/embedded view wrappers
+/// borrow the resulting UI and must not outlive it.
+///
+/// All public mutation, lifecycle, dispatch and paint operations are confined to
+/// the host/platform UI thread. The object is not internally synchronized and
+/// is never an audio/DSP real-time primitive. Application/component callbacks
+/// run synchronously inside the initiating call and may re-enter ordinary UI
+/// state. Some completion paths may also destroy the UI; those paths repair
+/// retained ownership before invoking application code.
 class UI {
 public:
     /// Construct and mount one retained tree using `default_theme()`.
@@ -57,6 +63,12 @@ public:
         tree_.mount();
     }
 
+    /// Begin terminal UI teardown and release the retained tree without unwinding.
+    ///
+    /// Native StandaloneWindow/EmbeddedView objects borrowing this UI must
+    /// already have been destroyed. Dialog completion is made terminal and the
+    /// presentation invalidation callback is detached before retained members
+    /// unwind. Teardown is noexcept.
     ~UI() noexcept {
         // Publish owner death before any teardown callback can run. Code that
         // intentionally permits an application callback to delete its UI takes
@@ -104,16 +116,31 @@ public:
         viewport_ = viewport;
         prepare_overlay_layout();
     }
-    /// Activate component lifecycle, focus/input routing and overlay layout.
-    /// PlatformServices belongs to the host-view domain used for dispatch/paint.
-    /// Activation callbacks may throw; partial activation is rolled back.
+    /// Activate component lifecycle plus the focus/input domain for this view.
+    ///
+    /// @param platform Host-view services for the same native view that will
+    /// later drive dispatch, paint and deactivation. The retained Tree borrows
+    /// this object for the active interval; keep it alive until deactivation or
+    /// teardown clears that borrow.
+    ///
+    /// Activation synchronously reconciles dynamic, availability and focus
+    /// state and may invoke application callbacks. Partial retained activation is
+    /// rolled back before a callback exception propagates; subsequent overlay
+    /// layout may also allocate or throw.
     void activate(PlatformServices& platform) {
         tree_.activate_focus(platform);
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
     }
-    /// Deactivate focus/hover/capture/components and transient/anchored presentation.
-    /// Cleanup continues across callback failures and may rethrow the first failure.
+    /// End the active interaction interval and dismiss transient view state.
+    ///
+    /// @param platform Services for the currently active host view.
+    ///
+    /// Pointer capture/hover, focus, anchored/transient presentation and
+    /// component active state are reconciled in teardown order. Cleanup
+    /// continues across callback failures; after active state and the retained
+    /// PlatformServices borrow are cleared, the first captured exception may be
+    /// rethrown.
     void deactivate(PlatformServices& platform) {
         // Transient presentations such as a pending/visible Tooltip are
         // cancelled at the view lifecycle boundary before focus/hover teardown
@@ -138,11 +165,20 @@ public:
     /// Re-synchronize availability/focus and re-notify the focused node when active.
     /// Focus callbacks execute synchronously in the UI domain and may throw.
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
-    /// Route one normalized input event through dialog/overlay and retained input.
-    /// Event geometry uses logical UI coordinates; PlatformServices is borrowed synchronously.
-    /// Structural changes commit at safe outer checkpoints. Popup/dialog completion may
-    /// re-enter ordinary UI/state work or destroy this UI. Callback failures propagate
-    /// after retained ownership repair. Returns Ignored during lifecycle transitions.
+    /// Route one normalized event through dialog, overlay and retained input policy.
+    ///
+    /// @param event Value input payload; pointer geometry is in root-logical coordinates.
+    /// @param platform Host-view services borrowed only for this dispatch frame.
+    /// @return Handled when NativeUI/application routing consumes the event,
+    /// otherwise Ignored. Lifecycle-transition calls return Ignored.
+    ///
+    /// Dispatch may reconcile dynamic composition, availability and focus,
+    /// allocate and invoke application callbacks. It is intentionally reentrant:
+    /// generation/transaction guards prevent older pointer/overlay/dialog frames
+    /// from corrupting newer nested work. Structural changes commit only at safe
+    /// outer checkpoints. Completion callbacks may re-enter ordinary UI/state
+    /// work or destroy this UI; retained ownership/retry bookkeeping is repaired
+    /// before propagation or callback return.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
@@ -372,10 +408,17 @@ public:
     void invalidate(Rect rect) { tree_.invalidate(rect); }
     /// Mark retained layout dirty from the root for later safe recomputation.
     void invalidate_layout() { tree_.invalidate_layout(); }
-    /// Paint the retained UI after applying deferred resize and overlay layout.
-    /// Successful paint consumes only pre-existing damage; reentrant invalidation
-    /// survives for the next frame. Failure restores damage and rethrows.
-    /// Painting is UI-thread work and is not audio/DSP real-time safe.
+    /// Paint the retained UI into a host-owned Skia canvas.
+    ///
+    /// @param canvas Borrowed destination canvas, valid only for this call.
+    /// @param platform Host-view services borrowed for this paint/layout checkpoint.
+    ///
+    /// Deferred resize and overlay placement are reconciled before drawing.
+    /// Lifecycle-transition painting is suppressed. Successful paint consumes
+    /// only damage present at transaction start; invalidation raised reentrantly
+    /// by paint callbacks survives for the next frame. Failure restores consumed
+    /// damage before propagating. Painting is UI-thread work, may allocate/invoke
+    /// application code and is not audio/DSP real-time safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return;
         (void)apply_pending_viewport_resize();

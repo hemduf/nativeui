@@ -79,6 +79,45 @@ There is no hidden mutable "current application", current-window singleton, proc
 
 The public declarations are in [`include/nativeui/window.hpp`](../include/nativeui/window.hpp) and [`include/nativeui/ui.hpp`](../include/nativeui/ui.hpp).
 
+
+### Retained `UI` lifecycle and host-driving contract
+
+`UI` owns one materialized retained component tree plus its layout, focus/input,
+overlay/dialog, semantic and paint-damage state. A standalone or embedded native
+view wrapper borrows `UI&`; destroy that wrapper before destroying the `UI`.
+The `PlatformServices` object passed to activation belongs to the same host-view
+domain and remains borrowed by the active retained tree until deactivation or
+teardown.
+
+The host-facing sequence is:
+
+1. construct `UI(root[, theme])` on the UI thread; root factories and mount
+   callbacks run synchronously and may throw after retained rollback;
+2. create the standalone/embedded native wrapper that borrows the live `UI`;
+3. call `activate(platform)` for the view's interaction interval;
+4. drive `resize()`, `dispatch()`, invalidation and `paint()` from that same
+   UI domain using logical-pixel geometry;
+5. call `deactivate(platform)` when the view leaves its active interval;
+6. destroy the native wrapper, then destroy the `UI`.
+
+`dispatch()` is deliberately reentrant. Application callbacks can trigger
+ordinary state/UI work, overlay changes and nested dispatch; retained generation
+and transaction guards prevent older frames from erasing newer nested state.
+Dialog/popup completion paths that permit application code to destroy the `UI`
+repair their retained ownership before the callback and do not dereference the
+destroyed object afterwards.
+
+`paint(canvas, platform)` borrows both arguments only for the synchronous call.
+Deferred lifecycle-reentrant resize and overlay placement are reconciled before
+drawing. A successful paint consumes only the damage snapshot present at the
+paint transaction start, so invalidation raised reentrantly during painting
+survives for the next frame. On failure, consumed damage is restored before the
+exception propagates.
+
+All of these lifecycle, dispatch and paint operations are UI/main-thread work.
+They may allocate or invoke application/component callbacks and are not suitable
+for an audio/DSP real-time thread.
+
 ## Native-window descriptor and operation contracts
 
 The public native-view surface uses **logical pixels** for every `Size`, `Rect`, minimum/maximum constraint, text-input rectangle and preferred-size notification. `scale_factor()` is the device conversion snapshot used at the platform boundary; application code should not pre-scale geometry before calling these APIs. Native configure events remain authoritative for the size reported by `size()`, so a successful `set_size()` is a submitted request rather than a synchronous guarantee that the OS has already configured that exact extent.
