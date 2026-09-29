@@ -327,10 +327,15 @@ public:
         if (!native_view_open()) return false;
         if (!visible_) return true;
         visible_ = false;
-        if (puglHide(view_) != PUGL_SUCCESS) {
+
+        suppress_embedded_focus_cleanup_ = embedded_;
+        const auto hide_status = puglHide(view_);
+        suppress_embedded_focus_cleanup_ = false;
+        if (hide_status != PUGL_SUCCESS) {
             visible_ = true;
             return false;
         }
+
         std::exception_ptr failure;
         const auto complete = [&](auto&& operation) {
             try { operation(); } catch (...) { if (!failure) failure = std::current_exception(); }

@@ -1342,8 +1342,9 @@ The [value editing contract](docs/value-editing.md) defines generic `EditSession
 notifications, standard control input boundaries, exception/reentrancy policy,
 and optional hidden `EmbeddedView` construction. State and editing remain
 UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
-The macOS Pugl visibility compatibility shim stages sources privately and is
-shared by source-tree and installed-package final consumers.
+The pinned macOS Pugl backend owns embedded visibility and focus behavior
+directly. NativeUI consumes that exact source commit without build-time source
+rewriting.
 
 ---
 

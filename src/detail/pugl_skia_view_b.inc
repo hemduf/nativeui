@@ -115,6 +115,7 @@
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             if (suppress_platform_focus_) return PUGL_SUCCESS;
 #endif
+            if (suppress_embedded_focus_cleanup_) return PUGL_SUCCESS;
             clear_raw_pointer_positions();
             ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
@@ -409,6 +410,7 @@
     bool should_close_{};
     bool visible_{};
     bool embedded_{};
+    bool suppress_embedded_focus_cleanup_{};
     bool deferred_scene_redraw_{};
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     std::uint64_t failed_scene_exposes_{};
