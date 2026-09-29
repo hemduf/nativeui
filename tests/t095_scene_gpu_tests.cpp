@@ -76,6 +76,39 @@ bool wait_for_failure(ui::Application& application,
     return false;
 }
 
+// A platform/window-server event can arrive after the previous readback has
+// completed. Require a sustained quiet interval instead of taking two snapshots
+// after zero-timeout polls. A one-off delayed event resets the baseline and may
+// then settle; a failed expose or a continuously rebuilding/presenting scene
+// cannot satisfy the quiet interval.
+bool wait_for_scene_idle(ui::Application& application,
+                         ui::StandaloneWindow& window) {
+    constexpr int kQuietPolls = 16;
+    constexpr int kMaxPolls = 128;
+
+    auto baseline =
+        ui::detail::PlatformTestAccess::scene_diagnostics(window);
+    int quiet_polls = 0;
+    for (int attempt = 0; attempt < kMaxPolls; ++attempt) {
+        (void)application.poll(0.005);
+        const auto current =
+            ui::detail::PlatformTestAccess::scene_diagnostics(window);
+
+        if (current.failed_exposes != baseline.failed_exposes) {
+            return false;
+        }
+        if (current.scene_builds == baseline.scene_builds &&
+            current.presentations == baseline.presentations) {
+            if (++quiet_polls == kQuietPolls) return true;
+            continue;
+        }
+
+        baseline = current;
+        quiet_polls = 0;
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -451,17 +484,7 @@ int main(int argc, char** argv) {
     if (!read_pixel(application, window, {16.0f, 12.0f})) {
         return fail("parent scene failed after embedded sibling destruction");
     }
-    for (int attempt = 0; attempt < 32; ++attempt) {
-        (void)application.poll(0.0);
-    }
-    const auto settled = PlatformTestAccess::scene_diagnostics(window);
-    for (int attempt = 0; attempt < 32; ++attempt) {
-        (void)application.poll(0.0);
-    }
-    const auto idle = PlatformTestAccess::scene_diagnostics(window);
-    if (idle.scene_builds != settled.scene_builds ||
-        idle.presentations != settled.presentations ||
-        idle.failed_exposes != settled.failed_exposes) {
+    if (!wait_for_scene_idle(application, window)) {
         return fail("settled scene spun or retried at idle");
     }
 
