@@ -1,0 +1,452 @@
+#include <nativeui/detail/dispatcher_owner.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <deque>
+#include <mutex>
+#include <new>
+#include <utility>
+#include <vector>
+
+namespace ui::detail {
+
+struct DispatcherOwnerToken final {};
+
+struct TaskEntry final {
+    std::uint64_t sequence{};
+    Dispatcher::Callback callback;
+};
+
+struct TimerEntry final {
+    std::uint64_t id{};
+    std::uint64_t sequence{};
+    DispatcherTimePoint due{};
+    std::chrono::steady_clock::duration interval{};
+    bool repeating{};
+    std::shared_ptr<Dispatcher::Callback> callback;
+};
+
+namespace {
+
+class SteadyDispatcherClock final : public DispatcherClock {
+public:
+    [[nodiscard]] DispatcherTimePoint now() const noexcept override {
+        return std::chrono::steady_clock::now();
+    }
+};
+
+[[nodiscard]] std::optional<std::chrono::steady_clock::duration>
+checked_duration(DispatcherDuration value, bool zero_allowed) noexcept {
+    const double seconds = value.count();
+    if (!std::isfinite(seconds) || seconds < 0.0 || (!zero_allowed && seconds == 0.0)) {
+        return std::nullopt;
+    }
+
+    using NativeDuration = std::chrono::steady_clock::duration;
+    const double maximum = std::chrono::duration<double>(NativeDuration::max()).count();
+    if (seconds > maximum) return std::nullopt;
+
+    const auto converted = std::chrono::duration_cast<NativeDuration>(value);
+    if (converted < NativeDuration::zero() || (!zero_allowed && converted == NativeDuration::zero())) {
+        return std::nullopt;
+    }
+    return converted;
+}
+
+[[nodiscard]] bool can_add(DispatcherTimePoint now,
+                           std::chrono::steady_clock::duration delta) noexcept {
+    return delta <= DispatcherTimePoint::max().time_since_epoch() - now.time_since_epoch();
+}
+
+} // namespace
+
+struct DispatcherState final {
+    explicit DispatcherState(std::weak_ptr<DispatcherWakeBackend> backend,
+                             std::shared_ptr<DispatcherClock> dispatcher_clock)
+        : wake_backend(std::move(backend)),
+          clock(dispatcher_clock ? std::move(dispatcher_clock)
+                                 : std::make_shared<SteadyDispatcherClock>()),
+          token(std::make_shared<DispatcherOwnerToken>()) {}
+
+    [[nodiscard]] TimerHandle make_timer_handle(std::uint64_t id) const noexcept {
+        return TimerHandle{token, id};
+    }
+
+    mutable std::mutex mutex;
+    std::deque<TaskEntry> tasks;
+    std::vector<TimerEntry> timers;
+    std::weak_ptr<DispatcherWakeBackend> wake_backend;
+    std::shared_ptr<DispatcherClock> clock;
+    std::shared_ptr<const DispatcherOwnerToken> token;
+    std::uint64_t next_task_sequence{1};
+    std::uint64_t next_timer_id{1};
+    std::uint64_t next_timer_sequence{1};
+    bool closing{};
+    bool wake_pending{};
+    bool fail_next_post_for_testing{};
+};
+
+namespace {
+
+[[nodiscard]] bool enqueue_task_locked(DispatcherState& state,
+                                       Dispatcher::Callback& callback) {
+    if (!callback || state.tasks.size() >= kDispatcherMaxPendingTasks ||
+        state.next_task_sequence == 0) {
+        return false;
+    }
+
+    // Grow the container before transferring user callable ownership. If the
+    // allocation throws, callback is still owned by the caller and therefore
+    // cannot be destroyed while the caller holds state.mutex.
+    state.tasks.emplace_back();
+    auto& entry = state.tasks.back();
+    entry.sequence = state.next_task_sequence++;
+    entry.callback = std::move(callback);
+    return true;
+}
+
+} // namespace
+
+void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noexcept {
+    std::shared_ptr<DispatcherWakeBackend> backend;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing || !state->wake_pending) return;
+        backend = state->wake_backend.lock();
+    }
+    if (backend) backend->request_wake();
+}
+
+[[nodiscard]] TimerHandle schedule_dispatcher_timer(
+    const std::weak_ptr<DispatcherState>& weak_state,
+    DispatcherDuration duration,
+    bool repeating,
+    Dispatcher::Callback callback) {
+    if (!callback) return {};
+    const auto converted = checked_duration(duration, !repeating);
+    if (!converted) return {};
+
+    const auto state = weak_state.lock();
+    if (!state) return {};
+    const auto now = state->clock->now();
+    if (!can_add(now, *converted)) return {};
+
+    // One callable object belongs to the timer for its entire active lifetime.
+    // Queueing a firing captures this shared callable instead of copying
+    // std::function, so mutable callback state is preserved across repeats.
+    auto shared_callback = std::make_shared<Dispatcher::Callback>(std::move(callback));
+
+    TimerHandle handle;
+    bool should_wake = false;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing || state->timers.size() >= kDispatcherMaxActiveTimers) return {};
+        if (state->next_timer_id == 0 || state->next_timer_sequence == 0) return {};
+
+        const auto id = state->next_timer_id++;
+        const auto sequence = state->next_timer_sequence++;
+        handle = state->make_timer_handle(id);
+
+        // Allocate the slot before it owns user callable state. Keep the local
+        // shared reference alive until after unlock as an additional guarantee
+        // against callable destruction during insertion failure/unwind.
+        state->timers.emplace_back();
+        auto& timer = state->timers.back();
+        timer.id = id;
+        timer.sequence = sequence;
+        timer.due = now + *converted;
+        timer.interval = repeating ? *converted : std::chrono::steady_clock::duration::zero();
+        timer.repeating = repeating;
+        timer.callback = shared_callback;
+
+        if (!state->wake_pending) {
+            state->wake_pending = true;
+            should_wake = true;
+        }
+    }
+    if (should_wake) request_dispatcher_wake(state);
+    return handle;
+}
+
+void ManualDispatcherClock::advance(DispatcherDuration delta) noexcept {
+    const auto converted = checked_duration(delta, true);
+    if (!converted || !can_add(now_, *converted)) return;
+    now_ += *converted;
+}
+
+DispatcherOwner::DispatcherOwner(std::shared_ptr<DispatcherWakeBackend> wake_backend,
+                                 std::shared_ptr<DispatcherClock> clock)
+    : state_(std::make_shared<DispatcherState>(wake_backend, std::move(clock))) {}
+
+DispatcherOwner::~DispatcherOwner() {
+    shutdown();
+}
+
+Dispatcher DispatcherOwner::dispatcher() const noexcept {
+    return Dispatcher{state_};
+}
+
+std::size_t DispatcherOwner::checkpoint() {
+    // Keep the queue state alive independently from `this`: a user callback is
+    // allowed to destroy its logical native owner while this method is active.
+    const auto state = state_;
+    if (!state) return 0;
+
+    const auto now = state->clock->now();
+    std::size_t work_count = 0;
+    bool should_wake = false;
+
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing) return 0;
+        state->wake_pending = false;
+
+        struct DueTimer final {
+            DispatcherTimePoint due;
+            std::uint64_t sequence;
+            std::uint64_t id;
+        };
+        std::vector<DueTimer> due;
+        due.reserve(state->timers.size());
+        for (const auto& timer : state->timers) {
+            if (timer.due <= now) due.push_back({timer.due, timer.sequence, timer.id});
+        }
+        std::sort(due.begin(), due.end(), [](const DueTimer& left, const DueTimer& right) {
+            if (left.due != right.due) return left.due < right.due;
+            return left.sequence < right.sequence;
+        });
+
+        bool timer_blocked_by_full_queue = false;
+        for (const auto& candidate : due) {
+            if (state->tasks.size() >= kDispatcherMaxPendingTasks ||
+                state->next_task_sequence == 0) {
+                timer_blocked_by_full_queue = true;
+                break;
+            }
+
+            const auto it = std::find_if(state->timers.begin(), state->timers.end(),
+                                         [&](const TimerEntry& timer) {
+                                             return timer.id == candidate.id;
+                                         });
+            if (it == state->timers.end() || it->due > now) continue;
+
+            const auto callback = it->callback;
+            Dispatcher::Callback queued_callback = [callback] { (*callback)(); };
+            const bool enqueued = enqueue_task_locked(*state, queued_callback);
+            if (!enqueued) {
+                timer_blocked_by_full_queue = true;
+                break;
+            }
+            if (it->repeating) {
+                if (!can_add(now, it->interval)) {
+                    state->timers.erase(it);
+                } else {
+                    it->due = now + it->interval;
+                }
+            } else {
+                // One-shot becomes inactive immediately after successful queue
+                // insertion and before its callback can execute. The queued
+                // wrapper owns the callable until this firing completes.
+                state->timers.erase(it);
+            }
+        }
+
+        // Freeze only how much work this checkpoint may begin. Leave every
+        // unstarted accepted task in the primary deque so an exception never
+        // needs a recovery insertion that could itself allocate or fail. A task
+        // is removed immediately before its invocation, making that begun task
+        // consumed while preserving all later work in FIFO order.
+        work_count = std::min(state->tasks.size(), kDispatcherMaxTasksPerCheckpoint);
+
+        // Work beyond this checkpoint's bounded budget (or a due timer that
+        // could not be queued because the queue is full) already needs another
+        // owner/event-loop checkpoint independently of callback outcomes.
+        if (state->tasks.size() > work_count || timer_blocked_by_full_queue) {
+            state->wake_pending = true;
+            should_wake = true;
+        }
+    }
+
+    if (should_wake) request_dispatcher_wake(state);
+
+    std::size_t executed = 0;
+    for (std::size_t index = 0; index < work_count; ++index) {
+        TaskEntry task;
+        {
+            std::lock_guard lock{state->mutex};
+            if (state->closing || state->tasks.empty()) break;
+            task = std::move(state->tasks.front());
+            state->tasks.pop_front();
+        }
+
+        try {
+            task.callback();
+            ++executed;
+        } catch (...) {
+            bool recover_wake = false;
+            {
+                std::lock_guard lock{state->mutex};
+                if (!state->closing && !state->tasks.empty()) {
+                    state->wake_pending = true;
+                    recover_wake = true;
+                }
+            }
+            if (recover_wake) request_dispatcher_wake(state);
+            throw;
+        }
+    }
+
+    // Reentrant posts made while original work was executing are deliberately
+    // outside the frozen work_count. Ensure they cannot be stranded when the
+    // original queue had no overflow wake pending.
+    bool recover_wake = false;
+    {
+        std::lock_guard lock{state->mutex};
+        if (!state->closing && !state->tasks.empty() && !state->wake_pending) {
+            state->wake_pending = true;
+            recover_wake = true;
+        }
+    }
+    if (recover_wake) request_dispatcher_wake(state);
+
+    return executed;
+}
+
+void DispatcherOwner::shutdown() noexcept {
+    const auto state = state_;
+    if (!state) return;
+
+    // User-owned callable/capture destruction is lifetime code and may re-enter
+    // Dispatcher. Move all discarded ownership out while locked, then let it
+    // destruct only after the mutex is released.
+    std::deque<TaskEntry> discarded_tasks;
+    std::vector<TimerEntry> discarded_timers;
+    {
+        std::lock_guard lock{state->mutex};
+        state->closing = true;
+        discarded_tasks.swap(state->tasks);
+        discarded_timers.swap(state->timers);
+        state->wake_pending = false;
+        state->wake_backend.reset();
+    }
+    state_.reset();
+}
+
+std::size_t DispatcherOwner::pending_task_count() const noexcept {
+    const auto state = state_;
+    if (!state) return 0;
+    std::lock_guard lock{state->mutex};
+    return state->tasks.size();
+}
+
+std::size_t DispatcherOwner::active_timer_count() const noexcept {
+    const auto state = state_;
+    if (!state) return 0;
+    std::lock_guard lock{state->mutex};
+    return state->timers.size();
+}
+
+std::optional<DispatcherDuration> DispatcherOwner::next_delay() const noexcept {
+    const auto state = state_;
+    if (!state) return std::nullopt;
+    const auto now = state->clock->now();
+
+    std::lock_guard lock{state->mutex};
+    if (state->closing) return std::nullopt;
+    if (!state->tasks.empty()) return DispatcherDuration::zero();
+    if (state->timers.empty()) return std::nullopt;
+
+    const auto it = std::min_element(state->timers.begin(), state->timers.end(),
+                                     [](const TimerEntry& left, const TimerEntry& right) {
+                                         if (left.due != right.due) return left.due < right.due;
+                                         return left.sequence < right.sequence;
+                                     });
+    if (it->due <= now) return DispatcherDuration::zero();
+    return std::chrono::duration_cast<DispatcherDuration>(it->due - now);
+}
+
+void DispatcherTestAccess::fail_next_post(const Dispatcher& dispatcher) noexcept {
+    const auto state = dispatcher.state_.lock();
+    if (!state) return;
+    std::lock_guard lock{state->mutex};
+    if (!state->closing) state->fail_next_post_for_testing = true;
+}
+
+} // namespace ui::detail
+
+namespace ui {
+
+bool Dispatcher::post(Callback callback) const {
+    if (!callback) return false;
+    const auto state = state_.lock();
+    if (!state) return false;
+
+    bool should_wake = false;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing) return false;
+        if (state->fail_next_post_for_testing) {
+            state->fail_next_post_for_testing = false;
+            throw std::bad_alloc{};
+        }
+        const bool was_empty = state->tasks.empty();
+        if (!detail::enqueue_task_locked(*state, callback)) return false;
+        if (was_empty && !state->wake_pending) {
+            state->wake_pending = true;
+            should_wake = true;
+        }
+    }
+    if (should_wake) detail::request_dispatcher_wake(state);
+    return true;
+}
+
+TimerHandle Dispatcher::schedule_after(DispatcherDuration delay, Callback callback) const {
+    return detail::schedule_dispatcher_timer(state_, delay, false, std::move(callback));
+}
+
+TimerHandle Dispatcher::schedule_every(DispatcherDuration interval, Callback callback) const {
+    return detail::schedule_dispatcher_timer(state_, interval, true, std::move(callback));
+}
+
+bool Dispatcher::cancel(const TimerHandle& handle) const {
+    if (!handle.valid()) return false;
+    const auto state = state_.lock();
+    if (!state || handle.owner_.get() != state->token.get()) return false;
+
+    std::shared_ptr<Callback> removed_callback;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing) return false;
+        const auto it = std::find_if(state->timers.begin(), state->timers.end(),
+                                     [&](const detail::TimerEntry& timer) {
+                                         return timer.id == handle.id_;
+                                     });
+        if (it == state->timers.end()) return false;
+        removed_callback = std::move(it->callback);
+        state->timers.erase(it);
+    }
+    return true;
+}
+
+bool Dispatcher::valid() const noexcept {
+    const auto state = state_.lock();
+    if (!state) return false;
+    std::lock_guard lock{state->mutex};
+    return !state->closing;
+}
+
+std::chrono::steady_clock::time_point Dispatcher::current_time() const noexcept {
+    const auto state = state_.lock();
+    if (!state) return {};
+
+    std::shared_ptr<detail::DispatcherClock> clock;
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->closing) return {};
+        clock = state->clock;
+    }
+    return clock ? clock->now() : std::chrono::steady_clock::time_point{};
+}
+
+} // namespace ui
