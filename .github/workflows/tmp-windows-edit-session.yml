@@ -39,6 +39,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=cl
           -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_CXX_FLAGS=/Zi
           -DNATIVEUI_BUILD_PLATFORM=OFF
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_BUILD_EXAMPLES=OFF
