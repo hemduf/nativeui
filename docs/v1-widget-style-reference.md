@@ -104,9 +104,34 @@ Thumb diameter and focus-ring width currently affect intrinsic cross-axis measur
 
 ## ListView / Tabs
 
-`ListViewStylePatch` controls surface/row/accent/separator colors and their border/radius/inset geometry. Selection is orthogonal to interaction.
+`ListViewStylePatch` is a partial owned override. A disengaged optional inherits the value already produced by the previous layer; an engaged optional replaces it. Surface border width/radius, row insets/radius/accent geometry and separator width/inset are expressed in logical UI pixels and are stored verbatim. The style layer does not clamp negative or non-finite values.
 
-`TabsStylePatch` controls header/panel/tab/text/separator/underline presentation plus header/panel/tab dimensions and text size.
+`ListViewStyle` resolves in this exact order:
+
+```text
+base -> selected -> interaction -> read_only -> focused
+```
+
+Interaction is one branch using the shared `disabled > pressed > hovered > normal` precedence. At every layer the inherited recipe is applied before the explicit/component-local recipe, so local fields win when both are present. `ResolvedListViewStyle` is an owned snapshot and borrows nothing from either recipe or the Theme used to create defaults. Equality is exact for geometry; no epsilon/tolerance is applied.
+
+`TabsStylePatch` follows the same absent-means-inherit contract. Header/panel border widths, header height, panel gap, radii, tab inset/radius, underline geometry, separator geometry and text size are logical UI pixels. `TabsStyle` uses the same `base -> selected -> interaction -> read_only -> focused` layering and inherited-before-local rule. `ResolvedTabsStyle` is likewise an independent owned value.
+
+`default_list_view_style(theme)` and `default_tabs_style(theme)` borrow the Theme only for the call and return detached recipes. The resolver functions borrow their recipe/state arguments synchronously, invoke no callbacks, perform no Theme lookup and do not mutate retained state. Applying a resolved/recipe change to a live widget remains UI/main-thread work; these helpers are not intended for audio/DSP real-time callbacks.
+
+```cpp
+auto inherited = ui::default_tabs_style(theme);
+
+ui::TabsStyle local;
+local.selected.underline_height = 3.0f; // logical pixels
+local.focused.header_border_width = 2.0f;
+
+ui::VisualState state;
+state.selected = true;
+state.focused = true;
+
+ui::ResolvedTabsStyle resolved =
+    ui::resolve_tabs_style(inherited, local, state);
+```
 
 ## ComboBox / MenuItem
 
