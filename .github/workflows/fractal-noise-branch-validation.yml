@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - issue/176-t092-fractal-noise
+      - fix/fractal-noise-gpu-reference
+      - review/fractal-noise-closeout
 
 permissions:
   contents: read

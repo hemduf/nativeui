@@ -2,6 +2,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
   add_test(
+    NAME nativeui_advanced_rendering_docs_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_contract.cmake"
+  )
+  set_tests_properties(nativeui_advanced_rendering_docs_contract PROPERTIES
+    LABELS "docs;contract"
+  )
+
+  add_test(
     NAME nativeui_feature_example_discovery_contract
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -155,9 +165,18 @@ if(NATIVEUI_BUILD_TESTS)
     set_tests_properties(${name} PROPERTIES LABELS "unit")
   endfunction()
 
+  nativeui_add_core_test(
+    nativeui_advanced_rendering_docs_snippets
+    ${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_snippets.cpp)
+  set_tests_properties(nativeui_advanced_rendering_docs_snippets PROPERTIES
+    LABELS "docs;unit"
+  )
+
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
+  nativeui_add_core_test(nativeui_edit_session_tests ${PROJECT_SOURCE_DIR}/tests/edit_session_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_edit_tests ${PROJECT_SOURCE_DIR}/tests/widget_edit_tests.cpp)
   nativeui_add_core_test(nativeui_component_state_tests ${PROJECT_SOURCE_DIR}/tests/component_state_tests.cpp)
   nativeui_add_core_test(nativeui_focus_tests ${PROJECT_SOURCE_DIR}/tests/focus_tests.cpp)
   nativeui_add_core_test(nativeui_routing_tests ${PROJECT_SOURCE_DIR}/tests/routing_tests.cpp)
@@ -598,6 +617,30 @@ if(NATIVEUI_BUILD_TESTS)
 
     if(APPLE)
       enable_language(OBJCXX)
+      add_test(NAME nativeui_pugl_visibility_contract
+        COMMAND ${CMAKE_COMMAND}
+          "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+          "-DPUGL_SOURCE=${pugl_src_SOURCE_DIR}"
+          "-DTEST_BINARY_DIR=${PROJECT_BINARY_DIR}"
+          -P "${PROJECT_SOURCE_DIR}/tests/pugl_visibility_contract.cmake")
+      set_tests_properties(nativeui_pugl_visibility_contract PROPERTIES
+        LABELS "build;cmake;platform;visibility" TIMEOUT 60)
+
+      add_executable(nativeui_embedded_visibility_tests ${PROJECT_SOURCE_DIR}/tests/embedded_visibility_macos_tests.mm)
+      set_target_properties(nativeui_embedded_visibility_tests PROPERTIES OBJCXX_STANDARD 20)
+      target_compile_options(nativeui_embedded_visibility_tests PRIVATE -fobjc-arc)
+      _nativeui_attach_consumer_platform(
+        TARGET nativeui_embedded_visibility_tests
+        CONSUMER_ID org.nativeui.test.embedded-visibility
+      )
+      nativeui_enable_project_warnings(nativeui_embedded_visibility_tests)
+      nativeui_enable_sanitizers(nativeui_embedded_visibility_tests)
+      if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
+        add_test(NAME nativeui_embedded_visibility_tests COMMAND nativeui_embedded_visibility_tests)
+        set_tests_properties(nativeui_embedded_visibility_tests PROPERTIES
+          LABELS "integration;platform;macos;visibility" TIMEOUT 60)
+      endif()
+
       add_executable(nativeui_smoke_macos_drop ${PROJECT_SOURCE_DIR}/tests/smoke_macos_drop.mm)
       set_target_properties(nativeui_smoke_macos_drop PROPERTIES OBJCXX_STANDARD 20)
       target_compile_options(nativeui_smoke_macos_drop PRIVATE -fobjc-arc)
@@ -673,7 +716,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state edit dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT ${PROJECT_SOURCE_DIR}/tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

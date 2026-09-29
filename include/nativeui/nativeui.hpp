@@ -5,6 +5,7 @@
 #include <nativeui/invalidation.hpp>
 #include <nativeui/input.hpp>
 #include <nativeui/gesture.hpp>
+#include <nativeui/edit.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/dispatcher.hpp>
 #include <nativeui/animation.hpp>
