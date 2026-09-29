@@ -34,10 +34,17 @@ namespace detail { class SkiaGlRenderer; }
 /// explicitly reviewed thread-safe bridge and apply it from the UI domain.
 class UI {
 public:
+    /// Construct and mount one retained tree using `default_theme()`.
+    /// Root composition is consumed into UI-owned retained component instances.
+    /// Construction may allocate/invoke mount callbacks and may throw after rollback.
+    /// UI construction is UI-thread work and is not audio/DSP real-time safe.
     template <class Root>
     explicit UI(Root&& root)
         : UI(std::forward<Root>(root), default_theme()) {}
 
+    /// Construct and mount one retained tree with an owned Theme value.
+    /// The Theme is moved into the Tree; caller storage need not outlive this call.
+    /// Construction has the same rollback/threading/error rules as the default overload.
     template <class Root>
     UI(Root&& root, Theme theme)
         : dialog_state_(std::make_shared<detail::DialogState>()),
@@ -73,13 +80,20 @@ public:
         }
     }
 
+    /// Borrow the current UI-owned Theme; do not retain across replacement/destruction.
     [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
+    /// Replace the Theme and publish only its classified paint/layout invalidation.
+    /// Rebinding may allocate or invoke component work and may throw.
     void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
+    /// Measure preferred root content under logical-pixel constraints without layout publication.
+    /// Dynamic/component measurement executes synchronously and may throw.
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
         if (tree_.lifecycle_transition_active()) return {};
         return tree_.measure_overlay_content(constraints);
     }
+    /// Publish a logical-pixel viewport size; lifecycle-reentrant resize is deferred.
+    /// Deferred layout/reconciliation may throw and remains retryable after failure.
     void resize(Size viewport) {
         if (tree_.lifecycle_transition_active()) {
             pending_viewport_resize_ = viewport;
@@ -90,11 +104,16 @@ public:
         viewport_ = viewport;
         prepare_overlay_layout();
     }
+    /// Activate component lifecycle, focus/input routing and overlay layout.
+    /// PlatformServices belongs to the host-view domain used for dispatch/paint.
+    /// Activation callbacks may throw; partial activation is rolled back.
     void activate(PlatformServices& platform) {
         tree_.activate_focus(platform);
         prepare_overlay_layout();
         enforce_new_modal_capture_barrier(platform);
     }
+    /// Deactivate focus/hover/capture/components and transient/anchored presentation.
+    /// Cleanup continues across callback failures and may rethrow the first failure.
     void deactivate(PlatformServices& platform) {
         // Transient presentations such as a pending/visible Tooltip are
         // cancelled at the view lifecycle boundary before focus/hover teardown
@@ -116,7 +135,14 @@ public:
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
+    /// Re-synchronize availability/focus and re-notify the focused node when active.
+    /// Focus callbacks execute synchronously in the UI domain and may throw.
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
+    /// Route one normalized input event through dialog/overlay and retained input.
+    /// Event geometry uses logical UI coordinates; PlatformServices is borrowed synchronously.
+    /// Structural changes commit at safe outer checkpoints. Popup/dialog completion may
+    /// re-enter ordinary UI/state work or destroy this UI. Callback failures propagate
+    /// after retained ownership repair. Returns Ignored during lifecycle transitions.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
@@ -266,24 +292,37 @@ public:
         if (completing_dialog) flush_pending_dialog_completion();
         return result;
     }
+    /// Deliver PointerCancel to active capture owners and clear capture state.
+    /// Cancellation callbacks may re-enter UI work and may throw.
     EventResult cancel_pointer(PlatformServices& platform) {
         return tree_.cancel_pointer(platform);
     }
+    /// Install an owned synchronous fallback for unhandled Commands; empty clears it.
+    /// The callback runs on the UI thread during dispatch and may re-enter or throw.
     void set_command_handler(std::function<EventResult(Command)> handler) {
         tree_.set_global_command_handler(std::move(handler));
     }
+    /// Install an owned synchronous fallback for unhandled KeyDown events.
+    /// The InputEvent reference is borrowed only for the callback invocation.
     void set_key_down_handler(std::function<EventResult(const InputEvent&)> handler) {
         tree_.set_global_key_down_handler(std::move(handler));
     }
+    /// True when retained layout or at least one paint region remains dirty.
     [[nodiscard]] bool dirty() const noexcept { return tree_.dirty(); }
+    /// True when retained logical geometry must be recomputed.
     [[nodiscard]] bool layout_dirty() const noexcept { return tree_.layout_dirty(); }
+    /// True when one or more logical paint-damage regions remain.
     [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
+    /// Borrow current root-logical dirty rectangles; later UI mutation may invalidate the reference.
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
     }
+    /// Borrow the latest bounded structural-reconciliation diagnostic string.
     [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
         return tree_.structural_diagnostic();
     }
+    /// Return effective availability for a NodeId, or nullopt for stale/missing identity.
+    /// The returned value is an owned snapshot and does not keep the node alive.
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
         return tree_.component_availability(id);
@@ -313,18 +352,30 @@ public:
         }
         return entries;
     }
+    /// Install an owned logical-region invalidation callback.
+    /// Existing dirty regions replay synchronously; later notifications run in the
+    /// invalidating UI operation. Reentrancy is allowed and exceptions propagate.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }
+    /// Region-agnostic invalidation callback overload; geometry is discarded.
     void set_invalidation_callback(std::function<void()> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }
+    /// Remove the presentation invalidation callback.
     void clear_invalidation_callback() {
         tree_.set_invalidation_callback(std::function<void(Rect)>{});
     }
+    /// Mark the complete current logical viewport for repaint.
     void invalidate() { tree_.invalidate(); }
+    /// Mark one root-logical rectangle for repaint.
     void invalidate(Rect rect) { tree_.invalidate(rect); }
+    /// Mark retained layout dirty from the root for later safe recomputation.
     void invalidate_layout() { tree_.invalidate_layout(); }
+    /// Paint the retained UI after applying deferred resize and overlay layout.
+    /// Successful paint consumes only pre-existing damage; reentrant invalidation
+    /// survives for the next frame. Failure restores damage and rethrows.
+    /// Painting is UI-thread work and is not audio/DSP real-time safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return;
         (void)apply_pending_viewport_resize();
