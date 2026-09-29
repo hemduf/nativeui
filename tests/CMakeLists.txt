@@ -280,6 +280,7 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_scalar_source_fault_tests PRIVATE ${PROJECT_SOURCE_DIR})
   add_executable(nativeui_scalar_source_source_tests
     ${PROJECT_SOURCE_DIR}/tests/scalar_source_source_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/headless.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp

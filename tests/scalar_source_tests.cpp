@@ -203,7 +203,8 @@ void copy_assignment_contract() {
     NUI_CHECK(ui::detail::ScalarSourceAccess::channel(replacement) ==
               ui::ScalarChannel::Green);
 
-    original = original;
+    auto* original_alias = &original;
+    original = *original_alias;
     NUI_CHECK(ui::detail::ScalarSourceAccess::channel(original) ==
               ui::ScalarChannel::Green);
 }
