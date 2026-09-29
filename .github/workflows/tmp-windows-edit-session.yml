@@ -53,3 +53,16 @@ jobs:
           $code = $LASTEXITCODE
           Write-Host "direct-exit-code=$code"
           if ($code -ne 0) { exit $code }
+      - name: Inspect Windows application fault
+        if: always()
+        shell: pwsh
+        run: |
+          $event = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -eq 1000 -and $_.Properties.Count -gt 6 -and [string]$_.Properties[0].Value -like '*nativeui_edit_session_tests*' } |
+            Select-Object -First 1
+          if ($event) {
+            Write-Host "fault-module=$($event.Properties[3].Value)"
+            Write-Host "exception-code=$($event.Properties[6].Value)"
+          } else {
+            Write-Host 'no-application-error-event'
+          }
