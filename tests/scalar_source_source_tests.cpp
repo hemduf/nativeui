@@ -496,10 +496,14 @@ void snapshot_lifetime_contract() {
             ui::Brush{ui::Color{0.15f, 0.65f, 0.25f, 1.0f}},
             ui::ScalarChannel::Green);
     }();
+    const ui::Brush solid_reference{
+        ui::Color{0.15f, 0.65f, 0.25f, 1.0f}};
     const auto solid_pixel =
         render_probe(scalar_probe(solid_scalar), 8, 8);
-    check(solid_pixel[0] > 0.60f && solid_pixel[0] < 0.70f,
-          "ScalarSource did not retain the temporary solid Brush");
+    const auto solid_expected =
+        render_probe(select_channel(
+            solid_reference, ui::ScalarChannel::Green), 8, 8);
+    check_pixel_near(solid_pixel, solid_expected);
 
     const auto shader_scalar = [] {
         const auto program = compile_probe(R"(
