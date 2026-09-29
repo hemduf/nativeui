@@ -460,6 +460,39 @@ void noise_sampling_contract() {
         render_probe(expected, 8, 6));
 }
 
+
+void backend_failure_retry_contract() {
+    const auto program = compile_probe(R"(
+        half4 main(float2) {
+            return half4(0.8, 0.2, 0.1, 1.0);
+        }
+    )");
+    ui::ShaderInstance shader{program};
+    const auto scalar = ui::ScalarSource::from_brush(
+        ui::Brush{shader}, ui::ScalarChannel::Red);
+    const auto probe = scalar_probe(scalar);
+
+    const auto before =
+        ui::detail::shader_materialization_call_count_for_test();
+    ui::detail::set_shader_materialization_failure_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeUniformData);
+
+    bool failed = false;
+    try {
+        (void)render_probe(probe, 8, 8);
+    } catch (const std::bad_alloc&) {
+        failed = true;
+    }
+    check(failed,
+          "ScalarSource hid backend materialization failure as scalar zero");
+    check(ui::detail::shader_materialization_call_count_for_test() > before,
+          "ScalarSource failure seam did not reach backend materialization");
+
+    const auto recovered = render_probe(probe, 8, 8);
+    check(recovered[0] > 0.75f && recovered[0] < 0.85f,
+          "ScalarSource did not recover after backend materialization failure");
+}
+
 void two_renderer_isolation_contract() {
     const auto first = ui::ScalarSource::from_brush(
         ui::Brush{ui::Color{0.8f, 0.1f, 0.1f, 1.0f}},
@@ -528,6 +561,7 @@ int main() {
     data_texture_channel_contract();
     snapshot_lifetime_contract();
     noise_sampling_contract();
+    backend_failure_retry_contract();
     independent_source_contract();
     two_renderer_isolation_contract();
     return 0;
