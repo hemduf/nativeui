@@ -30,6 +30,11 @@ if(NATIVEUI_BUILD_PLATFORM)
   # T053's consumer platform module and T047's installed-package helper use the
   # same resolved pinned source root. This is build/configure data only.
   set(NATIVEUI_PUGL_SOURCE_DIR "${pugl_src_SOURCE_DIR}")
+  if(APPLE)
+    include("${CMAKE_CURRENT_LIST_DIR}/NativeUIPuglVisibility.cmake")
+    set(NATIVEUI_PUGL_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/nativeui-pugl")
+    nativeui_prepare_pugl_visibility("${pugl_src_SOURCE_DIR}" "${NATIVEUI_PUGL_SOURCE_DIR}")
+  endif()
 
   add_library(nativeui_opengl INTERFACE)
   add_library(NativeUI::OpenGL ALIAS nativeui_opengl)

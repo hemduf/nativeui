@@ -118,7 +118,11 @@ void preedit_is_visually_distinct_without_committing_state() {
 void ime_owned_navigation_does_not_cancel_preedit() {
     test::MockPlatform platform;
     ui::State<std::string> value{"hello"};
-    ui::UI tree{ui::TextInput{"Name", value}};
+    int key_callbacks = 0;
+    ui::UI tree{ui::TextInput{"Name", value}.on_key_down([&](const ui::InputEvent&) {
+        ++key_callbacks;
+        return ui::EventResult::Ignored;
+    })};
 
     tree.resize({320.0f, 90.0f});
     tree.activate(platform);
@@ -129,10 +133,13 @@ void ime_owned_navigation_does_not_cancel_preedit() {
 
     tree.dispatch(test::key(ui::Key::Left), platform);
     NUI_CHECK(value.get() == "hello");
+    NUI_CHECK(key_callbacks == 0);
     NUI_CHECK_NEAR(platform.text_input_cursor_offset, candidate_before_key, 0.001f);
 
     tree.dispatch(composition(ui::CompositionType::Commit, "日本"), platform);
     NUI_CHECK(value.get() == "hello日本");
+    tree.dispatch(test::key(ui::Key::Left), platform);
+    NUI_CHECK(key_callbacks == 1);
 }
 
 void composition_candidate_tracks_preedit_cursor() {
@@ -259,6 +266,52 @@ void binding_text_input_entry_point_contract() {
     NUI_CHECK(!tree.layout_dirty());
 }
 
+void key_down_override_preserves_text_editing_and_recovers_after_throw() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"abc"};
+    int navigation_calls = 0;
+    bool throw_once = true;
+    ui::UI tree{ui::TextInput{"Search", value}.on_key_down([&](const ui::InputEvent& event) {
+        if (event.key != ui::Key::Up && event.key != ui::Key::Escape)
+            return ui::EventResult::Ignored;
+        ++navigation_calls;
+        if (throw_once) {
+            throw_once = false;
+            throw std::runtime_error("navigation failure");
+        }
+        return ui::EventResult::Handled;
+    })};
+    tree.resize({320.0f, 90.0f});
+    tree.activate(platform);
+
+    bool threw = false;
+    try {
+        (void)tree.dispatch(test::key(ui::Key::Up), platform);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    NUI_CHECK(threw);
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Up), platform) == ui::EventResult::Handled);
+    tree.dispatch(test::text("x"), platform);
+    NUI_CHECK(value.get() == "abcx");
+    NUI_CHECK(tree.dispatch(test::key(ui::Key::Escape), platform) == ui::EventResult::Handled);
+    NUI_CHECK(value.get() == "abcx");
+    NUI_CHECK(navigation_calls == 3);
+
+    // Ignored keys retain the standard text-input cursor behavior.
+    tree.dispatch(test::key(ui::Key::Left), platform);
+    tree.dispatch(test::text("y"), platform);
+    NUI_CHECK(value.get() == "abcyx");
+
+    ui::State<std::string> independent{"other"};
+    ui::UI other{ui::TextInput{"Other", independent}};
+    other.resize({320.0f, 90.0f});
+    other.activate(platform);
+    other.dispatch(test::key(ui::Key::Up), platform);
+    other.dispatch(test::text("z"), platform);
+    NUI_CHECK(independent.get() == "zother");
+}
+
 void suite() {
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
@@ -331,6 +384,7 @@ void suite() {
     composition_candidate_geometry_scales_at_platform_boundary();
     read_only_preserves_navigation_and_copy_but_blocks_mutations();
     binding_text_input_entry_point_contract();
+    key_down_override_preserves_text_editing_and_recovers_after_throw();
 }
 
 } // namespace
