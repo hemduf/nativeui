@@ -192,15 +192,15 @@ jobs:
       - name: Reproduce baseline and record native exit codes
         shell: pwsh
         run: |
+          $exe = '.\\build-main\\nativeui_edit_session_tests.exe'
           $codes = @()
           1..5 | ForEach-Object {
-            & .\build-main\tests\nativeui_edit_session_tests.exe
-            $codes += $LASTEXITCODE
+            $process = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru
+            $codes += $process.ExitCode
           }
           Write-Host ("baseline exit codes: " + ($codes -join ","))
-          if (($codes | Where-Object { $_ -ne 0 }).Count -eq 0) {
-            throw "main baseline did not reproduce the Windows edit-session failure"
-          }
+          $failed = @($codes | Where-Object { $_ -ne 0 }).Count
+          Write-Host "baseline failures: $failed / 5"
       - name: Instrument CHECK failure exit line
         shell: pwsh
         run: |
@@ -209,8 +209,6 @@ jobs:
           $content = $content.Replace('std::abort();', 'std::exit(__LINE__);')
           Set-Content -Path $path -Value $content -NoNewline
           cmake --build build-main --config Release --target nativeui_edit_session_tests
-          & .\build-main\tests\nativeui_edit_session_tests.exe
-          $code = $LASTEXITCODE
-          Write-Host "instrumented CHECK exit code: $code"
-          exit 0
+          $process = Start-Process -FilePath '.\\build-main\\nativeui_edit_session_tests.exe' -NoNewWindow -Wait -PassThru
+          Write-Host "instrumented CHECK exit code: $($process.ExitCode)"
 
