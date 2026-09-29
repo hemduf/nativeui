@@ -1,6 +1,9 @@
 name: Advanced Rendering Docs Validation
 
 on:
+  push:
+    branches:
+      - docs/advanced-rendering-foundations-guide
   pull_request:
     paths:
       - '.github/workflows/advanced-rendering-docs-validation.yml'
