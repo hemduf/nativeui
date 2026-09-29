@@ -157,15 +157,21 @@ The effect overload adds `Effect` filtering. Zero Gaussian blur reduces to an or
 
 `StrokeStyle::width` is a logical length. `StrokeCap` selects Butt/Round/Square endpoints, `StrokeJoin` selects Miter/Round/Bevel joins, and `miter_limit` is a dimensionless stroke-width ratio. `stroke_path()` treats an empty path or non-positive width as a no-op.
 
-Painter also draws rounded rectangles, circles, lines and arcs. Arc start/end are in **radians**, sweep is `end - start`, and arc/line helpers use round caps. Primitive draw calls otherwise expect finite meaningful geometry rather than defining cross-backend behavior for arbitrary invalid dimensions.
+Painter also draws rounded rectangles, circles, lines and arcs. Arc start/end are in **radians**, sweep is `end - start`, and arc/line helpers use round caps.
 
-`push_clip()`/`pop_clip()` are manual pairing helpers. Prefer `scoped_clip()` for exception-safe balance and invalid-geometry canonicalization.
+Primitive drawing and protected clipping intentionally have different invalid-input contracts. `scoped_clip(...)` canonicalizes invalid geometry to an empty clip because an unbounded/invalid clip would threaten retained traversal correctness. Primitive draw helpers instead forward geometry to the backend. Callers should therefore provide finite points/rectangles/angles, non-negative radii and finite positive stroke widths when they need portable deterministic output. In particular, rounded-rectangle draw radii are **not** clamped the way rounded clip radii are.
+
+Path draw calls borrow the `Path` only for the synchronous call and convert it to backend geometry immediately; conversion may allocate. `fill_path()` treats an empty path as a no-op. `stroke_path()` additionally treats `width <= 0` as a no-op and clamps the miter limit to at least zero. A NaN stroke width is not rejected by the `<= 0` check, and non-finite path commands are not rejected by the draw path, so finite inputs remain the caller contract. By contrast, `scoped_clip(path)` validates every command and fails closed to an empty clip.
+
+Every Brush-taking primitive borrows the Brush only until return. Gradient/image/runtime-shader materialization happens synchronously, may allocate or throw, and no pointer/reference into the caller's Brush is retained. `PaintOptions` is applied after source materialization using the documented opacity/blend canonicalization. A draw/materialization exception propagates to the retained paint boundary; the transactional rollback guarantee described above applies specifically to protected scope setup, not to arbitrary primitive draws.
+
+`push_clip()`/`pop_clip()` are legacy/manual pairing helpers. `push_clip()` saves state and forwards the rectangle directly; it does not perform `scoped_clip()`'s invalid-geometry canonicalization or protected transactional setup. Pair every successful manual push with a pop in the same traversal and prefer `scoped_clip()` in fallible component code.
 
 ### Text drawing and measurement
 
-`Painter::text(position, text, style)` treats `position.y` as the run's **vertical center**, not a baseline. `position.x` follows `TextStyle::align` (Left/Center/Right). Font size and coordinates are logical units; negative draw size clamps to zero. Malformed UTF-8 is repaired into owned valid bytes before being passed to Skia.
+`Painter::text(position, text, style)` treats `position.y` as the run's **vertical center**, not a baseline. `position.x` follows `TextStyle::align` (Left/Center/Right). Font size and coordinates are logical units; negative draw size clamps to zero. The UTF-8 view and `TextStyle` are borrowed only for the synchronous call. Font/fallback resolution and layout may allocate or throw; malformed UTF-8 is repaired into temporary owned valid bytes before being passed to Skia, and Painter retains no view into caller storage after return.
 
-`measure_text(text, size)` is the width-only convenience path through `TextService`; use the full text service/style APIs when ascent/descent or explicit typography is required.
+`measure_text(text, size)` is the width-only convenience path through `TextService` with the same borrowed-input and allocation/error boundary. Use the full text service/style APIs when ascent/descent or explicit typography is required.
 
 ## Brushes, gradients, paint options and effects
 
@@ -201,7 +207,7 @@ painter.fill_path(
     {.opacity = 0.9f, .blend = ui::BlendMode::SourceOver});
 ```
 
-Painter state belongs to the current retained paint traversal. Do not retain `Painter&`, `StateGuard`, `SkCanvas&` or borrowed gradient-stop references beyond the lifetime that supplies them, and do not use Painter as a cross-thread handoff mechanism.
+Painter state belongs to the current retained paint traversal. It is mutable, unsynchronized and serial to the owning UI/render domain. Do not retain `Painter&`, `StateGuard`, `SkCanvas&`, Path/Brush/TextStyle borrows or borrowed gradient-stop references beyond the call/traversal lifetime that supplies them. Do not hand Painter to asynchronous work or use it as a cross-thread or audio-real-time handoff mechanism.
 
 Runtime shaders use a two-stage contract:
 

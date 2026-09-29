@@ -94,8 +94,14 @@ struct ResolvedTextLayout {
 /// and protected-scope invariants.
 ///
 /// Path/gradient/effect/text materialization and unusually deep save stacks may
-/// allocate. Exceptions from fallible scope setup roll back protected backend
-/// state before propagating.
+/// allocate. Exceptions from fallible protected-scope setup roll back backend
+/// state before propagating. Ordinary draw/materialization failures propagate.
+///
+/// Painter is traversal-local mutable state with no internal synchronization.
+/// Path, Brush, gradient, TextStyle and string/view arguments are borrowed only
+/// for the synchronous call and are never retained after return. Painter,
+/// StateGuard and canvas references must not escape the owning paint traversal;
+/// this API is not suitable for an audio/DSP real-time callback.
 class Painter {
     struct ScopeFrame {
         int previous_floor{};
@@ -465,7 +471,12 @@ public:
         });
     }
 
-    /// Fill a rounded logical rectangle with a solid color.
+    /// Fill a rounded rectangle with a solid color.
+    ///
+    /// Rect/radius are logical UI units. Unlike scoped_clip(), primitive drawing
+    /// forwards geometry directly and does not canonicalize invalid rectangles or
+    /// clamp radius; callers provide finite meaningful geometry. Color is copied
+    /// by value and no caller-owned object is retained.
     void fill_rounded_rect(Rect rect, float radius, Color color) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(color, {}));
@@ -486,6 +497,11 @@ public:
     }
 
     /// Fill a rounded logical rectangle from any Brush source.
+    ///
+    /// Brush is borrowed only for this synchronous call. Its gradient/image/
+    /// runtime-shader source is materialized immediately, may allocate or throw,
+    /// and is not retained by Painter. PaintOptions apply to the materialized
+    /// source. Primitive geometry is expected to be finite and meaningful.
     void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
@@ -498,6 +514,10 @@ public:
     }
 
     /// Brush overload for stroking a rounded logical rectangle.
+    ///
+    /// Brush is borrowed only for the synchronous draw and materialization may
+    /// allocate/throw. This helper does not define a no-op rule for invalid
+    /// radius/width; use finite positive stroke geometry for portable behavior.
     void stroke_rounded_rect(Rect rect, float radius, float width, const Brush& brush,
                              PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
@@ -522,6 +542,10 @@ public:
     }
 
     /// Brush overload for an arc; angles are radians and caps are round.
+    ///
+    /// Sweep is end-start. Brush is borrowed only for this synchronous draw and
+    /// source materialization may allocate/throw. Radius, angles and width are
+    /// forwarded without primitive-level finite/positive canonicalization.
     void arc(Point center, float radius, float start, float end, float width,
              const Brush& brush, PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -538,6 +562,10 @@ public:
     }
 
     /// Brush overload for a logical-coordinate line segment with round caps.
+    ///
+    /// Brush is borrowed only for the synchronous draw; materialization may
+    /// allocate/throw. Endpoints and width are logical units and are forwarded
+    /// without validation, so callers provide finite geometry and positive width.
     void line(Point a, Point b, float width, const Brush& brush,
               PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -552,6 +580,10 @@ public:
     }
 
     /// Fill a Path from a Brush; an empty path is a no-op.
+    ///
+    /// Path and Brush are borrowed only for this call. Backend path conversion
+    /// and brush materialization are synchronous and may allocate/throw. Unlike
+    /// scoped_clip(path), drawing does not reject non-finite path coordinates.
     void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
         if (path.empty()) return;
         canvas_.drawPath(to_sk_path(path), make_fill_paint(brush, options));
@@ -562,7 +594,12 @@ public:
         stroke_path(path, Brush{color}, style);
     }
 
-    /// Brush overload; empty paths and non-positive widths are no-ops.
+    /// Brush overload for stroking a Path.
+    ///
+    /// Empty paths and widths <= 0 are no-ops. NaN width is not rejected by that
+    /// check, so callers provide finite positive width. Path and Brush are borrowed
+    /// only for the synchronous call; conversion/materialization may allocate and
+    /// throw. Miter limit is clamped to at least zero before backend use.
     void stroke_path(const Path& path, const Brush& brush, StrokeStyle style = {},
                      PaintOptions options = {}) {
         if (path.empty() || style.width <= 0.0f) return;
@@ -572,8 +609,10 @@ public:
     /// Draw UTF-8 text centered vertically on `position.y`.
     ///
     /// position.x follows TextStyle::align. Font size/coordinates are logical.
-    /// Layout may allocate; malformed UTF-8 is repaired before reaching Skia and
-    /// negative drawing size is clamped to zero.
+    /// The UTF-8 view and TextStyle are borrowed only until return; font fallback
+    /// resolution/layout is synchronous and may allocate/throw. Malformed UTF-8
+    /// is repaired into temporary owned bytes before Skia, negative size clamps to
+    /// zero, and no pointer into caller storage is retained after the call.
     void text(Point position, std::string_view text, const TextStyle& style) {
         const auto layout = detail::resolve_text_layout(text, style);
         text = layout.text_bytes(text);
@@ -614,8 +653,10 @@ public:
 
     /// Manually save then intersect a rectangular clip.
     ///
-    /// This forwards rect directly and must pair with pop_clip(). Prefer
-    /// scoped_clip() for exception-safe balance and invalid-geometry handling.
+    /// Rect is logical and forwarded directly. A successful call must pair with
+    /// pop_clip() in the same traversal. Unlike scoped_clip(), this legacy helper
+    /// neither canonicalizes invalid geometry nor provides protected transactional
+    /// rollback semantics around clip setup; prefer the scoped form in fallible code.
     void push_clip(Rect rect) {
         save();
         canvas_.clipRect(to_sk_rect(rect), SkClipOp::kIntersect, true);
@@ -625,6 +666,10 @@ public:
     void pop_clip() { restore(); }
 
     /// Measure UTF-8 text width in logical units using TextService defaults.
+    ///
+    /// Text is borrowed only for synchronous measurement. Font fallback and
+    /// malformed-UTF-8 repair follow TextService and may allocate/throw; no view
+    /// into caller storage is retained.
     [[nodiscard]] static float measure_text(std::string_view text, float size) {
         return TextService::measure(text, size).width;
     }
