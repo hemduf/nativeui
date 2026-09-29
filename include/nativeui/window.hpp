@@ -19,9 +19,23 @@ struct ApplicationBackendAccess;
 struct PlatformTestAccess;
 } // namespace detail
 
+/// Opaque borrowed native parent identifier supplied by the embedding host.
 using NativeParentHandle = std::uintptr_t;
+/// Opaque native child-view identifier owned by a live NativeUI view wrapper.
 using NativeViewHandle = std::uintptr_t;
+/// Host callback receiving an advisory preferred child size in logical pixels.
 using PreferredSizeCallback = std::function<void(Size)>;
+
+/// Construction policy for an embedded host-owned child view.
+///
+/// The option controls local child visibility only. It does not change ownership,
+/// polling, host-window visibility, occlusion, focus, or lifetime rules.
+struct EmbeddedViewOptions {
+    /// Realize the child initially shown when true; realize it hidden when false.
+    ///
+    /// A hidden child remains constructed and keeps its UI/platform resources.
+    bool initially_visible{true};
+};
 
 struct WindowDesc {
     std::string title{"NativeUI"};
@@ -183,6 +197,22 @@ public:
                  NativeParentHandle parent,
                  Size size,
                  std::shared_ptr<DesktopServicesBackend> desktop_services_backend);
+    /// Construct an embedded child with explicit visibility policy.
+    ///
+    /// `ui` and `parent` are borrowed and must outlive this view. `size` is
+    /// the requested child extent in logical pixels. The optional desktop
+    /// services backend is shared-owned by the view. Construction and all later
+    /// native-view operations are UI/main-thread only and are not audio-RT safe.
+    ///
+    /// `options.initially_visible == false` realizes the child hidden without
+    /// destroying its retained UI or Dispatcher. Native creation failures are
+    /// reported through the normal validity/error state rather than by taking
+    /// ownership of the host parent.
+    EmbeddedView(UI& ui,
+                 NativeParentHandle parent,
+                 Size size,
+                 std::shared_ptr<DesktopServicesBackend> desktop_services_backend,
+                 EmbeddedViewOptions options);
     ~EmbeddedView() override;
 
     EmbeddedView(const EmbeddedView&) = delete;
@@ -190,7 +220,38 @@ public:
     EmbeddedView(EmbeddedView&&) = delete;
     EmbeddedView& operator=(EmbeddedView&&) = delete;
 
-    bool poll(); // always non-blocking
+    /// Pump pending embedded-view/platform work without blocking.
+    ///
+    /// Polling remains host-owned even while the child is hidden. Returns the
+    /// platform/view success result; this call does not make a hidden child shown.
+    bool poll();
+
+    /// Request local child visibility without raising or showing the host window.
+    ///
+    /// The realized child, retained UI and Dispatcher are preserved. Showing
+    /// invalidates retained presentation so the next frame is fresh. Returns
+    /// false after terminal native close/failure; repeated successful show calls
+    /// are idempotent.
+    bool show();
+
+    /// Hide the local child while preserving its realized resources and UI.
+    ///
+    /// Hiding deactivates retained focus/input, cancels active pointer edits and
+    /// stops IME as part of cleanup. Cancellation callback exceptions propagate
+    /// only after cleanup has restored invariants. Polling may continue while
+    /// hidden. Returns false after terminal native close/failure; repeated
+    /// successful hide calls are idempotent.
+    bool hide();
+
+    /// Return requested local child visibility.
+    ///
+    /// This is not an occlusion query: it does not report host minimization,
+    /// hidden ancestors, clipping, or whether pixels are currently on screen.
+    [[nodiscard]] bool visible() const noexcept;
+
+    /// Request terminal close of this child view.
+    ///
+    /// Unlike hide(), close is terminal for the native child lifetime.
     void request_close();
 
     [[nodiscard]] bool should_close() const noexcept;
