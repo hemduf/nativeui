@@ -84,23 +84,72 @@ ui::ResolvedCheckboxStyle resolved =
 
 ## Slider / RangeSlider
 
-`SliderStylePatch` controls track, active-range, thumb, focus-ring and formatter-text colors plus track thickness, thumb diameter and focus-ring width. `SliderStyle` supplies base/hovered/pressed/disabled/read-only/focused patches; `ResolvedSliderStyle` is concrete.
+`SliderStylePatch` is a detached partial override for inactive track, active range, thumb, focus ring and formatter text, plus track thickness, thumb diameter and focus-ring width. Geometry is expressed in logical UI pixels. Engaged optionals are stored verbatim; negative or non-finite values are not clamped by the style layer.
 
-Thumb diameter and focus-ring width currently affect intrinsic cross-axis measurement; track thickness is paint geometry inside the measured bounds.
+Resolution order is:
+
+```text
+base -> interaction -> read_only -> focused
+```
+
+Interaction selects exactly one branch with `disabled > pressed > hovered > normal` precedence. Within each layer the inherited recipe is applied before the local recipe. `ResolvedSliderStyle` is an owned snapshot; it borrows nothing from its inputs.
+
+Thumb diameter and focus-ring width currently affect intrinsic cross-axis measurement, so changing either can require layout. Track thickness is paint geometry inside the measured bounds. `default_slider_style(theme)` only borrows the Theme for the call and returns detached values. `resolve_slider_style()` performs no Theme lookup, callback dispatch or retained-tree mutation. Applying style changes to a live Slider remains UI/main-thread work; these style helpers provide no audio/DSP real-time guarantee.
+
+```cpp
+auto inherited = ui::default_slider_style(theme);
+ui::SliderStyle local;
+local.base.thumb_diameter = 18.0f;        // logical UI pixels
+local.focused.focus_ring_width = 3.0f;   // logical UI pixels
+
+ui::VisualState state;
+state.focused = true;
+
+const ui::ResolvedSliderStyle resolved =
+    ui::resolve_slider_style(inherited, local, state);
+```
 
 ## ProgressBar / Meter
 
-`ProgressStylePatch` contains track/fill/border/text colors, border/corner geometry, text size, and horizontal/vertical intrinsic sizes including formatted variants.
+`ProgressStylePatch` contains track/fill/border/text colors, outer/fill radii, border width, formatted-text size and four preferred sizes: horizontal/vertical, each with unformatted and formatted variants. Every size and scalar geometry value is in logical UI pixels and is stored verbatim. A disengaged optional inherits the value from the previous layer.
 
-`ProgressBarStyle` and `MeterStyle` use separate defaults; Meter has a tighter default fill radius. Resolve with `resolve_progress_bar_style()` or `resolve_meter_style()`.
+Both families resolve in this order:
+
+```text
+base -> interaction -> read_only -> focused
+```
+
+The interaction branch uses `disabled > pressed > hovered > normal`; inherited values are applied before local values at every layer. `ResolvedProgressStyle` is fully owned. No implicit Theme lookup or fallback occurs: if callers resolve incomplete recipes and a field is absent in both, the result keeps that field's default-constructed value.
+
+`default_progress_bar_style(theme)` and `default_meter_style(theme)` synchronously borrow the Theme and return detached recipes. Their default geometry is the same except that ProgressBar uses a 6 logical-pixel fill radius while Meter uses 3. Resolution invokes no callbacks and mutates no retained state. Live-widget application remains UI/main-thread work and is outside the audio/DSP real-time contract.
 
 ## Toggle
 
-`ToggleStylePatch` covers surface/border/text, switch track/thumb, control geometry and typography. Checked state is orthogonal to interaction state, so checked+hovered/pressed/disabled/read-only/focused combinations resolve deterministically.
+`ToggleStylePatch` owns optional surface/border/text colors, switch track/thumb colors, logical-pixel control and switch geometry, typography, a font-family string and ordered fallback-family strings. Font data is copied into both recipes and resolved values; it is never borrowed from the Theme after default-style construction returns.
+
+Toggle resolution deliberately places checked state before interaction:
+
+```text
+base -> checked -> interaction -> read_only -> focused
+```
+
+Consequently a checked+disabled Toggle first receives the checked patch, then the disabled patch may override overlapping fields. Read-only and focus apply after interaction, with focus last. Inherited values precede local values inside each layer.
+
+`default_toggle_style(theme)` and `resolve_toggle_style()` may allocate while copying strings/vectors; allocation failure propagates rather than silently substituting typography. They invoke no callbacks and do not traverse or mutate the retained tree. Live style mutation is UI/main-thread work and these helpers are not audio/DSP real-time APIs.
 
 ## Scrollbar
 
-`ScrollbarStylePatch` controls track/thumb color, thickness, minimum thumb length and corner radius. The ScrollView scrollbar is pointer-targetable but not keyboard-focusable, so its recipe uses interaction plus read-only variants without a focused patch.
+`ScrollbarStylePatch` controls track/thumb color, logical-pixel thickness, minimum thumb length and corner radius. The ScrollView scrollbar is pointer-targetable but not keyboard-focusable, so the family intentionally has no focused patch.
+
+Resolution order is:
+
+```text
+base -> interaction -> read_only
+```
+
+Interaction again selects one `disabled > pressed > hovered > normal` branch; local values win inherited values in each layer. `ResolvedScrollbarStyle` owns its complete snapshot. Its equality operator compares colors through the style color comparator and compares float geometry exactly, with no epsilon or normalization.
+
+`default_scrollbar_style(theme)` borrows the Theme only while constructing the result. Current defaults use an 8 logical-pixel thickness and an 18 logical-pixel minimum thumb. The resolver performs no Theme lookup, validation, fallback, callbacks or retained-state mutation. Applying the result to a live ScrollView belongs to the UI/main-thread domain.
 
 ## ListView / Tabs
 

@@ -6,34 +6,65 @@
 
 namespace ui {
 
-/// Typed ScrollView scrollbar presentation/geometry overrides. The scrollbar
-/// is pointer-targetable but deliberately not keyboard-focusable, so T038 uses
-/// the common interaction branch plus the orthogonal read-only state here.
+/// Partial ScrollView scrollbar presentation/geometry override.
+///
+/// Empty optionals inherit the value already selected by preceding style layers.
+/// Geometry uses logical UI pixels and is stored verbatim; this layer performs no
+/// clamping or finite-value validation. The value owns no UI/tree/native resource
+/// and invokes no callbacks.
 struct ScrollbarStylePatch {
+    /// Scrollbar track color.
     std::optional<Color> track;
+    /// Scrollbar thumb color.
     std::optional<Color> thumb;
+    /// Cross-axis scrollbar thickness in logical UI pixels.
     std::optional<float> thickness;
+    /// Minimum thumb length in logical UI pixels.
     std::optional<float> minimum_thumb;
+    /// Track/thumb corner radius in logical UI pixels.
     std::optional<float> corner_radius;
 };
 
-/// Complete ScrollView scrollbar recipe with interaction/read-only variants.
+/// Complete ScrollView scrollbar recipe.
+///
+/// The scrollbar is pointer-targetable but intentionally not keyboard-focusable,
+/// so there is no focused patch. Resolution order is base -> interaction ->
+/// read_only, with disabled > pressed > hovered > normal choosing the single
+/// interaction branch and component-local values winning inherited values.
 struct ScrollbarStyle {
+    /// Normal-state baseline.
     ScrollbarStylePatch base;
+    /// Overrides while hovered.
     ScrollbarStylePatch hovered;
+    /// Overrides while actively pressed/dragged.
     ScrollbarStylePatch pressed;
+    /// Overrides while disabled.
     ScrollbarStylePatch disabled;
+    /// Orthogonal read-only overrides applied after interaction.
     ScrollbarStylePatch read_only;
 };
 
-/// Concrete scrollbar colors and geometry after style resolution.
+/// Owned concrete scrollbar presentation and geometry after resolution.
+///
+/// No field borrows from input recipes or Theme. Numeric geometry remains exactly
+/// the selected value; validation belongs to the consuming widget/layout path.
 struct ResolvedScrollbarStyle {
+    /// Resolved track color.
     Color track{};
+    /// Resolved thumb color.
     Color thumb{};
+    /// Resolved scrollbar thickness in logical UI pixels.
     float thickness{};
+    /// Resolved minimum thumb length in logical UI pixels.
     float minimum_thumb{};
+    /// Resolved track/thumb corner radius in logical UI pixels.
     float corner_radius{};
 
+    /// Compares two resolved snapshots field-for-field.
+    ///
+    /// Colors use the style color comparator; floating-point geometry uses exact
+    /// equality with no epsilon or normalization. The operation is constexpr,
+    /// noexcept, allocation-free, and invokes no callbacks.
     [[nodiscard]] constexpr bool operator==(const ResolvedScrollbarStyle& other) const noexcept {
         return detail::theme_color_equal(track, other.track) &&
                detail::theme_color_equal(thumb, other.thumb) &&
@@ -74,11 +105,15 @@ inline void apply_scrollbar_interaction_patch(ResolvedScrollbarStyle& target,
 
 } // namespace detail
 
-/// T037-backed default ScrollView scrollbar recipe. The base preserves the
-/// existing T034 8 px track, 18 px minimum thumb and 4 px radius contract.
-/// Interaction variants are paint-only so normal/hover/pressed/disabled keep
-/// identical geometry unless an application explicitly opts into a geometry
-/// override in that state.
+/// Builds the default ScrollView scrollbar recipe from a borrowed Theme.
+///
+/// The Theme is read only for the call and is not retained. Defaults are an
+/// 8-logical-pixel track, 18-logical-pixel minimum thumb, and Theme small radius.
+/// Default interaction variants alter color only; geometry remains stable unless
+/// callers explicitly override geometry in those patches.
+///
+/// No callbacks or retained-tree mutation occur. This helper is intended for
+/// UI/style setup rather than audio/DSP real-time callbacks.
 [[nodiscard]] inline ScrollbarStyle default_scrollbar_style(const Theme& theme) {
     ScrollbarStyle style;
     style.base.track = theme.palette.control_background;
@@ -93,9 +128,16 @@ inline void apply_scrollbar_interaction_patch(ResolvedScrollbarStyle& target,
     return style;
 }
 
-/// Resolve a scrollbar recipe from Theme/T039 inheritance, one local explicit
-/// recipe and the common T038 state precedence. Read-only is orthogonal to the
-/// competing disabled > pressed > hovered > normal interaction branch.
+/// Resolves inherited and local scrollbar recipes for one visual state.
+///
+/// Inputs are borrowed synchronously; the result is fully owned. Resolution is
+/// base -> interaction -> read_only. Local fields win inherited fields at each
+/// layer. There is no focus layer because the scrollbar itself is not
+/// keyboard-focusable.
+///
+/// The resolver performs no implicit Theme lookup, callbacks, retained mutation,
+/// validation, or fallback. Fields omitted by both recipes remain
+/// default-constructed in the returned snapshot.
 [[nodiscard]] inline ResolvedScrollbarStyle resolve_scrollbar_style(
     const ScrollbarStyle& inherited,
     const ScrollbarStyle& explicit_style,

@@ -8,63 +8,119 @@
 
 namespace ui {
 
-/// Typed Toggle presentation/measurement overrides. Empty fields inherit from
-/// the already resolved Theme/T039/component layer. Checked state, read-only
-/// and focus are orthogonal to the shared T038 interaction branch.
+/// Partial Toggle presentation, geometry, and typography override.
+///
+/// A disengaged optional inherits the value produced by the preceding layer; an
+/// engaged optional replaces it. Numeric geometry is expressed in logical UI
+/// pixels and is stored verbatim, including negative/non-finite values. Font
+/// family strings and fallback lists are owned by the patch.
+///
+/// The value contains no UI/tree/native ownership and invokes no callbacks.
 struct ToggleStylePatch {
+    /// Control surface color.
     std::optional<Color> fill;
+    /// Outer/control border color.
     std::optional<Color> border;
+    /// Label text color.
     std::optional<Color> text;
+    /// Switch track color.
     std::optional<Color> track;
+    /// Switch thumb color.
     std::optional<Color> thumb;
+    /// Border width in logical UI pixels.
     std::optional<float> border_width;
+    /// Control corner radius in logical UI pixels.
     std::optional<float> corner_radius;
+    /// Preferred control width in logical UI pixels.
     std::optional<float> control_width;
+    /// Preferred control height in logical UI pixels.
     std::optional<float> control_height;
+    /// Leading content inset in logical UI pixels.
     std::optional<float> leading_padding;
+    /// Trailing content inset in logical UI pixels.
     std::optional<float> trailing_padding;
+    /// Switch track width in logical UI pixels.
     std::optional<float> track_width;
+    /// Switch track height in logical UI pixels.
     std::optional<float> track_height;
+    /// Switch thumb diameter in logical UI pixels.
     std::optional<float> thumb_diameter;
+    /// Label text size in logical UI pixels.
     std::optional<float> text_size;
+    /// Label font weight.
     std::optional<FontWeight> text_weight;
+    /// Label font slant.
     std::optional<FontSlant> text_slant;
+    /// Owned preferred font-family name.
     std::optional<std::string> font_family;
+    /// Owned ordered fallback font-family names.
     std::optional<std::vector<std::string>> fallback_families;
 };
 
-/// Complete Toggle recipe. Checked/read-only/focused state layers over the
-/// shared normal/hovered/pressed/disabled interaction branch.
+/// Complete Toggle style recipe.
+///
+/// Resolution order is base -> checked -> interaction -> read_only -> focused.
+/// Interaction selects one branch with disabled > pressed > hovered > normal
+/// precedence. Within each layer inherited values are applied before local values.
 struct ToggleStyle {
+    /// Normal-state baseline.
     ToggleStylePatch base;
+    /// Overrides when the toggle is checked.
     ToggleStylePatch checked;
+    /// Overrides while hovered.
     ToggleStylePatch hovered;
+    /// Overrides while actively pressed.
     ToggleStylePatch pressed;
+    /// Overrides while disabled.
     ToggleStylePatch disabled;
+    /// Orthogonal read-only overrides.
     ToggleStylePatch read_only;
+    /// Orthogonal focus overrides applied last.
     ToggleStylePatch focused;
 };
 
-/// Concrete Toggle presentation and measurement values after style resolution.
+/// Fully resolved, owned Toggle presentation and measurement snapshot.
+///
+/// Strings and fallback vectors are copied into the result; it retains no borrow
+/// of the input recipes or Theme. Geometry remains unvalidated at this layer.
 struct ResolvedToggleStyle {
+    /// Resolved control surface color.
     Color fill{};
+    /// Resolved border color.
     Color border{};
+    /// Resolved label text color.
     Color text{};
+    /// Resolved switch track color.
     Color track{};
+    /// Resolved switch thumb color.
     Color thumb{};
+    /// Resolved border width in logical UI pixels.
     float border_width{};
+    /// Resolved corner radius in logical UI pixels.
     float corner_radius{};
+    /// Resolved preferred control width in logical UI pixels.
     float control_width{};
+    /// Resolved preferred control height in logical UI pixels.
     float control_height{};
+    /// Resolved leading inset in logical UI pixels.
     float leading_padding{};
+    /// Resolved trailing inset in logical UI pixels.
     float trailing_padding{};
+    /// Resolved switch track width in logical UI pixels.
     float track_width{};
+    /// Resolved switch track height in logical UI pixels.
     float track_height{};
+    /// Resolved switch thumb diameter in logical UI pixels.
     float thumb_diameter{};
+    /// Resolved label text size in logical UI pixels.
     float text_size{};
+    /// Resolved label font weight.
     FontWeight text_weight{FontWeight::Regular};
+    /// Resolved label font slant.
     FontSlant text_slant{FontSlant::Upright};
+    /// Owned resolved font-family name.
     std::string font_family;
+    /// Owned ordered resolved fallback families.
     std::vector<std::string> fallback_families;
 };
 
@@ -113,9 +169,12 @@ inline void apply_toggle_interaction_patch(ResolvedToggleStyle& target,
 
 } // namespace detail
 
-/// T037-backed default Toggle recipe. Geometry and normal/checked presentation
-/// reproduce the existing v1 Toggle contract exactly; the extra T038 states
-/// remain paint-only and do not perturb the legacy track/thumb golden.
+/// Builds the default Toggle recipe from a synchronously borrowed Theme.
+///
+/// The returned recipe owns all string/vector data and does not retain the Theme.
+/// Default geometry is expressed in logical UI pixels. Copying typography data can
+/// allocate; allocation failure propagates normally. No callbacks or retained-tree
+/// mutation occur, and this helper is not an audio/DSP real-time-safe contract.
 [[nodiscard]] inline ToggleStyle default_toggle_style(const Theme& theme) {
     ToggleStyle style;
     style.base.fill = theme.palette.surface;
@@ -152,9 +211,17 @@ inline void apply_toggle_interaction_patch(ResolvedToggleStyle& target,
     return style;
 }
 
-/// Resolve Toggle style from an already composed inherited recipe, a local
-/// explicit recipe and the shared T038 VisualState. Checked state is applied
-/// before the competing interaction branch so Disabled still wins visually.
+/// Resolves inherited and component-local Toggle recipes for one visual state.
+///
+/// Inputs are borrowed only during the call. Resolution order is
+/// base -> checked -> interaction -> read_only -> focused; local values win
+/// inherited values at each layer. Thus a disabled interaction may override an
+/// earlier checked value, while read-only/focused patches can override both.
+///
+/// The result owns its strings and vectors. Those copies may allocate and failure
+/// propagates; there is no fallback recipe. The resolver performs no implicit
+/// Theme lookup, callback dispatch, or retained mutation. It is not an
+/// audio/DSP real-time-safe API.
 [[nodiscard]] inline ResolvedToggleStyle resolve_toggle_style(
     const ToggleStyle& inherited,
     const ToggleStyle& explicit_style,
