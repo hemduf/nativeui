@@ -8,13 +8,32 @@
 
 namespace ui {
 
-enum class EditSource { Pointer, Keyboard, Wheel, Accessibility };
+/// Origin metadata for one UI edit lifetime.
+enum class EditSource {
+    /// Pointer press/drag interaction.
+    Pointer,
+    /// Keyboard command or repeat.
+    Keyboard,
+    /// Wheel/scroll interaction.
+    Wheel,
+    /// Semantic action initiated by an accessibility adapter.
+    Accessibility
+};
 
+/// Synchronous callbacks owned by an `EditSession<T>`.
+///
+/// Callbacks execute on the UI thread. Captured references keep normal C++
+/// lifetime obligations; NativeUI does not extend referenced-object lifetime.
 template <detail::StateValue T>
 struct EditCallbacks {
+    /// Called once after an edit successfully begins.
     std::function<void(EditSource)> begin;
+    /// Called after State observers for a changed committed value.
+    /// The value reference is borrowed only for this callback.
     std::function<void(const T&, EditSource)> change;
+    /// Called once for normal completion.
     std::function<void(EditSource)> end;
+    /// Called once for interruption; cancellation does not roll back State.
     std::function<void(EditSource)> cancel;
 };
 
