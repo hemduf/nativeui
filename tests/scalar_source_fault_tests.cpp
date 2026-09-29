@@ -189,10 +189,65 @@ void move_and_noise_copy_failure_contracts() {
               ui::ScalarChannel::Red);
 }
 
+
+void factory_allocation_failure_recovers() {
+    ui::LinearGradient gradient{
+        {0.0f, 0.0f},
+        {32.0f, 0.0f},
+        {
+            ui::GradientStop{0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            ui::GradientStop{0.33f, {0.3f, 0.4f, 0.5f, 1.0f}},
+            ui::GradientStop{0.66f, {0.5f, 0.6f, 0.7f, 1.0f}},
+            ui::GradientStop{1.0f, {0.7f, 0.8f, 0.9f, 1.0f}},
+        },
+    };
+    const ui::Brush brush{std::move(gradient)};
+
+    bool brush_threw = false;
+    {
+        allocation_probe::ScopedFailure fail;
+        try {
+            static_cast<void>(ui::ScalarSource::from_brush(
+                brush, ui::ScalarChannel::Green));
+        } catch (const std::bad_alloc&) {
+            brush_threw = true;
+        }
+    }
+    NUI_CHECK(brush_threw);
+
+    const auto brush_recovered = ui::ScalarSource::from_brush(
+        brush, ui::ScalarChannel::Green);
+    NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(brush_recovered));
+    NUI_CHECK(ui::detail::ScalarSourceAccess::channel(brush_recovered) ==
+              ui::ScalarChannel::Green);
+
+    const auto created = ui::NoiseSource::create(
+        ui::NoiseType::Value,
+        {.feature_size = 18.0f, .seed = 0x10203040u});
+    NUI_CHECK(created.ok());
+
+    bool noise_threw = false;
+    {
+        allocation_probe::ScopedFailure fail;
+        try {
+            static_cast<void>(ui::ScalarSource::from_noise(created.noise));
+        } catch (const std::bad_alloc&) {
+            noise_threw = true;
+        }
+    }
+    NUI_CHECK(noise_threw);
+
+    const auto noise_recovered = ui::ScalarSource::from_noise(created.noise);
+    NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(noise_recovered));
+    NUI_CHECK(ui::detail::ScalarSourceAccess::channel(noise_recovered) ==
+              ui::ScalarChannel::Red);
+}
+
 void suite() {
     constant_construction_allocates_nothing();
     copy_assignment_has_strong_guarantee();
     move_and_noise_copy_failure_contracts();
+    factory_allocation_failure_recovers();
 }
 
 } // namespace
