@@ -44,7 +44,14 @@ void check(bool condition, const char* message) {
 }
 
 void source_creation_contract() {
-    const auto initial = ui::detail::shader_compile_call_count_for_test();
+    const auto initial_compile =
+        ui::detail::shader_compile_call_count_for_test();
+    const auto initial_materialization =
+        ui::detail::shader_materialization_call_count_for_test();
+    const auto initial_decode =
+        ui::detail::image_decode_call_count_for_test();
+    const auto initial_image_materialization =
+        ui::detail::image_texture_materialization_call_count_for_test();
 
     ui::ScalarSource zero;
     ui::ScalarSource direct{8.0f};
@@ -52,8 +59,16 @@ void source_creation_contract() {
     (void)zero;
     (void)direct;
     (void)constant;
-    check(ui::detail::shader_compile_call_count_for_test() == initial,
+    check(ui::detail::shader_compile_call_count_for_test() == initial_compile,
           "constant ScalarSource construction compiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              initial_materialization,
+          "constant ScalarSource construction materialized shader state");
+    check(ui::detail::image_decode_call_count_for_test() == initial_decode,
+          "constant ScalarSource construction decoded image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              initial_image_materialization,
+          "constant ScalarSource construction materialized ImageTexture state");
 
     const auto compiled = ui::ShaderProgram::compile(R"(
         half4 main(float2) { return half4(0.25, 0.5, 0.75, 1.0); }
@@ -61,7 +76,7 @@ void source_creation_contract() {
     check(compiled.ok(), "shader setup failed");
     const auto after_shader_compile =
         ui::detail::shader_compile_call_count_for_test();
-    check(after_shader_compile == initial + 1U,
+    check(after_shader_compile == initial_compile + 1U,
           "shader setup did not compile exactly once");
 
     ui::ShaderInstance shader{compiled.program};
