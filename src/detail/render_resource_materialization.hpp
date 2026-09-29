@@ -225,6 +225,11 @@ private:
         LinearGradientCacheKey,
         RadialGradientCacheKey>;
 
+    static_assert(std::is_nothrow_destructible_v<CachedResource>,
+                  "cached backend resources must tear down without throwing");
+    static_assert(std::is_nothrow_destructible_v<RenderResourceKey>,
+                  "render-resource cache keys must tear down without throwing");
+
     struct RenderResourceKeyHash final {
         using is_transparent = void;
 

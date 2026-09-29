@@ -231,6 +231,8 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_render_resource_allocation_tests
     ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_tests.cpp)
+  target_sources(nativeui_render_resource_allocation_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_probe.cpp)
   target_include_directories(nativeui_render_resource_allocation_tests PRIVATE
     ${PROJECT_SOURCE_DIR})
 

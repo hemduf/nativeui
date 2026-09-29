@@ -1,44 +1,30 @@
 #include "src/detail/effect_cache_key.hpp"
 #include "src/detail/render_resource_materialization.hpp"
 #include "src/detail/shader_brush_access.hpp"
+#include "render_resource_allocation_probe.hpp"
 #include "test_support.hpp"
 
 #include "include/core/SkColor.h"
 #include "include/core/SkShader.h"
 
 #include <array>
-#include <atomic>
 #include <cstddef>
-#include <cstdlib>
 #include <new>
-#if defined(_WIN32)
-#  include <malloc.h>
-#endif
 
 namespace {
-
-std::atomic<bool> count_allocations{false};
-std::atomic<std::size_t> allocation_count{0};
-
-void record_allocation() noexcept {
-    if (count_allocations.load(std::memory_order_relaxed)) {
-        allocation_count.fetch_add(1, std::memory_order_relaxed);
-    }
-}
 
 class AllocationScope final {
 public:
     AllocationScope() noexcept {
-        allocation_count.store(0, std::memory_order_relaxed);
-        count_allocations.store(true, std::memory_order_relaxed);
+        test::render_resource_allocations::begin();
     }
 
     ~AllocationScope() noexcept {
-        count_allocations.store(false, std::memory_order_relaxed);
+        test::render_resource_allocations::end();
     }
 
     [[nodiscard]] std::size_t allocations() const noexcept {
-        return allocation_count.load(std::memory_order_relaxed);
+        return test::render_resource_allocations::count();
     }
 };
 
@@ -101,6 +87,45 @@ void linear_gradient_warm_hit_allocates_zero() {
     {
         AllocationScope guard;
         warm = context.acquire_linear_gradient(gradient, factory);
+        allocations = guard.allocations();
+    }
+
+    NUI_CHECK(warm && warm.hit && warm.retained);
+    NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
+    context.end_frame();
+}
+
+void radial_gradient_warm_hit_allocates_zero() {
+    const ui::RadialGradient gradient{
+        {16.0f, 16.0f},
+        12.0f,
+        {
+            {0.0f, {1.0f, 1.0f, 1.0f, 1.0f}},
+            {0.5f, {0.5f, 0.25f, 0.75f, 0.8f}},
+            {1.0f, {0.0f, 0.0f, 0.0f, 0.0f}},
+        }};
+
+    ui::detail::RenderResourceMaterializationContext context;
+    std::size_t creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return ui::detail::GradientCacheAccess::materialize(gradient);
+    };
+
+    context.begin_frame();
+    auto cold = context.acquire_radial_gradient(gradient, factory);
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    NUI_CHECK(creates == 1);
+    cold = {};
+    context.end_frame();
+
+    context.begin_frame();
+    ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_radial_gradient(gradient, factory);
         allocations = guard.allocations();
     }
 
@@ -279,137 +304,6 @@ void deep_shader_child_warm_hit_allocates_zero() {
 
 } // namespace
 
-void* operator new(std::size_t size) {
-    if (void* memory = std::malloc(size == 0 ? 1 : size)) {
-        record_allocation();
-        return memory;
-    }
-    throw std::bad_alloc{};
-}
-
-void* operator new[](std::size_t size) {
-    return ::operator new(size);
-}
-
-void operator delete(void* memory) noexcept {
-    std::free(memory);
-}
-
-void operator delete[](void* memory) noexcept {
-    std::free(memory);
-}
-
-void operator delete(void* memory, std::size_t) noexcept {
-    std::free(memory);
-}
-
-void operator delete[](void* memory, std::size_t) noexcept {
-    std::free(memory);
-}
-
-void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
-    try {
-        return ::operator new(size);
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
-    try {
-        return ::operator new[](size);
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-void operator delete(void* memory, const std::nothrow_t&) noexcept {
-    ::operator delete(memory);
-}
-
-void operator delete[](void* memory, const std::nothrow_t&) noexcept {
-    ::operator delete[](memory);
-}
-
-void* operator new(std::size_t size, std::align_val_t alignment) {
-    const auto align = static_cast<std::size_t>(alignment);
-#if defined(_WIN32)
-    if (void* memory = _aligned_malloc(size == 0 ? 1 : size, align)) {
-        record_allocation();
-        return memory;
-    }
-#else
-    const auto requested = size == 0 ? 1 : size;
-    const auto rounded = ((requested + align - 1) / align) * align;
-    if (void* memory = std::aligned_alloc(align, rounded)) {
-        record_allocation();
-        return memory;
-    }
-#endif
-    throw std::bad_alloc{};
-}
-
-void* operator new[](std::size_t size, std::align_val_t alignment) {
-    return ::operator new(size, alignment);
-}
-
-void* operator new(
-    std::size_t size,
-    std::align_val_t alignment,
-    const std::nothrow_t&) noexcept {
-    try {
-        return ::operator new(size, alignment);
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-void* operator new[](
-    std::size_t size,
-    std::align_val_t alignment,
-    const std::nothrow_t&) noexcept {
-    try {
-        return ::operator new[](size, alignment);
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-void operator delete(void* memory, std::align_val_t) noexcept {
-#if defined(_WIN32)
-    _aligned_free(memory);
-#else
-    std::free(memory);
-#endif
-}
-
-void operator delete[](void* memory, std::align_val_t alignment) noexcept {
-    ::operator delete(memory, alignment);
-}
-
-void operator delete(
-    void* memory, std::size_t, std::align_val_t alignment) noexcept {
-    ::operator delete(memory, alignment);
-}
-
-void operator delete[](
-    void* memory, std::size_t, std::align_val_t alignment) noexcept {
-    ::operator delete[](memory, alignment);
-}
-
-void operator delete(
-    void* memory,
-    std::align_val_t alignment,
-    const std::nothrow_t&) noexcept {
-    ::operator delete(memory, alignment);
-}
-
-void operator delete[](
-    void* memory,
-    std::align_val_t alignment,
-    const std::nothrow_t&) noexcept {
-    ::operator delete[](memory, alignment);
-}
 
 void allocation_guard_covers_aligned_nothrow_new() {
     void* memory = nullptr;
@@ -430,6 +324,7 @@ void allocation_guard_covers_aligned_nothrow_new() {
 int main() {
     allocation_guard_covers_aligned_nothrow_new();
     linear_gradient_warm_hit_allocates_zero();
+    radial_gradient_warm_hit_allocates_zero();
     image_texture_warm_hit_allocates_zero();
     runtime_shader_warm_hit_allocates_zero();
     effect_warm_hit_allocates_zero();

@@ -73,6 +73,36 @@ void gradient_warm_hit_skips_materialization() {
     context.end_frame();
 }
 
+void radial_gradient_warm_hit_skips_materialization() {
+    const ui::RadialGradient gradient{
+        {16.0f, 16.0f},
+        12.0f,
+        {
+            {0.0f, {1.0f, 1.0f, 1.0f, 1.0f}},
+            {0.5f, {0.5f, 0.25f, 0.75f, 0.8f}},
+            {1.0f, {0.0f, 0.0f, 0.0f, 0.0f}},
+        }};
+
+    ui::detail::RenderResourceMaterializationContext context;
+    std::size_t creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return ui::detail::GradientCacheAccess::materialize(gradient);
+    };
+
+    context.begin_frame();
+    auto cold = context.acquire_radial_gradient(gradient, factory);
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    cold = {};
+    context.end_frame();
+
+    context.begin_frame();
+    auto warm = context.acquire_radial_gradient(gradient, factory);
+    NUI_CHECK(warm && warm.retained && warm.hit);
+    NUI_CHECK(creates == 1U);
+    context.end_frame();
+}
+
 void image_texture_warm_hit_skips_decode_and_materialization() {
     const auto decode_before =
         ui::detail::image_decode_call_count_for_test();
@@ -187,6 +217,7 @@ void effect_warm_hit_skips_materialization() {
 
 int main() {
     gradient_warm_hit_skips_materialization();
+    radial_gradient_warm_hit_skips_materialization();
     image_texture_warm_hit_skips_decode_and_materialization();
     runtime_shader_warm_hit_skips_compile_and_materialization();
     effect_warm_hit_skips_materialization();
