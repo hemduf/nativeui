@@ -480,6 +480,13 @@ int main(int argc, char** argv) {
     if (idle.scene_builds != settled.scene_builds ||
         idle.presentations != settled.presentations ||
         idle.failed_exposes != settled.failed_exposes) {
+        std::cerr << "T095 idle diagnostics: settled builds="
+                  << settled.scene_builds << " presentations="
+                  << settled.presentations << " failures="
+                  << settled.failed_exposes << "; idle builds="
+                  << idle.scene_builds << " presentations="
+                  << idle.presentations << " failures="
+                  << idle.failed_exposes << '\\n';
         return fail("settled scene spun or retried at idle");
     }
 
