@@ -153,8 +153,8 @@ void placement_size_and_relative_motion() {
     bool covers_old = false;
     bool covers_new = false;
     for (const auto damage : f.tree.dirty_regions()) {
-        covers_old = covers_old || damage.contains({10, 10});
-        covers_new = covers_new || damage.contains({30, 10});
+        covers_old = covers_old || damage.contains(ui::Point{10, 10});
+        covers_new = covers_new || damage.contains(ui::Point{30, 10});
     }
     NUI_CHECK(covers_old && covers_new);
 
