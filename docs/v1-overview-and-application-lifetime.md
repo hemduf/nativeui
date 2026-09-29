@@ -160,6 +160,37 @@ Key lifetime rules are:
 
 The combined standalone-parent/embedded-child lifecycle is exercised by [`t041_smoke_harness`](../examples/features/t041_smoke_harness.cpp). Plug-in SDK ownership and host-specific parameter/audio semantics remain outside NativeUI.
 
+
+### Embedded child visibility
+
+`EmbeddedViewOptions{.initially_visible = false}` supports hosts that separate native child realization from presentation. The option controls the NativeUI child only; it never raises, shows, hides, resizes, or takes ownership of the embedding host window.
+
+A hidden embedded child remains realized. Its retained `UI`, Dispatcher and platform resources stay alive, and the host may continue calling the always-non-blocking `poll()`, updating State, and granting sizes. `show()` and `hide()` are idempotent UI-thread operations. They return false once the native child is terminally closed or otherwise unable to perform the request.
+
+`visible()` reports NativeUI's requested **local child visibility**. It is deliberately not an occlusion/presentation query: a true value does not prove that the host window is unminimized, that all ancestors are shown, that the child is unclipped, or that pixels are currently visible on screen.
+
+Showing is passive: it does not raise the host window or steal host ownership. A successful show invalidates retained presentation so the next frame is fresh. Hiding preserves the realized child but deactivates retained focus/input, cancels active pointer edits, and stops IME before returning. If application cancellation callbacks throw, NativeUI restores those cleanup invariants first and then propagates the exception to the direct UI-thread caller.
+
+`request_close()` remains distinct from `hide()`: close is terminal for the native child lifetime, while hide is reversible. The view continues to borrow the `UI` and host parent in both visible and hidden states, so both must outlive the `EmbeddedView`.
+
+```cpp
+ui::EmbeddedView child{
+    tree,
+    host_parent,
+    {640.0f, 420.0f},
+    {},
+    ui::EmbeddedViewOptions{.initially_visible = false}};
+
+child.poll();   // host-owned and non-blocking while hidden
+child.show();   // passive local child presentation
+child.hide();   // keeps the realized child and retained UI alive
+
+const bool locally_shown = child.visible();
+(void)locally_shown;
+```
+
+These operations may enter platform services, invalidate retained rendering, and dispatch lifecycle/application callbacks. They are UI/main-thread operations and are not audio/DSP real-time safe.
+
 ## Lifetime checklist
 
 For NativeUI 1.0 application/embedding code, keep these invariants visible in the owning code:
