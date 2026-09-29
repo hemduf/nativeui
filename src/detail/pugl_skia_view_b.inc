@@ -408,7 +408,7 @@
     PreferredSizeCallback preferred_size_callback_;
     bool preferred_measure_dirty_{};
     bool should_close_{};
-    bool visible_{};
+    detail::WindowVisibilityState visibility_;
     bool embedded_{};
     bool suppress_embedded_focus_cleanup_{};
     bool deferred_scene_redraw_{};

@@ -163,7 +163,7 @@ public:
             if (const auto status = puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
                 throw_pugl(status, "puglShow failed");
             }
-            visible_ = true;
+            visibility_.set_visible(true);
         }
         if (fault_result) ++fault_result->show_completed;
         maybe_inject(NativeViewConstructionFaultStage::AfterShow);
@@ -309,31 +309,59 @@ public:
 
     bool show() {
         if (!native_view_open()) return false;
-        if (visible_) return true;
-        visible_ = true;
-        if (puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE) != PUGL_SUCCESS) {
-            visible_ = false;
+        if (visibility_.visible()) return true;
+
+        const auto generation = visibility_.begin_show();
+        const auto status =
+            puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
+        if (status != PUGL_SUCCESS) {
+            visibility_.rollback_show(generation);
             return false;
         }
+
+        // A synchronous native callback may have performed a newer visibility
+        // transition or closed the view. The newest transition owns follow-up.
+        if (!visibility_.current(generation) ||
+            !visibility_.visible() ||
+            !native_view_open()) {
+            return true;
+        }
+
         renderer_.invalidate();
         const auto logical = geometry_.logical_size();
         request_redraw({0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
 
-    [[nodiscard]] bool visible() const noexcept { return native_view_open() && visible_; }
+    [[nodiscard]] bool visible() const noexcept {
+        return native_view_open() && visibility_.visible();
+    }
 
     bool hide() {
         if (!native_view_open()) return false;
-        if (!visible_) return true;
-        visible_ = false;
+        if (!visibility_.visible()) return true;
 
-        suppress_embedded_focus_cleanup_ = embedded_;
-        const auto hide_status = puglHide(view_);
-        suppress_embedded_focus_cleanup_ = false;
+        const auto generation = visibility_.begin_hide();
+        PuglStatus hide_status = PUGL_SUCCESS;
+        {
+            detail::ScopedBooleanState suppress_focus_cleanup{
+                suppress_embedded_focus_cleanup_,
+                suppress_embedded_focus_cleanup_ || embedded_};
+            hide_status = puglHide(view_);
+        }
+
         if (hide_status != PUGL_SUCCESS) {
-            visible_ = true;
+            visibility_.rollback_hide(generation);
             return false;
+        }
+
+        // If a Pugl callback re-entered show/hide (or closed the native view),
+        // that newer transition owns cleanup. Never deactivate a view that a
+        // nested show just made visible again.
+        if (!visibility_.current(generation) ||
+            visibility_.visible() ||
+            !view_) {
+            return true;
         }
 
         std::exception_ptr failure;
@@ -374,7 +402,7 @@ public:
     bool close_native_view() noexcept {
         if (!view_) {
             should_close_ = true;
-            visible_ = false;
+            visibility_.set_visible(false);
             return false;
         }
 
@@ -416,7 +444,7 @@ public:
         renderer_.abandon();
         puglFreeView(view_);
         view_ = nullptr;
-        visible_ = false;
+        visibility_.set_visible(false);
         should_close_ = true;
         return true;
     }
@@ -711,7 +739,7 @@ private:
             cleanup.view_acquired = false;
             if (cleanup.fault_result) ++cleanup.fault_result->view_released;
         }
-        visible_ = false;
+        visibility_.set_visible(false);
         if (world_ && owns_world_) {
             puglFreeWorld(world_);
             world_ = nullptr;

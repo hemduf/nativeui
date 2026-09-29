@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -71,6 +72,69 @@ private:
 /// for window lifecycle control. Rejection or exception-before-enqueue clears
 /// the posted bit and leaves the close phase itself as the durable source of
 /// truth for the next owner/platform checkpoint.
+class ScopedBooleanState final {
+public:
+    ScopedBooleanState(bool& slot, bool value) noexcept
+        : slot_(slot), previous_(slot) {
+        slot_ = value;
+    }
+
+    ~ScopedBooleanState() noexcept { slot_ = previous_; }
+
+    ScopedBooleanState(const ScopedBooleanState&) = delete;
+    ScopedBooleanState& operator=(const ScopedBooleanState&) = delete;
+    ScopedBooleanState(ScopedBooleanState&&) = delete;
+    ScopedBooleanState& operator=(ScopedBooleanState&&) = delete;
+
+private:
+    bool& slot_;
+    bool previous_{};
+};
+
+/// Transactional visibility bookkeeping for synchronous native show/hide calls.
+///
+/// Native callbacks may re-enter show/hide before the outer platform call
+/// returns. Each transition gets a monotonically increasing generation so the
+/// outer caller can detect that a nested transition superseded it and must not
+/// publish rollback, cleanup, or redraw work over the newer state.
+class WindowVisibilityState final {
+public:
+    using Generation = std::uint64_t;
+
+    [[nodiscard]] bool visible() const noexcept { return visible_; }
+
+    [[nodiscard]] Generation begin_show() noexcept {
+        visible_ = true;
+        return ++generation_;
+    }
+
+    [[nodiscard]] Generation begin_hide() noexcept {
+        visible_ = false;
+        return ++generation_;
+    }
+
+    [[nodiscard]] bool current(Generation generation) const noexcept {
+        return generation_ == generation;
+    }
+
+    void rollback_show(Generation generation) noexcept {
+        if (current(generation)) visible_ = false;
+    }
+
+    void rollback_hide(Generation generation) noexcept {
+        if (current(generation)) visible_ = true;
+    }
+
+    void set_visible(bool visible) noexcept {
+        visible_ = visible;
+        ++generation_;
+    }
+
+private:
+    Generation generation_{};
+    bool visible_{};
+};
+
 class WindowControlPostState final {
 public:
     template <class Post>
