@@ -1,0 +1,53 @@
+name: Windows Edit Session Validation
+
+on:
+  push:
+    branches:
+      - fix/root-header-registration-contracts
+
+permissions:
+  contents: read
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '1'
+
+jobs:
+  windows-edit-session:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+      - name: Build edit-session test
+        run: cmake --build build --config Release --target nativeui_edit_session_tests
+      - name: Run executable directly
+        shell: pwsh
+        run: |
+          & .\build\nativeui_edit_session_tests.exe
+          if ($LASTEXITCODE -ne 0) { throw "nativeui_edit_session_tests exit code $LASTEXITCODE" }
+      - name: Run CTest verbosely
+        shell: pwsh
+        run: ctest --test-dir build -C Release -V -R '^nativeui_edit_session_tests$'
