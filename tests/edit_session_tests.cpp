@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -10,6 +11,11 @@
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "check failed: %s at %d\\n", #condition, __LINE__); std::fflush(stderr); std::_Exit(1); } } while (false)
 
 int main() {
+    std::set_terminate([] {
+        std::fprintf(stderr, "terminate-handler\\n");
+        std::fflush(stderr);
+        std::_Exit(86);
+    });
     const auto phase = [](const char* name) {
         std::fprintf(stderr, "phase: %s\\n", name);
         std::fflush(stderr);
@@ -140,5 +146,13 @@ int main() {
     CHECK(edit.begin(ui::EditSource::Pointer));
     CHECK(other.set(0.4f,ui::EditSource::Keyboard));
     CHECK(edit.active()); edit.end(); CHECK(trace=="BE");
+    std::fprintf(stderr,
+                 "active-before-exit edit=%d other=%d reentrant=%d retained=%d observer_failure=%d\\n",
+                 edit.active() ? 1 : 0,
+                 other.active() ? 1 : 0,
+                 reentrant.active() ? 1 : 0,
+                 retained.active() ? 1 : 0,
+                 observer_failure.active() ? 1 : 0);
+    std::fflush(stderr);
     phase("done");
 }
