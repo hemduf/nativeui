@@ -8,7 +8,7 @@ Public declarations used here are in [paint styles](../include/nativeui/paint_st
 
 NativeUI is retained-mode and paints in two logical dimensions. Components render through `ui::Painter`; drawing coordinates, gradients and runtime-shader coordinates are Painter-local and follow the active transform.
 
-The public rendering contract is backend-neutral. `Color`, `Brush`, `Effect`, `PaintOptions`, `ShaderProgram` and `ShaderInstance` are NativeUI API. Backend handles and compiler objects are not public API or ABI.
+The supported rendering contract documented here is backend-neutral. `Color`, `Brush`, `Effect`, `PaintOptions`, `ShaderProgram` and `ShaderInstance` are NativeUI API. Some current low-level Painter declarations still expose backend C++ escape hatches; those are not a portable NativeUI integration contract and are intentionally not taught in this guide. Backend compiler objects remain implementation details.
 
 This layer is not a general 3D scene API. Perspective, depth-buffer behavior and physically based material/lighting contracts are outside this documentation slice.
 
@@ -81,7 +81,7 @@ Scopes restore in strict lexical LIFO order, including exception unwinding. `Sta
 
 ## 4. SkSL runtime shaders
 
-SkSL is a public source format in NativeUI. The Skia C++ API and ABI remain private implementation details.
+SkSL is a public source format in NativeUI. Skia C++ API/ABI is not a supported portable NativeUI integration contract; use NativeUI shader types for normal application code.
 
 Shader compilation is explicit preparation work through `ui::ShaderProgram::compile()`. It may allocate and is not audio-real-time work. Rendering a shader Brush does not implicitly compile its source.
 
