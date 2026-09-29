@@ -6,6 +6,7 @@ struct Model {
     ui::State<bool> enabled{false};
     int scoped{};
     int global{};
+    int navigation{};
 };
 }
 
@@ -16,7 +17,11 @@ int main(int argc, char** argv) {
         auto tree = std::make_unique<ui::UI>(
             ui::Column{
                 ui::Header{"T017 / PORTABLE COMMAND ROUTING"},
-                ui::TextInput{"Text", model.text},
+                ui::TextInput{"Text", model.text}.on_key_down([&](const ui::InputEvent& event) {
+                    if (event.key != ui::Key::Down) return ui::EventResult::Ignored;
+                    ++model.navigation;
+                    return ui::EventResult::Handled;
+                }),
                 ui::CommandScope{[&](ui::Command command) {
                     if (command == ui::Command::Undo) {
                         ++model.scoped;
@@ -28,7 +33,7 @@ int main(int argc, char** argv) {
                 ui::Canvas{520.0f, 70.0f, [&](ui::CanvasContext2D& g) {
                     g.fill_rounded_rect({0.0f, 0.0f, g.width(), g.height()}, 10.0f, ui::colors::panel);
                     g.text({14.0f, 24.0f}, "TextInput owns Copy/Paste. On the toggle, Primary+Z is scoped; Primary+C falls through globally.", 10.0f, ui::colors::textMuted);
-                    g.text({14.0f, 52.0f}, "scoped: " + std::to_string(model.scoped) + "  global: " + std::to_string(model.global), 10.0f, ui::colors::textMuted);
+                    g.text({14.0f, 52.0f}, "scoped: " + std::to_string(model.scoped) + "  global: " + std::to_string(model.global) + "  Down in text: " + std::to_string(model.navigation), 10.0f, ui::colors::textMuted);
                 }}
             }.padding(20.0f).gap(12.0f));
 
@@ -47,6 +52,11 @@ int main(int argc, char** argv) {
         example::Platform platform;
         tree->resize({580.0f, 330.0f});
         tree->activate(platform);
+
+        tree->dispatch(example::key(ui::Key::Down), platform);
+        if (model.navigation != 1 || model.text.get() != "NativeUI commands") {
+            return example::fail("TextInput custom Down command did not preserve its text");
+        }
 
         ui::InputEvent select_all = example::key(ui::Key::A);
         select_all.primary = true;

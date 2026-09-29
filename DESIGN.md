@@ -776,6 +776,8 @@ Embedded-font registration owns/copies the supplied font bytes. Shared registry 
 
 Pugl `PUGL_TEXT` provides committed Unicode text and is the normal insertion path, including dead-key/input-method sequences that produce committed text.
 
+`TextInput::on_key_down` can reserve a navigation key for its containing view. The callback runs before the built-in cursor commands and returns `Handled` to consume the key or `Ignored` to keep normal text editing. Active IME composition retains ownership of its navigation keys, so the callback does not run for those keys until composition ends.
+
 Full IME pre-edit/composition remains a separate future platform-extension feature. This includes marked/pre-edit text and candidate-rectangle behavior that the pinned Pugl API does not fully expose.
 
 If required, advanced IME should be implemented through a very small platform extension layer. It is **not** a reason to replace Pugl or rebuild the complete windowing stack.
@@ -1331,6 +1333,17 @@ The main platform risks remain isolated rather than allowed to distort the toolk
 3. the legacy independent-PROGRAM-world standalone constructor remains only until T069 and must not become a second multi-window ownership model.
 
 None of these currently justifies reimplementing Win32, Cocoa and X11 windowing inside NativeUI.
+
+---
+
+## Value edit lifetimes and embedded visibility
+
+The [value editing contract](docs/value-editing.md) defines generic `EditSession<T>`
+notifications, standard control input boundaries, exception/reentrancy policy,
+and optional hidden `EmbeddedView` construction. State and editing remain
+UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The macOS Pugl visibility compatibility shim stages sources privately and is
+shared by source-tree and installed-package final consumers.
 
 ---
 

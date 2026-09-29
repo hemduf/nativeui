@@ -1,6 +1,7 @@
 class TextInputComponent final : public Component, public detail::ThemeBinding {
 public:
     using SubmitCallback = std::function<void(const std::string&)>;
+    using KeyDownCallback = std::function<EventResult(const InputEvent&)>;
 
     TextInputComponent(
         std::string label,
@@ -8,12 +9,14 @@ public:
         std::string placeholder,
         std::size_t max_length,
         SubmitCallback on_submit,
+        KeyDownCallback on_key_down,
         TextInputStyle style)
         : label_(std::move(label)),
           state_(std::move(state)),
           model_(state_.get(), max_length),
           placeholder_(std::move(placeholder)),
           on_submit_(std::move(on_submit)),
+          on_key_down_(std::move(on_key_down)),
           style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
@@ -261,6 +264,13 @@ public:
         }
 
         if (event.type != InputType::KeyDown) return EventResult::Ignored;
+        // Applications may reserve navigation keys for the surrounding view.
+        // A handled key leaves the edit model untouched; ignored keys keep the
+        // standard text-input behavior. Active IME composition is handled above.
+        if (on_key_down_ && on_key_down_(event) == EventResult::Handled) {
+            pending_ime_commit_.clear();
+            return EventResult::Handled;
+        }
         pending_ime_commit_.clear();
 
         switch (event.key) {
@@ -762,6 +772,7 @@ private:
     TextEditModel model_;
     std::string placeholder_;
     SubmitCallback on_submit_;
+    KeyDownCallback on_key_down_;
     TextInputStyle style_;
 
     bool drag_select_{};

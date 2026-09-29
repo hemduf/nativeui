@@ -408,6 +408,7 @@
     bool preferred_measure_dirty_{};
     bool should_close_{};
     bool visible_{};
+    bool embedded_{};
     bool deferred_scene_redraw_{};
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     std::uint64_t failed_scene_exposes_{};
