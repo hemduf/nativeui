@@ -123,5 +123,7 @@ int main() {
     CHECK(edit.begin(ui::EditSource::Pointer));
     CHECK(other.set(0.4f,ui::EditSource::Keyboard));
     CHECK(edit.active()); edit.end(); CHECK(trace=="BE");
+    // Keep an explicit success status: hosted Windows qualification observed
+    // non-zero process status after every CHECK passed with implicit return.
     return 0;
 }
