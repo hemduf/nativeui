@@ -246,6 +246,48 @@ void brush_sampling_contract() {
     }
 }
 
+
+void nonfinite_shader_channel_contract() {
+    const auto program = compile_probe(R"(
+        uniform float zero;
+        half4 main(float2 p) {
+            float infinity = (p.x + 1.0) / zero;
+            float not_a_number = zero / zero;
+            return half4(-0.25, 1.5, not_a_number, infinity);
+        }
+    )");
+    ui::ShaderInstance shader{program};
+    check(shader.set_float("zero", 0.0f) == ui::ShaderSetResult::Ok,
+          "ScalarSource non-finite shader setup failed");
+    const ui::Brush brush{shader};
+
+    const auto negative = render_probe(
+        scalar_probe(ui::ScalarSource::from_brush(
+            brush, ui::ScalarChannel::Red)),
+        8, 8);
+    const auto above_one = render_probe(
+        scalar_probe(ui::ScalarSource::from_brush(
+            brush, ui::ScalarChannel::Green)),
+        8, 8);
+    const auto nan_value = render_probe(
+        scalar_probe(ui::ScalarSource::from_brush(
+            brush, ui::ScalarChannel::Blue)),
+        8, 8);
+    const auto infinity = render_probe(
+        scalar_probe(ui::ScalarSource::from_brush(
+            brush, ui::ScalarChannel::Alpha)),
+        8, 8);
+
+    check(negative[0] < 0.0f,
+          "ScalarSource clamped a negative Shader Brush channel");
+    check(above_one[0] > 1.0f,
+          "ScalarSource clamped a greater-than-one Shader Brush channel");
+    check(std::isnan(nan_value[0]),
+          "ScalarSource did not preserve Shader Brush NaN classification");
+    check(std::isinf(infinity[0]) && infinity[0] > 0.0f,
+          "ScalarSource did not preserve Shader Brush infinity");
+}
+
 void source_construction_side_effect_contract() {
     const auto image = ui::Image::decode(kAlphaPayloadPng);
     check(image.valid(), "ScalarSource side-effect fixture did not decode");
@@ -591,6 +633,7 @@ void independent_source_contract() {
 int main() {
     source_creation_contract();
     brush_sampling_contract();
+    nonfinite_shader_channel_contract();
     source_construction_side_effect_contract();
     data_texture_channel_contract();
     color_texture_channel_contract();
