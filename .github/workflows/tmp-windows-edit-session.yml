@@ -42,6 +42,7 @@ jobs:
           -DNATIVEUI_BUILD_PLATFORM=OFF
           -DNATIVEUI_BUILD_TESTS=ON
           -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_ENABLE_SANITIZERS=ON
       - name: Build
         run: cmake --build build-edit --target nativeui_edit_session_tests
       - name: Test
