@@ -127,6 +127,24 @@ The native wrappers receive a `UI&`; application code must therefore keep the re
 
 State/Binding lifetime, equality and callback/reentrancy semantics are part of the landed contract and are documented in [`v1-state-and-binding.md`](v1-state-and-binding.md).
 
+## UI orchestration contract
+
+`UI` owns one mounted retained tree and its Theme, layout, focus, input, overlay and invalidation state. Construction consumes the root specification, mounts immediately and may propagate allocation or component-lifecycle failures after retained rollback. Destruction is `noexcept` and publishes UI death before retained teardown.
+
+`measure()` and `resize()` use logical UI pixels. Measurement does not publish viewport geometry; resize publishes the viewport used by layout, hit testing, overlays and paint. A resize requested during an active lifecycle transition is deferred to a later safe checkpoint.
+
+`activate()`, `deactivate()`, `refresh_focus()`, `dispatch()`, `cancel_pointer()` and `paint()` are UI-thread operations. The supplied `PlatformServices` belongs to the host-view domain used for that UI. Application/component callbacks may run synchronously and may throw; these APIs are not audio/DSP real-time safe.
+
+`dispatch()` is also a retained reentrancy boundary: structural work requested by callbacks is committed at safe outer checkpoints. Popup and dialog completion callbacks run after retained detach and may re-enter ordinary UI/state work or destroy the UI, so callers must not keep internal node/component borrows across dispatch.
+
+`set_invalidation_callback()` owns its callback and immediately replays existing dirty regions to a newly installed callback. Later notifications are synchronous with the UI operation publishing damage. `dirty_regions()` returns a borrowed logical-region vector; copy it before later mutation if the snapshot must survive. `invalidate()` marks the full viewport, `invalidate(Rect)` one root-logical region, and `invalidate_layout()` retained geometry.
+
+A successful `paint()` consumes only damage that existed before paint callbacks began; invalidation raised reentrantly survives for the next frame. If paint throws, pre-existing damage is restored for retry.
+
+`component_availability()` and `component_semantics()` return value snapshots or `nullopt` for stale/missing NodeIds. `overlay_entries()` returns an owned diagnostic vector. By contrast, `theme()`, `dirty_regions()` and `structural_diagnostic()` return borrows into UI-owned storage and must not outlive replacement/mutation/destruction.
+
+With `NATIVEUI_ENABLE_INSPECTOR`, the `ui::debug` helpers remain UI-thread diagnostics. `PluginUI` is only a compatibility alias for `UI` and adds no plug-in or real-time ownership semantics.
+
 ## EmbeddedView: host-owned child integration
 
 `EmbeddedView` is separate from the standalone `Application` model. It represents one native child view embedded in a parent supplied by an external host/adapter.
