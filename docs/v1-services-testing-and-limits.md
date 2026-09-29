@@ -330,17 +330,58 @@ Remote CI is a qualification layer rather than the inner RED/GREEN loop. Active 
 
 When compiled in, inspector state belongs to each `UI` independently. It snapshots copied retained-tree diagnostics and paints a passive post-content overlay. It does not become a second component tree, consume application overlay slots, receive hit testing/focus, or run a persistent timer/redraw loop. Missing/stale node IDs are handled safely through value-based snapshots rather than raw retained-tree pointers.
 
-The public debug value model is fully owned:
+### Snapshot value and coordinate contract
 
-- `debug::InspectorNode` copies NodeId/parent identity, bounds/clip, dirty flags, focus/capture flags, effective availability, child order and depth;
-- `debug::InspectorSnapshot` owns its node list and dirty-region list, so callers can retain a snapshot after the live tree changes;
-- `InspectorSnapshot::find(id)` returns a pointer borrowed only from that snapshot;
-- `debug::inspector_snapshot(ui)` copies the current diagnostic state;
-- `set_inspector_enabled()` and `set_inspector_selected_node()` affect only that UI instance and request repaint.
+`debug::InspectorSnapshot` is a fully owned point-in-time value. Its `nodes` vector is emitted in retained pre-order: a parent appears before its descendants, `depth` is zero for the root, and `child_order` is the zero-based position among that parent's retained children. Runtime-produced nodes always carry a non-zero `NodeId`; the root's `parent_id` is `kInvalidNodeId`.
 
-Stale/missing selected NodeIds are safe diagnostic values; the inspector does not keep retained nodes alive.
+All `InspectorNode::bounds`, `clip_bounds`, and `InspectorSnapshot::dirty_regions` values use root-logical pixels. `bounds` is the last committed retained geometry. If a node is layout-dirty, the snapshot reports that dirty bit while leaving the last published bounds intact rather than inventing speculative geometry. `clip_bounds` is the inherited effective clip entering the node; the root starts from the viewport, and child clipping is intersected as the traversal descends.
 
-Use the inspector to understand bounds, clips, dirty state, focus/capture and retained hierarchy while debugging. Do not build application behavior that depends on the inspector being present.
+The dirty flags have deliberately different meanings:
+
+- `layout_dirty` copies the node's pending retained-layout bit and is not consumed by inspection;
+- `paint_dirty` is derived by intersecting the node's bounds with the Tree's current dirty rectangles, so it means "this node intersects pending damage", not "this node caused the damage";
+- `dirty_regions` copies the exact pending root-logical paint-damage rectangles and taking a snapshot does not clear them.
+
+`focusable` reflects the component predicate at snapshot time, `focused` marks the current retained focus owner, `pointer_capture_owner` records active capture ownership, and `availability` copies the node's effective inherited visibility/enabled/read-only state. `debug_name` is an owned UTF-8 diagnostic string; v1 currently reports a generic component label and applications must not treat it as a stable RTTI/type identifier.
+
+`InspectorSnapshot::find(id)` performs a linear lookup over the owned vector. The returned pointer borrows from that snapshot only; vector mutation or snapshot destruction invalidates it. A stale/missing ID returns `nullptr`. Copying the snapshot makes an independent value, and neither a snapshot nor a selected ID keeps a live retained node alive.
+
+### Query checkpoints, mutation and failures
+
+`debug::inspector_snapshot(ui)` executes on the owning UI/main thread. Before traversing it flushes queued dynamic mutations at the normal retained checkpoint, so the result describes the reconciled tree visible at that boundary. If a lifecycle transition is already active, it returns an empty snapshot instead of exposing partially mounted/unmounted state.
+
+Snapshotting can allocate while copying vectors and strings, and mutation flushing may execute the same work/errors as the normal retained checkpoint. Those failures are ordinary C++ failures; there is no hidden fallback to a partial snapshot. Snapshotting does **not** clear layout dirtiness or paint damage.
+
+`inspector_enabled(ui)` and `inspector_selected_node(ui)` are non-owning O(1) value reads. Their `const UI&` parameter does not make concurrent access safe: inspector operations obey the same single-owner UI-thread rule as the rest of the retained runtime.
+
+`set_inspector_enabled(ui, enabled)` and `set_inspector_selected_node(ui, id)` are idempotent for an unchanged value. A real change requests paint invalidation only; it does not invalidate layout. That invalidation uses the normal Tree/UI invalidation callback path, so callers must obey the same callback/reentrancy rules as `UI::invalidate()`. Missing, stale and `kInvalidNodeId` selections are accepted and simply produce no live-node highlight.
+
+None of the inspector functions is an audio/DSP real-time API. Snapshotting allocates, and state changes participate in UI invalidation.
+
+### Example
+
+```cpp
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+ui::debug::set_inspector_enabled(ui, true);
+
+auto snapshot = ui::debug::inspector_snapshot(ui);
+for (const auto& node : snapshot.nodes) {
+    if (node.paint_dirty) {
+        log_damage(node.id, node.bounds);
+    }
+}
+
+const ui::NodeId selected = snapshot.nodes.empty()
+    ? ui::kInvalidNodeId
+    : snapshot.nodes.front().id;
+ui::debug::set_inspector_selected_node(ui, selected);
+
+// The copy is independent of later retained reconciliation/destruction.
+auto retained_diagnostic_copy = snapshot;
+#endif
+```
+
+Use the inspector to understand bounds, clips, dirty state, focus/capture and retained hierarchy while debugging. Do not build application behavior that depends on the inspector being compiled in or on `debug_name` values.
 
 ## Contributor policy map
 
