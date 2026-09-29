@@ -451,12 +451,30 @@ int main(int argc, char** argv) {
     if (!read_pixel(application, window, {16.0f, 12.0f})) {
         return fail("parent scene failed after embedded sibling destruction");
     }
-    for (int attempt = 0; attempt < 32; ++attempt) {
-        (void)application.poll(0.0);
+    // A hosted compositor may deliver one final configure/expose after the
+    // embedded sibling is destroyed. Establish a bounded quiescent window
+    // before checking the actual no-spin/no-retry invariant; do not mistake
+    // that one-shot platform work for retained-scene activity.
+    auto settled = PlatformTestAccess::scene_diagnostics(window);
+    int stable_polls = 0;
+    for (int attempt = 0; attempt < 256 && stable_polls < 16; ++attempt) {
+        (void)application.poll(0.005);
+        const auto current = PlatformTestAccess::scene_diagnostics(window);
+        if (current.scene_builds == settled.scene_builds &&
+            current.presentations == settled.presentations &&
+            current.failed_exposes == settled.failed_exposes) {
+            ++stable_polls;
+        } else {
+            settled = current;
+            stable_polls = 0;
+        }
     }
-    const auto settled = PlatformTestAccess::scene_diagnostics(window);
-    for (int attempt = 0; attempt < 32; ++attempt) {
-        (void)application.poll(0.0);
+    if (stable_polls < 16) {
+        return fail("scene did not reach bounded idle quiescence");
+    }
+
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        (void)application.poll(0.005);
     }
     const auto idle = PlatformTestAccess::scene_diagnostics(window);
     if (idle.scene_builds != settled.scene_builds ||
