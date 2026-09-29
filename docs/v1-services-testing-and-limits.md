@@ -4,31 +4,80 @@ This chapter documents stable NativeUI 1.0 resource/service contracts, the proje
 
 ## Resources
 
-NativeUI separates the generic resource-provider seam from its zero-copy embedded resource manager.
+NativeUI separates the generic owned-byte provider seam from its zero-copy embedded-resource table API. Neither layer creates a process-global registry or silently owns application storage.
 
-[`ResourceProvider`](../include/nativeui/resource.hpp) is the polymorphic provider contract for APIs that need owned encoded bytes. `load(resource_id)` performs an exact application-defined lookup and returns an owned `std::vector<std::byte>` or `std::nullopt` when unavailable. Provider storage policy is intentionally open: files, bundles, archives, generated memory and other backends can implement the same seam.
+### ResourceProvider: owned-byte boundary
 
-Because a provider may allocate or perform I/O, `load()` is a resource-preparation/UI-side operation unless a concrete provider documents a stronger contract. It must not be assumed real-time safe.
+[`ResourceProvider`](../include/nativeui/resource.hpp) is the polymorphic seam for APIs that require an independently owned encoded payload. `load(resource_id)` performs an application-defined exact lookup and returns an owned `std::vector<std::byte>` or `std::nullopt` when unavailable. A provider may source bytes from files, bundles, archives, generated memory or another backend.
 
-NativeUI can consume immutable embedded resource tables without introducing a process-global registry or runtime filesystem dependency.
+The base interface intentionally does not promise allocation-free or real-time behavior. Implementations may allocate, perform I/O or synchronize, so provider loading belongs to resource-preparation/UI-side code unless the concrete provider explicitly documents a stronger contract.
 
-[`ui::EmbeddedResourceEntry`](../include/nativeui/embedded_resource.hpp) is the small public metadata type used by generated or application-owned resource tables. Each entry is an immutable view containing a resource ID and byte span.
+### EmbeddedResourceEntry: borrowed table storage
 
-[`ui::ResourceManager`](../include/nativeui/resource_manager.hpp) is a non-owning view over one sorted immutable table:
+[`EmbeddedResourceEntry`](../include/nativeui/embedded_resource.hpp) is a pair of borrowed views:
 
-- construction validates the complete table once;
-- IDs must be non-empty, unique and strictly sorted by their exact byte ordering;
-- a valid manager performs exact, case-sensitive lookup with binary search;
-- direct lookup returns a zero-copy `ResourceView` into the original immutable storage;
-- the caller-owned entry table, IDs and payload storage must outlive the manager and every returned view;
-- copies of a manager remain lightweight borrowed views; no mutable registry, cache or singleton is created;
-- concurrent read-only lookup is safe while the borrowed table remains alive and immutable.
+- `id` is an exact `std::string_view`; it is not normalized, case-folded or path-decoded;
+- `bytes` is a borrowed `std::span<const std::byte>`;
+- a zero-length payload is valid and means **present but empty**, not missing;
+- copying an entry copies only the views; it does not copy the characters or bytes.
 
-Invalid tables fail as a whole rather than exposing a valid prefix. Direct `find()`, `contains()` and `resources()` then behave as absent/empty operations.
+The caller therefore owns the entry array, every ID's character storage and every payload buffer. Those objects must outlive any `ResourceManager` or `ResourceView` that can still reference them.
 
-`ResourceManagerProvider` is the compatibility adapter for APIs that require owned resource bytes. A successful non-empty load copies the selected payload into an owned vector. That operation may allocate and is explicitly a resource-preparation/UI-side operation, not a real-time audio operation.
+### ResourceManager: validation and zero-copy lookup
 
-The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) demonstrates the public resource lookup boundary and its deterministic `--self-test` path. Package/CMake guidance lives in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md); until the replanned reference-application track produces a maintained Getting Started artifact, this chapter does not invent that tutorial surface.
+[`ResourceManager`](../include/nativeui/resource_manager.hpp) borrows one immutable `std::span<const EmbeddedResourceEntry>`. Construction performs one allocation-free O(N) validation pass and records the result. An empty table is valid. For a non-empty table, every ID must be non-empty and the complete table must be strictly ascending and unique using NativeUI's exact **unsigned-byte lexicographic** comparison.
+
+That ordering is intentionally byte-oriented rather than locale-aware. For example, uppercase/lowercase and UTF-8 bytes are compared exactly as stored. The manager does not sort, normalize or repair an input table.
+
+Validation is atomic at the public boundary. If any entry violates the contract:
+
+- `valid()` is false;
+- `validation_error()` returns stable NativeUI-owned diagnostic text;
+- `find()` returns `std::nullopt`;
+- `contains()` returns false;
+- `resources()` returns an empty span rather than exposing a valid-looking prefix.
+
+For a valid manager, `find(id)` uses allocation-free O(log N) binary search and returns a `ResourceView` that directly aliases the original ID and payload storage. A hit on an empty payload is still an engaged result. `contains(id)` has the same exact-ID semantics, while `resources()` returns the original validated table as a borrowed span.
+
+Copies/moves of `ResourceManager` remain lightweight views and do not share mutable state. Concurrent read-only calls are safe as long as the underlying table, strings and payload bytes remain alive and immutable. The direct manager API performs no allocation or internal locking, but NativeUI does not advertise it as a general audio-thread transport: a real-time caller would still need independently proven storage lifetime/residency and bounded input behavior.
+
+### ResourceManagerProvider: explicit ownership conversion
+
+`ResourceManagerProvider` adapts the borrowed manager to `ResourceProvider`. The adapter copies the lightweight manager only; it still does not own or extend the lifetime of the embedded table.
+
+`load(id)` has three distinct outcomes:
+
+- invalid table or missing ID -> `std::nullopt`;
+- present empty resource -> engaged empty vector, without turning it into "missing";
+- present non-empty resource -> a newly owned byte vector copied from the embedded payload.
+
+The non-empty success path may allocate and propagate allocation failure. The adapter keeps no cache; each successful non-empty call creates an independent copy. Because `load()` may allocate/copy, it is resource-preparation/UI-side work and not audio-real-time safe. Concurrent calls are safe under the same immutable-backing-storage lifetime requirement as direct manager lookup.
+
+```cpp
+constexpr std::array<std::byte, 3> kPreset{
+    std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+
+const std::array<ui::EmbeddedResourceEntry, 2> table{{
+    {"preset/default.bin", kPreset},
+    {"preset/empty.bin", {}},
+}};
+
+ui::ResourceManager resources{table};
+if (!resources.valid()) {
+    // validation_error() is a stable NativeUI-owned diagnostic string_view.
+}
+
+if (const auto preset = resources.find("preset/default.bin")) {
+    // preset->bytes is zero-copy and borrows kPreset.
+}
+
+ui::ResourceManagerProvider provider{resources};
+if (auto owned = provider.load("preset/default.bin")) {
+    // *owned is an independent copy.
+}
+```
+
+The focused executable [`t057_embedded_resources`](../examples/features/t057_embedded_resources.cpp) exercises validation, direct zero-copy lookup, the explicit provider copy boundary and use by the SVG cache. Package/CMake guidance lives in [`v1-packaging-and-cmake.md`](v1-packaging-and-cmake.md).
 
 ## Dispatcher: worker-to-UI handoff
 
