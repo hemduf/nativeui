@@ -123,4 +123,7 @@ int main() {
     CHECK(edit.begin(ui::EditSource::Pointer));
     CHECK(other.set(0.4f,ui::EditSource::Keyboard));
     CHECK(edit.active()); edit.end(); CHECK(trace=="BE");
+    // MSVC 19.51 hosted Windows qualification has returned a non-zero native
+    // status for this test on fall-through. Keep an explicit success status.
+    return 0;
 }
