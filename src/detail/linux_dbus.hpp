@@ -288,6 +288,25 @@ using LinuxDbusObjectPathHandler =
 [[nodiscard]] bool linux_dbus_valid_timeout(std::chrono::milliseconds timeout) noexcept;
 [[nodiscard]] bool linux_dbus_valid_object_path(std::string_view path) noexcept;
 
+/// Validates one explicit D-Bus address string before any connection, thread or
+/// file descriptor is acquired. The check is a pure syntax query: empty input,
+/// embedded NUL bytes, a missing/incomplete address entry or an entry without a
+/// transport method fail without touching libdbus connection state.
+[[nodiscard]] bool linux_dbus_valid_bus_address(std::string_view address) noexcept;
+
+/// One-shot accessibility-bus discovery result. The transport never caches the
+/// value: the caller owns `address` and must start its accessibility transport
+/// with it explicitly. `code` is `None` and `address` is non-empty on success;
+/// every failure leaves `address` empty and carries a bounded error code.
+struct LinuxDbusBusAddressDiscovery final {
+    LinuxDbusErrorCode code{LinuxDbusErrorCode::BusUnavailable};
+    std::string address;
+
+    [[nodiscard]] bool available() const noexcept {
+        return code == LinuxDbusErrorCode::None && !address.empty();
+    }
+};
+
 /// Transport-local hard-limit ledger. It owns no libdbus objects and invokes no
 /// callbacks; IDs are monotonically generated within each resource namespace.
 /// Client ownership is checked on release so sibling Portal/accessibility
@@ -363,11 +382,39 @@ public:
     LinuxDbusTransport(LinuxDbusTransport&&) = delete;
     LinuxDbusTransport& operator=(LinuxDbusTransport&&) = delete;
 
+    /// Start the transport against the process session bus. The default path is
+    /// unchanged: one private `dbus_bus_get_private(DBUS_BUS_SESSION, ...)`
+    /// connection, registered through libdbus exactly like before.
     [[nodiscard]] LinuxDbusErrorCode start();
+
+    /// Start the transport against one caller-supplied explicit bus address
+    /// (private `dbus_connection_open_private()` + `dbus_bus_register()`). An
+    /// empty, malformed or NUL-containing address is rejected with
+    /// `InvalidArgument` before any connection, thread, ledger slot or file
+    /// descriptor is acquired; open or registration failure returns
+    /// `BusUnavailable` and leaves the transport stopped with nothing leaked.
+    /// Resource limits, timeout validation, I/O loop, stop/destroy semantics and
+    /// error taxonomy are identical to the session path, and the address is not
+    /// retained after the call.
+    [[nodiscard]] LinuxDbusErrorCode start(std::string_view bus_address);
+
     void stop() noexcept;
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::string unique_name() const;
+
+    /// One-shot AT-SPI2 accessibility-bus discovery. A non-empty
+    /// `AT_SPI_BUS_ADDRESS` wins with no bus round-trip; otherwise this performs
+    /// exactly one bounded `org.a11y.Bus.GetAddress` call, borrowing the
+    /// caller-supplied running session transport when available and otherwise
+    /// opening one private session connection that is closed again before the
+    /// call returns. There is no retry loop, no polling and no process-global
+    /// address cache; every failure returns a bounded error code and an empty
+    /// address. `timeout` is validated against the frozen
+    /// `linux_dbus_valid_timeout()` range and bounds the blocking call.
+    [[nodiscard]] static LinuxDbusBusAddressDiscovery discover_accessibility_bus_address(
+        LinuxDbusTransport* session_transport = nullptr,
+        std::chrono::milliseconds timeout = kLinuxDbusDefaultTimeout);
 
     /// Register one logical Portal/accessibility client on this transport.
     /// IDs are transport-local, monotonically generated and never reused.
