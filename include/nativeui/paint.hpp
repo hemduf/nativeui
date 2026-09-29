@@ -866,7 +866,7 @@ private:
 
     [[nodiscard]] SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
         return brush.visit([this, options](const auto& source) {
-            return make_fill_paint(source, options);
+            return this->make_fill_paint(source, options);
         });
     }
 
