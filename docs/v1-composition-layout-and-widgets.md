@@ -14,6 +14,46 @@ The durable distinction is:
 
 Normal application code composes public builders and components. It should not include `nativeui/detail/` implementation headers or construct private retained-tree nodes directly.
 
+### Component protocol, callback contexts and ownership
+
+[`include/nativeui/component_base.hpp`](../include/nativeui/component_base.hpp) is the low-level public protocol behind custom retained components. A `Spec` owns a component factory plus child specifications; when the tree materializes that recipe, the resulting `Component` is owned by its retained node. `NodeId` is identity inside one tree/UI lifetime only: storing an ID does not keep a node alive, and an ID is not a cross-UI or cross-thread capability.
+
+Measurement and layout use **logical UI pixels**. `ChildMetrics` is an owned snapshot of minimum/preferred sizes plus dimensionless flex weights; `ChildPlacement` is parent-produced logical geometry. Custom `Component::measure()`, `minimum_size()`, `child_constraints()`, `measure_constrained()` and `layout_children()` receive borrowed inputs for the duration of the call. Implementations must not retain references into those inputs. The retained tree owns resulting node geometry and reuses it for paint, focus, hit testing and invalidation.
+
+The callback contexts deliberately have different lifetime rules:
+
+- `PaintContext`, `InputContext`, `CanvasInputContext`, `FocusContext` and `LifecycleContext` are callback-scoped borrows. Their painter/platform/context references must not escape the callback.
+- `MountContext` itself is callback-scoped, but invalidator callables returned by `invalidator()`, `layout_invalidator()`, `focus_invalidator()` and `availability_invalidator()` are copyable deferred handles for later UI-domain state changes. They do not transfer component/tree ownership.
+- paint/input/focus geometry is expressed in logical coordinates; framebuffer/device scaling belongs below this layer.
+- text measurement, clipboard/drop integration, retained invalidation and lifecycle hooks belong to the UI/main/render domain. They may allocate, call platform services or invoke application code and are not audio/DSP real-time APIs.
+
+Pointer capture through `InputContext` is scoped to the pointer identity/generation associated with the current callback. Terminal pointer callbacks cannot reacquire capture, and stale/re-entrant callbacks cannot replace or release a newer generation. This preserves deterministic capture ownership during nested dispatch without exposing a process-global capture singleton.
+
+`ComponentAvailability::interactive()` means **visible and enabled**; it intentionally does not fold in `read_only`. Read-only is a separate editing/mutation policy for controls that support it. Effective availability is ancestry-resolved and cached by the retained tree.
+
+A minimal custom component keeps callback borrows local and stores only durable invalidation handles:
+
+```cpp
+class Meter final : public ui::Component {
+public:
+    ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {120.0f, 18.0f}; // logical pixels
+    }
+
+    void mount(ui::MountContext& context) override {
+        repaint_ = context.invalidator();
+    }
+
+    void paint(ui::PaintContext&) const override {
+        // Paint here; do not retain the callback-scoped context.
+    }
+
+private:
+    std::function<void()> repaint_;
+};
+```
+
+Factories stored in `Spec` own their captures according to ordinary C++ rules. If a factory or callback captures a reference/pointer to application state, NativeUI does not extend that referenced object's lifetime.
 ### Dynamic composition
 
 [`include/nativeui/dynamic.hpp`](../include/nativeui/dynamic.hpp) provides three UI-thread-confined dynamic composition families:

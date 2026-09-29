@@ -23,54 +23,107 @@ class OverlayService;
 
 class Tree;
 
+/// Dimensionless main-axis flex weights advertised by a retained component.
+///
+/// `grow` participates when a flex container has positive free space and
+/// `shrink` participates when content must contract. Zero opts out of the
+/// corresponding redistribution step. These values are layout metadata only.
 struct FlexFactors {
+    /// Relative share of positive free space.
     float grow{};
+    /// Relative share of required shrinkage.
     float shrink{};
 };
 
+/// Constraint-aware size information exchanged between parent and child layout.
+///
+/// `minimum` and `preferred` use NativeUI logical pixels. `flex` is
+/// dimensionless. Values are owned snapshots for one measurement pass and do
+/// not track later component, constraint or viewport changes.
 struct ChildMetrics {
+    /// Smallest logical size reported for the current measurement constraints.
     Size minimum{};
+    /// Preferred logical size after current constraints are considered.
     Size preferred{};
+    /// Optional main-axis flex metadata consumed by flex-aware parents.
     FlexFactors flex{};
 
+    /// Construct zero minimum/preferred sizes with no flex participation.
     ChildMetrics() = default;
+    /// Construct an intrinsic preferred-size result with a zero minimum.
     explicit ChildMetrics(Size preferred_size) : preferred(preferred_size) {}
+    /// Construct explicit minimum and preferred sizes in logical pixels.
     ChildMetrics(Size minimum_size, Size preferred_size)
         : minimum(minimum_size), preferred(preferred_size) {}
+    /// Construct explicit sizes plus dimensionless flex metadata.
     ChildMetrics(Size minimum_size, Size preferred_size, FlexFactors flex_factors)
         : minimum(minimum_size), preferred(preferred_size), flex(flex_factors) {}
 };
 
+/// Parent-computed placement for one retained child.
+///
+/// `bounds` is an owned logical-coordinate snapshot in the parent's space.
 struct ChildPlacement {
+    /// Final child bounds for the current retained layout pass.
     Rect bounds;
 };
 
+/// Stable retained-node identity within one tree/UI lifetime.
+///
+/// This is an identity token, not an owning handle and not a cross-tree or
+/// cross-thread synchronization primitive. Stored IDs must tolerate teardown.
 using NodeId = std::uint64_t;
+/// Sentinel used when no retained node identity is available.
 inline constexpr NodeId kInvalidNodeId = 0;
 
+/// Retained visibility policy before ancestry is resolved.
 enum class VisibilityMode {
+    /// Participate in layout, painting, semantics and ordinary interaction.
     Visible,
+    /// Keep layout participation while suppressing presentation/interaction.
     Hidden,
+    /// Remove ordinary visible layout/presentation participation.
     Collapsed,
 };
 
+/// Effective/local retained availability state for one component.
+///
+/// Ancestors can only make descendants less available. `interactive()` tests
+/// visibility plus enabled state only; read-only remains a separate editing
+/// policy consumed by controls that support it.
 struct ComponentAvailability {
+    /// Current retained visibility policy.
     VisibilityMode visibility{VisibilityMode::Visible};
+    /// Whether ordinary interaction is enabled.
     bool enabled{true};
+    /// Whether mutation/editing should be suppressed while remaining present.
     bool read_only{};
 
+    /// Return true when visible and enabled.
+    ///
+    /// `read_only` is intentionally not folded into this result.
     [[nodiscard]] bool interactive() const noexcept {
         return visibility == VisibilityMode::Visible && enabled;
     }
 
+    /// Compare all availability dimensions by value.
     bool operator==(const ComponentAvailability&) const = default;
 };
 
+/// Borrowed services and geometry for one `Component::paint()` callback.
+///
+/// The context borrows `Painter` and `PlatformServices`; neither is kept alive
+/// by this object and obtained references must not escape the callback. Geometry
+/// uses NativeUI logical pixels. Painting/text measurement are UI/render work
+/// and are not audio/DSP real-time APIs.
 class PaintContext {
 public:
+    /// Construct with an effective clip equal to `bounds`.
     PaintContext(Painter& painter, Rect bounds, bool focused, PlatformServices& platform)
         : PaintContext(painter, bounds, bounds, focused, platform) {}
 
+    /// Construct with explicit retained bounds and inherited logical clip.
+    /// All referenced services are borrowed for the paint-callback lifetime.
     PaintContext(Painter& painter,
                  Rect bounds,
                  Rect clip_bounds,
@@ -82,13 +135,20 @@ public:
           focused_(focused),
           platform_(platform) {}
 
+    /// Retained component bounds in the current logical coordinate space.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
+    /// Effective inherited paint clip in logical coordinates.
     [[nodiscard]] Rect clip_bounds() const noexcept { return clip_bounds_; }
+    /// Whether this component is the current keyboard-focus owner.
     [[nodiscard]] bool focused() const noexcept { return focused_; }
+    /// Borrow the active painter; do not retain the reference after `paint()`.
     [[nodiscard]] Painter& painter() noexcept { return painter_; }
+    /// Measure borrowed UTF-8 text through the owning platform service.
+    /// The returned metrics are an owned value in logical pixels.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
     }
+    /// Convenience width measurement; `size` and the result are logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
@@ -101,23 +161,37 @@ private:
     PlatformServices& platform_;
 };
 
+/// Canvas-style borrowed facade over the active `Painter`.
+///
+/// The facade does not own the painter. Geometry, stroke widths, radii and text
+/// sizes use logical pixels; angular arguments are radians. Calls forward
+/// immediately to the painter and inherit its clip/transform stack. The context
+/// must stay inside the paint callback and is not an audio/DSP RT API.
 class CanvasContext2D {
 public:
+    /// Borrow a painter for a canvas with the supplied logical bounds.
     CanvasContext2D(Painter& painter, Rect bounds, bool focused)
         : painter_(painter), bounds_(bounds), focused_(focused) {}
 
+    /// Return the canvas extent in logical pixels.
     [[nodiscard]] Size size() const noexcept { return Size{bounds_.w, bounds_.h}; }
+    /// Return logical canvas width.
     [[nodiscard]] float width() const noexcept { return bounds_.w; }
+    /// Return logical canvas height.
     [[nodiscard]] float height() const noexcept { return bounds_.h; }
+    /// Return the focus snapshot captured for this paint callback.
     [[nodiscard]] bool focused() const noexcept { return focused_; }
 
+    /// Measure borrowed UTF-8 text and return owned logical-pixel metrics.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return TextService::measure(text, style);
     }
+    /// Convenience text width; `size` and result use logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return TextService::measure(text, size).width;
     }
 
+    /// Fill an axis-aligned logical rectangle with a solid color.
     void fill_rect(Rect rect, Color color) {
         painter_.fill_rounded_rect(rect, 0.0f, color);
     }
@@ -134,6 +208,7 @@ public:
         painter_.fill_rounded_rect(rect, 0.0f, brush, options);
     }
 
+    /// Stroke a logical rectangle; `width` is in logical pixels.
     void stroke_rect(Rect rect, float width, Color color) {
         painter_.stroke_rounded_rect(rect, 0.0f, width, color);
     }
@@ -143,6 +218,7 @@ public:
         painter_.stroke_rounded_rect(rect, 0.0f, width, brush, options);
     }
 
+    /// Fill a rounded logical rectangle; `radius` is in logical pixels.
     void fill_rounded_rect(Rect rect, float radius, Color color) {
         painter_.fill_rounded_rect(rect, radius, color);
     }
@@ -162,6 +238,7 @@ public:
         painter_.fill_rounded_rect(rect, radius, brush, options);
     }
 
+    /// Stroke a rounded rectangle; radius/width use logical pixels.
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         painter_.stroke_rounded_rect(rect, radius, width, color);
     }
@@ -171,6 +248,7 @@ public:
         painter_.stroke_rounded_rect(rect, radius, width, brush, options);
     }
 
+    /// Draw a filled circle in logical coordinates.
     void circle(Point center, float radius, Color color) {
         painter_.circle(center, radius, color);
     }
@@ -179,6 +257,7 @@ public:
         painter_.circle(center, radius, brush, options);
     }
 
+    /// Stroke an arc; center/radius/width are logical and start/end are radians.
     void arc(Point center, float radius, float start, float end, float width, Color color) {
         painter_.arc(center, radius, start, end, width, color);
     }
@@ -188,6 +267,7 @@ public:
         painter_.arc(center, radius, start, end, width, brush, options);
     }
 
+    /// Stroke a logical line with a logical-pixel width.
     void line(Point a, Point b, float width, Color color) {
         painter_.line(a, b, width, color);
     }
@@ -197,6 +277,7 @@ public:
         painter_.line(a, b, width, brush, options);
     }
 
+    /// Fill a borrowed path under the current transform/clip.
     void fill_path(const Path& path, Color color) {
         painter_.fill_path(path, color);
     }
@@ -205,6 +286,7 @@ public:
         painter_.fill_path(path, brush, options);
     }
 
+    /// Stroke a borrowed path with a copied stroke-style value.
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
         painter_.stroke_path(path, color, style);
     }
@@ -214,12 +296,15 @@ public:
         painter_.stroke_path(path, brush, style, options);
     }
 
+    /// Draw a borrowed decoded image into a logical destination rectangle.
+    /// The context does not retain image ownership.
     void draw_image(const Image& image,
                     Rect destination,
                     ImageFit fit = ImageFit::Fill) {
         detail::draw_image(painter_, image, destination, fit);
     }
 
+    /// Draw a logical source sub-rectangle of a borrowed image to destination.
     void draw_image(const Image& image,
                     Rect source,
                     Rect destination,
@@ -227,10 +312,12 @@ public:
         detail::draw_image(painter_, image, source, destination, fit);
     }
 
+    /// Draw a borrowed parsed SVG icon into logical destination bounds.
     void draw_svg(const SvgIcon& icon, Rect destination) {
         detail::draw_svg(painter_, icon, destination);
     }
 
+    /// Draw borrowed UTF-8 text at a logical position using the supplied style.
     void text(Point position, std::string_view text, const TextStyle& style) {
         painter_.text(position, text, style);
     }
@@ -240,16 +327,24 @@ public:
         painter_.text(position, text, size, color, align);
     }
 
+    /// Intersect the active painter clip with a logical rectangle.
     void push_clip(Rect rect) { painter_.push_clip(rect); }
+    /// Pop the most recently pushed clip.
     void pop_clip() { painter_.pop_clip(); }
 
+    /// Save the current painter transform/clip state.
     void save() { painter_.save(); }
+    /// Restore the most recently saved painter state.
     void restore() { painter_.restore(); }
+    /// Append a logical translation to the active transform.
     void translate(float x, float y) { painter_.translate(x, y); }
     void translate(Point offset) { painter_.translate(offset); }
+    /// Append independent X/Y scale factors.
     void scale(float x, float y) { painter_.scale(x, y); }
     void scale(float uniform) { painter_.scale(uniform); }
+    /// Append a rotation in radians.
     void rotate(float radians) { painter_.rotate(radians); }
+    /// Append the supplied transform value.
     void concat(const Transform2D& transform) { painter_.concat(transform); }
 
 private:
@@ -281,12 +376,15 @@ public:
           legacy_release_(std::move(release)) {}
 
     /// Retained bounds of the receiving component in logical coordinates.
+    /// Retained bounds in logical coordinates.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
 
     /// Measure text through the owning platform services.
+    /// Measure borrowed UTF-8 text and return owned logical-pixel metrics.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
     }
+    /// Convenience width measurement in logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
@@ -375,29 +473,46 @@ private:
 /// It exposes size rather than absolute bounds and forwards invalidation,
 /// pointer-capture, clipboard and drag/drop operations to the same callback
 /// context. It must not outlive the enclosing input callback.
+/// Canvas-friendly callback-scoped facade over `InputContext`.
+///
+/// It borrows the underlying context and must not outlive the enclosing input
+/// callback. Operations forward to the same retained pointer/clipboard/drop
+/// and invalidation services; they do not transfer ownership.
 class CanvasInputContext {
 public:
+    /// Borrow an existing callback-scoped input context.
     explicit CanvasInputContext(InputContext& context) : context_(context) {}
 
+    /// Return the receiving component extent in logical pixels.
     [[nodiscard]] Size size() const noexcept {
         const auto b = context_.bounds();
         return Size{b.w, b.h};
     }
 
+    /// Measure borrowed UTF-8 text through the owning platform service.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return context_.text_metrics(text, style);
     }
+    /// Convenience width measurement in logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return context_.text_width(text, size);
     }
 
+    /// Request paint invalidation for the receiving component.
     void invalidate() const { context_.invalidate(); }
+    /// Request retained layout plus paint invalidation.
     void invalidate_layout() const { context_.invalidate_layout(); }
+    /// Capture the current eligible pointer contact to this retained target.
     void capture_pointer() const { context_.capture_pointer(); }
+    /// Release capture owned by this target for the current contact.
     void release_pointer() const { context_.release_pointer(); }
+    /// Replace platform clipboard text with the borrowed payload.
     void set_clipboard_text(std::string_view text) { context_.set_clipboard_text(text); }
+    /// Request clipboard text through the normal platform/input path.
     void request_clipboard_text() { context_.request_clipboard_text(); }
+    /// Accept exactly one advertised drop type for this component.
     [[nodiscard]] bool accept_drop(std::string_view type) { return context_.accept_drop(type); }
+    /// Reject the current drop offer for this component.
     void reject_drop() { context_.reject_drop(); }
 
 private:
@@ -420,6 +535,7 @@ public:
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)) {}
 
+    /// Return logical bounds captured for this transition.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
@@ -434,9 +550,11 @@ public:
     }
 
     /// Repaint this component without recomputing layout.
+    /// Request paint invalidation through the retained callback seam.
     void invalidate() const { invalidate_(); }
 
     /// Recompute layout from this component through its ancestors, then repaint.
+    /// Request layout plus paint invalidation through retained ancestors.
     void invalidate_layout() const { invalidate_layout_(); }
 
 private:
@@ -446,6 +564,12 @@ private:
     std::function<void()> invalidate_layout_;
 };
 
+/// Services supplied for the retained `Component::mount()` transition.
+///
+/// The context itself is callback-scoped. Returned invalidator callables are
+/// copyable handles intended for later UI-domain state changes; they do not
+/// transfer ownership of the tree or component. The overlay seam is borrowed.
+/// Mount/unmount and invalidation scheduling are UI/main-thread operations.
 class MountContext {
 public:
     MountContext(NodeId node_id,
@@ -461,6 +585,7 @@ public:
           invalidate_availability_(std::move(invalidate_availability)),
           overlay_service_(overlay_service) {}
 
+    /// Return this component's retained identity in the current tree.
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     /// Long-lived callback for state changes that only affect painting.
     [[nodiscard]] std::function<void()> invalidator() const {
@@ -521,6 +646,10 @@ private:
     detail::OverlayService* overlay_service_{};
 };
 
+/// Borrowed geometry/invalidation services for activate/deactivate/unmount.
+///
+/// The object is valid only for the lifecycle callback receiving it. Geometry
+/// is a logical snapshot for that transition; do not retain this context.
 class LifecycleContext {
 public:
     LifecycleContext(NodeId node_id,
@@ -532,6 +661,7 @@ public:
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)) {}
 
+    /// Return retained identity for this lifecycle callback.
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
     void invalidate() const { invalidate_(); }
@@ -544,10 +674,18 @@ private:
     std::function<void()> invalidate_layout_;
 };
 
+/// Polymorphic protocol implemented by retained custom controls.
+///
+/// A component is owned by its retained `Node` after a `Spec` factory
+/// materializes it. Hooks execute in owning-tree UI/main-thread order.
+/// Implementations must not retain callback-scoped Paint/Input/Focus/Lifecycle
+/// contexts. These hooks are not audio/DSP real-time entry points.
 class Component {
 public:
+    /// Destroy the component when its owning retained node is torn down.
     virtual ~Component() = default;
 
+    /// Whether this node may become the keyboard-focus owner.
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
 
     /// Whether this component may start a pointer route independently of keyboard focus.
@@ -559,15 +697,19 @@ public:
     /// retained tree resolves this monotonically through ancestry and stores the
     /// effective result on each component instance.
     [[nodiscard]] virtual ComponentAvailability local_availability() const noexcept { return {}; }
+    /// Return ancestry-resolved availability cached by the retained tree.
     [[nodiscard]] ComponentAvailability effective_availability() const noexcept {
         return effective_availability_;
     }
+    /// Convenience view of resolved visibility.
     [[nodiscard]] VisibilityMode effective_visibility() const noexcept {
         return effective_availability_.visibility;
     }
+    /// Convenience view of resolved enabled state.
     [[nodiscard]] bool effective_enabled() const noexcept {
         return effective_availability_.enabled;
     }
+    /// Convenience view of resolved read-only state.
     [[nodiscard]] bool effective_read_only() const noexcept {
         return effective_availability_.read_only;
     }
@@ -577,6 +719,7 @@ public:
     [[nodiscard]] virtual bool is_focus_scope() const noexcept { return false; }
     [[nodiscard]] virtual bool focus_scope_active() const noexcept { return false; }
     [[nodiscard]] virtual bool focus_scope_traps() const noexcept { return false; }
+    /// Preferred focusable-descendant index when a scope needs initial focus.
     [[nodiscard]] virtual std::size_t focus_scope_default_index() const noexcept { return 0; }
 
     /// T045 platform-neutral semantic projection. The default `None` role
@@ -601,6 +744,10 @@ public:
 
     /// Existing intrinsic preferred-size hook. Kept source-compatible for
     /// custom components while constrained measurement is layered around it.
+    /// Report intrinsic preferred size from borrowed child-metric snapshots.
+    ///
+    /// Sizes use logical pixels; `children` is ordered like retained children
+    /// and must not be retained beyond this call.
     [[nodiscard]] virtual Size measure(const std::vector<ChildMetrics>& children) const = 0;
 
     /// Intrinsic minimum size before parent constraints are applied. Components
@@ -630,6 +777,10 @@ public:
         return ChildMetrics{minimum, preferred};
     }
 
+    /// Compute logical placements for retained children.
+    ///
+    /// Child metrics are borrowed input; placements is caller-owned output
+    /// corresponding by index to retained children. The default does nothing.
     virtual void layout_children(
         Rect,
         const std::vector<ChildMetrics>&,
@@ -651,12 +802,14 @@ public:
     /// child-to-parent in reverse sibling order.
     virtual void unmount(LifecycleContext&) {}
 
+    /// Observe focus gain/loss with a callback-scoped borrowed focus context.
     virtual void focus_changed(bool, FocusContext&) {}
 
     /// Called on ancestors after keyboard focus moves to one of their descendants.
     /// The descendant bounds are expressed in this component's local logical
     /// coordinates for the current layout. The hook is not repeated when focus is
     /// merely refreshed on the same node.
+    /// Observe descendant focus bounds in this component's local coordinates.
     virtual void descendant_focus_changed(Rect) {}
 
     /// Handle a targeted input event. Returning `Handled` consumes the event;
@@ -666,6 +819,8 @@ public:
         return EventResult::Ignored;
     }
 
+    /// Paint using a callback-scoped borrowed context in logical coordinates.
+    /// Implementations must not retain the context or painter reference.
     virtual void paint(PaintContext&) const = 0;
 
 private:
@@ -685,24 +840,51 @@ private:
     ComponentAvailability effective_availability_{};
 };
 
+/// Retained runtime node owned by the tree.
+///
+/// Application composition normally uses `Spec`/builders. `parent` is
+/// non-owning; `component` and `children` are owned. Geometry/cache fields are
+/// tree-maintained UI-domain state and are not independently thread-safe.
 struct Node {
+    /// Retained identity, or the invalid sentinel before publication.
     NodeId id{kInvalidNodeId};
+    /// Borrowed parent pointer; null for a retained root.
     Node* parent{};
+    /// Owned component instance materialized from a `Spec` factory.
     std::unique_ptr<Component> component;
+    /// Owned child nodes in retained composition order.
     std::vector<std::unique_ptr<Node>> children;
+    /// Current logical layout bounds.
     Rect bounds{};
+    /// Last logical visual bounds published for paint invalidation.
     Rect published_visual_bounds{};
+    /// Whether published visual bounds currently contain a valid snapshot.
     bool visual_bounds_published{};
+    /// Whether retained layout must be recomputed.
     bool layout_dirty{true};
+    /// Cached resolved activity for focus-scope routing.
     bool focus_scope_active_cached{};
+    /// Non-owning retained identity used for focus restoration, or invalid.
     NodeId focus_restore{kInvalidNodeId};
 };
 
+/// Owned declarative recipe for one retained component subtree.
+///
+/// The factory transfers ownership of a new component instance when the tree
+/// materializes the node. Child specs are owned recursively. Captured external
+/// references/pointers keep ordinary C++ lifetime obligations; storing the
+/// specification does not extend those referenced lifetimes.
 struct Spec {
+    /// Factory invoked by retained materialization to create the component.
     std::function<std::unique_ptr<Component>()> factory;
+    /// Owned child specifications in retained composition order.
     std::vector<Spec> children;
 };
 
+/// Convert a builder/value exposing `spec()` into an owned `Spec`.
+///
+/// The argument is perfectly forwarded. Allocations/exceptions from `spec()`
+/// propagate unchanged; this helper adds no fallback or synchronization.
 template <class T>
 Spec make_spec(T&& value) {
     return std::forward<T>(value).spec();
