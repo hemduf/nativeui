@@ -133,12 +133,17 @@ Important distinctions:
 
 - it does **not** hide, disable, collapse, mount or unmount its child;
 - `active=false` only removes descendants from focus targeting;
-- an active scope observes its `Binding<bool>` while mounted;
-- focus structure is reconciled when that binding changes.
+- the Binding overload stores an owned Binding handle; the State overload converts to Binding immediately and therefore does **not** retain a raw `State<bool>*`;
+- destroying the originating State leaves the retained Binding at its documented last value and stops future source notifications rather than dangling the scope;
+- while mounted, active-state notifications synchronously invalidate focus structure and retained presentation on the UI thread.
 
-By default `trap(true)` prevents Tab/Shift+Tab traversal from escaping once focus is inside an active scope.
+The builder owns exactly one child Spec. `spec() &&` consumes that builder and transfers the child, Binding and policy into declarative retained state; it performs no focus transition by itself. Tree materialization/mounting may allocate or throw through ordinary component lifecycle machinery.
 
-`default_focus(index)` chooses a **zero-based available focusable-descendant index** when the scope activates. If that index is unavailable/out of range, NativeUI falls back to the first available descendant. When the scope deactivates, NativeUI restores the previously focused eligible node when possible, otherwise normal retained fallback rules apply.
+By default `trap(true)` prevents Tab/Shift+Tab traversal from escaping once focus is inside an active scope. The trap flag does not make an inactive scope eligible and does not change pointer/layout visibility.
+
+`default_focus(index)` chooses a **zero-based available focusable-descendant index** when the scope activates. It is not a direct-child index. If that index is unavailable/out of range, NativeUI falls back to the first available descendant. When the scope deactivates, NativeUI restores the previously focused eligible node when possible, otherwise normal retained fallback rules apply.
+
+`FocusScopeComponent` is a transparent one-child layout wrapper: preferred/minimum size comes from the first child and layout grants that child the complete logical bounds. It paints no pixels. These methods and focus callbacks belong to the UI/main-thread domain and are not audio/DSP real-time operations.
 
 Example:
 
@@ -169,7 +174,11 @@ When NativeUI sees a supported primary-modifier shortcut, it converts the key ev
 3. lets [`CommandScope`](../include/nativeui/command.hpp) handlers on the ancestor route handle or ignore it;
 4. if still ignored, invokes the tree/UI global command handler.
 
-A `CommandScope` does not take focus and does not intercept raw pointer/key/text events:
+A `CommandScope` does not take focus and does not intercept raw pointer/key/text events. It owns its `std::function` callback and one child Spec. The callback receives `Command` by value, so there is no argument lifetime to extend; captured objects follow normal `std::function` ownership rules.
+
+Invocation is synchronous on the owning UI thread. Returning `Ignored` is intentional when a parent/global handler should remain eligible. An empty callback also behaves as `Ignored`. Exceptions are not translated into an EventResult by CommandScope; they propagate through the Tree/UI dispatch boundary after its bookkeeping rules are applied. Callback-triggered State changes or retained structural work may therefore re-enter UI logic and are reconciled at the same safe checkpoints as other dispatch callbacks. Command callbacks are not audio/DSP real-time entry points.
+
+Like FocusScope, `CommandScopeComponent` is a transparent one-child layout wrapper: it forwards preferred/minimum size, grants the child the full logical bounds and paints no pixels. Construction/spec creation does not invoke the callback; the callback is transferred into the retained component when the Spec materializes.
 
 ```cpp
 auto scoped = ui::CommandScope{
@@ -184,7 +193,7 @@ auto scoped = ui::CommandScope{
 };
 ```
 
-Returning `Ignored` is intentional when a parent/global handler should remain eligible. [`t017_commands.cpp`](../examples/features/t017_commands.cpp) demonstrates TextInput owning Copy/Paste, a scoped Undo handler and global fallback.
+[`t017_commands.cpp`](../examples/features/t017_commands.cpp) demonstrates TextInput owning Copy/Paste, a scoped Undo handler and global fallback.
 
 ## Reusable click/drag gestures
 

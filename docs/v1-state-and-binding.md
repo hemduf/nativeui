@@ -113,7 +113,9 @@ Consequently, writes through a binding follow the same equality, reentrancy, coa
 | `Enabled` | `State<bool>` | Enabled/disabled interaction and focus eligibility |
 | `ReadOnly` | `State<bool>` | Monotonic read-only capability without generic focus/hit-test suppression |
 
-The State reference is borrowed by these builders/components and must outlive the mounted retained wrapper. Changes are observed while mounted and feed the tree's availability reconciliation; they do not simulate structural removal.
+These decorators intentionally differ from Binding-based components: each builder stores a raw pointer to the supplied State, and the Spec produced by `spec() &&` keeps that pointer for later component materialization. The State must therefore outlive **both the produced Spec and every retained wrapper materialized from it**; constructing a Spec and then destroying its State before mounting violates the API lifetime contract. NativeUI does not promote this borrow to shared ownership.
+
+Construction owns/converts the child Spec but performs no subscription or Tree mutation. Observation begins when the retained wrapper mounts. State notifications run synchronously in the UI/main-thread domain and request availability reconciliation through the retained Tree; they do not simulate structural removal. These decorators are not synchronization primitives and are not audio/DSP real-time APIs.
 
 ### Visibility
 
@@ -130,9 +132,9 @@ auto details = ui::Visibility{
 };
 ```
 
-Use `.mode(ui::VisibilityMode::Collapsed)` when false should also remove the subtree's layout contribution. Passing `Visible` as the false-mode is sanitized to `Hidden`, so false always makes the subtree unavailable.
+Use `.mode(ui::VisibilityMode::Collapsed)` when false should also remove the subtree's layout contribution. Passing `Visible` as the false-mode is sanitized to `Hidden`, so false always makes the subtree unavailable. `mode()` only configures the bool-State form; a `State<VisibilityMode>` already supplies the complete mode and ignores that fallback setting.
 
-Hidden keeps layout participation but removes paint/normal interaction/focus eligibility. Collapsed additionally removes layout contribution. Neither state unmounts the retained child.
+Hidden keeps layout participation but removes paint/normal interaction/focus eligibility. Collapsed additionally removes layout contribution. Neither state unmounts the retained child. The wrapper itself paints no pixels and forwards one-child layout; descendants resolve their own enabled/read-only presentation against effective inherited availability.
 
 ### Enabled
 
@@ -141,6 +143,12 @@ A disabled subtree remains retained, measured and painted but is unavailable for
 ### ReadOnly
 
 Read-only is also monotonic through ancestry, but unlike disabled it does not generically remove focus or pointer targeting. Editable/value controls enforce mutation policy while retaining non-mutating behavior such as selection, navigation or copy when their widget contract supports it.
+
+### Builder/materialization contract
+
+`Visibility`, `Enabled` and `ReadOnly` are rvalue-style declarative builders. Their `spec() &&` methods consume the child specification and retain the borrowed State pointer for later materialization. They do not return a live component reference and do not extend application State lifetime.
+
+Component creation, State observer registration and later availability reconciliation occur in the owning Tree/UI lifecycle. Allocation or lifecycle exceptions follow the normal retained rollback/propagation contract; there is no decorator-specific error code or fallback State. State callbacks can run synchronously as part of `State::set()`, so application code must respect the same reentrancy rules described for State observers above.
 
 ## DirtyRegion and paint invalidation
 
