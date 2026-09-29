@@ -69,8 +69,11 @@ private:
 
 /// Resource-cache outcome for SVG loading.
 enum class SvgLoadError {
+    /// Resource bytes were found and parsed into a valid SvgIcon.
     None,
+    /// The ResourceProvider returned std::nullopt for the exact identifier.
     NotFound,
+    /// Bytes were returned, but parsing/intrinsic-geometry validation failed.
     ParseFailed,
 };
 
@@ -100,30 +103,55 @@ struct SvgLoadResult {
 class SvgCache {
 public:
     /// Bind a cache to `provider`; the provider is borrowed and must outlive the cache.
+    ///
+    /// Construction establishes no ownership cycle and performs no provider or
+    /// parser callback. Internal cache allocation/setup may throw.
     explicit SvgCache(ResourceProvider& provider);
+
+    /// Destroy cached entries without destroying the borrowed provider.
+    ///
+    /// SvgIcon handles already copied out remain alive through shared parsed backing.
     ~SvgCache();
 
+    /// SvgCache has unique mutable cache identity and is not copyable.
     SvgCache(const SvgCache&) = delete;
+    /// SvgCache has unique mutable cache identity and is not copy-assignable.
     SvgCache& operator=(const SvgCache&) = delete;
+
     /// Transfer cache contents and the borrowed provider association.
+    ///
     /// The moved-from cache is valid but empty/unbound: load() reports NotFound.
+    /// Existing SvgIcon handles copied out before the move remain independently valid.
     SvgCache(SvgCache&&) noexcept;
+
     /// Transfer cache contents/provider association with the same moved-from contract.
+    ///
+    /// Any entries previously owned by this cache are released first; copied-out
+    /// SvgIcon handles keep their backing alive.
     SvgCache& operator=(SvgCache&&) noexcept;
 
     /// Load once by exact resource identifier and cache both success and failure.
     ///
-    /// The identifier is borrowed for the provider call but copied as the cache
-    /// key. `std::nullopt` maps to NotFound; returned bytes that fail
-    /// SvgIcon::parse(), including an empty vector, map to ParseFailed. A cached
-    /// entry suppresses provider/parse retries until `clear()`.
-    /// Provider callbacks are synchronous and may throw; allocation/provider
-    /// exceptions propagate and are not converted to SvgLoadError.
+    /// `resource_id` is borrowed only for this synchronous call and copied into
+    /// the cache key on a miss. No normalization, case folding or fallback lookup
+    /// is added by SvgCache. `std::nullopt` maps to NotFound; returned bytes that
+    /// fail SvgIcon::parse(), including an empty vector, map to ParseFailed.
+    ///
+    /// A cached entry suppresses provider/parse retries until `clear()`. Provider
+    /// callbacks and parsing execute synchronously in the caller's UI/resource-
+    /// preparation domain. Allocation/provider exceptions propagate and are not
+    /// converted to SvgLoadError or cached as a terminal result.
     [[nodiscard]] SvgLoadResult load(std::string_view resource_id);
-    /// Number of cached identifiers, including cached failure entries.
+    /// Return the number of cached identifiers, including cached failure entries.
+    ///
+    /// This is an unsynchronized read of this cache instance and performs no
+    /// provider/parser work.
     [[nodiscard]] std::size_t size() const noexcept;
+
     /// Remove all cached successes/failures without affecting the provider.
-    /// Existing SvgIcon values copied out keep their parsed DOM alive.
+    ///
+    /// Existing SvgIcon values copied out keep their parsed DOM alive. A later
+    /// load of the same identifier may call the provider/parser again.
     void clear();
 
 private:

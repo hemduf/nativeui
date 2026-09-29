@@ -363,21 +363,25 @@ Image drawing has two coordinate domains:
 
 ### ImageTexture
 
-`ImageTexture` is an owned value description layered over shared immutable `Image` backing. The source rectangle must be finite, positive and fully inside the decoded image; the destination rectangle must be finite and positive. Invalid construction canonicalizes to an inert texture. The destination rectangle describes one complete texture period in logical coordinates rather than a clip/bounds rectangle.
+`ImageTexture` is an owned value description layered over shared immutable `Image` backing. Its default constructor creates the canonical inert state. The whole-image constructor derives a source rectangle from decoded pixel dimensions; the source-rectangle overload instead accepts an explicit rectangle in **decoded-image pixels**. In both cases the destination is in Painter-local **logical coordinates** and describes one complete texture period rather than a clip/bounds rectangle.
 
-Tiling is independent on X/Y (`Clamp`, `Repeat`, `Mirror`, `Decal`). Sampling defaults to linear filtering with no mipmap selection. `TextureInterpretation::Color` uses color-managed RGB with ordinary alpha coverage; `Data` samples normalized numeric channels without color conversion/implicit premultiplication. Texture mutation only changes the public value description; backend shader/mipmap materialization remains renderer-owned.
+The source rectangle must be finite, positive and fully inside the decoded image; the destination must be finite and positive. Invalid construction canonicalizes the complete value to inert state instead of partially retaining an invalid mapping. `image()` returns a borrowed reference to the stored handle, while `source()` and `destination()` return value geometry. Copying shares immutable decoded backing. Moving transfers the full description and resets the source to inert state; self-move assignment intentionally also yields inert state.
 
-The optional texture-local `Transform2D` maps texture/pattern coordinates into Painter-local coordinates before the Painter/device transform. NativeUI retains even a non-invertible transform verbatim so it can be inspected/replaced, but `valid()` becomes false until the transform satisfies the shared inversion contract. Copies share the decoded image; moves reset the source object to the inert state.
+Tiling is independent on X/Y (`Clamp`, `Repeat`, `Mirror`, `Decal`). `TextureSampling` defaults to `Linear` filtering with `TextureMipmap::None`; its setters/getters are constexpr/noexcept value operations and do not decode, allocate, generate mipmaps or create backend resources. `TextureInterpretation::Color` uses color-managed RGB with ordinary alpha coverage; `Data` samples normalized numeric channels without color conversion/implicit premultiplication. Texture mutation only changes the public value description; backend shader/mipmap materialization remains renderer-owned.
+
+The optional texture-local `Transform2D` maps texture/pattern coordinates into Painter-local coordinates before the Painter/device transform. NativeUI retains even a non-invertible transform verbatim so it can be inspected/replaced, but `valid()` becomes false until the transform satisfies the shared inversion contract. Replacing the transform can therefore recover the same image/source/sampling state without reconstructing the texture. None of these value mutations is a synchronization or audio-real-time boundary.
 
 ### ImageCache
 
-`ImageCache` borrows one `ResourceProvider`, which must outlive the cache. `load(resource_id)` copies the identifier as its cache key, calls the provider synchronously only on a cache miss, then caches **both success and failure**:
+`ImageCache` borrows one `ResourceProvider`, which must outlive the cache. Construction establishes no ownership cycle and does not call the provider. The cache has unique mutable identity, is non-copyable, and is movable: moving transfers cached entries plus the borrowed provider association, while the moved-from cache becomes empty/unbound and reports `NotFound` on later loads.
+
+`load(resource_id)` borrows the identifier only for the synchronous call but copies it as the cache key on a miss. The cache adds no normalization/case folding/fallback policy of its own. It then calls the provider synchronously only on a cache miss and caches **both success and failure**:
 
 - provider `std::nullopt` -> `ImageLoadError::NotFound`;
 - returned bytes that fail `Image::decode()`, including an empty byte vector -> `DecodeFailed`;
 - valid decoded image -> `None`.
 
-A repeated identifier does not re-enter the provider or decoder until `clear()`. `size()` therefore counts cached failures as well as successes. `clear()` drops cache entries but does not invalidate `Image` handles already copied out. Provider/allocation exceptions propagate rather than being converted to an `ImageLoadError`.
+A repeated identifier does not re-enter the provider or decoder until `clear()`. `size()` therefore counts cached failures as well as successes and performs no provider/decode work. `clear()` drops only this cache's entries; it does not affect the provider or invalidate `Image` handles already copied out, because those handles retain shared immutable decoded backing. Provider/allocation exceptions propagate rather than being converted to an `ImageLoadError` and are not cached as terminal outcomes. Cache mutation is unsynchronized UI/resource-preparation work.
 
 ### SVG icons
 
@@ -385,7 +389,9 @@ A repeated identifier does not re-enter the provider or decoder until `clear()`.
 
 V1 SVG resources are static and self-contained: NativeUI does not fetch external file/network resources or drive SVG animation. Drawing uses a centered contain-style fit, preserves intrinsic aspect ratio, clips to the requested destination and treats non-positive/non-finite destinations as no-ops.
 
-`SvgCache` has the same lifetime and caching rules as `ImageCache`: it borrows its provider, caches successes and failures per exact identifier, maps provider absence to `NotFound`, maps returned-but-unusable bytes (including empty bytes) to `ParseFailed`, counts all entries in `size()`, and retries only after `clear()`. Existing copied `SvgIcon` handles keep the parsed DOM alive after cache clear/destruction.
+`SvgCache` has the same lifetime and ownership shape as `ImageCache`: it borrows its provider, is non-copyable/movable, and leaves the moved-from cache empty/unbound. `load()` borrows the identifier for the call, copies it as the exact cache key, performs no normalization/fallback lookup, maps provider absence to `NotFound`, and maps returned-but-unusable bytes (including empty bytes) to `ParseFailed`. Successes and failures are both cached; `size()` counts both, and a later provider/parser retry happens only after `clear()`.
+
+Provider calls and SVG parsing are synchronous UI/resource-preparation work. Provider/allocation/parser exceptions that escape the normal parse-result path propagate and are not converted into cached `SvgLoadError` values. `clear()` or cache destruction releases only cache ownership; existing copied `SvgIcon` handles keep the parsed DOM alive through shared immutable backing.
 
 ### Resource-loading example
 

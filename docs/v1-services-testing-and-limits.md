@@ -8,9 +8,11 @@ NativeUI separates the generic owned-byte provider seam from its zero-copy embed
 
 ### ResourceProvider: owned-byte boundary
 
-[`ResourceProvider`](../include/nativeui/resource.hpp) is the polymorphic seam for APIs that require an independently owned encoded payload. `load(resource_id)` performs an application-defined exact lookup and returns an owned `std::vector<std::byte>` or `std::nullopt` when unavailable. A provider may source bytes from files, bundles, archives, generated memory or another backend.
+[`ResourceProvider`](../include/nativeui/resource.hpp) is the polymorphic seam for APIs that require an independently owned encoded payload. `load(resource_id)` receives a borrowed `std::string_view` valid only for the synchronous call. The base interface itself performs no normalization, case folding, path decoding, fallback search, cache lookup or asynchronous scheduling; those policies belong to a concrete provider when needed.
 
-The base interface intentionally does not promise allocation-free or real-time behavior. Implementations may allocate, perform I/O or synchronize, so provider loading belongs to resource-preparation/UI-side code unless the concrete provider explicitly documents a stronger contract.
+A successful call returns an owned `std::vector<std::byte>` whose lifetime is independent of the provider after return. A **present empty resource** is an engaged empty vector; `std::nullopt` means that this provider cannot supply the requested identifier. This distinction is preserved by the ResourceManager adapter and by higher-level image/SVG caches.
+
+The base interface intentionally does not promise allocation-free, non-throwing or real-time behavior. Implementations may allocate, perform I/O, synchronize or propagate ordinary C++ exceptions. `std::nullopt` is therefore not a generic exception/error translation. Provider loading belongs to resource-preparation/UI-side code unless the concrete provider explicitly documents and proves a stronger contract. The base class adds no cross-thread synchronization and defines no retry/cancellation/reentrancy protocol because `load()` is synchronous and callback-free at this layer.
 
 ### EmbeddedResourceEntry: borrowed table storage
 
