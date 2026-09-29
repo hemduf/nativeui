@@ -148,7 +148,8 @@ void move_and_noise_copy_failure_contracts() {
                   ui::ScalarChannel::Red);
         NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(noise_source));
 
-        moved_noise = std::move(moved_noise);
+        auto* self = &moved_noise;
+        moved_noise = std::move(*self);
         NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(moved_noise));
         NUI_CHECK(ui::detail::ScalarSourceAccess::constant_value(moved_noise) ==
                   0.0f);
