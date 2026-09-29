@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>NativeUI</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0b0b0d;
+    overflow: hidden;
+    touch-action: none;
+  }
+  /* The first top-level Pugl view is the standalone app surface. Additional
+     top-level views and embedded views keep their own Pugl-managed geometry
+     instead of being stacked over the primary surface. */
+  canvas.nativeui-primary-surface {
+    display: block;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+  }
+</style>
+</head>
+<body>
+<script>
+  (() => {
+    const refreshPrimarySurface = () => {
+      const surfaces = Array.from(document.body.children).filter(
+        (element) => element.tagName === 'CANVAS' && element.dataset.puglView);
+      surfaces.forEach((surface, index) => {
+        surface.classList.toggle('nativeui-primary-surface', index === 0);
+      });
+    };
+
+    const observer = new MutationObserver(refreshPrimarySurface);
+    observer.observe(document.body, {childList: true});
+    refreshPrimarySurface();
+  })();
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

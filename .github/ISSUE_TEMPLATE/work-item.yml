@@ -1,0 +1,141 @@
+name: NativeUI work item
+description: Engineering ticket for NativeUI
+title: "Txxx — "
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options: [Feature, Bug, Platform, Infrastructure, Refactor, Research]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options: [P0, P1, P2]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Milestone
+      options: [M0, M1, M2, M3, M4, M5, M6, M7, M8, Backlog]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      options: [Ready, Doing, Blocked]
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Explicit ticket dependencies, or None.
+      value: None
+    validations:
+      required: true
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: Observable result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: architectural_context
+    attributes:
+      label: Architectural context
+      description: Affected subsystem boundaries, authoritative design/docs, and existing state this work composes with.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants
+      description: MUST/MUST NOT behavior, ownership, threading, transaction, failure or isolation rules that cannot be silently changed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Included work, constraints and exclusions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Explicit neighboring work this ticket must not absorb.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Testable outcomes, including failure recovery when relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required tests
+      description: Targeted tests, full relevant CTest suite, feature self-test and platform/fault checks as applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation / scheduling note
+      description: Technical direction or blocker, when useful.
+
+  - type: textarea
+    id: planning_gate
+    attributes:
+      label: Planning gate
+      description: Before Status is Ready/Doing, the planner must resolve dependencies, architecture decisions and open questions.
+      value: |
+        - **Planner verdict:** NEEDS_PLANNING
+        - **Dependency check:** NOT_VERIFIED
+        - **Open questions:** list unresolved questions, or None
+        - **Architecture decisions required:** list unresolved decisions, or None
+        - **Scope-change rule:** contradictions or missing decisions return NEEDS_DECISION; the implementer must not resolve them silently.
+    validations:
+      required: true
+
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion protocol
+      value: |
+        - [ ] Acceptance criteria and required tests pass.
+        - [ ] Record targeted and full relevant local test results; run focused platform checks when needed.
+        - [ ] Complete the CODE_REVIEW.md record and resolve Blocking/Important findings.
+        - [ ] Update issue status, labels and milestone; close after merge.
+    validations:
+      required: true
+
+  - type: textarea
+    id: review_record
+    attributes:
+      label: Mandatory code review record
+      description: Before closing, replace this note with the complete applicable record from CODE_REVIEW.md.
+      value: Pending final review.
+    validations:
+      required: true
