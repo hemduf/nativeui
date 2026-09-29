@@ -3,6 +3,7 @@
 #include <nativeui/scalar_source.hpp>
 #include <nativeui/shader.hpp>
 
+#include "src/detail/image_texture_test_seams.hpp"
 #include "src/detail/scalar_source_access.hpp"
 #include "src/detail/shader_brush_access.hpp"
 #include "src/detail/shader_test_seams.hpp"
@@ -243,6 +244,55 @@ void brush_sampling_contract() {
     }
 }
 
+void source_construction_side_effect_contract() {
+    const auto image = ui::Image::decode(kAlphaPayloadPng);
+    check(image.valid(), "ScalarSource side-effect fixture did not decode");
+
+    ui::ImageTexture texture{
+        image,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 16.0f, 16.0f}};
+    texture.set_interpretation(ui::TextureInterpretation::Data);
+    const ui::Brush data_brush{texture};
+
+    const auto decode_before =
+        ui::detail::image_decode_call_count_for_test();
+    const auto materialization_before =
+        ui::detail::image_texture_materialization_call_count_for_test();
+    const auto compile_before =
+        ui::detail::shader_compile_call_count_for_test();
+
+    const auto data_scalar =
+        ui::ScalarSource::from_brush(data_brush, ui::ScalarChannel::Red);
+    check(ui::detail::ScalarSourceAccess::brush(data_scalar) != nullptr,
+          "ScalarSource lost ImageTexture Brush storage");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before,
+          "from_brush decoded Image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              materialization_before,
+          "from_brush materialized an ImageTexture");
+    check(ui::detail::shader_compile_call_count_for_test() == compile_before,
+          "from_brush compiled shader source");
+
+    const auto noise = ui::NoiseSource::create(
+        ui::NoiseType::Perlin,
+        {.feature_size = 28.0f, .seed = 0x2468ace0u});
+    check(noise.ok(), "ScalarSource side-effect noise setup failed");
+    const auto after_noise_compile =
+        ui::detail::shader_compile_call_count_for_test();
+    const auto noise_scalar = ui::ScalarSource::from_noise(noise.noise);
+    check(ui::detail::ScalarSourceAccess::brush(noise_scalar) != nullptr,
+          "ScalarSource lost NoiseSource storage");
+    check(ui::detail::shader_compile_call_count_for_test() ==
+              after_noise_compile,
+          "from_noise compiled source");
+    check(ui::detail::image_decode_call_count_for_test() == decode_before,
+          "from_noise decoded Image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              materialization_before,
+          "from_noise materialized ImageTexture state");
+}
+
 void data_texture_channel_contract() {
     const auto image = ui::Image::decode(kAlphaPayloadPng);
     check(image.valid(), "ScalarSource Data texture fixture did not decode");
@@ -352,6 +402,46 @@ void noise_sampling_contract() {
         render_probe(expected, 8, 6));
 }
 
+void two_renderer_isolation_contract() {
+    const auto first = ui::ScalarSource::from_brush(
+        ui::Brush{ui::Color{0.8f, 0.1f, 0.1f, 1.0f}},
+        ui::ScalarChannel::Red);
+    const auto second = ui::ScalarSource::from_brush(
+        ui::Brush{ui::Color{0.1f, 0.7f, 0.1f, 1.0f}},
+        ui::ScalarChannel::Green);
+    const auto first_brush = scalar_probe(first);
+    const auto second_brush = scalar_probe(second);
+
+    auto first_tree = ui::UI{ui::Canvas{
+        16.0f, 16.0f,
+        [first_brush](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 16.0f, 16.0f}, first_brush);
+        }}};
+    auto second_tree = ui::UI{ui::Canvas{
+        16.0f, 16.0f,
+        [second_brush](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 16.0f, 16.0f}, second_brush);
+        }}};
+
+    ui::HeadlessRenderer second_renderer{{16.0f, 16.0f}, 1.0f};
+    {
+        ui::HeadlessRenderer first_renderer{{16.0f, 16.0f}, 1.0f};
+        check(first_renderer.render(first_tree),
+              "first ScalarSource renderer failed");
+        const auto first_pixel = first_renderer.pixel(8, 8);
+        check(first_pixel.r > 150,
+              "first ScalarSource renderer produced the wrong channel");
+    }
+
+    check(second_renderer.render(second_tree),
+          "second ScalarSource renderer failed after first destruction");
+    const auto before = second_renderer.rgba_pixels();
+    check(second_renderer.render(second_tree),
+          "second ScalarSource renderer failed on repeat");
+    check(second_renderer.rgba_pixels() == before,
+          "second ScalarSource renderer changed after first destruction");
+}
+
 void independent_source_contract() {
     auto first = ui::ScalarSource::from_brush(
         ui::Brush{ui::Color{0.8f, 0.1f, 0.1f, 1.0f}},
@@ -376,9 +466,11 @@ void independent_source_contract() {
 int main() {
     source_creation_contract();
     brush_sampling_contract();
+    source_construction_side_effect_contract();
     data_texture_channel_contract();
     snapshot_lifetime_contract();
     noise_sampling_contract();
     independent_source_contract();
+    two_renderer_isolation_contract();
     return 0;
 }
