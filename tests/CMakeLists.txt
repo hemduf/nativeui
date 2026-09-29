@@ -546,6 +546,19 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_fractal_noise_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_fractal_noise_gpu_reference_tests)
 
+    add_executable(nativeui_scalar_source_gpu_reference_tests
+      ${PROJECT_SOURCE_DIR}/tests/scalar_source_gpu_reference_tests.cpp
+    )
+    target_include_directories(nativeui_scalar_source_gpu_reference_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_scalar_source_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.scalar-source-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_scalar_source_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_scalar_source_gpu_reference_tests)
+
     add_executable(nativeui_t095_scene_gpu_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_gpu_tests.cpp)
     target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
       "${PROJECT_SOURCE_DIR}"
@@ -645,6 +658,8 @@ if(NATIVEUI_BUILD_TESTS)
         COMMAND nativeui_t091_worley_noise_gpu_reference_tests)
       add_test(NAME nativeui_fractal_noise_gpu_reference_tests
         COMMAND nativeui_fractal_noise_gpu_reference_tests)
+      add_test(NAME nativeui_scalar_source_gpu_reference_tests
+        COMMAND nativeui_scalar_source_gpu_reference_tests)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       add_test(NAME nativeui_t096_scene_gpu_tests COMMAND nativeui_t096_scene_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
@@ -657,6 +672,7 @@ if(NATIVEUI_BUILD_TESTS)
         nativeui_t090_simplex_noise_gpu_reference_tests
         nativeui_t091_worley_noise_gpu_reference_tests
         nativeui_fractal_noise_gpu_reference_tests
+        nativeui_scalar_source_gpu_reference_tests
         nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
         TIMEOUT 60
