@@ -60,41 +60,27 @@ public:
             return {found->second->resource, true, true};
         }
 
-        std::shared_ptr<const Resource> resource =
-            std::invoke(std::forward<Factory>(factory));
-        if (!resource) return {};
+        return acquire_miss(
+            accounted_bytes,
+            [&key] { return Key{key}; },
+            std::forward<Factory>(factory));
+    }
 
-        if (!can_retain(accounted_bytes) ||
-            !can_make_room(accounted_bytes)) {
-            return {std::move(resource), false, false};
+    template <class LookupKey, class KeyFactory, class Factory>
+    [[nodiscard]] Acquisition acquire_with_lookup(
+        const LookupKey& lookup_key,
+        std::size_t accounted_bytes,
+        KeyFactory&& key_factory,
+        Factory&& factory) {
+        if (auto found = index_.find(lookup_key); found != index_.end()) {
+            entries_.splice(entries_.end(), entries_, found->second);
+            return {found->second->resource, true, true};
         }
 
-        // Resolve every victim through the index before publishing the
-        // candidate. Hash/equality and eviction-plan allocation may throw, but
-        // at this point the cache and its LRU order are still untouched.
-        auto eviction_plan = prepare_evictions(accounted_bytes);
-
-        // Stage every potentially-throwing insertion before evicting an
-        // existing entry. The constructor reserves one extra map slot, so this
-        // insertion cannot rehash and invalidate the prepared index iterators.
-        entries_.push_back(Entry{key, resource, accounted_bytes});
-        const auto inserted_entry = std::prev(entries_.end());
-        try {
-            const auto [position, inserted] =
-                index_.emplace(inserted_entry->key, inserted_entry);
-            if (!inserted) {
-                throw std::logic_error(
-                    "RenderResourceCache key equality changed during insertion");
-            }
-            (void)position;
-        } catch (...) {
-            entries_.erase(inserted_entry);
-            throw;
-        }
-
-        commit_evictions(eviction_plan);
-        retained_accounted_bytes_ += accounted_bytes;
-        return {std::move(resource), false, true};
+        return acquire_miss(
+            accounted_bytes,
+            std::forward<KeyFactory>(key_factory),
+            std::forward<Factory>(factory));
     }
 
     [[nodiscard]] std::size_t retained_entries() const noexcept {
@@ -121,6 +107,50 @@ private:
         std::shared_ptr<const Resource> resource;
         std::size_t accounted_bytes{};
     };
+
+    template <class KeyFactory, class Factory>
+    [[nodiscard]] Acquisition acquire_miss(
+        std::size_t accounted_bytes,
+        KeyFactory&& key_factory,
+        Factory&& factory) {
+        std::shared_ptr<const Resource> resource =
+            std::invoke(std::forward<Factory>(factory));
+        if (!resource) return {};
+
+        if (!can_retain(accounted_bytes) ||
+            !can_make_room(accounted_bytes)) {
+            return {std::move(resource), false, false};
+        }
+
+        // Resolve every victim before publishing the candidate. Hash/equality,
+        // eviction-plan allocation and owned-key construction may throw, but
+        // retained state and LRU order remain untouched until staging succeeds.
+        auto eviction_plan = prepare_evictions(accounted_bytes);
+        Key stored_key = std::invoke(std::forward<KeyFactory>(key_factory));
+
+        // Stage every potentially-throwing insertion before evicting an
+        // existing entry. The constructor reserves one extra map slot, so this
+        // insertion cannot rehash and invalidate prepared index iterators.
+        entries_.push_back(
+            Entry{std::move(stored_key), resource, accounted_bytes});
+        const auto inserted_entry = std::prev(entries_.end());
+        try {
+            const auto [position, inserted] =
+                index_.emplace(inserted_entry->key, inserted_entry);
+            if (!inserted) {
+                throw std::logic_error(
+                    "RenderResourceCache key equality changed during insertion");
+            }
+            (void)position;
+        } catch (...) {
+            entries_.erase(inserted_entry);
+            throw;
+        }
+
+        commit_evictions(eviction_plan);
+        retained_accounted_bytes_ += accounted_bytes;
+        return {std::move(resource), false, true};
+    }
 
     using EntryList = std::list<Entry>;
     using EntryIterator = typename EntryList::iterator;

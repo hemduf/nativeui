@@ -64,6 +64,7 @@ struct HookState {
     ui::detail::RenderResourceMaterializationContext resources;
     int shader_creates{};
     int effect_creates{};
+    int gradient_creates{};
 };
 
 [[nodiscard]] sk_sp<SkShader> cached_shader_hook(
@@ -91,6 +92,100 @@ struct HookState {
         });
     return acquisition ? std::move(acquisition.filter)
                        : sk_sp<SkImageFilter>{};
+}
+
+[[nodiscard]] sk_sp<SkShader> cached_linear_gradient_hook(
+    void* opaque,
+    const ui::LinearGradient& gradient) {
+    auto& state = *static_cast<HookState*>(opaque);
+    auto acquisition = state.resources.acquire_linear_gradient(
+        gradient,
+        [&] {
+            ++state.gradient_creates;
+            return ui::detail::GradientCacheAccess::materialize(gradient);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+void tree_painter_gradient_hits_after_warmup() {
+    const ui::Brush brush{ui::LinearGradient{
+        {0.0f, 0.0f},
+        {32.0f, 0.0f},
+        {
+            {0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {0.5f, {0.0f, 1.0f, 0.0f, 1.0f}},
+            {1.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
+        }}};
+
+    ui::Tree tree{ui::compile(ui::make_spec(ui::Canvas{
+        32.0f, 32.0f, [brush](ui::CanvasContext2D& g) {
+            g.fill_rect({0.0f, 0.0f, 32.0f, 32.0f}, brush);
+        }}))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+
+    const auto info = SkImageInfo::MakeN32Premul(32, 32);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(surface);
+
+    HookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state,
+        nullptr,
+        nullptr,
+        nullptr,
+        &cached_linear_gradient_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.gradient_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.gradient_creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+}
+
+void equivalent_gradient_descriptions_hit_semantically() {
+    const ui::LinearGradient first{
+        {1.0f, 2.0f},
+        {20.0f, 8.0f},
+        {
+            {0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            {0.4f, {0.4f, 0.5f, 0.6f, 0.8f}},
+            {1.0f, {0.7f, 0.8f, 0.9f, 1.0f}},
+        }};
+    const ui::LinearGradient same{
+        {1.0f, 2.0f},
+        {20.0f, 8.0f},
+        {
+            {0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            {0.4f, {0.4f, 0.5f, 0.6f, 0.8f}},
+            {1.0f, {0.7f, 0.8f, 0.9f, 1.0f}},
+        }};
+
+    ui::detail::RenderResourceMaterializationContext context;
+    int creates = 0;
+    auto first_resource = context.acquire_linear_gradient(first, [&] {
+        ++creates;
+        return ui::detail::GradientCacheAccess::materialize(first);
+    });
+    auto same_resource = context.acquire_linear_gradient(same, [&] {
+        ++creates;
+        return ui::detail::GradientCacheAccess::materialize(same);
+    });
+
+    NUI_CHECK(first_resource && same_resource);
+    NUI_CHECK(!first_resource.hit && same_resource.hit);
+    NUI_CHECK(first_resource.shader == same_resource.shader);
+    NUI_CHECK(creates == 1);
 }
 
 void tree_painter_runtime_shader_hits_after_warmup() {
@@ -677,6 +772,8 @@ void clear_is_instance_local() {
 } // namespace
 
 int main() {
+    tree_painter_gradient_hits_after_warmup();
+    equivalent_gradient_descriptions_hit_semantically();
     tree_painter_runtime_shader_hits_after_warmup();
     tree_painter_effect_hits_after_warmup();
     retained_hit_skips_backend_creation();

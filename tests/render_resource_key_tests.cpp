@@ -1,4 +1,5 @@
 #include "src/detail/effect_cache_key.hpp"
+#include "src/detail/gradient_cache_key.hpp"
 #include "src/detail/image_texture_cache_key.hpp"
 #include "src/detail/shader_brush_access.hpp"
 #include "test_support.hpp"
@@ -266,6 +267,77 @@ void invalid_transform_is_never_a_retained_key() {
     NUI_CHECK(!ui::detail::image_texture_cache_key(texture));
 }
 
+void gradient_key_semantics_are_complete_and_hash_consistent() {
+    using ui::detail::LinearGradientCacheKey;
+    using ui::detail::LinearGradientCacheKeyEqual;
+    using ui::detail::LinearGradientCacheKeyHash;
+    using ui::detail::RadialGradientCacheKey;
+    using ui::detail::RadialGradientCacheKeyEqual;
+    using ui::detail::RadialGradientCacheKeyHash;
+
+    const ui::LinearGradient linear_a{
+        {0.0f, -0.0f},
+        {20.0f, 4.0f},
+        {
+            {0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            {1.0f, {0.8f, 0.7f, 0.6f, 1.0f}},
+        }};
+    const ui::LinearGradient linear_b{
+        {-0.0f, 0.0f},
+        {20.0f, 4.0f},
+        {
+            {-0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            {1.0f, {0.8f, 0.7f, 0.6f, 1.0f}},
+        }};
+    const LinearGradientCacheKey linear_key_a{linear_a};
+    const LinearGradientCacheKey linear_key_b{linear_b};
+    NUI_CHECK(LinearGradientCacheKeyEqual{}(linear_key_a, linear_key_b));
+    NUI_CHECK(
+        LinearGradientCacheKeyHash{}(linear_key_a) ==
+        LinearGradientCacheKeyHash{}(linear_key_b));
+
+    const ui::LinearGradient linear_changed{
+        {0.0f, 0.0f},
+        {21.0f, 4.0f},
+        {
+            {0.0f, {0.1f, 0.2f, 0.3f, 1.0f}},
+            {1.0f, {0.8f, 0.7f, 0.6f, 1.0f}},
+        }};
+    NUI_CHECK(!LinearGradientCacheKeyEqual{}(
+        linear_key_a, LinearGradientCacheKey{linear_changed}));
+
+    const ui::RadialGradient radial_a{
+        {3.0f, -0.0f},
+        8.0f,
+        {
+            {0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {1.0f, {0.0f, 0.0f, 1.0f, 0.0f}},
+        }};
+    const ui::RadialGradient radial_b{
+        {3.0f, 0.0f},
+        8.0f,
+        {
+            {-0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {1.0f, {0.0f, 0.0f, 1.0f, -0.0f}},
+        }};
+    const RadialGradientCacheKey radial_key_a{radial_a};
+    const RadialGradientCacheKey radial_key_b{radial_b};
+    NUI_CHECK(RadialGradientCacheKeyEqual{}(radial_key_a, radial_key_b));
+    NUI_CHECK(
+        RadialGradientCacheKeyHash{}(radial_key_a) ==
+        RadialGradientCacheKeyHash{}(radial_key_b));
+
+    const ui::RadialGradient radial_changed{
+        {3.0f, 0.0f},
+        9.0f,
+        {
+            {0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {1.0f, {0.0f, 0.0f, 1.0f, 0.0f}},
+        }};
+    NUI_CHECK(!RadialGradientCacheKeyEqual{}(
+        radial_key_a, RadialGradientCacheKey{radial_changed}));
+}
+
 void effect_key_distinguishes_all_material_fields() {
     using ui::detail::EffectCacheAccess;
     using ui::detail::EffectCacheKeyHash;
@@ -328,6 +400,7 @@ int main() {
     shader_snapshot_semantics_are_stable();
     nested_shader_snapshot_semantics_do_not_flatten_on_lookup();
     invalid_transform_is_never_a_retained_key();
+    gradient_key_semantics_are_complete_and_hash_consistent();
     effect_key_distinguishes_all_material_fields();
     return 0;
 }

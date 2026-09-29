@@ -108,6 +108,36 @@ private:
                        : sk_sp<SkImageFilter>{};
 }
 
+[[nodiscard]] sk_sp<SkShader> materialize_cached_linear_gradient(
+    void* state,
+    const LinearGradient& gradient) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::GradientCacheAccess::materialize(gradient);
+
+    auto acquisition = resources->acquire_linear_gradient(
+        gradient,
+        [&gradient] {
+            return detail::GradientCacheAccess::materialize(gradient);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] sk_sp<SkShader> materialize_cached_radial_gradient(
+    void* state,
+    const RadialGradient& gradient) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::GradientCacheAccess::materialize(gradient);
+
+    auto acquisition = resources->acquire_radial_gradient(
+        gradient,
+        [&gradient] {
+            return detail::GradientCacheAccess::materialize(gradient);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
 }
@@ -523,7 +553,9 @@ public:
                 &render_resources_,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
-                &materialize_cached_effect};
+                &materialize_cached_effect,
+                &materialize_cached_linear_gradient,
+                &materialize_cached_radial_gradient};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -630,7 +662,9 @@ public:
                 &render_resources_,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
-                &materialize_cached_effect};
+                &materialize_cached_effect,
+                &materialize_cached_linear_gradient,
+                &materialize_cached_radial_gradient};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {

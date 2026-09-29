@@ -20,6 +20,10 @@ struct PainterPrivateHooks final {
         const std::shared_ptr<const ShaderBrushSnapshot>& snapshot){};
     sk_sp<SkImageFilter> (*materialize_effect_filter)(
         void* state, const Effect& effect){};
+    sk_sp<SkShader> (*materialize_linear_gradient)(
+        void* state, const LinearGradient& gradient){};
+    sk_sp<SkShader> (*materialize_radial_gradient)(
+        void* state, const RadialGradient& gradient){};
 };
 
 } // namespace ui::detail

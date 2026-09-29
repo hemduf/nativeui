@@ -1,8 +1,59 @@
 #include <nativeui/paint.hpp>
 
+#include "detail/gradient_cache_key.hpp"
 #include "detail/painter_private_hooks.hpp"
 
 namespace ui {
+
+void Painter::apply_fill_source(
+    SkPaint& paint,
+    const LinearGradient& gradient) {
+    const auto& stops = gradient.stops();
+    if (stops.empty()) {
+        paint.setColor4f(to_sk_color(Color{}));
+        return;
+    }
+    if (!valid_gradient_stops(stops)) {
+        paint.setColor4f(to_sk_color(stops.front().color));
+        return;
+    }
+
+    auto shader =
+        private_hooks_ && private_hooks_->materialize_linear_gradient
+        ? private_hooks_->materialize_linear_gradient(
+              private_hooks_->state, gradient)
+        : detail::GradientCacheAccess::materialize(gradient);
+    if (shader) {
+        paint.setShader(std::move(shader));
+    } else {
+        paint.setColor4f(to_sk_color(stops.front().color));
+    }
+}
+
+void Painter::apply_fill_source(
+    SkPaint& paint,
+    const RadialGradient& gradient) {
+    const auto& stops = gradient.stops();
+    if (stops.empty()) {
+        paint.setColor4f(to_sk_color(Color{}));
+        return;
+    }
+    if (!valid_gradient_stops(stops)) {
+        paint.setColor4f(to_sk_color(stops.front().color));
+        return;
+    }
+
+    auto shader =
+        private_hooks_ && private_hooks_->materialize_radial_gradient
+        ? private_hooks_->materialize_radial_gradient(
+              private_hooks_->state, gradient)
+        : detail::GradientCacheAccess::materialize(gradient);
+    if (shader) {
+        paint.setShader(std::move(shader));
+    } else {
+        paint.setColor4f(to_sk_color(stops.front().color));
+    }
+}
 
 sk_sp<SkImageFilter> Painter::materialize_effect_filter(
     const Effect& effect) {

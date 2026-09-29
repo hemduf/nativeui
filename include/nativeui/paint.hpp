@@ -784,25 +784,9 @@ private:
         paint.setColor4f(to_sk_color(color));
     }
 
-    static void apply_fill_source(SkPaint& paint, const LinearGradient& gradient) {
-        const auto start = gradient.start();
-        const auto end = gradient.end();
-        const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
-        apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
-            return SkShaders::LinearGradient(points, sk_gradient);
-        });
-    }
+    void apply_fill_source(SkPaint& paint, const LinearGradient& gradient);
 
-    static void apply_fill_source(SkPaint& paint, const RadialGradient& gradient) {
-        const auto center = gradient.center();
-        const SkPoint sk_center{center.x, center.y};
-        apply_gradient(paint, gradient.stops(), [sk_center, &gradient](const SkGradient& sk_gradient) {
-            if (!(gradient.radius() > 0.0f) || !std::isfinite(gradient.radius())) {
-                return sk_sp<SkShader>{};
-            }
-            return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
-        });
-    }
+    void apply_fill_source(SkPaint& paint, const RadialGradient& gradient);
 
     void apply_fill_source(SkPaint& paint, const ImageTexture& texture);
 
@@ -819,7 +803,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const LinearGradient& gradient,
+    [[nodiscard]] SkPaint make_fill_paint(const LinearGradient& gradient,
                                                  PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -832,7 +816,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const RadialGradient& gradient,
+    [[nodiscard]] SkPaint make_fill_paint(const RadialGradient& gradient,
                                                  PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);

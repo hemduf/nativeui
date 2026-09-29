@@ -1,6 +1,7 @@
 #pragma once
 
 #include "effect_cache_key.hpp"
+#include "gradient_cache_key.hpp"
 #include "image_texture_cache_key.hpp"
 #include "render_resource_accounting.hpp"
 #include "render_resource_cache.hpp"
@@ -79,6 +80,54 @@ public:
     }
 
     template <class Factory>
+    [[nodiscard]] ImageTextureAcquisition acquire_linear_gradient(
+        const LinearGradient& gradient,
+        Factory&& factory) {
+        if (!GradientCacheAccess::cacheable(gradient)) {
+            auto shader = std::forward<Factory>(factory)();
+            return {std::move(shader), {}, false, false};
+        }
+
+        const LinearGradientCacheLookup lookup{&gradient};
+        auto acquisition = resources_.acquire_with_lookup(
+            lookup,
+            0U,
+            [&gradient] {
+                return RenderResourceKey{LinearGradientCacheKey{gradient}};
+            },
+            [&factory]() -> std::shared_ptr<CachedResource> {
+                auto shader = std::forward<Factory>(factory)();
+                if (!shader) return {};
+                return std::make_shared<CachedResource>(std::move(shader));
+            });
+        return shader_acquisition(std::move(acquisition));
+    }
+
+    template <class Factory>
+    [[nodiscard]] ImageTextureAcquisition acquire_radial_gradient(
+        const RadialGradient& gradient,
+        Factory&& factory) {
+        if (!GradientCacheAccess::cacheable(gradient)) {
+            auto shader = std::forward<Factory>(factory)();
+            return {std::move(shader), {}, false, false};
+        }
+
+        const RadialGradientCacheLookup lookup{&gradient};
+        auto acquisition = resources_.acquire_with_lookup(
+            lookup,
+            0U,
+            [&gradient] {
+                return RenderResourceKey{RadialGradientCacheKey{gradient}};
+            },
+            [&factory]() -> std::shared_ptr<CachedResource> {
+                auto shader = std::forward<Factory>(factory)();
+                if (!shader) return {};
+                return std::make_shared<CachedResource>(std::move(shader));
+            });
+        return shader_acquisition(std::move(acquisition));
+    }
+
+    template <class Factory>
     [[nodiscard]] ImageTextureAcquisition acquire_image_texture(
         const ImageTexture& texture,
         Factory&& factory) {
@@ -96,19 +145,7 @@ public:
                 if (!shader) return {};
                 return std::make_shared<CachedResource>(std::move(shader));
             });
-        if (!acquisition) return {};
-
-        retain_frame_resource(acquisition.resource, acquisition.retained);
-        const auto* shader =
-            std::get_if<sk_sp<SkShader>>(acquisition.resource.get());
-        if (!shader || !*shader) return {};
-        std::shared_ptr<const sk_sp<SkShader>> typed_lease{
-            acquisition.resource, shader};
-        return {
-            *shader,
-            std::move(typed_lease),
-            acquisition.hit,
-            acquisition.retained};
+        return shader_acquisition(std::move(acquisition));
     }
 
     template <class Factory>
@@ -128,19 +165,7 @@ public:
                 if (!shader) return {};
                 return std::make_shared<CachedResource>(std::move(shader));
             });
-        if (!acquisition) return {};
-
-        retain_frame_resource(acquisition.resource, acquisition.retained);
-        const auto* shader =
-            std::get_if<sk_sp<SkShader>>(acquisition.resource.get());
-        if (!shader || !*shader) return {};
-        std::shared_ptr<const sk_sp<SkShader>> typed_lease{
-            acquisition.resource, shader};
-        return {
-            *shader,
-            std::move(typed_lease),
-            acquisition.hit,
-            acquisition.retained};
+        return shader_acquisition(std::move(acquisition));
     }
 
     template <class Factory>
@@ -193,10 +218,16 @@ private:
         std::shared_ptr<const ShaderBrushSnapshot> snapshot;
     };
 
-    using RenderResourceKey =
-        std::variant<ImageTextureCacheKey, RuntimeShaderKey, EffectCacheKey>;
+    using RenderResourceKey = std::variant<
+        ImageTextureCacheKey,
+        RuntimeShaderKey,
+        EffectCacheKey,
+        LinearGradientCacheKey,
+        RadialGradientCacheKey>;
 
     struct RenderResourceKeyHash final {
+        using is_transparent = void;
+
         [[nodiscard]] std::size_t operator()(
             const RenderResourceKey& key) const noexcept {
             return std::visit(
@@ -206,15 +237,31 @@ private:
                         return ImageTextureCacheKeyHash{}(value);
                     } else if constexpr (std::is_same_v<Value, RuntimeShaderKey>) {
                         return ShaderBrushAccess::semantic_hash(value.snapshot);
-                    } else {
+                    } else if constexpr (std::is_same_v<Value, EffectCacheKey>) {
                         return EffectCacheKeyHash{}(value);
+                    } else if constexpr (std::is_same_v<Value, LinearGradientCacheKey>) {
+                        return LinearGradientCacheKeyHash{}(value);
+                    } else {
+                        return RadialGradientCacheKeyHash{}(value);
                     }
                 },
                 key);
         }
+
+        [[nodiscard]] std::size_t operator()(
+            LinearGradientCacheLookup lookup) const noexcept {
+            return LinearGradientCacheKeyHash{}(lookup);
+        }
+
+        [[nodiscard]] std::size_t operator()(
+            RadialGradientCacheLookup lookup) const noexcept {
+            return RadialGradientCacheKeyHash{}(lookup);
+        }
     };
 
     struct RenderResourceKeyEqual final {
+        using is_transparent = void;
+
         [[nodiscard]] bool operator()(
             const RenderResourceKey& a,
             const RenderResourceKey& b) const noexcept {
@@ -230,13 +277,71 @@ private:
                     } else if constexpr (std::is_same_v<Left, RuntimeShaderKey>) {
                         return ShaderBrushAccess::semantic_equal(
                             left.snapshot, right.snapshot);
-                    } else {
+                    } else if constexpr (std::is_same_v<Left, EffectCacheKey>) {
                         return left == right;
+                    } else if constexpr (std::is_same_v<Left, LinearGradientCacheKey>) {
+                        return LinearGradientCacheKeyEqual{}(left, right);
+                    } else {
+                        return RadialGradientCacheKeyEqual{}(left, right);
                     }
                 },
                 a, b);
         }
+
+        [[nodiscard]] bool operator()(
+            const RenderResourceKey& key,
+            LinearGradientCacheLookup lookup) const noexcept {
+            const auto* gradient =
+                std::get_if<LinearGradientCacheKey>(&key);
+            return gradient &&
+                   LinearGradientCacheKeyEqual{}(*gradient, lookup);
+        }
+
+        [[nodiscard]] bool operator()(
+            LinearGradientCacheLookup lookup,
+            const RenderResourceKey& key) const noexcept {
+            return (*this)(key, lookup);
+        }
+
+        [[nodiscard]] bool operator()(
+            const RenderResourceKey& key,
+            RadialGradientCacheLookup lookup) const noexcept {
+            const auto* gradient =
+                std::get_if<RadialGradientCacheKey>(&key);
+            return gradient &&
+                   RadialGradientCacheKeyEqual{}(*gradient, lookup);
+        }
+
+        [[nodiscard]] bool operator()(
+            RadialGradientCacheLookup lookup,
+            const RenderResourceKey& key) const noexcept {
+            return (*this)(key, lookup);
+        }
     };
+
+    using ResourceCache = RenderResourceCache<
+        RenderResourceKey,
+        CachedResource,
+        RenderResourceKeyHash,
+        RenderResourceKeyEqual>;
+
+    [[nodiscard]] ImageTextureAcquisition shader_acquisition(
+        ResourceCache::Acquisition acquisition) {
+        if (!acquisition) return {};
+
+        retain_frame_resource(acquisition.resource, acquisition.retained);
+        const auto* shader =
+            std::get_if<sk_sp<SkShader>>(acquisition.resource.get());
+        if (!shader || !*shader) return {};
+        std::shared_ptr<const sk_sp<SkShader>> typed_lease{
+            acquisition.resource, shader};
+        return {
+            *shader,
+            std::move(typed_lease),
+            acquisition.hit,
+            acquisition.retained};
+    }
+
     void retain_frame_resource(
         const std::shared_ptr<const CachedResource>& resource,
         bool retained) {
@@ -273,12 +378,6 @@ private:
         std::vector<std::shared_ptr<const CachedResource>>{}
             .swap(transient_frame_leases_);
     }
-    using ResourceCache = RenderResourceCache<
-        RenderResourceKey,
-        CachedResource,
-        RenderResourceKeyHash,
-        RenderResourceKeyEqual>;
-
     ResourceCache resources_;
     std::array<std::shared_ptr<const CachedResource>,
                kMaxRetainedEntries> retained_frame_leases_{};

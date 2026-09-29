@@ -71,6 +71,45 @@ constexpr std::array<std::byte, 76> kTinyRgbaPng{
         {0.0f, 0.0f, 16.0f, 16.0f}};
 }
 
+void linear_gradient_warm_hit_allocates_zero() {
+    const ui::LinearGradient gradient{
+        {0.0f, 0.0f},
+        {32.0f, 0.0f},
+        {
+            {0.0f, {1.0f, 0.0f, 0.0f, 1.0f}},
+            {0.5f, {0.0f, 1.0f, 0.0f, 1.0f}},
+            {1.0f, {0.0f, 0.0f, 1.0f, 1.0f}},
+        }};
+
+    ui::detail::RenderResourceMaterializationContext context;
+    std::size_t creates = 0;
+    auto factory = [&] {
+        ++creates;
+        return ui::detail::GradientCacheAccess::materialize(gradient);
+    };
+
+    context.begin_frame();
+    auto cold = context.acquire_linear_gradient(gradient, factory);
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    NUI_CHECK(creates == 1);
+    cold = {};
+    context.end_frame();
+
+    context.begin_frame();
+    ui::detail::RenderResourceMaterializationContext::ImageTextureAcquisition warm;
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.acquire_linear_gradient(gradient, factory);
+        allocations = guard.allocations();
+    }
+
+    NUI_CHECK(warm && warm.hit && warm.retained);
+    NUI_CHECK(allocations == 0);
+    NUI_CHECK(creates == 1);
+    context.end_frame();
+}
+
 void image_texture_warm_hit_allocates_zero() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -390,6 +429,7 @@ void allocation_guard_covers_aligned_nothrow_new() {
 
 int main() {
     allocation_guard_covers_aligned_nothrow_new();
+    linear_gradient_warm_hit_allocates_zero();
     image_texture_warm_hit_allocates_zero();
     runtime_shader_warm_hit_allocates_zero();
     effect_warm_hit_allocates_zero();
