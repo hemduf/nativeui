@@ -153,3 +153,64 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
         run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+
+  diagnose-main-windows-edit-session:
+    name: Main baseline edit-session diagnosis
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8c0f9f1264cfd026f023ebbb881baf7ab320166f
+      - name: Verify baseline head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "8c0f9f1264cfd026f023ebbb881baf7ab320166f"
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Configure baseline
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-main -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=OFF
+          -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
+      - name: Build baseline edit-session test
+        run: cmake --build build-main --config Release --target nativeui_edit_session_tests
+      - name: Reproduce baseline and record native exit codes
+        shell: pwsh
+        run: |
+          $codes = @()
+          1..5 | ForEach-Object {
+            & .\build-main\tests\nativeui_edit_session_tests.exe
+            $codes += $LASTEXITCODE
+          }
+          Write-Host ("baseline exit codes: " + ($codes -join ","))
+          if (($codes | Where-Object { $_ -ne 0 }).Count -eq 0) {
+            throw "main baseline did not reproduce the Windows edit-session failure"
+          }
+      - name: Instrument CHECK failure exit line
+        shell: pwsh
+        run: |
+          $path = 'tests/edit_session_tests.cpp'
+          $content = Get-Content $path -Raw
+          $content = $content.Replace('std::abort();', 'std::exit(__LINE__);')
+          Set-Content -Path $path -Value $content -NoNewline
+          cmake --build build-main --config Release --target nativeui_edit_session_tests
+          & .\build-main\tests\nativeui_edit_session_tests.exe
+          $code = $LASTEXITCODE
+          Write-Host "instrumented CHECK exit code: $code"
+          exit 0
+
