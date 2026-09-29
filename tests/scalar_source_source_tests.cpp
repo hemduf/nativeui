@@ -337,7 +337,7 @@ void data_texture_channel_contract() {
 }
 
 void snapshot_lifetime_contract() {
-    const auto scalar = [] {
+    const auto gradient_scalar = [] {
         ui::Brush temporary{ui::LinearGradient{
             {0.0f, 0.0f},
             {16.0f, 0.0f},
@@ -347,11 +347,69 @@ void snapshot_lifetime_contract() {
             std::move(temporary), ui::ScalarChannel::Red);
     }();
 
-    const auto brush = scalar_probe(scalar);
-    const auto left = render_probe(brush, 2, 8);
-    const auto right = render_probe(brush, 13, 8);
+    const auto gradient_brush = scalar_probe(gradient_scalar);
+    const auto left = render_probe(gradient_brush, 2, 8);
+    const auto right = render_probe(gradient_brush, 13, 8);
     check(right[0] > left[0] + 0.35f,
-          "ScalarSource did not retain the temporary Brush snapshot");
+          "ScalarSource did not retain the temporary gradient Brush");
+
+    const auto solid_scalar = [] {
+        return ui::ScalarSource::from_brush(
+            ui::Brush{ui::Color{0.15f, 0.65f, 0.25f, 1.0f}},
+            ui::ScalarChannel::Green);
+    }();
+    const auto solid_pixel =
+        render_probe(scalar_probe(solid_scalar), 8, 8);
+    check(solid_pixel[0] > 0.60f && solid_pixel[0] < 0.70f,
+          "ScalarSource did not retain the temporary solid Brush");
+
+    const auto shader_scalar = [] {
+        const auto program = compile_probe(R"(
+            half4 main(float2) {
+                return half4(0.1, 0.3, 0.8, 1.0);
+            }
+        )");
+        ui::ShaderInstance shader{program};
+        return ui::ScalarSource::from_brush(
+            ui::Brush{shader}, ui::ScalarChannel::Blue);
+    }();
+    const auto shader_pixel =
+        render_probe(scalar_probe(shader_scalar), 8, 8);
+    check(shader_pixel[0] > 0.75f && shader_pixel[0] < 0.85f,
+          "ScalarSource did not retain the temporary Shader Brush");
+
+    const auto image_scalar = [] {
+        const auto image = ui::Image::decode(kAlphaPayloadPng);
+        check(image.valid(), "ScalarSource lifetime Image fixture did not decode");
+        ui::ImageTexture texture{
+            image,
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            {0.0f, 0.0f, 16.0f, 16.0f}};
+        ui::TextureSampling nearest;
+        nearest.set_filter(ui::TextureFilter::Nearest)
+               .set_mipmap(ui::TextureMipmap::None);
+        texture.set_sampling(nearest)
+               .set_interpretation(ui::TextureInterpretation::Data);
+        return ui::ScalarSource::from_brush(
+            ui::Brush{texture}, ui::ScalarChannel::Red);
+    }();
+    const auto image_pixel =
+        render_probe(scalar_probe(image_scalar), 8, 8);
+    check(std::abs(image_pixel[0] - 200.0f / 255.0f) <= 0.005f,
+          "ScalarSource did not retain the temporary ImageTexture Brush");
+
+    const auto noise_scalar = [] {
+        const auto created = ui::NoiseSource::create(
+            ui::NoiseType::Value,
+            {.feature_size = 20.0f, .seed = 0x10203040u});
+        check(created.ok(), "ScalarSource lifetime NoiseSource setup failed");
+        return ui::ScalarSource::from_noise(created.noise);
+    }();
+    const auto noise_pixel =
+        render_probe(scalar_probe(noise_scalar), 7, 9);
+    check(std::isfinite(noise_pixel[0]) &&
+              noise_pixel[0] >= 0.0f && noise_pixel[0] <= 1.0f,
+          "ScalarSource did not retain the temporary NoiseSource");
 }
 
 void noise_sampling_contract() {
