@@ -40,6 +40,34 @@ foreach(_required IN ITEMS
   endif()
 endforeach()
 
+
+function(require_compiled_doc_snippet _name _anchor)
+  string(FIND "${_guide_source}" "${_anchor}" _anchor_pos)
+  if(_anchor_pos EQUAL -1)
+    message(FATAL_ERROR
+      "advanced-rendering documentation contract: missing snippet anchor '${_anchor}'")
+  endif()
+
+  string(SUBSTRING "${_guide_source}" ${_anchor_pos} -1 _guide_tail)
+  string(REGEX MATCH "~~~cpp\n([^~]*)~~~" _doc_block "${_guide_tail}")
+  if(_doc_block STREQUAL "")
+    message(FATAL_ERROR
+      "advanced-rendering documentation contract: missing C++ block for ${_name}")
+  endif()
+
+  set(_doc_snippet "${CMAKE_MATCH_1}")
+  string(FIND "${_snippet_source}" "${_doc_snippet}" _compiled_fixture_pos)
+  if(_compiled_fixture_pos EQUAL -1)
+    message(FATAL_ERROR
+      "advanced-rendering documentation contract: ${_name} snippet is not the compiled fixture")
+  endif()
+endfunction()
+
+require_compiled_doc_snippet("gradient" "Canonical gradient fill:")
+require_compiled_doc_snippet(
+  "runtime shader"
+  "Canonical compile, uniform binding and Brush snapshot:")
+
 foreach(_forbidden IN ITEMS
     "#include <include/core/"
     "#include <include/effects/"
