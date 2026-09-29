@@ -1,12 +1,13 @@
 #include <nativeui/edit.hpp>
 
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
-#define CHECK(condition) do { if (!(condition)) { std::cerr << "check failed: " << #condition << " at " << __LINE__ << "\n"; std::abort(); } } while (false)
+#define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "check failed: %s at %d\\n", #condition, __LINE__); std::fflush(stderr); std::_Exit(1); } } while (false)
 
 int main() {
     ui::State<float> value{0.5f};
