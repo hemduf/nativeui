@@ -1,0 +1,84 @@
+# CMake build trees and downloaded dependency caches
+/build*/
+/cmake-build*/
+/out/
+_deps/
+.cache/
+.cpm-cache/
+
+# Generated CMake files (including accidental in-source configuration)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+/Makefile
+/CPackConfig.cmake
+/CPackSourceConfig.cmake
+/_CPack_Packages/
+/cpm-package-lock.cmake
+
+# Compiled outputs, debug symbols and coverage
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.app/
+*.dSYM/
+*.pdb
+*.ilk
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# Generated test images; tests/golden/baselines/*.ppm stays versioned
+golden-artifacts/
+*.actual.ppm
+*.diff.ppm
+
+# Recoverable iteration snapshots are distributed separately from Git
+/nativeui_T*.zip
+
+# Ticket content is maintained in GitHub Issues; keep local recovery copies private
+/tickets/
+/TICKETS.md
+
+# Machine-specific CMake, IDE and editor state
+CMakeUserPresets.json
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+xcuserdata/
+*.xcuserstate
+*.swp
+*.swo
+*~
+
+# Local environment values; sanitized templates may be committed
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# macOS / Windows filesystem metadata
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+Thumbs.db
+Desktop.ini
