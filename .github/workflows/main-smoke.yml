@@ -1,0 +1,52 @@
+name: Main Smoke
+
+# Immediate feedback on integrated main. A newer merge replaces an obsolete run.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'CODE_REVIEW.md'
+      - 'THIRD_PARTY.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  core-smoke:
+    name: Linux Core smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: |
+            nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install core dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
+      - name: Configure Core
+        run: >-
+          cmake -S . -B build-smoke -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build-smoke
+      - name: Test unit suite
+        run: ctest --test-dir build-smoke --output-on-failure -L '^unit$'
