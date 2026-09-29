@@ -400,3 +400,7 @@ if(EMSCRIPTEN AND NATIVEUI_BUILD_WASM_SPIKE)
     nativeui_enable_project_warnings(nativeui_wasm_app)
   endif()
 endif()
+
+if(NATIVEUI_BUILD_TESTS)
+  add_subdirectory(tests/raster_cache)
+endif()
