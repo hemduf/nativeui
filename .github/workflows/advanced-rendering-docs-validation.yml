@@ -1,0 +1,49 @@
+name: Advanced Rendering Docs Validation
+
+on:
+  push:
+    branches:
+      - docs/advanced-rendering-foundations-guide
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  docs:
+    name: Compile snippets and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+      - name: Build documentation snippets
+        run: cmake --build build --target nativeui_advanced_rendering_docs_snippets
+      - name: Run documentation contracts
+        run: >-
+          ctest --test-dir build --output-on-failure
+          -R '^nativeui_advanced_rendering_docs_(contract|snippets)$'
