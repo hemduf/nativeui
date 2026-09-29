@@ -35,9 +35,9 @@ compile -> mount -> measure/layout -> activate_focus
 
 ## Measurement and layout
 
-`measure(constraints)` returns root `ChildMetrics` in logical units. `layout(viewport)` publishes retained logical geometry for a logical viewport size.
+`measure(constraints)` returns root `ChildMetrics` in logical units without publishing geometry. It can flush pending dynamic structure first, so the syntactically const call is not a pure read: factories/measurement callbacks may allocate or throw.
 
-Failed layout is transactional: partial geometry is rolled back and the tree remains dirty for a later retry.
+`layout(viewport)` publishes retained logical geometry for a logical-pixel viewport after dynamic reconciliation. An unchanged clean viewport is a no-op. Failed layout is transactional: partial geometry is rolled back to the last coherent publication, the tree remains dirty, and the exception propagates for a later retry.
 
 ## Invalidation and damage
 
@@ -50,23 +50,33 @@ Tree separates layout and paint dirtiness:
 
 `invalidate()` dirties the full viewport, `invalidate(rect)` dirties one root-logical region, and `invalidate_layout()` schedules retained layout work.
 
-A host can install `set_invalidation_callback()`. The region-aware overload receives logical rectangles, and already-dirty regions are replayed immediately when a callback is installed.
+A host can install `set_invalidation_callback()`. Tree owns the callback. Region-aware notification is synchronous on the UI thread when newly exposed logical damage is published; the zero-argument overload discards region detail. Already-dirty regions are replayed immediately during installation.
 
-## Input and focus
+Callbacks may re-enter Tree or throw. Dirty/layout state is recorded before notification, and a newly installed callback remains installed if replay throws. `invalidate(rect)` is bounded by the current viewport/DirtyRegion policy; `invalidate_layout()` also conservatively dirties the full viewport because bounds can move.
 
-`dispatch(event, platform)` routes a normalized `InputEvent` through the retained focus/hit-test/pointer-capture model. Dynamic reconciliation and availability/focus synchronization occur at safe checkpoints around outer dispatch.
+## Input, focus and reentrancy
 
-`focus_next()` / `focus_previous()` traverse eligible retained focus targets. Global command and KeyDown handlers are fallback seams after the focused retained route returns `Ignored`.
+`activate_focus(platform)` establishes the active interaction domain and borrows that PlatformServices object for the active interval. Keep it alive until deactivation/teardown and use the same logical platform domain for dispatch/focus calls.
 
-`cancel_pointer()` delivers PointerCancel to active capture owners and clears their capture/interaction state.
+`dispatch(event, platform)` routes normalized events through retained focus/hit-test/capture. Most events require an active Tree; `DropOffer` / `DropData` may target a mounted inactive Tree. Pointer positions use root-logical coordinates.
+
+Dispatch is reentrant. Each frame receives a Tree-local generation token so an older outer pointer event cannot erase a newer nested interaction that reuses the same `PointerId`. Exception paths restore dispatch bookkeeping before propagating; the outermost successful return reconciles queued dynamic/availability/focus work.
+
+The public pointer-interaction index/token/begin/end helpers expose this generation mechanism for advanced integrations/tests. They are allocation-free, track at most 16 IDs and normally should not replace normal `dispatch()`/capture lifecycle.
+
+Global Command/KeyDown handlers are owned fallback callbacks after focused retained routing returns `Ignored`. The KeyDown slot keeps the executing callable alive across reentrant replacement/clear.
+
+`cancel_pointer()` delivers PointerCancel and completes the cleanup it owns before an exception propagates.
 
 See [Input, focus and commands](v1-input-focus-and-commands.md) for the event-level contract.
 
 ## Painting
 
-`paint(SkCanvas&, platform)` performs the full retained traversal and ensures layout first. Failed paint restores pre-existing damage instead of publishing a falsely clean frame.
+`paint(SkCanvas&, platform)` borrows its targets synchronously, prepares pending structure/focus/layout and performs the full retained traversal. A successful frame consumes only damage that existed before the first paint callback; reentrant invalidation remains dirty for the next frame. A failing callback causes pre-existing damage to be merged back before the exception propagates.
 
-`paint_region(Painter&, platform, repaint_region)` performs a selective root-logical traversal for renderer-owned damage reconstruction and does not consume Tree's own dirty state.
+`paint_region(Painter&, platform, repaint_region)` is a renderer-facing selective traversal in root-logical coordinates. It may invoke the same application paint/layout machinery but **never consumes Tree dirty state**, so it must not be treated as acknowledgement of presentation.
+
+Both paths belong to the UI/render domain and are not audio-real-time safe.
 
 ## Theme and diagnostics
 
