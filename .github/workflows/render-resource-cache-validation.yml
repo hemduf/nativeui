@@ -119,6 +119,102 @@ jobs:
         if: runner.os != 'Linux'
         run: ctest --test-dir build --output-on-failure -C Release -LE '^package$'
 
+
+  windows-edit-session:
+    name: Windows EditSession diagnostic
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure focused unit test
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-edit -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+      - name: Build focused unit test
+        run: cmake --build build-edit --target nativeui_edit_session_tests
+      - name: Run focused unit test
+        run: ctest --test-dir build-edit -V -R '^nativeui_edit_session_tests    name: Linux ASan + UBSan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
+      - name: Configure
+        run: >-
+          cmake -S . -B build-sanitize -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_ENABLE_SANITIZERS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+      - name: Build
+        run: cmake --build build-sanitize
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
+        run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+
+  benchmark:
+    name: macOS render-resource benchmark
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Configure benchmark
+        run: >-
+          cmake -S tests/t051 -B build-benchmark -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_SOURCE_DIR=${{ github.workspace }}
+          -DNATIVEUI_BENCHMARK_COMMIT_SHA=${GITHUB_SHA}
+      - name: Build benchmark
+        run: cmake --build build-benchmark --target nativeui_render_resource_cache_benchmarks
+      - name: Run benchmark contract
+        run: >-
+          ctest --test-dir build-benchmark --output-on-failure
+          -R '^render_resource_cache\.benchmark$'
+
+
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
