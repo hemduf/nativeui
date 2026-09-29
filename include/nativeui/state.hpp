@@ -46,10 +46,6 @@ concept StateValue = requires(const T& lhs, const T& rhs) {
 template <detail::StateValue T>
 class Binding;
 
-/// Forward declaration for the generic UI edit-lifetime helper.
-template <detail::StateValue T>
-class EditSession;
-
 /// Observable retained-UI value with synchronous, deterministic notification.
 ///
 /// `T` must be equality comparable. State is UI/main-thread confined: it
@@ -331,9 +327,6 @@ private:
     std::shared_ptr<typename State<T>::Control> control_;
 
     friend class State<T>;
-    // EditSession inspects the shared notification transaction state so it can
-    // reject edits that cannot synchronously report a committed value.
-    friend class EditSession<T>;
 };
 
 template <detail::StateValue T>
