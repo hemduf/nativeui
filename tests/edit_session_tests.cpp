@@ -1,26 +1,14 @@
 #include <nativeui/edit.hpp>
 
-#include <cstdio>
 #include <cstdlib>
-#include <exception>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
-#define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "check failed: %s at %d\\n", #condition, __LINE__); std::fflush(stderr); std::_Exit(1); } } while (false)
+#define CHECK(condition) do { if (!(condition)) { std::cerr << "check failed: " << #condition << " at " << __LINE__ << "\n"; std::abort(); } } while (false)
 
 int main() {
-    std::set_terminate([] {
-        std::fprintf(stderr, "terminate-handler\\n");
-        std::fflush(stderr);
-        std::_Exit(86);
-    });
-    const auto phase = [](const char* name) {
-        std::fprintf(stderr, "phase: %s\\n", name);
-        std::fflush(stderr);
-    };
-    phase("initial");
     ui::State<float> value{0.5f};
     std::string trace;
     ui::EditCallbacks<float> callbacks{
@@ -48,10 +36,7 @@ int main() {
     edit.cancel();
     CHECK(trace == "BCX" && value.get() == 0.4f);
 
-    phase("callback-failures");
     for (int failure = 0; failure < 4; ++failure) {
-        std::fprintf(stderr, "failure-case: %d\\n", failure);
-        std::fflush(stderr);
         bool fail = true;
         trace.clear();
         ui::EditSession<float> faulty{value.binding(), {
@@ -72,7 +57,6 @@ int main() {
         CHECK(trace == "BCE");
     }
 
-    phase("self-delete-change");
     trace.clear();
     std::unique_ptr<ui::EditSession<float>> owned;
     callbacks.change = [&](const float&, ui::EditSource) { trace += 'C'; owned.reset(); };
@@ -80,7 +64,6 @@ int main() {
     owned->set(0.8f, ui::EditSource::Keyboard);
     CHECK(!owned && trace == "BCX");
 
-    phase("observer-cancel");
     trace.clear();
     auto observer = value.observe([&](const float&) { edit.cancel(); });
     edit.set(0.9f, ui::EditSource::Accessibility);
@@ -90,7 +73,6 @@ int main() {
     CHECK(edit.set(0.1f, ui::EditSource::Keyboard));
     CHECK(trace == "BCE");
 
-    phase("reentrant");
     // Reentrant edits are rejected; terminal requests are deferred and cancel wins.
     trace.clear();
     ui::EditSession<float>* reentrant_ptr{};
@@ -105,7 +87,6 @@ int main() {
     reentrant_ptr=&reentrant;
     CHECK(!reentrant.begin(ui::EditSource::Pointer)); CHECK(trace=="BX");
 
-    phase("dying-state");
     trace.clear();
     auto dying_state=std::make_unique<ui::State<float>>(0.0f);
     ui::EditSession<float> retained{dying_state->binding(), callbacks};
@@ -114,13 +95,11 @@ int main() {
     CHECK(!retained.update(1)); CHECK(!retained.active()); CHECK(trace=="BX");
     CHECK(!retained.begin(ui::EditSource::Pointer));
 
-    phase("self-delete-begin");
     trace.clear();
     callbacks.begin=[&](ui::EditSource){trace+='B';owned.reset();};
     owned=std::make_unique<ui::EditSession<float>>(value.binding(),callbacks);
     CHECK(!owned->begin(ui::EditSource::Pointer)); CHECK(!owned); CHECK(trace=="BX");
 
-    phase("observer-failure");
     trace.clear();
     ui::EditSession<float> observer_failure{value.binding(), {
         [&](ui::EditSource){trace+='B';},{},{},[&](ui::EditSource){trace+='X';throw 7;}}};
@@ -130,7 +109,6 @@ int main() {
     CHECK(trace=="BX"); CHECK(!observer_failure.active());
     throwing_observer.reset();
 
-    phase("foreign-observer");
     // A foreign State observer cannot start an edit whose write would only queue.
     trace.clear();
     auto recursive=value.observe([&](const float&){
@@ -140,20 +118,10 @@ int main() {
     value.set(0.3f); CHECK(trace.empty()); CHECK(value.get()==0.3f);
     recursive.reset();
 
-    phase("independent-owner");
     // Independent owners do not share editing state, even for one Binding.
     ui::EditSession<float> other{value.binding()};
     CHECK(edit.begin(ui::EditSource::Pointer));
     CHECK(other.set(0.4f,ui::EditSource::Keyboard));
     CHECK(edit.active()); edit.end(); CHECK(trace=="BE");
-    std::fprintf(stderr,
-                 "active-before-exit edit=%d other=%d reentrant=%d retained=%d observer_failure=%d\\n",
-                 edit.active() ? 1 : 0,
-                 other.active() ? 1 : 0,
-                 reentrant.active() ? 1 : 0,
-                 retained.active() ? 1 : 0,
-                 observer_failure.active() ? 1 : 0);
-    std::fflush(stderr);
-    phase("done");
     return 0;
 }
