@@ -3,6 +3,7 @@
 #include "src/detail/scalar_source_access.hpp"
 #include "test_support.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <limits>

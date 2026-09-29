@@ -292,7 +292,10 @@ if(NATIVEUI_BUILD_TESTS)
   target_compile_definitions(nativeui_scalar_source_source_tests PRIVATE
     NATIVEUI_ENABLE_TEST_SEAMS=1
   )
-  target_link_libraries(nativeui_scalar_source_source_tests PRIVATE SkiaBuilder::svg)
+  target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
+    SkiaBuilder::svg
+    NativeUI::Core
+  )
   nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
   nativeui_enable_sanitizers(nativeui_scalar_source_source_tests)
   add_test(NAME nativeui_scalar_source_source_tests COMMAND nativeui_scalar_source_source_tests)
