@@ -9,7 +9,7 @@ if(NATIVEUI_BUILD_PLATFORM)
   # This pin includes the reviewed iOS/iPadOS input work and the macOS
   # embedded visibility/focus lifecycle used directly by NativeUI.
   set(NATIVEUI_PUGL_COMMIT
-      "165c50f08c6e65505198aa95e2cdf9d4028af7b6"
+      "c1d7ddd13f74613c83cbbeee9028ca017b50ff0e"
       CACHE STRING "Pinned hemduf/pugl commit")
   set(NATIVEUI_PUGL_SOURCE "" CACHE PATH "Use an already available Pugl source tree")
 
