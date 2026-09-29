@@ -237,6 +237,7 @@ private:
 class TextInput {
 public:
     using SubmitCallback = TextInputComponent::SubmitCallback;
+    using KeyDownCallback = TextInputComponent::KeyDownCallback;
 
     TextInput(std::string label, Binding<std::string> state)
         : label_(std::move(label)), state_(std::move(state)) {}
@@ -259,6 +260,13 @@ public:
         return std::move(*this);
     }
 
+    /// Handle selected KeyDown events before the built-in cursor/edit commands.
+    /// Return Ignored to preserve the standard text-input behavior.
+    TextInput&& on_key_down(KeyDownCallback callback) && {
+        on_key_down_ = std::move(callback);
+        return std::move(*this);
+    }
+
     TextInput&& style(TextInputStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
@@ -269,13 +277,15 @@ public:
         auto state = std::move(state_);
         auto placeholder = std::move(placeholder_);
         auto callback = std::move(on_submit_);
+        auto key_down = std::move(on_key_down_);
         auto style = std::move(style_);
         const auto max_length = max_length_;
         return Spec{[label = std::move(label), state = std::move(state), placeholder = std::move(placeholder),
-                     max_length, callback = std::move(callback), style = std::move(style)]() mutable {
+                     max_length, callback = std::move(callback), key_down = std::move(key_down),
+                     style = std::move(style)]() mutable {
                         return std::make_unique<TextInputComponent>(
                             std::move(label), std::move(state), std::move(placeholder), max_length,
-                            std::move(callback), std::move(style));
+                            std::move(callback), std::move(key_down), std::move(style));
                     },
                     {}};
     }
@@ -286,6 +296,7 @@ private:
     std::string placeholder_;
     std::size_t max_length_{256};
     SubmitCallback on_submit_;
+    KeyDownCallback on_key_down_;
     TextInputStyle style_;
 };
 

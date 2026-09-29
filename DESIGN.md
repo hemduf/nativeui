@@ -739,6 +739,8 @@ Embedded-font registration owns/copies the supplied font bytes. Shared registry 
 
 Pugl `PUGL_TEXT` provides committed Unicode text and is the normal insertion path, including dead-key/input-method sequences that produce committed text.
 
+`TextInput::on_key_down` can reserve a navigation key for its containing view. The callback runs before the built-in cursor commands and returns `Handled` to consume the key or `Ignored` to keep normal text editing. Active IME composition retains ownership of its navigation keys, so the callback does not run for those keys until composition ends.
+
 Full IME pre-edit/composition remains a separate future platform-extension feature. This includes marked/pre-edit text and candidate-rectangle behavior that the pinned Pugl API does not fully expose.
 
 If required, advanced IME should be implemented through a very small platform extension layer. It is **not** a reason to replace Pugl or rebuild the complete windowing stack.
