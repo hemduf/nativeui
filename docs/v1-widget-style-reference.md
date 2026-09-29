@@ -135,9 +135,40 @@ ui::ResolvedTabsStyle resolved =
 
 ## ComboBox / MenuItem
 
-`ComboBoxStylePatch` controls anchor fill/border/text, minimum width, control height, padding and typography.
+`ComboBoxStylePatch` is a detached partial override for the ComboBox anchor. A disengaged optional means “inherit the value already produced by the previous layer”; an engaged optional replaces it. Border width, corner radius, minimum width, control height, horizontal padding and text size are logical UI pixels and are stored verbatim: this style layer does not clamp negative/non-finite values. Font-family strings and fallback vectors are owned.
 
-`MenuItemStylePatch` controls popup row fill/text/separator, row/separator geometry, padding, radius and typography. Selected state remains orthogonal to interaction.
+`ComboBoxStyle` resolves in this exact order:
+
+```text
+base -> interaction -> read_only -> focused
+```
+
+The interaction layer selects exactly one branch with `disabled > pressed > hovered > normal` precedence. Within every layer, inherited fields are applied before component-local fields, so the local recipe wins on overlap. `ResolvedComboBoxStyle` is an independent owned snapshot. If callers resolve incomplete recipes without first supplying `default_combo_box_style(theme)`, untouched fields retain their zero/default constructed values; resolution does not perform an implicit Theme lookup.
+
+`MenuItemStylePatch` follows the same absent-means-inherit and logical-pixel rules for row/separator geometry, padding, radius and typography. Menu-item resolution deliberately differs in layer order:
+
+```text
+base -> interaction -> selected -> read_only -> focused
+```
+
+Selection is an orthogonal flag, but its patch is applied **after** the interaction branch. Consequently a selected patch can override an overlapping hovered/pressed/disabled field. Read-only then overrides selection where specified, and focus is final. As with ComboBox, inherited values are applied before local values inside each layer. `ResolvedMenuItemStyle` owns its font strings/vectors and borrows nothing from its recipes or Theme.
+
+`default_combo_box_style(theme)` and `default_menu_item_style(theme)` borrow the Theme only for the call and return detached recipes. The resolver functions synchronously borrow recipe/state inputs, invoke no callbacks, do not mutate retained state, and have no reentrant UI-dispatch path. Copying strings/vectors can allocate and allocation failure propagates; there is no silent fallback. These helpers are therefore not audio/DSP real-time operations. Applying recipe changes to live widgets remains UI/main-thread work.
+
+```cpp
+auto inherited = ui::default_menu_item_style(theme);
+
+ui::MenuItemStyle local;
+local.selected.fill = ui::Color{0.12f, 0.25f, 0.55f, 1.0f};
+local.focused.text = ui::Color{1.0f, 1.0f, 1.0f, 1.0f};
+
+ui::VisualState state;
+state.selected = true;
+state.focused = true;
+
+ui::ResolvedMenuItemStyle resolved =
+    ui::resolve_menu_item_style(inherited, local, state);
+```
 
 ## TextInput
 
