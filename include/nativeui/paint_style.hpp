@@ -28,9 +28,13 @@ struct ShaderBrushSnapshot;
 
 /// Conservative non-negative visual expansion in logical units.
 struct VisualOutset {
+    /// Extra logical extent required to the left of nominal paint bounds.
     float left{};
+    /// Extra logical extent required above nominal paint bounds.
     float top{};
+    /// Extra logical extent required to the right of nominal paint bounds.
     float right{};
+    /// Extra logical extent required below nominal paint bounds.
     float bottom{};
 
     /// Equal expansion on every edge; non-finite/non-positive becomes zero.
@@ -106,10 +110,15 @@ public:
         };
     }
 
+    /// Copy the complete backend-neutral value; no renderer resource is shared.
     Effect(const Effect&) noexcept = default;
+    /// Replace this value without allocation or renderer interaction.
     Effect& operator=(const Effect&) noexcept = default;
+    /// Move the complete value; no backend handle transfer is involved.
     Effect(Effect&&) noexcept = default;
+    /// Move-assign without allocation or renderer interaction.
     Effect& operator=(Effect&&) noexcept = default;
+    /// Destroy the value; no callback or renderer lifetime is involved.
     ~Effect() noexcept = default;
 
 private:
@@ -177,15 +186,22 @@ static_assert(std::is_nothrow_destructible_v<Effect>);
 /// Painter requires at least two finite strictly increasing offsets. Invalid
 /// non-empty sequences fall back to the first stop color at materialization.
 struct GradientStop {
+    /// Normalized position. Materialization requires a finite value in [0, 1]
+    /// that is strictly greater than the previous stop.
     float offset{};
+    /// Color sampled at offset; copied and owned as part of the gradient value.
     Color color{};
 };
 
 /// Blend equation used by PaintOptions and scoped layers.
 enum class BlendMode {
+    /// Standard source-over alpha compositing.
     SourceOver,
+    /// Multiply source and destination color components.
     Multiply,
+    /// Screen source and destination color components.
     Screen,
+    /// Add source and destination contributions.
     Plus,
 };
 
@@ -194,7 +210,10 @@ enum class BlendMode {
 /// Painter clamps finite opacity to [0, 1]; non-finite opacity falls back to 1.
 /// Blend defaults to SourceOver.
 struct PaintOptions {
+    /// Additional source opacity. Finite values clamp to [0, 1] at
+    /// materialization; non-finite values fall back to 1.
     float opacity{1.0f};
+    /// Compositing equation. Unknown enum payloads fall back to SourceOver.
     BlendMode blend{BlendMode::SourceOver};
 };
 
@@ -205,10 +224,16 @@ struct PaintOptions {
 class LinearGradient {
 public:
     /// Convenience two-stop gradient from normalized offset 0 to 1.
+    ///
+    /// start/end use logical Painter coordinates. Colors are copied by value;
+    /// no caller storage is retained. Constructing owned stops may allocate.
     LinearGradient(Point start, Point end, Color start_color, Color end_color)
         : start_(start), end_(end), stops_{{0.0f, start_color}, {1.0f, end_color}} {}
 
     /// Gradient with caller-supplied stops copied into owned storage.
+    ///
+    /// The initializer-list is borrowed only for construction. Stop ordering and
+    /// range are validated later by Painter, not by this constructor.
     LinearGradient(Point start, Point end, std::initializer_list<GradientStop> stops)
         : start_(start), end_(end), stops_(stops) {}
 
@@ -243,10 +268,16 @@ private:
 class RadialGradient {
 public:
     /// Convenience two-stop radial gradient from normalized offset 0 to 1.
+    ///
+    /// center/radius use logical Painter units. Radius is stored verbatim and is
+    /// validated only when Painter materializes the gradient.
     RadialGradient(Point center, float radius, Color inner_color, Color outer_color)
         : center_(center), radius_(radius), stops_{{0.0f, inner_color}, {1.0f, outer_color}} {}
 
     /// Radial gradient with caller-supplied stops copied into owned storage.
+    ///
+    /// The initializer-list is borrowed only for construction and copied before
+    /// return. Radius and stop validation are deferred to Painter.
     RadialGradient(Point center, float radius, std::initializer_list<GradientStop> stops)
         : center_(center), radius_(radius), stops_(stops) {}
 
@@ -280,6 +311,9 @@ public:
     /// Take ownership of a radial-gradient value.
     Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
     /// Snapshot current ShaderInstance bindings into an immutable brush source.
+    ///
+    /// shader is borrowed only during construction. Later ShaderInstance mutation
+    /// does not affect this Brush; snapshot allocation errors propagate.
     explicit Brush(const ShaderInstance& shader);
     /// Take an ImageTexture value; invalid textures become transparent.
     explicit Brush(ImageTexture texture) noexcept

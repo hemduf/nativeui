@@ -153,9 +153,9 @@ The effect overload adds `Effect` filtering. Zero Gaussian blur reduces to an or
 
 ### Paths and primitive drawing
 
-[`Path`](../include/nativeui/path.hpp) owns move/line/quadratic/cubic/close commands in logical coordinates. Fluent construction may allocate as its vector grows. `clear()` is noexcept and keeps capacity for reuse.
+[`Path`](../include/nativeui/path.hpp) owns move/line/quadratic/cubic/close commands in logical coordinates and retains no Painter/backend resource or caller-owned point storage. Mutators copy coordinates verbatim and do not pre-normalize NaN/Inf. Fluent construction may allocate as its vector grows; copying a Path copies that owned command vector and may allocate. `clear()` is noexcept, retains capacity and is intended for same-owner reuse after synchronous Painter consumption returns. Path mutation is unsynchronized and is not an audio-real-time construction API.
 
-`StrokeStyle::width` is a logical length. `StrokeCap` selects Butt/Round/Square endpoints, `StrokeJoin` selects Miter/Round/Bevel joins, and `miter_limit` is a dimensionless stroke-width ratio. `stroke_path()` treats an empty path or non-positive width as a no-op.
+`StrokeStyle::width` is a logical length. `StrokeCap::Butt` ends at the endpoint, `Round` adds a semicircular cap, and `Square` extends by half the stroke width. `StrokeJoin::Miter` extends outer edges to their intersection subject to `miter_limit`; `Round` arcs the corner and `Bevel` truncates it. `miter_limit` is a dimensionless miter-length/stroke-width ratio and negative values clamp to zero before backend use. `stroke_path()` treats an empty path or non-positive width as a no-op; finite positive widths remain the portable caller contract.
 
 Painter also draws rounded rectangles, circles, lines and arcs. Arc start/end are in **radians**, sweep is `end - start`, and arc/line helpers use round caps.
 
@@ -177,9 +177,11 @@ Every Brush-taking primitive borrows the Brush only until return. Gradient/image
 
 [`paint_style.hpp`](../include/nativeui/paint_style.hpp) stores renderer-neutral values; backend resources are materialized later by Painter.
 
-`PaintOptions::opacity` is canonicalized at draw/layer time: finite values clamp to [0, 1], non-finite opacity falls back to 1.0. `BlendMode` provides `SourceOver`, `Multiply`, `Screen` and `Plus`.
+`PaintOptions::opacity` is canonicalized at draw/layer time: finite values clamp to [0, 1], non-finite opacity falls back to 1.0. `BlendMode::SourceOver` is standard source-over alpha compositing; `Multiply` and `Screen` use the corresponding artistic equations; `Plus` performs additive composition. Unknown enum payloads fail closed to SourceOver at materialization.
 
-`LinearGradient` and `RadialGradient` own their stop vectors. Offsets are normalized [0, 1] values and must be finite and **strictly increasing**, with at least two stops. Validation is deferred to materialization: an invalid non-empty sequence falls back to its first stop color; an empty sequence falls back to `Color{}` (opaque black with the current `Color` defaults). A radial gradient with non-positive/non-finite radius cannot materialize a radial shader and likewise falls back to the first stop color. `stops()` is a borrowed vector reference and must not be retained across assignment/destruction.
+`LinearGradient` and `RadialGradient` own their stop vectors. Constructor points/centers/radii use logical Painter coordinates/lengths. Initializer-list storage is borrowed only during construction and copied before return; construction may allocate, but no pointer into caller storage is retained. Offsets are normalized [0, 1] values and must be finite and **strictly increasing**, with at least two stops. Validation is deliberately deferred to materialization: an invalid non-empty sequence falls back to its first stop color; an empty sequence falls back to `Color{}` (opaque black with the current `Color` defaults). A radial gradient stores radius verbatim; a non-positive/non-finite radius cannot materialize a radial shader and likewise falls back to the first stop color. `stops()` is a borrowed vector reference and must not be retained across assignment/destruction.
+
+`VisualOutset` reports conservative logical expansion independently on left/top/right/bottom. It is damage-accounting metadata, not a clip or allocation request by itself. `VisualOutset::uniform(v)` turns non-finite/non-positive input into zero expansion.
 
 `Brush` is the common owned/snapshotted fill source: solid `Color`, owned linear/radial gradient, `ImageTexture`, or immutable snapshot of a prepared `ShaderInstance`. Invalid `ImageTexture` construction yields a transparent Brush. Copying may allocate because gradient stop vectors are owned; moving is noexcept and leaves the source as a valid transparent Brush.
 
