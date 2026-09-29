@@ -1,4 +1,4 @@
-#include "detail/platform_test_access.hpp"
+#include "src/detail/platform_test_access.hpp"
 
 #include <nativeui/nativeui.hpp>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)

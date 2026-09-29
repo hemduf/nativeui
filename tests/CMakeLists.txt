@@ -220,6 +220,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_render_resource_hot_hit_counter_tests
     ${PROJECT_SOURCE_DIR}/tests/render_resource_hot_hit_counter_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
   )
   target_include_directories(nativeui_render_resource_hot_hit_counter_tests PRIVATE
@@ -267,6 +268,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_t083_image_texture_fault_tests
     ${PROJECT_SOURCE_DIR}/tests/t083_image_texture_fault_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
   )
   target_include_directories(nativeui_t083_image_texture_fault_tests PRIVATE
@@ -304,6 +306,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t088_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -323,6 +326,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t089_perlin_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -342,6 +346,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t090_simplex_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -361,6 +366,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t091_worley_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -380,6 +386,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_fractal_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -410,6 +417,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/shader_fault_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_shader_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
