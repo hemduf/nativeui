@@ -177,13 +177,19 @@ Drag/drop integration is demonstrated by [`t018_drop`](../examples/features/t018
 
 ## ComboBox and PopupMenu
 
-[`combo_popup.hpp`](../include/nativeui/combo_popup.hpp) provides two focusable retained controls presented through NativeUI's in-view overlay stack rather than separate native popup windows.
+[`combo_popup.hpp`](../include/nativeui/combo_popup.hpp) provides two focusable retained controls presented through NativeUI's in-view overlay stack rather than separate native popup windows. Their providers and callbacks execute synchronously in the UI domain; none of this API is intended for an audio/DSP real-time callback.
 
 ### ComboBox<T>
 
-`ComboBox<T>` requires a copy-constructible, equality-comparable value and writes through a `Binding<T>` (or a `State<T>&` convenience constructor). Each `ComboBoxOption<T>` owns a value, display label and enabled flag. Disabled options remain visible but are skipped by navigation and cannot be committed.
+`ComboBox<T>` requires a copy-constructible, equality-comparable value and writes through a `Binding<T>` (or a `State<T>&` convenience constructor). Each `ComboBoxOption<T>` is an owned snapshot row:
 
-Options may be an owned vector or an `OptionsProvider`. Provider-backed ComboBoxes call the provider once during builder construction to seed anchor display state and again **on every popup open**. The popup owns the returned vector snapshot.
+- `value` is compared with the current selection and copied into the deferred commit path;
+- `label` owns UTF-8 presentation text;
+- `enabled == false` keeps the row visible but removes it from keyboard/pointer selection.
+
+The stable-vector constructors take ownership of the supplied vector. NativeUI retains it as the anchor-display snapshot and copies it for each popup open, so later caller mutations of the original vector cannot affect the control.
+
+The dynamic `OptionsProvider` returns a fresh owned `std::vector<ComboBoxOption<T>>`. A non-empty provider is called **synchronously once during builder construction** to seed anchor display state and again **on every popup open**. The returned vector becomes NativeUI-owned snapshot state; no borrow into provider-local storage survives the call. An empty provider/result is valid. Provider exceptions are not translated into fallback rows and propagate through the construction/input path.
 
 ```cpp
 ui::State<int> voice{1};
@@ -197,22 +203,44 @@ auto combo = ui::ComboBox<int>{
             {3, "Unavailable", false},
         };
     }}
-    .placeholder("Choose a voice");
+    .placeholder("Choose a voice")
+    .spec();
 ```
 
-The placeholder appears when the selected value is absent from the current display snapshot. `.style()` customizes the anchor; `.item_style()` customizes popup rows.
+The placeholder is owned UTF-8 text displayed when the selected value is absent from the latest display snapshot. `.style()` owns the anchor `ComboBoxStyle`; `.item_style()` owns the `MenuItemStyle` applied to popup rows. Style dimensions follow NativeUI logical UI units.
 
-Selection is committed only after popup close/reconciliation reaches its safe retained checkpoint, so selection observers cannot run against a popup subtree still being detached.
+Opening, provider evaluation, option copying, text measurement and `spec()` may allocate. Keep them on the UI/resource-preparation side of an application rather than an RT callback.
+
+Selection commit is deliberately deferred: the chosen value is copied out of the popup snapshot, the overlay is closed/detached, and only then is `Binding<T>::set()` performed at the retained safe commit point. Selection observers may therefore perform ordinary state/UI reentrant work without seeing a half-detached popup subtree. If the anchor has been unmounted before the deferred commit runs, the weak anchor check suppresses the write.
 
 ### PopupMenu
 
-`PopupMenuItem::action(label, callback, enabled)` builds an action row; `separator()` builds a disabled structural row. `actionable()` is true only for enabled action rows with a callback.
+`PopupMenuItem` owns all row state. `PopupMenuItem::action(label, callback, enabled)` moves the UTF-8 label and callback into the row. An action is actionable only when its kind is `Action`, it is enabled, and its `std::function<void()>` is non-empty. `separator()` creates a disabled structural row with no callback.
 
-`PopupMenu` accepts a stable vector or an `ItemsProvider`; providers are evaluated on each open and the session owns that snapshot. Action callbacks run after popup close/detach reaches its retained commit point.
+A stable-vector `PopupMenu` owns the supplied rows and copies them into a fresh session snapshot on every open. The dynamic `ItemsProvider` differs from ComboBox providers in one important detail: it is **not** called during builder construction; it runs only when the menu opens. Its returned vector is fully owned by the popup session, so provider-local data can be released immediately after return. Empty snapshots are valid, and provider exceptions propagate through the opening input path.
 
-Keyboard behavior is demonstrated by [`t035_combo_popup.cpp`](../examples/features/t035_combo_popup.cpp): Down/Enter/Space can open, Up/Down/Home/End navigate eligible rows, Enter/Space commit, Escape dismisses, and Tab closes before normal focus traversal.
+Action callbacks execute only after the popup has closed/detached at the retained safe commit point. The callback may perform ordinary state/UI work, including work that causes retained reconciliation, without racing popup teardown. Callbacks are application/UI callbacks, may allocate, and are not audio-RT work.
 
-Typed anchor/row presentation is documented in [Widget style reference](v1-widget-style-reference.md).
+```cpp
+auto menu = ui::PopupMenu{
+    "Actions",
+    std::vector<ui::PopupMenuItem>{
+        ui::PopupMenuItem::action("Duplicate", [] { duplicate_selection(); }),
+        ui::PopupMenuItem::separator(),
+        ui::PopupMenuItem::action("Delete", [] { delete_selection(); }, can_delete),
+    }}
+    .spec();
+```
+
+### Interaction and lifetime
+
+Both controls create modal retained overlays anchored to their mounted node. Popup snapshots and callback/value objects are owned by the active session; the anchor runtime is shared internally only for retained coordination. Application code receives no borrowed pointer into the popup implementation.
+
+Down/Enter/Space can open; Up/Down/Home/End navigate eligible rows; Enter/Space commit or invoke; Escape dismisses; and Tab closes before normal focus traversal. Pointer activation captures/release through the normal retained input path. Disabled ComboBox rows, separators, disabled menu actions and menu actions with empty callbacks are skipped.
+
+Opening-key suppression prevents the same key-down that created a popup from immediately re-triggering it before the matching key-up. Dismissal/teardown clears the retained runtime state so stale popup handles are not reused.
+
+Keyboard behavior is demonstrated by [`t035_combo_popup.cpp`](../examples/features/t035_combo_popup.cpp). Typed anchor/row presentation is documented in [Widget style reference](v1-widget-style-reference.md), and the underlying overlay lifetime rules are documented later in this chapter.
 
 ## Text input and IME
 
