@@ -155,4 +155,5 @@ int main() {
                  observer_failure.active() ? 1 : 0);
     std::fflush(stderr);
     phase("done");
+    return 0;
 }
