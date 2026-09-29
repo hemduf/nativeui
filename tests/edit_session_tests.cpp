@@ -43,7 +43,7 @@ int main() {
             [&](ui::EditSource) { trace += 'B'; if (fail && failure == 0) throw std::runtime_error("begin"); },
             [&](const float&, ui::EditSource) { trace += 'C'; if (fail && failure == 1) throw std::runtime_error("change"); },
             [&](ui::EditSource) { trace += 'E'; if (fail && failure == 2) throw std::runtime_error("end"); },
-            [&](ui::EditSource) { trace += 'X'; if (fail && failure == 3) throw std::runtime_error("cancel"); }}}; 
+            [&](ui::EditSource) { trace += 'X'; if (fail && failure == 3) throw std::runtime_error("cancel"); }}};
         try {
             faulty.begin(ui::EditSource::Pointer);
             faulty.update(value.get() + 0.01f);
