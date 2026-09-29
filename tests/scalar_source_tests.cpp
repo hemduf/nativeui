@@ -89,7 +89,8 @@ void move_contract() {
     NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(source));
     NUI_CHECK(ui::detail::ScalarSourceAccess::constant_value(source) == 0.0f);
 
-    moved = std::move(moved);
+    auto* self = &moved;
+    moved = std::move(*self);
     NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(moved));
     NUI_CHECK(ui::detail::ScalarSourceAccess::constant_value(moved) == 0.0f);
 }
