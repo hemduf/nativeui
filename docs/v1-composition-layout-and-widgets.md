@@ -257,40 +257,62 @@ Focused references are [`t025_text_edit_model`](../examples/features/t025_text_e
 
 [`include/nativeui/overlay.hpp`](../include/nativeui/overlay.hpp) defines the generic retained overlay model and [`UI::show_overlay()` / `close_overlay()`](../include/nativeui/ui.hpp) own publication. Overlays remain retained content inside one `UI`; they are not native popup windows and they do not create process-global modal state.
 
-### Overlay specification and lifetime
+### Ownership, specification and lifetime
 
-`OverlaySpec` owns the overlay content specification plus its presentation policy:
+`OverlaySpec` is an owned value request. Successful `show_overlay()` moves the content `Spec` and policy into one UI-owned overlay entry. The overlay therefore owns its retained specification, but it does **not** own the optional anchor node and it cannot extend the lifetime of application objects borrowed by factories or callbacks captured inside that specification.
 
-- `OverlayMode::NonModal` leaves ordinary root keyboard focus active. `Modal` creates an active trapping focus scope and blocks pointer input to lower retained content.
-- `OverlayPointerPolicy::Normal` participates in pointer hit testing. `Ignore` makes the overlay and its descendants pointer-transparent. `Modal + Ignore` is invalid and `show_overlay()` returns an invalid handle for that combination.
-- `anchor` is an optional `NodeId` from the **same UI**. Without an anchor, presentation is centered. If an anchored node disappears or becomes unresolvable, the UI dismisses that overlay rather than keeping stale anchor state.
-- `placement` is resolved in logical UI coordinates. Anchor-relative sides may flip to their opposite side when that fits better and are then clamped to the viewport. `Auto` considers below, above, right and left deterministically in that order.
-- Escape and outside-pointer dismissal are opt-in through `dismiss_on_escape` and `dismiss_on_outside_pointer_down`.
+- `OverlayMode::NonModal` leaves ordinary root keyboard focus active. `Modal` creates an active trapping focus scope and blocks pointer input to lower retained content in the same UI.
+- `OverlayPointerPolicy::Normal` participates in retained pointer hit testing. `Ignore` makes the wrapper and descendants pointer-transparent. `Modal + Ignore` is invalid: publication returns an invalid handle and does not leave a live entry.
+- `anchor` is an optional non-owning `NodeId` from the **same UI**. Without an anchor, presentation is centered regardless of the requested placement. If a published anchor later disappears or can no longer resolve geometry, the UI dismisses the overlay rather than reusing stale coordinates.
+- `dismiss_on_escape` and `dismiss_on_outside_pointer_down` are opt-in policies. Outside-pointer dismissal is evaluated against resolved logical bounds.
 
-`OverlayHandle` is a non-owning per-UI identity token. It becomes stale after explicit close, policy dismissal, anchor loss or UI teardown; keeping the handle does not keep the overlay alive. Passing an empty, stale, already-closed or cross-UI handle to `close_overlay()` returns `false`.
+`OverlayHandle` is a non-owning identity token for the exact entry in the exact UI. Keeping a handle does not keep an entry alive. It becomes stale after explicit close, policy dismissal, anchor loss or UI teardown. Empty, stale, already-closing/already-closed and cross-UI handles are rejected by `close_overlay()` with `false`. Equality compares identity, not current liveness, so `valid()` remains the liveness observation.
 
-Publication/close are transactional around retained structural invalidation. If structural notification throws while opening, the provisional entry is rolled back before the exception escapes. If it throws while closing, the logical entry remains live so the same handle can be retried instead of exposing a half-closed overlay.
+### Placement and units
 
-`overlay_entries()` is diagnostics only: it returns creation-order policy plus resolved bounds in **logical coordinates**. `resolved == false` means retained layout has not produced final bounds yet.
+All overlay geometry is expressed in **logical UI pixels** in the owning viewport. Retained measurement chooses the content's natural size; placement changes the origin but does not shrink that measured size merely to fit the viewport.
+
+For an explicit anchor-relative side, NativeUI uses the requested side when it fully fits. If it does not fit, the opposite side wins when it fully fits; when neither side fully fits, the side with the larger viewport intersection wins, with a tie preserving the requested side. The resulting origin is then clamped to the viewport. Oversized content keeps its measured size, so it may extend past the far edge even though its origin is clamped.
+
+`OverlayPlacement::Auto` evaluates Below, Above, Right and Left in that exact order. The first full fit wins. If no side fully fits, the greatest viewport-intersection area wins and the same order breaks ties. Anchorless overlays use centered placement regardless of the enum value.
+
+`OverlayEntryInfo::placement` reports the **requested policy**, not the side chosen after flip/auto resolution. `bounds` is meaningful only when `resolved == true`; it is an owned point-in-time geometry snapshot and does not track later layout.
+
+### Publication, failure and retained mutation
+
+Publication and close are transactional around retained structural invalidation:
+
+- opening may allocate; allocation failures propagate;
+- `Modal + Ignore` is a contract rejection represented by an invalid handle rather than an exception;
+- if retained structural notification throws while opening, the provisional entry is removed before the exception propagates;
+- if structural notification throws while closing, the logical entry remains live and the same handle remains the retry owner instead of exposing a half-closed state;
+- a successful close makes that exact handle stale.
+
+`overlay_entries()` is diagnostics only. It allocates/copies an owned vector in creation order and exposes policy plus resolved geometry; it never returns content components, mutable overlay state or platform objects.
+
+`show_overlay()`, `close_overlay()`, layout-driven placement/dismissal and `overlay_entries()` all belong to the UI/main-thread domain. They may allocate and participate in retained structural work. None of this surface is audio/DSP real-time safe, and a handle is not a cross-thread synchronization or mutation capability.
 
 ```cpp
 ui::OverlaySpec popup;
-popup.anchor = button_node_id;
-popup.placement = ui::OverlayPlacement::Auto;
+popup.anchor = button_node_id;                 // borrowed retained identity
+popup.placement = ui::OverlayPlacement::Auto; // logical-pixel placement
 popup.dismiss_on_escape = true;
 popup.dismiss_on_outside_pointer_down = true;
 popup.content = ui::make_spec(ui::Label{"Actions"});
 
 ui::OverlayHandle handle = screen.show_overlay(std::move(popup));
 if (handle) {
-    // Later, still on the UI thread.
+    // Later, still in the owning UI/main-thread domain.
+    for (const auto& entry : screen.overlay_entries()) {
+        if (entry.resolved) {
+            // entry.bounds is an owned logical-geometry snapshot.
+        }
+    }
     (void)screen.close_overlay(handle);
 }
 ```
 
-Overlay presentation, dismissal and inspection are UI/main-thread operations. A handle is not a synchronization primitive and does not permit cross-thread retained mutation.
-
-[`t061_overlay_portal`](../examples/features/t061_overlay_portal.cpp) exercises non-modal, modal, pointer-transparent, anchored/dismissal and handle-lifetime behavior.
+[`t061_overlay_portal`](../examples/features/t061_overlay_portal.cpp) exercises non-modal, modal, pointer-transparent, anchored/dismissal, placement and handle-lifetime behavior.
 
 ## Tooltip
 
