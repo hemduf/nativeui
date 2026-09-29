@@ -116,9 +116,82 @@ void copy_assignment_has_strong_guarantee() {
               ui::ScalarChannel::Green);
 }
 
+void move_and_noise_copy_failure_contracts() {
+    auto brush_source = ui::ScalarSource::from_brush(
+        ui::Brush{ui::Color{0.2f, 0.4f, 0.8f, 1.0f}},
+        ui::ScalarChannel::Blue);
+
+    const auto created = ui::NoiseSource::create(
+        ui::NoiseType::Value,
+        {.feature_size = 24.0f, .seed = 0x13579bdfu});
+    NUI_CHECK(created.ok());
+    auto noise_source = ui::ScalarSource::from_noise(created.noise);
+
+    const auto before_move = allocation_probe::allocation_count;
+    {
+        allocation_probe::ScopedFailure fail;
+
+        ui::ScalarSource moved_brush{std::move(brush_source)};
+        NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(moved_brush));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::channel(moved_brush) ==
+                  ui::ScalarChannel::Blue);
+        NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(brush_source));
+
+        ui::ScalarSource assigned{4.0f};
+        assigned = std::move(moved_brush);
+        NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(assigned));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(moved_brush));
+
+        ui::ScalarSource moved_noise{std::move(noise_source)};
+        NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(moved_noise));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::channel(moved_noise) ==
+                  ui::ScalarChannel::Red);
+        NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(noise_source));
+
+        moved_noise = std::move(moved_noise);
+        NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(moved_noise));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::constant_value(moved_noise) ==
+                  0.0f);
+    }
+    NUI_CHECK(allocation_probe::allocation_count == before_move);
+
+    const auto noise_again = ui::NoiseSource::create(
+        ui::NoiseType::Perlin,
+        {.feature_size = 20.0f, .seed = 0x2468ace0u});
+    NUI_CHECK(noise_again.ok());
+    const auto source = ui::ScalarSource::from_noise(noise_again.noise);
+    ui::ScalarSource destination{8.0f};
+
+    bool threw = false;
+    {
+        allocation_probe::ScopedFailure fail;
+        try {
+            destination = source;
+        } catch (const std::bad_alloc&) {
+            threw = true;
+        }
+    }
+
+    if (threw) {
+        NUI_CHECK(ui::detail::ScalarSourceAccess::is_constant(destination));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::constant_value(destination) ==
+                  8.0f);
+    } else {
+        NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(destination));
+        NUI_CHECK(ui::detail::ScalarSourceAccess::channel(destination) ==
+                  ui::ScalarChannel::Red);
+    }
+
+    destination = source;
+    NUI_CHECK(!ui::detail::ScalarSourceAccess::is_constant(destination));
+    NUI_CHECK(ui::detail::ScalarSourceAccess::channel(destination) ==
+              ui::ScalarChannel::Red);
+}
+
 void suite() {
     constant_construction_allocates_nothing();
     copy_assignment_has_strong_guarantee();
+    move_and_noise_copy_failure_contracts();
 }
 
 } // namespace
