@@ -1,3 +1,4 @@
+#include <nativeui/image.hpp>
 #include <nativeui/noise.hpp>
 #include <nativeui/scalar_source.hpp>
 #include <nativeui/shader.hpp>
@@ -13,6 +14,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -20,6 +22,18 @@
 #include <utility>
 
 namespace {
+
+constexpr std::array<std::byte, 70> kAlphaPayloadPng{
+    std::byte{137},std::byte{80},std::byte{78},std::byte{71},std::byte{13},std::byte{10},std::byte{26},std::byte{10},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{72},std::byte{68},std::byte{82},
+    std::byte{0},std::byte{0},std::byte{0},std::byte{1},std::byte{0},std::byte{0},std::byte{0},std::byte{1},
+    std::byte{8},std::byte{6},std::byte{0},std::byte{0},std::byte{0},std::byte{31},std::byte{21},std::byte{196},
+    std::byte{137},std::byte{0},std::byte{0},std::byte{0},std::byte{13},std::byte{73},std::byte{68},std::byte{65},
+    std::byte{84},std::byte{120},std::byte{218},std::byte{99},std::byte{56},std::byte{145},std::byte{98},std::byte{228},
+    std::byte{0},std::byte{0},std::byte{4},std::byte{245},std::byte{1},std::byte{159},std::byte{91},std::byte{144},
+    std::byte{228},std::byte{44},std::byte{0},std::byte{0},std::byte{0},std::byte{0},std::byte{73},std::byte{69},
+    std::byte{78},std::byte{68},std::byte{174},std::byte{66},std::byte{96},std::byte{130},
+};
 
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error{message};
@@ -229,6 +243,49 @@ void brush_sampling_contract() {
     }
 }
 
+void data_texture_channel_contract() {
+    const auto image = ui::Image::decode(kAlphaPayloadPng);
+    check(image.valid(), "ScalarSource Data texture fixture did not decode");
+
+    ui::ImageTexture texture{
+        image,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 16.0f, 16.0f}};
+    ui::TextureSampling nearest;
+    nearest.set_filter(ui::TextureFilter::Nearest)
+           .set_mipmap(ui::TextureMipmap::None);
+    texture.set_sampling(nearest)
+           .set_interpretation(ui::TextureInterpretation::Data);
+    const ui::Brush data{texture};
+
+    constexpr std::array<ui::ScalarChannel, 4> channels{
+        ui::ScalarChannel::Red,
+        ui::ScalarChannel::Green,
+        ui::ScalarChannel::Blue,
+        ui::ScalarChannel::Alpha,
+    };
+    constexpr std::array<float, 4> expected{
+        200.0f / 255.0f,
+        100.0f / 255.0f,
+        50.0f / 255.0f,
+        64.0f / 255.0f,
+    };
+
+    for (std::size_t index = 0; index < channels.size(); ++index) {
+        const auto scalar =
+            ui::ScalarSource::from_brush(data, channels[index]);
+        const auto pixel = render_probe(scalar_probe(scalar), 8, 8);
+        check(std::abs(pixel[0] - expected[index]) <= 0.005f,
+              "ScalarSource changed raw Data texture channel value");
+        check(std::abs(pixel[1] - expected[index]) <= 0.005f,
+              "ScalarSource Data channel grayscale probe diverged");
+        check(std::abs(pixel[2] - expected[index]) <= 0.005f,
+              "ScalarSource Data channel grayscale probe diverged");
+        check(std::abs(pixel[3] - 1.0f) <= 0.005f,
+              "ScalarSource Data channel probe changed output coverage");
+    }
+}
+
 void snapshot_lifetime_contract() {
     const auto scalar = [] {
         ui::Brush temporary{ui::LinearGradient{
@@ -319,6 +376,7 @@ void independent_source_contract() {
 int main() {
     source_creation_contract();
     brush_sampling_contract();
+    data_texture_channel_contract();
     snapshot_lifetime_contract();
     noise_sampling_contract();
     independent_source_contract();
