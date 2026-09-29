@@ -204,7 +204,8 @@ void copy_assignment_contract() {
     NUI_CHECK(ui::detail::ScalarSourceAccess::channel(replacement) ==
               ui::ScalarChannel::Green);
 
-    original = original;
+    const auto* self = &original;
+    original = *self;
     NUI_CHECK(ui::detail::ScalarSourceAccess::channel(original) ==
               ui::ScalarChannel::Green);
 }
