@@ -47,7 +47,7 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          & .\build-edit\tests\nativeui_edit_session_tests.exe
+          & .\build-edit\nativeui_edit_session_tests.exe
           $code = $LASTEXITCODE
           Write-Host "direct-exit-code=$code"
           if ($code -ne 0) { exit $code }
