@@ -89,6 +89,14 @@ void source_creation_contract() {
     check(ui::detail::shader_compile_call_count_for_test() ==
               after_shader_compile,
           "from_brush recompiled an existing source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              initial_materialization,
+          "from_brush materialized backend shader state");
+    check(ui::detail::image_decode_call_count_for_test() == initial_decode,
+          "from_brush decoded image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              initial_image_materialization,
+          "from_brush materialized ImageTexture state");
 
     const auto created = ui::NoiseSource::create(
         ui::NoiseType::Value, {.feature_size = 32.0f, .seed = 0x12345678u});
@@ -104,6 +112,14 @@ void source_creation_contract() {
     check(ui::detail::shader_compile_call_count_for_test() ==
               after_noise_compile,
           "from_noise recompiled an existing NoiseSource");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              initial_materialization,
+          "from_noise materialized backend shader state");
+    check(ui::detail::image_decode_call_count_for_test() == initial_decode,
+          "from_noise decoded image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              initial_image_materialization,
+          "from_noise materialized ImageTexture state");
 
     ui::NoiseSource inert;
     auto inert_scalar = ui::ScalarSource::from_noise(inert);
