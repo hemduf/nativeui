@@ -27,21 +27,11 @@ function(require_text haystack needle description)
   endif()
 endfunction()
 
-function(require_header_compile_registration header description)
-  string(REGEX MATCH
-    "foreach\\(_header IN ITEMS[^\\)]*[ \\t\\r\\n]${header}([ \\t\\r\\n]|\\))"
-    _header_registration
-    "${_tests_cmake}"
-  )
-  if(NOT _header_registration)
-    message(FATAL_ERROR "T064 root integration contract: missing ${description}: ${header}")
-  endif()
-endfunction()
-
 require_text("${_root_cmake}" "src/desktop_services.cpp" "DesktopServices implementation in NativeUI::Core")
 require_text("${_root_cmake}" "add_subdirectory(tests)" "test directory registration")
 require_text("${_tests_cmake}" "nativeui_t064_root_integration_contract" "contract registration")
-require_header_compile_registration("desktop_services" "isolated DesktopServices public-header compile coverage")
+string(REGEX MATCH "foreach\\(_header IN ITEMS [^)]*\\)" _public_header_loop "${_tests_cmake}")
+require_text("${_public_header_loop}" " desktop_services " "isolated DesktopServices public-header compile coverage")
 require_text("${_umbrella}" "#include <nativeui/desktop_services.hpp>" "DesktopServices umbrella export")
 require_text("${_window_header}" "DesktopServices& desktop_services();" "view-owned DesktopServices accessor")
 require_text("${_window_header}" "std::shared_ptr<DesktopServicesBackend> desktop_services_backend" "explicit EmbeddedView backend injection")

@@ -116,6 +116,7 @@
         for (const auto& change : pending) {
             const auto old = change.node->component->effective_availability();
             if (old == change.value) continue;
+            invalidate_raster_cache_ancestry(change.node);
 
             const bool old_collapsed = old.visibility == VisibilityMode::Collapsed;
             const bool new_collapsed = change.value.visibility == VisibilityMode::Collapsed;
@@ -255,6 +256,7 @@
     }
 
     void invalidate_node_paint(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         mark_paint_culling_dirty();
         if (layout_transaction_active_ || !node.visual_bounds_published) {
             // Candidate geometry is not publication authority. A state change
@@ -288,6 +290,7 @@
     }
 
     void invalidate_layout_from(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         mark_paint_culling_dirty();
         for (Node* current = &node; current; current = current->parent) {
             current->layout_dirty = true;
@@ -337,6 +340,7 @@
     }
 
     void deactivate_node_untracked(Node& node) {
+        invalidate_raster_cache_ancestry(&node);
         std::exception_ptr first_error;
         for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
             try {

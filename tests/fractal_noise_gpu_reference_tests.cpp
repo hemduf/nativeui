@@ -13,6 +13,7 @@
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -47,9 +48,9 @@ double base_reference(ui::NoiseType base,
 
 double fractal_reference(ui::NoiseType base,
                          ui::FractalNoiseMode mode,
+                         std::uint32_t seed,
                          double x,
                          double y) {
-    constexpr std::uint32_t seed = 0x12345678u;
     constexpr double feature_size = 48.0;
     double frequency = 1.0;
     double amplitude = 1.0;
@@ -84,33 +85,76 @@ ui::UI make_ui(const ui::Brush& brush, float size = 64.0f) {
         }}};
 }
 
+struct GpuComparisonSummary {
+    int max_red_delta = 0;
+    int max_green_delta = 0;
+    int max_blue_delta = 0;
+    std::size_t mismatch_count = 0;
+};
+
 void compare(ui::Application& app,
+             std::uint32_t seed,
              ui::NoiseType base,
-             ui::FractalNoiseMode mode) {
-    constexpr std::uint32_t seed = 0x12345678u;
+             ui::FractalNoiseMode mode,
+             GpuComparisonSummary& summary) {
+    constexpr float logical_size = 64.0f;
     const auto source = ui::NoiseSource::create_fractal(
         base, {.feature_size = 48.0f, .seed = seed}, options(mode));
     check(source.ok(), "fractal GPU source did not compile");
-
-    auto reference_ui = make_ui(source.noise.as_brush());
-    ui::HeadlessRenderer reference{{64, 64}, 1.0f};
-    check(reference.render(reference_ui), "fractal raster reference failed");
 
     auto gpu_ui = make_ui(source.noise.as_brush());
     ui::StandaloneWindow window{
         app, gpu_ui,
         ui::WindowDesc{.title = "NativeUI fractal noise GPU reference",
-                       .size = {64, 64}, .resizable = false}};
+                       .size = {logical_size, logical_size}, .resizable = false}};
     check(window.valid() && window.native_handle(),
           "fractal GPU window invalid");
+
+    // Wait for the initial native expose/configure before reading the scale.
+    // The renderer and request_gpu_readback() both use geometry_.last_valid_scale(),
+    // so a completed initial scene is the stable synchronization point. A readback
+    // is deliberately not used as the probe: on macOS the first readback can be
+    // requested before the initial drawable is ready and then never complete.
+    check(ui::detail::PlatformTestAccess::request_expose(window),
+          "fractal GPU initial expose request rejected");
+    ui::detail::SceneDiagnostics diagnostics;
+    for (int iteration = 0; iteration < 100 && !diagnostics.scene_valid;
+         ++iteration) {
+        (void)app.poll(0.01);
+        diagnostics =
+            ui::detail::PlatformTestAccess::scene_diagnostics(window);
+    }
+    check(diagnostics.scene_valid,
+          "fractal GPU initial scene did not become valid");
+
+    const float scale = window.scale_factor();
+    check(std::isfinite(scale) && scale > 0.0f,
+          "fractal GPU window scale is invalid");
+
+    // Native window extents use outward rounding, so the scale oracle must
+    // mirror production rather than nearest-integer sample-point rounding.
+    const int expected_scene_extent =
+        static_cast<int>(std::ceil(logical_size * scale));
+    check(diagnostics.scene_width == expected_scene_extent &&
+              diagnostics.scene_height == expected_scene_extent,
+          "fractal GPU scene extent does not match window scale");
+
+    auto reference_ui = make_ui(source.noise.as_brush());
+    ui::HeadlessRenderer reference{{logical_size, logical_size}, scale};
+    check(reference.render(reference_ui), "fractal raster reference failed");
 
     constexpr std::array<std::array<int, 2>, 4> samples{{
         {0, 0}, {8, 8}, {31, 23}, {52, 45}
     }};
     for (const auto& xy : samples) {
-        const auto expected = reference.pixel(xy[0], xy[1]);
-        const double cpu = fractal_reference(
-            base, mode, double(xy[0]) + 0.5, double(xy[1]) + 0.5);
+        const int physical_x =
+            static_cast<int>(std::lround(float(xy[0]) * scale));
+        const int physical_y =
+            static_cast<int>(std::lround(float(xy[1]) * scale));
+        const auto expected = reference.pixel(physical_x, physical_y);
+        const double sample_x = (double(physical_x) + 0.5) / double(scale);
+        const double sample_y = (double(physical_y) + 0.5) / double(scale);
+        const double cpu = fractal_reference(base, mode, seed, sample_x, sample_y);
         check(std::abs(double(expected.r) / 255.0 - cpu) < 0.015,
               "fractal raster diverged from CPU oracle");
 
@@ -123,11 +167,32 @@ void compare(ui::Application& app,
             actual = ui::detail::PlatformTestAccess::take_gpu_readback(window);
         }
         check(actual.has_value(), "fractal GPU readback incomplete");
-        check(std::abs(int(actual->r) - int(expected.r)) <= 5 &&
-                  std::abs(int(actual->g) - int(expected.g)) <= 5 &&
-                  std::abs(int(actual->b) - int(expected.b)) <= 5 &&
-                  actual->a == expected.a,
-              "fractal GPU pixel diverged from raster");
+
+        const int dr = int(actual->r) - int(expected.r);
+        const int dg = int(actual->g) - int(expected.g);
+        const int db = int(actual->b) - int(expected.b);
+        summary.max_red_delta = std::max(summary.max_red_delta, std::abs(dr));
+        summary.max_green_delta =
+            std::max(summary.max_green_delta, std::abs(dg));
+        summary.max_blue_delta =
+            std::max(summary.max_blue_delta, std::abs(db));
+
+        if (std::abs(dr) > 5 || std::abs(dg) > 5 || std::abs(db) > 5 ||
+            actual->a != expected.a) {
+            ++summary.mismatch_count;
+            std::cerr
+                << "fractal GPU mismatch: seed=" << seed
+                << " base=" << static_cast<int>(base)
+                << " mode=" << static_cast<int>(mode)
+                << " logical=(" << xy[0] << "," << xy[1] << ")"
+                << " physical=(" << physical_x << "," << physical_y << ")"
+                << " scale=" << scale
+                << " expected=(" << int(expected.r) << "," << int(expected.g)
+                << "," << int(expected.b) << "," << int(expected.a) << ")"
+                << " actual=(" << int(actual->r) << "," << int(actual->g)
+                << "," << int(actual->b) << "," << int(actual->a) << ")"
+                << " delta=(" << dr << "," << dg << "," << db << ")\n";
+        }
     }
 }
 
@@ -191,13 +256,27 @@ int main(int argc, char** argv) {
         ui::Application app;
         check(app.valid(), "platform application invalid");
         app.set_quit_policy(ui::QuitPolicy::ExplicitOnly);
-        for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
-                          ui::NoiseType::Simplex}) {
-            for (auto mode : {ui::FractalNoiseMode::FBm,
-                              ui::FractalNoiseMode::Turbulence,
-                              ui::FractalNoiseMode::Ridged}) {
-                compare(app, base, mode);
+        GpuComparisonSummary summary;
+        constexpr std::array<std::uint32_t, 2> seeds{
+            0x12345678u, 0xA5A5A5A5u
+        };
+        for (const auto seed : seeds) {
+            for (auto base : {ui::NoiseType::Value, ui::NoiseType::Perlin,
+                              ui::NoiseType::Simplex}) {
+                for (auto mode : {ui::FractalNoiseMode::FBm,
+                                  ui::FractalNoiseMode::Turbulence,
+                                  ui::FractalNoiseMode::Ridged}) {
+                    compare(app, seed, base, mode, summary);
+                }
             }
+        }
+        std::cout << "Fractal GPU delta maxima: red=" << summary.max_red_delta
+                  << " green=" << summary.max_green_delta
+                  << " blue=" << summary.max_blue_delta
+                  << " mismatches=" << summary.mismatch_count << '\n';
+        if (summary.mismatch_count != 0) {
+            throw std::runtime_error{
+                "fractal GPU pixels diverged from scale-matched raster"};
         }
         return 0;
     } catch (const std::exception& e) {

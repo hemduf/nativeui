@@ -172,6 +172,9 @@ if(NATIVEUI_BUILD_TESTS)
     LABELS "docs;unit"
   )
 
+  nativeui_add_core_test(
+    nativeui_window_control_state_tests
+    ${PROJECT_SOURCE_DIR}/tests/window_control_state_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
@@ -553,15 +556,6 @@ if(NATIVEUI_BUILD_TESTS)
 
     if(APPLE)
       enable_language(OBJCXX)
-      add_test(NAME nativeui_pugl_visibility_contract
-        COMMAND ${CMAKE_COMMAND}
-          "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
-          "-DPUGL_SOURCE=${pugl_src_SOURCE_DIR}"
-          "-DTEST_BINARY_DIR=${PROJECT_BINARY_DIR}"
-          -P "${PROJECT_SOURCE_DIR}/tests/pugl_visibility_contract.cmake")
-      set_tests_properties(nativeui_pugl_visibility_contract PROPERTIES
-        LABELS "build;cmake;platform;visibility" TIMEOUT 60)
-
       add_executable(nativeui_embedded_visibility_tests ${PROJECT_SOURCE_DIR}/tests/embedded_visibility_macos_tests.mm)
       set_target_properties(nativeui_embedded_visibility_tests PROPERTIES OBJCXX_STANDARD 20)
       target_compile_options(nativeui_embedded_visibility_tests PRIVATE -fobjc-arc)

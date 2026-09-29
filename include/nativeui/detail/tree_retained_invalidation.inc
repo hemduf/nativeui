@@ -129,7 +129,10 @@
             const auto lifetime = weak.lock();
             if (!lifetime || !lifetime->tree) return;
             auto* tree = lifetime->tree;
-            if (!tree->retained_invalidation_node(owner)) return;
+            const auto* live = tree->retained_invalidation_node(owner);
+            if (!live) return;
+            // Revoke containing rasters before enqueue/storage can throw.
+            tree->invalidate_raster_cache_ancestry(live);
             tree->queue_dynamic_mutation(owner);
         });
 
