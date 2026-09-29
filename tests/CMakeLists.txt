@@ -172,6 +172,9 @@ if(NATIVEUI_BUILD_TESTS)
     LABELS "docs;unit"
   )
 
+  nativeui_add_core_test(
+    nativeui_window_control_state_tests
+    ${PROJECT_SOURCE_DIR}/tests/window_control_state_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
