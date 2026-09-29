@@ -31,6 +31,7 @@
 #include <nativeui/image.hpp>
 #include <nativeui/shader.hpp>
 #include <nativeui/noise.hpp>
+#include <nativeui/scalar_source.hpp>
 #include <nativeui/svg.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/component.hpp>
