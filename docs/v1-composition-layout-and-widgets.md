@@ -308,28 +308,47 @@ At a public-contract level:
 
 ## Dialog
 
-[`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp) defines a UI-scoped retained dialog controller. A dialog is ordinary NativeUI retained content presented through the overlay/modal stack; it does not introduce a second platform modal-window hierarchy.
+[`include/nativeui/dialog.hpp`](../include/nativeui/dialog.hpp) defines a UI-scoped retained dialog transaction. Presentation stays inside the owning UI's retained overlay/modal stack; NativeUI does not create a second platform modal-window hierarchy or a process-global current-dialog object.
 
-### Specification and validation
+### Specification, ownership and validation
 
-`DialogSpec::body` must contain a valid component factory. Action IDs must be non-empty and unique, and a spec may contain at most one `Default` action and one `Cancel` action. Disabled actions remain visible but cannot activate.
+`DialogSpec` is an owned value description consumed by `show()`:
 
-`Dialog::show()` reports contract-level failures without inventing platform exceptions:
+- `title` is owned text; an empty title removes the title row;
+- `body` is a retained `Spec` whose component factory must be valid;
+- `actions` is an owned vector in presentation order and may be empty;
+- `backdrop_color` is copied with the specification and paints the owning UI viewport behind the panel.
 
-- `Shown`: the per-UI dialog slot and modal overlay were published;
+Every `DialogActionId` is an owned string. IDs must be non-empty and unique within one specification. A spec may contain at most one `Default` action and at most one `Cancel` action. Disabled actions remain visible and keep their row/order, but cannot be activated. The semantic role does not reorder actions.
+
+`Dialog::show()` reports contract-level outcomes explicitly:
+
+- `Shown`: the per-UI dialog slot and retained modal overlay were published;
 - `Busy`: this controller or another dialog already owns the UI's single active dialog slot;
-- `InvalidSpec`: body/action invariants are invalid;
-- `Unavailable`: the UI is tearing down/unavailable or the backing overlay cannot publish.
+- `InvalidSpec`: the body factory or action invariants are invalid;
+- `Unavailable`: the UI is tearing down/unavailable or retained overlay publication cannot complete.
 
-Allocation or retained structural-notification failures can still throw. A failed publication rolls back ownership so the UI is not stranded in `Busy`.
+An empty completion callable is valid. Validation occurs before the single per-UI slot is acquired. Allocation and retained structural-notification failures are not encoded as `DialogShowResult` and may throw; failed publication rolls the slot/local ownership back instead of leaving the UI stranded in `Busy`.
 
-### Completion, keyboard policy and lifetime
+### Result and keyboard policy
 
-An enabled `Default` action handles Enter. Escape completes the enabled `Cancel` action when present; otherwise it produces `DialogResultKind::Dismissed`. `Dialog::close()` is the programmatic dismissed path.
+`DialogResult` is an owned terminal value. `Action` carries the selected action's exact owned ID. `Dismissed` carries an empty ID.
 
-Completion runs only after the retained overlay close/reconciliation reaches its safe commit point and the per-UI dialog slot is released. Application completion code can therefore re-enter and present another dialog. If a normal completion callback throws, NativeUI has already made the completed dialog terminal before the exception propagates. Destructor cleanup is `noexcept` and contains failures.
+An enabled `Default` action is the fallback for Enter **after focused content has had its normal input opportunity**. For example, a focused single-line text input may submit and a text area may insert a newline without triggering the dialog default action. Escape follows the dialog policy before it can leak to focused dialog content: an enabled `Cancel` action produces an `Action` result for that ID; otherwise Escape produces `Dismissed`. `Dialog::close()` requests the same dismissed terminal result programmatically.
 
-`Dialog` is bound to one `UI`, is non-copyable/non-movable and is UI/main-thread confined. `active()` observes whether that controller still owns the active generation; it does not extend UI lifetime. UI deactivation/teardown may abandon active presentation as part of UI lifecycle cleanup rather than preserving a native modal session outside the UI.
+The dialog panel is a trapping focus scope. Pointer/keyboard ownership, focus restoration and dismissal remain scoped to the same retained `UI`; no native focus/modal lifetime is exported to application code.
+
+### Completion, reentrancy and failure recovery
+
+A non-empty `Dialog::Completion` is owned by the active transaction and runs at most once. NativeUI first reaches the retained close safe point, releases the per-UI dialog slot and makes the controller terminal, then invokes application completion. The callback may therefore re-enter NativeUI, present another dialog, destroy the `Dialog`, or destroy the owning `UI`.
+
+When a close is requested from inside retained dispatch, NativeUI may defer the whole close transaction until the retained safe checkpoint. If retained reconciliation fails before that commit point, the same dialog remains repairable. The **first requested terminal result is preserved across retry**: if an action requested completion and close reconciliation threw, a later repair call to `close()` cannot silently replace that pending action result with `Dismissed`.
+
+If application completion throws after a successful close commit, the dialog is already terminal and the per-UI slot is reusable before the exception propagates. `Dialog` destruction is `noexcept`: while the UI is live it performs best-effort dismissed close, forces terminal cleanup if ordinary close fails, and contains completion exceptions.
+
+UI deactivation or whole-UI teardown is different from an application-requested close: NativeUI abandons the presentation and suppresses the application completion callback. The controller does not keep its `UI` alive; if the UI disappears first, `active()` becomes false and later close/show paths are inert/unavailable rather than dereferencing ownership that no longer exists.
+
+All dialog construction, retained publication/reconciliation, callback movement and application completion are UI/main-thread work and may allocate. None of this surface is intended for an audio/DSP real-time callback.
 
 ```cpp
 ui::Dialog confirm{screen};
@@ -351,10 +370,9 @@ const auto shown = confirm.show(
     });
 ```
 
-The dialog panel is a focus scope; modal pointer/keyboard ownership and focus restoration remain part of the same retained `UI`. The implementation uses logical viewport geometry and bounded body scrolling, not a separate native coordinate/window model.
+The panel uses logical UI geometry and bounded body scrolling rather than a separate native coordinate/window model.
 
-[`t063_dialog`](../examples/features/t063_dialog.cpp) is the focused executable reference for Default/Cancel behavior, exactly-once completion, focus trapping, bounded scrolling and close-before-callback semantics.
-
+[`t063_dialog`](../examples/features/t063_dialog.cpp) is the executable contract reference for Default/Cancel behavior, focused-editor precedence, exactly-once completion, deactivation suppression, reentrant UI destruction, close-retry preservation, focus trapping, bounded scrolling and close-before-callback semantics.
 ## Virtualized list controller
 
 [`VirtualListState<Key>`](../include/nativeui/virtual_list.hpp) is the external controller for the fixed-row-height virtualized `ListView` path. It owns the instance-local retained runtime while the application supplies a borrowed `State<std::optional<Key>>` for selection. That selection State must outlive every live controller/view/runtime that still refers to it; there is no process-global current-list registry.
