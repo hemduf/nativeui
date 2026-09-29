@@ -106,13 +106,9 @@ bool near_channel(std::uint8_t actual,
 void compare_gpu(ui::Application& application,
                  const ui::ScalarSource& source,
                  const char* title) {
+    constexpr float logical_size = 64.0f;
+    constexpr float logical_sample = 32.0f;
     const auto brush = scalar_brush(source);
-
-    auto reference_ui = make_ui(brush);
-    ui::HeadlessRenderer reference{{64.0f, 64.0f}, 1.0f};
-    check(reference.render(reference_ui),
-          "ScalarSource headless reference render failed");
-    const auto expected = reference.pixel(32, 32);
 
     auto gpu_ui = make_ui(brush);
     ui::StandaloneWindow window{
@@ -120,13 +116,47 @@ void compare_gpu(ui::Application& application,
         gpu_ui,
         ui::WindowDesc{
             .title = title,
-            .size = {64.0f, 64.0f},
+            .size = {logical_size, logical_size},
             .resizable = false}};
     check(window.valid() && window.native_handle(),
           "ScalarSource GPU window is invalid");
 
+    // Synchronize with the native drawable before using its scale or asking
+    // for a readback. Requesting the first readback before initial expose can
+    // leave no completed drawable on some hosted/native backends.
+    check(ui::detail::PlatformTestAccess::request_expose(window),
+          "ScalarSource GPU initial expose request was rejected");
+    ui::detail::SceneDiagnostics diagnostics;
+    for (int iteration = 0; iteration < 100 && !diagnostics.scene_valid;
+         ++iteration) {
+        (void)application.poll(0.01);
+        diagnostics =
+            ui::detail::PlatformTestAccess::scene_diagnostics(window);
+    }
+    check(diagnostics.scene_valid,
+          "ScalarSource GPU initial scene did not become valid");
+
+    const float scale = window.scale_factor();
+    check(std::isfinite(scale) && scale > 0.0f,
+          "ScalarSource GPU window scale is invalid");
+
+    const int expected_scene_extent =
+        static_cast<int>(std::ceil(logical_size * scale));
+    check(diagnostics.scene_width == expected_scene_extent &&
+              diagnostics.scene_height == expected_scene_extent,
+          "ScalarSource GPU scene extent does not match window scale");
+
+    auto reference_ui = make_ui(brush);
+    ui::HeadlessRenderer reference{{logical_size, logical_size}, scale};
+    check(reference.render(reference_ui),
+          "ScalarSource headless reference render failed");
+
+    const int physical_sample =
+        static_cast<int>(std::lround(logical_sample * scale));
+    const auto expected = reference.pixel(physical_sample, physical_sample);
+
     check(ui::detail::PlatformTestAccess::request_gpu_readback(
-              window, ui::Point{32.0f, 32.0f}),
+              window, ui::Point{logical_sample, logical_sample}),
           "ScalarSource GPU readback request was rejected");
 
     std::optional<ui::detail::PlatformReadbackPixel> actual;
