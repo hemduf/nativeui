@@ -76,6 +76,59 @@ void test_runtime_constraint_updates_preserve_old_pair_on_failure() {
     NUI_CHECK(same(*constraints.max_size(), {300.0f, 240.0f}));
 }
 
+void test_scoped_boolean_state_restores_exact_previous_value() {
+    bool value = false;
+    {
+        ui::detail::ScopedBooleanState outer{value, true};
+        NUI_CHECK(value);
+        {
+            ui::detail::ScopedBooleanState inner{value, false};
+            NUI_CHECK(!value);
+        }
+        NUI_CHECK(value);
+    }
+    NUI_CHECK(!value);
+}
+
+void test_visibility_state_preserves_newest_reentrant_transition() {
+    ui::detail::WindowVisibilityState state;
+    NUI_CHECK(!state.visible());
+
+    const auto outer_show = state.begin_show();
+    NUI_CHECK(state.visible());
+    NUI_CHECK(state.current(outer_show));
+
+    const auto nested_hide = state.begin_hide();
+    NUI_CHECK(!state.visible());
+    NUI_CHECK(!state.current(outer_show));
+    NUI_CHECK(state.current(nested_hide));
+
+    // A stale outer show must not undo the newer hide.
+    state.rollback_show(outer_show);
+    NUI_CHECK(!state.visible());
+
+    state.set_visible(true);
+    const auto outer_hide = state.begin_hide();
+    NUI_CHECK(!state.visible());
+
+    const auto nested_show = state.begin_show();
+    NUI_CHECK(state.visible());
+    NUI_CHECK(!state.current(outer_hide));
+    NUI_CHECK(state.current(nested_show));
+
+    // A stale outer hide must not undo the newer show.
+    state.rollback_hide(outer_hide);
+    NUI_CHECK(state.visible());
+
+    const auto current_hide = state.begin_hide();
+    state.rollback_hide(current_hide);
+    NUI_CHECK(state.visible());
+
+    const auto current_show = state.begin_show();
+    state.rollback_show(current_show);
+    NUI_CHECK(!state.visible());
+}
+
 void test_close_control_post_state_recovers_rejection_and_exception() {
     ui::detail::WindowControlPostState post_state;
 
@@ -166,6 +219,8 @@ void suite() {
     test_size_constraints_validate_and_clamp_atomically();
     test_size_constraints_reject_non_finite_or_non_positive_values();
     test_runtime_constraint_updates_preserve_old_pair_on_failure();
+    test_scoped_boolean_state_restores_exact_previous_value();
+    test_visibility_state_preserves_newest_reentrant_transition();
     test_close_control_post_state_recovers_rejection_and_exception();
     test_close_state_accept_cancel_and_exactly_once_completion();
     test_programmatic_close_inside_veto_wins_over_cancel();
