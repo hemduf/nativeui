@@ -4,6 +4,7 @@
 #include <nativeui/paint.hpp>
 #include <nativeui/scalar_source.hpp>
 #include <nativeui/shader.hpp>
+#include <nativeui/widgets.hpp>
 
 #include "src/detail/image_texture_test_seams.hpp"
 #include "src/detail/scalar_source_access.hpp"
