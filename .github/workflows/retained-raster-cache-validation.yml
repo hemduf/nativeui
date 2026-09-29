@@ -1,0 +1,135 @@
+name: Retained Raster Cache Validation
+
+on:
+  push:
+    branches:
+      - feature/retained-raster-cache-boundary
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64
+            os: macos-15
+          - name: Windows x64
+            os: windows-latest
+          - name: Linux x64
+            os: ubuntu-latest
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libxtst-dev libgl1-mesa-dev libfontconfig1-dev mesa-utils xvfb xauth
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=ON
+          -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_BUILD_EXAMPLES=ON
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=ON
+          -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Run retained raster cache contracts
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build --output-on-failure -C Release -R '^nativeui_raster_cache_'
+      - name: Run retained raster cache contracts on Linux
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ctest --test-dir build --output-on-failure -C Release -R '^nativeui_raster_cache_'
+      - name: Test Linux
+        if: runner.os == 'Linux'
+        run: >-
+          xvfb-run -a
+          -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
+          ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+      - name: Test macOS and Windows
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+
+  sanitizers:
+    name: Linux ASan + UBSan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact head
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
+      - name: Configure
+        run: >-
+          cmake -S . -B build-sanitize -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_ENABLE_SANITIZERS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+      - name: Build
+        run: cmake --build build-sanitize
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
+        run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
