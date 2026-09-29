@@ -178,6 +178,10 @@ public:
         return resources_.retained_accounted_bytes();
     }
 
+    [[nodiscard]] std::size_t transient_frame_lease_capacity_for_test() const noexcept {
+        return transient_frame_leases_.capacity();
+    }
+
     void clear() noexcept {
         release_frame_resources();
         frame_active_ = false;
@@ -260,7 +264,14 @@ private:
             retained_frame_leases_[index].reset();
         }
         retained_frame_lease_count_ = 0;
-        transient_frame_leases_.clear();
+
+        // Transient resources are allowed to exceed the retained cache bounds
+        // for one active frame, so their lease count is intentionally
+        // unbounded by kMaxRetainedEntries. Do not let a pathological frame
+        // turn that temporary usage into permanent per-view bookkeeping
+        // capacity after the resources themselves have been released.
+        std::vector<std::shared_ptr<const CachedResource>>{}
+            .swap(transient_frame_leases_);
     }
     using ResourceCache = RenderResourceCache<
         RenderResourceKey,

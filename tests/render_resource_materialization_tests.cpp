@@ -595,6 +595,41 @@ void frame_scope_pins_resources_until_completion() {
         ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
 }
 
+void transient_frame_bookkeeping_is_released_at_frame_boundary() {
+    const auto image = ui::Image::decode(kTinyRgbaPng);
+    NUI_CHECK(image.valid());
+
+    ui::detail::RenderResourceMaterializationContext context;
+    context.begin_frame();
+
+    for (std::size_t index = 0;
+         index < ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries;
+         ++index) {
+        auto retained = context.acquire_image_texture(
+            texture_at(image, static_cast<float>(index)),
+            [] { return SkShaders::Color(SK_ColorRED); });
+        NUI_CHECK(retained && retained.retained);
+    }
+
+    for (std::size_t index = 0; index < 64U; ++index) {
+        auto transient = context.acquire_image_texture(
+            texture_at(
+                image,
+                static_cast<float>(
+                    ui::detail::RenderResourceMaterializationContext::
+                        kMaxRetainedEntries + index)),
+            [] { return SkShaders::Color(SK_ColorBLUE); });
+        NUI_CHECK(transient && !transient.retained);
+    }
+
+    NUI_CHECK(context.transient_frame_lease_capacity_for_test() >= 64U);
+    context.end_frame();
+    NUI_CHECK(context.transient_frame_lease_capacity_for_test() == 0U);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+}
+
 void clear_releases_context_owned_frame_leases() {
     const auto image = ui::Image::decode(kTinyRgbaPng);
     NUI_CHECK(image.valid());
@@ -656,6 +691,7 @@ int main() {
     effects_share_the_unified_cache_budget();
     invalid_texture_is_transient_and_never_retained();
     frame_scope_pins_resources_until_completion();
+    transient_frame_bookkeeping_is_released_at_frame_boundary();
     clear_releases_context_owned_frame_leases();
     clear_is_instance_local();
     return 0;
