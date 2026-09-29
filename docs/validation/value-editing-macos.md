@@ -1,3 +1,9 @@
+> **Historical note:** this document records the original validation campaign
+> that used a build-private Pugl staging shim. Current NativeUI pins the corrected
+> Pugl source directly and does not rewrite dependency sources during CMake
+> configuration. The staging commands and contract-test references below are kept
+> only as evidence of the original campaign.
+
 # Value editing / embedded visibility validation
 
 Implementation is based on NativeUI `74f70b986152903f470a735c9e416003baba3cea`.
