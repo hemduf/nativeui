@@ -29,6 +29,62 @@ The callback contexts deliberately have different lifetime rules:
 
 Pointer capture through `InputContext` is scoped to the pointer identity/generation associated with the current callback. Terminal pointer callbacks cannot reacquire capture, and stale/re-entrant callbacks cannot replace or release a newer generation. This preserves deterministic capture ownership during nested dispatch without exposing a process-global capture singleton.
 
+For custom components, the public callback facades have deliberately different contracts:
+
+| Context/API | Borrowed/owned data | Important behavior |
+| --- | --- | --- |
+| `PaintContext` | borrows `Painter` and `PlatformServices`; owns logical bounds/clip/focus snapshots | text measurement and painting execute synchronously in the render/UI domain; returned metrics are owned values |
+| `CanvasContext2D` | borrows one `Painter`; owns logical bounds/focus snapshot | all geometry is logical; gradient/brush/path/image/SVG/text resources are consumed synchronously and are not retained; save/clip stacks must be balanced |
+| `InputContext` | borrows `PlatformServices`; owns invalidation/capture callbacks and logical bounds | clipboard/drop/text-input operations forward immediately to the platform seam; invalidation may re-enter/throw; generation-aware Tree capture prevents stale nested callbacks from stealing/releasing newer capture |
+| `CanvasInputContext` | borrows an `InputContext` | exposes the same input services with size-oriented canvas ergonomics and no additional lifetime |
+| `FocusContext` | borrows `PlatformServices`; owns logical bounds plus invalidation callbacks | text metrics/text-input updates and invalidation run synchronously in the UI domain and inherit platform/runtime failure semantics |
+| `MountContext` | owns a `NodeId` value and invalidator factories/callables; optionally borrows the per-UI overlay seam | the context is callback-scoped, but copied invalidator functions may be stored for later UI-domain changes; they do not keep the retained node or Tree alive |
+| `LifecycleContext` | owns `NodeId`/bounds snapshots and invalidation callbacks | valid only for activate/deactivate/unmount callback work; invalidation requests are synchronous, while layout recomputation remains deferred to a safe checkpoint |
+
+The `CanvasContext2D` drawing overloads intentionally mirror `Painter` without creating another resource owner. For example, a `Brush` backed by an image/shader and a `Path` need remain valid only for the draw call; the facade neither stores them nor makes the paint callback safe for another thread. Stroke widths, radii, positions, image rectangles and text sizes are logical values; arc/rotation angles are radians and scale factors are dimensionless.
+
+`MountContext::invalidator()`, `layout_invalidator()`, `focus_invalidator()` and `availability_invalidator()` are the exception to the callback-borrow rule: they are returned by value specifically so a mounted component can retain them. They schedule work through the owning retained runtime; they are not direct layout/paint calls and are not an audio-thread notification mechanism. The `NodeId` returned by `node_id()` remains non-owning and may become stale after structural reconciliation.
+
+A component that needs pointer capture and later repaint can keep only durable state plus the mount invalidator while using the input context transiently:
+
+```cpp
+class DragHandle final : public ui::Component {
+public:
+    ui::Size measure(const std::vector<ui::ChildMetrics>&) const override {
+        return {24.0f, 24.0f};
+    }
+
+    void mount(ui::MountContext& context) override {
+        repaint_ = context.invalidator();
+    }
+
+    ui::EventResult input(const ui::InputEvent& event,
+                          ui::InputContext& context) override {
+        if (event.type == ui::InputType::PointerDown) {
+            context.capture_pointer();
+            dragging_ = true;
+            context.invalidate();
+            return ui::EventResult::Handled;
+        }
+        if (event.type == ui::InputType::PointerUp) {
+            context.release_pointer();
+            dragging_ = false;
+            context.invalidate();
+            return ui::EventResult::Handled;
+        }
+        return ui::EventResult::Ignored;
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        // Use context.painter() only in this callback.
+    }
+
+private:
+    bool dragging_{};
+    std::function<void()> repaint_;
+};
+```
+
 `ComponentAvailability::interactive()` means **visible and enabled**; it intentionally does not fold in `read_only`. Read-only is a separate editing/mutation policy for controls that support it. Effective availability is ancestry-resolved and cached by the retained tree.
 
 A minimal custom component keeps callback borrows local and stores only durable invalidation handles:

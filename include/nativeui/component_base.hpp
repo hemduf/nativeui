@@ -192,18 +192,33 @@ public:
     }
 
     /// Fill an axis-aligned logical rectangle with a solid color.
+    ///
+    /// `rect` is expressed in the current logical coordinate space and is
+    /// transformed/clipped by the borrowed Painter state immediately.
     void fill_rect(Rect rect, Color color) {
         painter_.fill_rounded_rect(rect, 0.0f, color);
     }
 
+    /// Fill an axis-aligned logical rectangle with a borrowed linear gradient.
+    ///
+    /// Gradient geometry and `rect` use logical coordinates. `options` is
+    /// copied for this draw; neither the gradient nor options are retained.
     void fill_rect(Rect rect, const LinearGradient& gradient, PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, 0.0f, gradient, options);
     }
 
+    /// Fill an axis-aligned logical rectangle with a borrowed radial gradient.
+    ///
+    /// Gradient geometry and `rect` use logical coordinates. The call executes
+    /// synchronously through the active Painter and retains no gradient reference.
     void fill_rect(Rect rect, const RadialGradient& gradient, PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, 0.0f, gradient, options);
     }
 
+    /// Fill an axis-aligned logical rectangle with a borrowed Brush.
+    ///
+    /// Brush/image/shader resources follow Painter's synchronous borrowing rules;
+    /// callers must keep referenced resources alive for this call.
     void fill_rect(Rect rect, const Brush& brush, PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, 0.0f, brush, options);
     }
@@ -213,6 +228,10 @@ public:
         painter_.stroke_rounded_rect(rect, 0.0f, width, color);
     }
 
+    /// Stroke a logical rectangle with a borrowed Brush.
+    ///
+    /// `width` is a logical-pixel stroke width and `options` is copied for
+    /// this synchronous draw.
     void stroke_rect(Rect rect, float width, const Brush& brush,
                      PaintOptions options = {}) {
         painter_.stroke_rounded_rect(rect, 0.0f, width, brush, options);
@@ -223,16 +242,28 @@ public:
         painter_.fill_rounded_rect(rect, radius, color);
     }
 
+    /// Fill a rounded logical rectangle with a borrowed linear gradient.
+    ///
+    /// `rect`, `radius`, and gradient geometry are logical. The gradient is
+    /// consumed synchronously and is not retained by this facade.
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
                            PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, radius, gradient, options);
     }
 
+    /// Fill a rounded logical rectangle with a borrowed radial gradient.
+    ///
+    /// `rect`, `radius`, and gradient geometry are logical. The gradient is
+    /// consumed synchronously and is not retained by this facade.
     void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
                            PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, radius, gradient, options);
     }
 
+    /// Fill a rounded logical rectangle with a borrowed Brush.
+    ///
+    /// `rect` and `radius` use logical pixels; Painter owns any validation,
+    /// fallback, and shader/image materialization behavior for the Brush.
     void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
                            PaintOptions options = {}) {
         painter_.fill_rounded_rect(rect, radius, brush, options);
@@ -243,6 +274,10 @@ public:
         painter_.stroke_rounded_rect(rect, radius, width, color);
     }
 
+    /// Stroke a rounded rectangle with a borrowed Brush.
+    ///
+    /// `radius` and `width` are logical pixels. Brush resources are borrowed
+    /// for this call and remain owned by the caller.
     void stroke_rounded_rect(Rect rect, float radius, float width, const Brush& brush,
                              PaintOptions options = {}) {
         painter_.stroke_rounded_rect(rect, radius, width, brush, options);
@@ -253,6 +288,10 @@ public:
         painter_.circle(center, radius, color);
     }
 
+    /// Draw a filled logical circle with a borrowed Brush.
+    ///
+    /// `center` and `radius` are transformed by the current Painter state;
+    /// the Brush is not retained after the synchronous draw.
     void circle(Point center, float radius, const Brush& brush, PaintOptions options = {}) {
         painter_.circle(center, radius, brush, options);
     }
@@ -262,6 +301,10 @@ public:
         painter_.arc(center, radius, start, end, width, color);
     }
 
+    /// Stroke an arc with a borrowed Brush.
+    ///
+    /// Center/radius/width use logical coordinates, `start`/`end` are radians,
+    /// and Brush resources are borrowed only for this call.
     void arc(Point center, float radius, float start, float end, float width,
              const Brush& brush, PaintOptions options = {}) {
         painter_.arc(center, radius, start, end, width, brush, options);
@@ -272,6 +315,10 @@ public:
         painter_.line(a, b, width, color);
     }
 
+    /// Stroke a logical line with a borrowed Brush.
+    ///
+    /// Endpoints and `width` use logical coordinates/pixels and are transformed
+    /// by the current Painter state.
     void line(Point a, Point b, float width, const Brush& brush,
               PaintOptions options = {}) {
         painter_.line(a, b, width, brush, options);
@@ -282,6 +329,10 @@ public:
         painter_.fill_path(path, color);
     }
 
+    /// Fill a borrowed Path with a borrowed Brush.
+    ///
+    /// Both objects need remain valid only for this synchronous call; neither is
+    /// retained by CanvasContext2D.
     void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
         painter_.fill_path(path, brush, options);
     }
@@ -291,6 +342,10 @@ public:
         painter_.stroke_path(path, color, style);
     }
 
+    /// Stroke a borrowed Path with a borrowed Brush and copied style/options.
+    ///
+    /// Path/Brush lifetimes need cover only this call. Stroke dimensions are
+    /// interpreted in the Painter's current logical coordinate system.
     void stroke_path(const Path& path, const Brush& brush, StrokeStyle style = {},
                      PaintOptions options = {}) {
         painter_.stroke_path(path, brush, style, options);
@@ -318,33 +373,50 @@ public:
     }
 
     /// Draw borrowed UTF-8 text at a logical position using the supplied style.
+    ///
+    /// `text` and `style` are borrowed only for this call. Text measurement
+    /// and font fallback follow Painter/TextService behavior and may allocate.
     void text(Point position, std::string_view text, const TextStyle& style) {
         painter_.text(position, text, style);
     }
 
+    /// Draw borrowed UTF-8 text with a convenience logical-pixel size/color style.
+    ///
+    /// `position` and `size` use logical coordinates. `align` controls the
+    /// horizontal anchor exactly as the equivalent TextStyle overload.
     void text(Point position, std::string_view text, float size, Color color,
               TextAlign align = TextAlign::Left) {
         painter_.text(position, text, size, color, align);
     }
 
     /// Intersect the active painter clip with a logical rectangle.
+    ///
+    /// Clip state is stack-scoped; balance this call with `pop_clip()` before
+    /// the enclosing paint callback returns.
     void push_clip(Rect rect) { painter_.push_clip(rect); }
     /// Pop the most recently pushed clip.
+    ///
+    /// The same balancing/underflow contract as the underlying Painter applies.
     void pop_clip() { painter_.pop_clip(); }
 
     /// Save the current painter transform/clip state.
+    ///
+    /// Balance with `restore()`; state is owned by the borrowed Painter, not by
+    /// CanvasContext2D.
     void save() { painter_.save(); }
     /// Restore the most recently saved painter state.
     void restore() { painter_.restore(); }
-    /// Append a logical translation to the active transform.
+    /// Append a logical X/Y translation to the active transform.
     void translate(float x, float y) { painter_.translate(x, y); }
+    /// Append a logical translation vector to the active transform.
     void translate(Point offset) { painter_.translate(offset); }
-    /// Append independent X/Y scale factors.
+    /// Append independent dimensionless X/Y scale factors.
     void scale(float x, float y) { painter_.scale(x, y); }
+    /// Append one dimensionless uniform scale factor on both axes.
     void scale(float uniform) { painter_.scale(uniform); }
     /// Append a rotation in radians.
     void rotate(float radians) { painter_.rotate(radians); }
-    /// Append the supplied transform value.
+    /// Append the supplied transform value by immediate copy/borrow semantics of Painter.
     void concat(const Transform2D& transform) { painter_.concat(transform); }
 
 private:
@@ -361,6 +433,15 @@ private:
 /// guarded against stale/re-entrant contact generations.
 class InputContext {
 public:
+    /// Construct a callback-scoped input facade from borrowed platform services
+    /// and owned callback functions.
+    ///
+    /// `bounds` is the receiving component's logical rectangle. `platform` is
+    /// borrowed for the lifetime of this context and must outlive it. The supplied
+    /// invalidation/capture/release callables are moved into the context and may
+    /// allocate or throw when invoked. This constructor is primarily useful to
+    /// adapters/tests; retained Tree dispatch supplies generation-aware capture
+    /// callbacks through its internal constructor.
     InputContext(
         Rect bounds,
         PlatformServices& platform,
@@ -375,43 +456,63 @@ public:
           legacy_capture_(std::move(capture)),
           legacy_release_(std::move(release)) {}
 
-    /// Retained bounds of the receiving component in logical coordinates.
-    /// Retained bounds in logical coordinates.
+    /// Return retained bounds of the receiving component in logical coordinates.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
 
-    /// Measure text through the owning platform services.
-    /// Measure borrowed UTF-8 text and return owned logical-pixel metrics.
+    /// Measure borrowed UTF-8 text through the active PlatformServices.
+    ///
+    /// `text`/`style` need remain valid only for the call. Returned metrics
+    /// are an owned logical-pixel snapshot; platform/font work may allocate.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
     }
-    /// Convenience width measurement in logical pixels.
+    /// Convenience UTF-8 width measurement in logical pixels.
+    ///
+    /// `text` is borrowed for the call; `size` and the returned width use
+    /// logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
-    /// Replace the platform clipboard's text payload.
+    /// Replace the platform clipboard text from a payload borrowed for this call.
+    ///
+    /// Platform-specific failure behavior is owned by PlatformServices; this
+    /// wrapper adds no retry, fallback, or cross-thread synchronization.
     void set_clipboard_text(std::string_view text) { platform_.set_clipboard_text(text); }
 
     /// Ask the platform adapter to deliver clipboard text through its normal
     /// NativeUI input path.
+    ///
+    /// The request is asynchronous only if the PlatformServices implementation
+    /// defines it that way; InputContext does not retain a completion callback.
     void request_clipboard_text() { platform_.request_clipboard_text(); }
 
-    /// Accept one exact advertised drop type for this component's bounds.
+    /// Accept one exact advertised drop type for this component's logical bounds.
+    ///
+    /// Returns the PlatformServices acceptance result. `type` is borrowed for
+    /// the call and no wildcard/implicit conversion is applied here.
     [[nodiscard]] bool accept_drop(std::string_view type) {
         return platform_.accept_drop(type, bounds_);
     }
-    /// Reject the current drop offer for this component.
+    /// Reject the current drop offer for this component's logical bounds.
     void reject_drop() { platform_.reject_drop(bounds_); }
 
-    /// Start/update/stop native text input for this focused editor.
+    /// Start, update, or stop native text input for this focused editor.
     ///
     /// `area` and `cursor_offset` are logical geometry; the platform boundary
-    /// performs physical-pixel scaling.
+    /// performs device scaling. The call is synchronous at this API boundary and
+    /// inherits PlatformServices error/reentrancy behavior.
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         platform_.set_text_input(active, area, cursor_offset);
     }
-    /// Repaint this component without recomputing layout.
+    /// Request repaint of this component without recomputing layout.
+    ///
+    /// The retained invalidator is invoked synchronously and may re-enter/throw
+    /// according to the owning Tree's invalidation contract.
     void invalidate() const { invalidate_(); }
-    /// Recompute layout from this component through its ancestors, then repaint.
+    /// Request layout from this component through its ancestors, then repaint.
+    ///
+    /// The retained invalidator is invoked synchronously and may re-enter/throw;
+    /// geometry is recomputed later at the Tree/UI layout checkpoint.
     void invalidate_layout() const { invalidate_layout_(); }
     /// Capture the current pointer contact to this retained component.
     ///
@@ -468,16 +569,12 @@ private:
     std::function<void()> legacy_release_;
 };
 
-/// Canvas-friendly borrowed facade over `InputContext`.
-///
-/// It exposes size rather than absolute bounds and forwards invalidation,
-/// pointer-capture, clipboard and drag/drop operations to the same callback
-/// context. It must not outlive the enclosing input callback.
 /// Canvas-friendly callback-scoped facade over `InputContext`.
 ///
-/// It borrows the underlying context and must not outlive the enclosing input
-/// callback. Operations forward to the same retained pointer/clipboard/drop
-/// and invalidation services; they do not transfer ownership.
+/// It exposes logical size rather than absolute bounds and forwards text
+/// measurement, invalidation, pointer capture, clipboard and drag/drop operations
+/// to the same borrowed context. It does not own PlatformServices or retained
+/// interaction state and must not outlive the enclosing input callback.
 class CanvasInputContext {
 public:
     /// Borrow an existing callback-scoped input context.
@@ -526,6 +623,11 @@ private:
 /// and paint/layout invalidation.
 class FocusContext {
 public:
+    /// Construct one callback-scoped focus-transition context.
+    ///
+    /// `bounds` is an owned logical snapshot. `platform` is borrowed for this
+    /// context's lifetime, while invalidation callables are moved into the
+    /// context. Construction itself invokes no platform or application callback.
     FocusContext(Rect bounds,
                  PlatformServices& platform,
                  std::function<void()> invalidate,
@@ -535,26 +637,40 @@ public:
           invalidate_(std::move(invalidate)),
           invalidate_layout_(std::move(invalidate_layout)) {}
 
-    /// Return logical bounds captured for this transition.
+    /// Return logical bounds captured for this focus transition.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
+
+    /// Measure borrowed UTF-8 text and return owned logical-pixel metrics.
+    ///
+    /// The PlatformServices implementation owns font lookup/fallback and any
+    /// allocation or error behavior.
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
     }
+
+    /// Convenience borrowed-text width measurement in logical pixels.
     [[nodiscard]] float text_width(std::string_view text, float size) const {
         return platform_.text_width(text, size);
     }
-    /// Start/update/stop platform text input for the focused component. Geometry
-    /// is supplied in logical coordinates.
+
+    /// Start, update, or stop platform text input for the focused component.
+    ///
+    /// `area` and `cursor_offset` are logical geometry; the platform boundary
+    /// owns device scaling. The call inherits PlatformServices error semantics.
     void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         platform_.set_text_input(active, area, cursor_offset);
     }
 
-    /// Repaint this component without recomputing layout.
-    /// Request paint invalidation through the retained callback seam.
+    /// Request paint invalidation for the focused component.
+    ///
+    /// Notification is synchronous through the retained invalidator and may
+    /// re-enter or throw according to the owning Tree contract.
     void invalidate() const { invalidate_(); }
 
-    /// Recompute layout from this component through its ancestors, then repaint.
-    /// Request layout plus paint invalidation through retained ancestors.
+    /// Request retained layout plus paint invalidation through ancestors.
+    ///
+    /// Geometry is recomputed later at the normal layout checkpoint; the
+    /// invalidation callback itself is invoked synchronously.
     void invalidate_layout() const { invalidate_layout_(); }
 
 private:
@@ -572,6 +688,12 @@ private:
 /// Mount/unmount and invalidation scheduling are UI/main-thread operations.
 class MountContext {
 public:
+    /// Construct mount services for one retained identity.
+    ///
+    /// `node_id` is an identity token, not ownership. Invalidation callables are
+    /// moved into this context and may be copied out through the accessors below.
+    /// `overlay_service` is borrowed and may be null; it must not be retained as
+    /// an owning pointer or used outside the owning UI/main-thread domain.
     MountContext(NodeId node_id,
                  std::function<void()> invalidate,
                  std::function<void()> invalidate_layout,
@@ -586,30 +708,54 @@ public:
           overlay_service_(overlay_service) {}
 
     /// Return this component's retained identity in the current tree.
+    ///
+    /// The value does not keep the node or Tree alive and may become stale after
+    /// unmount/reconciliation.
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
-    /// Long-lived callback for state changes that only affect painting.
+
+    /// Return a copyable callback for state changes that affect only painting.
+    ///
+    /// The returned callable is intended for later UI-domain use. It does not own
+    /// the component/Tree; after the retained identity disappears, generated Tree
+    /// invalidators safely become inert according to the owning runtime.
     [[nodiscard]] std::function<void()> invalidator() const {
         return invalidate_ ? invalidate_ : make_invalidator(invalidator_factory_.invalidate);
     }
-    /// Long-lived callback for state changes that can affect preferred size/layout.
+
+    /// Return a copyable callback for changes that can affect measurement/layout.
+    ///
+    /// Invocation schedules retained layout and the paint damage implied by
+    /// geometry movement; it is not an immediate synchronous layout pass.
     [[nodiscard]] std::function<void()> layout_invalidator() const {
         return invalidate_layout_ ? invalidate_layout_
                                   : make_invalidator(invalidator_factory_.invalidate_layout);
     }
-    /// Long-lived callback for state changes that affect focus availability/scopes.
+
+    /// Return a copyable callback for changes that affect focusability/scope state.
+    ///
+    /// Invocation requests focus-structure reconciliation at the runtime's safe
+    /// checkpoint; application focus callbacks may run during that later repair.
     [[nodiscard]] std::function<void()> focus_invalidator() const {
         return invalidate_focus_ ? invalidate_focus_
                                  : make_invalidator(invalidator_factory_.invalidate_focus);
     }
-    /// Long-lived callback for local visibility/enabled/read-only state changes.
+
+    /// Return a copyable callback for visibility/enabled/read-only changes.
+    ///
+    /// The returned function is always callable; when no availability invalidator
+    /// exists this accessor returns an inert no-op rather than an empty function.
     [[nodiscard]] std::function<void()> availability_invalidator() const {
         auto callback = invalidate_availability_
                             ? invalidate_availability_
                             : make_invalidator(invalidator_factory_.invalidate_availability);
         return callback ? std::move(callback) : std::function<void()>{[] {}};
     }
-    /// Borrowed per-UI T061 overlay seam. Null for trees compiled without a UI
-    /// owner (direct internal component use, headless component fixtures).
+
+    /// Borrow the optional per-UI overlay service.
+    ///
+    /// Returns null for direct/headless retained trees without a UI overlay owner.
+    /// The pointer is non-owning and must not escape the owning UI lifetime or be
+    /// used from worker/audio threads.
     [[nodiscard]] detail::OverlayService* overlay_service() const noexcept {
         return overlay_service_;
     }
@@ -652,6 +798,11 @@ private:
 /// is a logical snapshot for that transition; do not retain this context.
 class LifecycleContext {
 public:
+    /// Construct one callback-scoped lifecycle context.
+    ///
+    /// `node_id` and `bounds` are owned snapshots for the transition. The
+    /// invalidation callbacks are moved into the context and invoke the owning
+    /// retained runtime synchronously when called.
     LifecycleContext(NodeId node_id,
                      Rect bounds,
                      std::function<void()> invalidate,
@@ -662,9 +813,23 @@ public:
           invalidate_layout_(std::move(invalidate_layout)) {}
 
     /// Return retained identity for this lifecycle callback.
+    ///
+    /// The value is non-owning and may be stale after unmount/reconciliation.
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
+
+    /// Return logical component bounds captured for this lifecycle transition.
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
+
+    /// Request paint invalidation through the owning retained runtime.
+    ///
+    /// The callback is invoked synchronously and may re-enter/throw according to
+    /// Tree invalidation rules.
     void invalidate() const { invalidate_(); }
+
+    /// Request layout plus paint invalidation through retained ancestors.
+    ///
+    /// The request is synchronous, while actual geometry recomputation occurs at
+    /// the next safe layout checkpoint.
     void invalidate_layout() const { invalidate_layout_(); }
 
 private:
@@ -714,12 +879,27 @@ public:
         return effective_availability_.read_only;
     }
 
-    /// Focus-scope metadata used by the tree focus manager. Normal components
-    /// are not scopes and therefore remain unaffected by scope state.
+    /// Whether this component defines a focus scope for retained descendants.
+    ///
+    /// Normal components return false and ignore the remaining scope metadata.
     [[nodiscard]] virtual bool is_focus_scope() const noexcept { return false; }
+
+    /// Whether this focus scope currently participates in focus routing.
+    ///
+    /// Returning false excludes the scope subtree from ordinary scoped traversal
+    /// until focus structure is invalidated/reconciled.
     [[nodiscard]] virtual bool focus_scope_active() const noexcept { return false; }
+
+    /// Whether focus traversal is constrained to this active scope.
+    ///
+    /// This flag is consulted only for components that report `is_focus_scope()`.
     [[nodiscard]] virtual bool focus_scope_traps() const noexcept { return false; }
-    /// Preferred focusable-descendant index when a scope needs initial focus.
+
+    /// Preferred focusable-descendant index when an active scope needs initial focus.
+    ///
+    /// The index is advisory; runtime eligibility/availability still determines
+    /// the actual target and invalid/out-of-range candidates fall back to normal
+    /// scope traversal.
     [[nodiscard]] virtual std::size_t focus_scope_default_index() const noexcept { return 0; }
 
     /// T045 platform-neutral semantic projection. The default `None` role
