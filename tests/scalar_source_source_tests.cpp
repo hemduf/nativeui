@@ -1,5 +1,7 @@
+#include <nativeui/headless.hpp>
 #include <nativeui/image.hpp>
 #include <nativeui/noise.hpp>
+#include <nativeui/paint.hpp>
 #include <nativeui/scalar_source.hpp>
 #include <nativeui/shader.hpp>
 
