@@ -336,6 +336,38 @@ void data_texture_channel_contract() {
     }
 }
 
+
+void color_texture_channel_contract() {
+    const auto image = ui::Image::decode(kAlphaPayloadPng);
+    check(image.valid(), "ScalarSource Color texture fixture did not decode");
+
+    ui::ImageTexture texture{
+        image,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 16.0f, 16.0f}};
+    ui::TextureSampling nearest;
+    nearest.set_filter(ui::TextureFilter::Nearest)
+           .set_mipmap(ui::TextureMipmap::None);
+    texture.set_sampling(nearest)
+           .set_interpretation(ui::TextureInterpretation::Color);
+    const ui::Brush color{texture};
+
+    for (auto channel : {
+             ui::ScalarChannel::Red,
+             ui::ScalarChannel::Green,
+             ui::ScalarChannel::Blue,
+             ui::ScalarChannel::Alpha}) {
+        const auto scalar =
+            ui::ScalarSource::from_brush(color, channel);
+        const auto actual = scalar_probe(scalar);
+        const auto expected = select_channel(color, channel);
+        check_pixel_near(
+            render_probe(actual, 8, 8),
+            render_probe(expected, 8, 8),
+            0.005f);
+    }
+}
+
 void snapshot_lifetime_contract() {
     const auto gradient_scalar = [] {
         ui::Brush temporary{ui::LinearGradient{
@@ -559,6 +591,7 @@ int main() {
     brush_sampling_contract();
     source_construction_side_effect_contract();
     data_texture_channel_contract();
+    color_texture_channel_contract();
     snapshot_lifetime_contract();
     noise_sampling_contract();
     backend_failure_retry_contract();
