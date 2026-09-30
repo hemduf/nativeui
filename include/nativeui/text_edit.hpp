@@ -1,3 +1,11 @@
+/// \file
+/// UTF-8 boundary helpers and the platform-independent mutable text-edit model.
+///
+/// Public positions are byte offsets unless stated otherwise. Boundary helpers
+/// recognize UTF-8 continuation bytes but do not validate Unicode or segment
+/// grapheme clusters. TextEditModel owns text, selection, composition and bounded
+/// history, has no internal synchronization or callbacks, and is UI/main-thread
+/// work rather than an audio/DSP real-time API.
 #pragma once
 
 #include <algorithm>
@@ -200,30 +208,54 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
 } // namespace text
 
 /// Granularity used by horizontal movement and deletion.
+///
+/// Cursor/anchor storage remains byte-based for every value.
 enum class TextMotion {
+    /// One continuation-boundary-delimited UTF-8 unit, not a grapheme cluster.
     Codepoint,
+    /// One coarse CharClass run as defined by char_class_at().
     Word,
+    /// The complete document boundary.
     Document,
 };
 
 /// Platform-independent mutable UTF-8 editing model.
 ///
-/// Cursor/anchor/composition positions are byte offsets clamped to UTF-8
-/// boundaries. The model owns text, selection, pre-edit state and bounded
-/// undo/redo history, but no platform editor, drawing or synchronization.
+/// Cursor, anchor and composition positions are byte offsets clamped to the
+/// continuation-byte boundaries recognized by this header. The model owns text,
+/// selection, pre-edit state and bounded undo/redo history and never retains
+/// caller string views after a mutating call returns.
+///
+/// The model owns no platform editor, clipboard, painter, Dispatcher or retained
+/// component. It invokes no application callbacks, adds no synchronization and
+/// should be mutated in the owning UI/main-thread domain. Methods that copy/grow
+/// strings or history may allocate and propagate ordinary C++ exceptions; bool
+/// results report editing outcomes rather than translating allocation failures.
+///
+/// Input bytes are not normalized or fully validated as Unicode. Navigation is
+/// defined by the helper rules in namespace ui::text, not grapheme segmentation.
 class TextEditModel {
 public:
-    /// Owned text/cursor/anchor checkpoint. Offsets are bytes in `text`.
+    /// Owned text/cursor/anchor checkpoint independent of the model lifetime.
+    ///
+    /// Transient composition state and undo/redo history are intentionally absent.
     struct Snapshot {
+        /// Complete owned byte string.
         std::string text;
+        /// Insertion endpoint as a byte offset in `text`.
         std::size_t cursor{};
+        /// Opposite selection endpoint as a byte offset in `text`.
         std::size_t anchor{};
 
+        /// Value equality across text and both offsets.
         [[nodiscard]] bool operator==(const Snapshot&) const = default;
     };
 
-    /// Construct with initial text. max_length counts future inserted code
-    /// points; zero means unlimited.
+    /// Take ownership of initial text and configure the future insertion limit.
+    ///
+    /// `max_length` counts code-point-like units traversed by next_codepoint();
+    /// zero means unlimited. Initial text is never truncated and both endpoints
+    /// start at its byte end.
     explicit TextEditModel(std::string value = {}, std::size_t max_length = 0)
         : text_(std::move(value)),
           max_length_(max_length == 0 ? std::numeric_limits<std::size_t>::max() : max_length),
@@ -273,8 +305,11 @@ public:
         composition_active_ = true;
     }
 
-    /// Replace pre-edit text and clamp its cursor/selection byte range.
-    /// Starts composition automatically when inactive.
+    /// Replace owned pre-edit text and clamp its cursor/selection byte range.
+    ///
+    /// Starts composition automatically when inactive. `preedit` is consumed;
+    /// cursor/selection are byte-based and clamped to recognized boundaries. Base
+    /// text and undo history are unchanged. String assignment may allocate/throw.
     void update_composition(std::string preedit, std::size_t cursor_byte, std::size_t selection_bytes) {
         if (!composition_active_) begin_composition();
         composition_text_ = std::move(preedit);
@@ -288,10 +323,17 @@ public:
         composition_selection_bytes_ = selection_end - composition_cursor_byte_;
     }
 
-    /// Commit text over the composition-start selection.
+    /// End active pre-edit and replace the composition-start selection.
     ///
-    /// Returns false for inactive/stale composition, exhausted max length or
-    /// when no committed text can be accepted.
+    /// `committed` is borrowed only for this call. An active attempt clears the
+    /// transient composition state, verifies that base text still matches the
+    /// start snapshot, then truncates to the remaining max-length code-point
+    /// budget without splitting a recognized boundary.
+    ///
+    /// Returns true only when bytes are inserted. False covers inactive/stale
+    /// composition, exhausted budget or an accepted empty prefix; for an active
+    /// attempt it may still mean composition state ended/restored. Allocation and
+    /// history failures propagate as exceptions rather than false.
     [[nodiscard]] bool commit_composition(std::string_view committed) {
         if (!composition_active_) return false;
 
@@ -344,8 +386,12 @@ public:
         max_length_ = max_length == 0 ? std::numeric_limits<std::size_t>::max() : max_length;
     }
 
-    /// Replace all text. This explicit replacement does not enforce max_length.
-    /// Selection is clamped/preserved by default and history is cleared by default.
+    /// Replace all owned text without enforcing max_length.
+    ///
+    /// Existing endpoints are clamped when preserved, otherwise both move to the
+    /// new end. History clears by default. Active composition is not explicitly
+    /// cancelled: replacing base text makes its snapshot stale, so a later commit
+    /// is rejected instead of applying the old range to new text.
     void set_text(std::string value, bool preserve_selection = true, bool clear_history = true) {
         text_ = std::move(value);
         if (preserve_selection) {
@@ -449,8 +495,12 @@ public:
         move_vertical(true, extend);
     }
 
-    /// Replace selection/insert at cursor, truncating incoming text to the
-    /// remaining max-length code-point budget. Creates an undo checkpoint.
+    /// Replace selection/insert at cursor within the max-length budget.
+    ///
+    /// `incoming` is borrowed only for the call. Non-empty normal insertion
+    /// cancels active composition, truncates on a recognized boundary, checkpoints
+    /// the pre-edit state and clears redo history. Returns true iff text changed;
+    /// allocation/history failures propagate instead of returning false.
     [[nodiscard]] bool insert(std::string_view incoming) {
         if (incoming.empty()) return false;
         if (composition_active_) cancel_composition();
@@ -528,6 +578,10 @@ public:
     }
 
     /// Restore the previous owned text/cursor/anchor checkpoint.
+    ///
+    /// Active composition is cancelled first. False means undo history is empty;
+    /// successful transfer copies the pre-undo state to redo history and may
+    /// allocate/throw.
     [[nodiscard]] bool undo() {
         if (composition_active_) cancel_composition();
         if (undo_.empty()) return false;
@@ -539,6 +593,10 @@ public:
     }
 
     /// Reapply one previously undone checkpoint.
+    ///
+    /// Active composition is cancelled first. False means redo history is empty;
+    /// successful transfer copies the pre-redo state to undo history and may
+    /// allocate/throw.
     [[nodiscard]] bool redo() {
         if (composition_active_) cancel_composition();
         if (redo_.empty()) return false;
@@ -549,7 +607,10 @@ public:
         return true;
     }
 
-    /// Copy current text/cursor/anchor; transient composition state is omitted.
+    /// Return an owned text/cursor/anchor checkpoint.
+    ///
+    /// It is independent of later model mutation and omits transient composition
+    /// plus undo/redo history. Copying text may allocate/throw.
     [[nodiscard]] Snapshot snapshot() const { return Snapshot{text_, cursor_, anchor_}; }
 
 private:

@@ -284,41 +284,63 @@ These helpers deliberately do not clamp application values. The control/applicat
 
 ## TextEditModel
 
-[`text_edit.hpp`](../include/nativeui/text_edit.hpp) provides NativeUI's platform-independent UTF-8 editing model and boundary/navigation helpers.
+[`text_edit.hpp`](../include/nativeui/text_edit.hpp) provides NativeUI's platform-independent UTF-8 boundary/navigation helpers plus the owned mutable `TextEditModel`.
 
-### Byte-index contract
+### Storage, units and ownership
 
-Cursor, anchor, selection and composition positions are **byte offsets** clamped to UTF-8 continuation boundaries, not grapheme indices. Helpers in `ui::text` provide next/previous code-point boundaries, word movement, line boundaries and code-point columns. They use UTF-8 continuation-byte structure and do not implement full Unicode validity or grapheme segmentation.
+The model owns its base text, selection endpoints, active IME/pre-edit bytes and bounded undo/redo snapshots. It does not retain caller string views, platform editor objects, clipboard handles, painters or retained components.
 
-`TextMotion` selects Codepoint, Word or Document granularity. Word classification treats ASCII whitespace separately, ASCII letters/digits/underscore as Word, punctuation as its own class, and non-ASCII leading bytes as Word.
+Cursor, anchor, selection and composition positions are **byte offsets**. Helpers in `ui::text` recognize UTF-8 continuation-byte boundaries, but deliberately do not perform full Unicode validation, normalization or grapheme-cluster segmentation. `TextMotion::Codepoint` is therefore one continuation-boundary-delimited unit, not one user-perceived grapheme. `Word` uses the coarse `CharClass` policy; `Document` targets the complete buffer boundary.
 
-### Selection, movement and history
+Borrowed and owned results have different lifetimes:
 
-`cursor()` is the insertion endpoint; `anchor()` is the opposite selection endpoint. `selected_text()` returns a borrowed view into model text.
+- `text()` and `composition_text()` return references to model-owned strings;
+- `selected_text()` returns a view into `text()`;
+- relevant mutation, assignment or model destruction can invalidate those borrows;
+- `snapshot()` returns an owned independent text/cursor/anchor copy and intentionally excludes transient composition plus undo/redo history.
 
-Movement/selection includes `move_to()`, `move_left/right()`, line start/end, vertical movement, explicit ranges, select-all and word selection. Vertical movement preserves a preferred **code-point column**.
+A non-zero max length applies to **future insertion/composition commits in code-point-like units**; zero means unlimited. Construction and `set_text()` do not truncate a complete supplied string, so owned text may already exceed the insertion budget.
 
-Editing operations create bounded undo checkpoints; the implementation retains at most 64 undo/redo snapshots.
+### Mutation, failures and history
+
+`TextEditModel` invokes no application callback and has no callback-driven reentrancy path. Noexcept movement/selection APIs only update already-owned scalar/index state. Operations that copy/truncate/grow strings or push snapshots may allocate and propagate ordinary C++ exceptions. Boolean editing results describe whether the requested text mutation was accepted; they are not a generic error channel and do not translate allocation failures.
+
+Undo/redo retains at most 64 owned snapshots per direction. A successful normal edit checkpoints the prior text/cursor/anchor state and clears redo history.
+
+| API | Contract |
+| --- | --- |
+| `insert(view)` | borrows input for the call, cancels active composition before a non-empty normal insertion, truncates to remaining max-length budget and checkpoints accepted mutation |
+| `erase_selection()` | false for empty selection; otherwise cancels composition and checkpoints before deletion |
+| `backspace()/delete_forward()` | cancel composition, then delete selection or Codepoint/Word/Document range |
+| `undo()/redo()` | cancel composition first; false only when the respective history is empty; successful transfer copies an owned snapshot to the opposite history |
+| `set_text(value,...)` | consumes complete replacement text without enforcing max length; optionally preserves/clamps byte endpoints and clears history |
+
+A false edit result does not necessarily mean every transient field stayed unchanged. For example, composition cancellation/restoration can occur before a later insertion/deletion rejection. Allocation failures are exceptions rather than false and mutating calls are not documented as a transactional rollback boundary for every cursor/composition/history side effect.
 
 ```cpp
 ui::TextEditModel edit{"one two", 32};
 edit.move_left(ui::TextMotion::Word);
 edit.select_word_at(edit.cursor());
+
+const std::string_view borrowed = edit.selected_text();
 (void)edit.insert("three");
+// borrowed must not be used after the mutation.
+
+auto checkpoint = edit.snapshot(); // owned copy; may outlive edit
 (void)edit.undo();
 ```
 
-A non-zero max length applies to future insertion/composition commits in **code points**; zero means unlimited. `set_text()` is an explicit complete replacement and does not truncate the supplied value to max length.
-
 ### IME/pre-edit transaction
 
-`begin_composition()` snapshots base text/selection. `update_composition()` stores owned pre-edit text and clamps cursor/selection bytes.
+`begin_composition()` snapshots current text/cursor/anchor and starts an empty pre-edit transaction. `update_composition(preedit, cursor_byte, selection_bytes)` consumes the new pre-edit string, clamps the cursor to a recognized byte boundary, bounds the selection to the remaining pre-edit bytes and leaves base text/history unchanged. Calling it while inactive starts composition automatically.
 
-`commit_composition()` replaces the selection captured at composition start only if base text is still unchanged. It returns false for inactive/stale composition, exhausted max length or when no committed text is accepted. `cancel_composition()` clears pre-edit state and restores composition-start cursor/anchor when base text has not changed.
+`commit_composition(committed)` borrows committed bytes only for the call. For an active attempt, NativeUI ends transient composition state, verifies that base text still matches the composition-start snapshot and truncates the accepted prefix to the remaining max-length budget without splitting a recognized boundary. It returns true only when non-empty bytes are inserted. Inactive/stale composition, exhausted budget or an accepted empty prefix returns false; allocation/history/string failures propagate instead.
 
-Ordinary model editing cancels active composition before mutating text. `Snapshot` intentionally stores text/cursor/anchor only, not transient pre-edit state.
+`set_text()` does not explicitly cancel active composition. Replacing base text makes the stored composition-start snapshot stale, so a later `commit_composition()` rejects the old range instead of applying it to the new text.
 
-[`t025_text_edit_model.cpp`](../examples/features/t025_text_edit_model.cpp) is the focused executable reference. The model owns no platform editor, painter, clipboard or synchronization primitive; drive it in the UI/main-thread domain.
+`cancel_composition()` is noexcept. It clears pre-edit storage and, when base text still matches the starting snapshot, restores the captured cursor/anchor. Normal destructive editing operations cancel active composition before mutating base text.
+
+[`t025_text_edit_model.cpp`](../examples/features/t025_text_edit_model.cpp) is the focused model reference; [`t029_ime_composition.cpp`](../examples/features/t029_ime_composition.cpp) exercises retained IME integration.
 
 ## Threading and lifetime
 
