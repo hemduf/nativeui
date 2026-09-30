@@ -9,6 +9,7 @@
 #include "src/detail/shader_brush_access.hpp"
 #include "src/detail/shader_test_seams.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory>
