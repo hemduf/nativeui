@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -510,8 +511,10 @@ struct UiaEventDerivation final {
 
 /// Per-view owner of lazily materialized UIA providers.
 ///
-/// The endpoint is UI-thread confined. It owns the native handles it has
-/// materialized, and each handle stores only weak publication/action endpoints
+/// Immutable semantic reads are safe on native accessibility callback threads,
+/// and provider materialization/cache bookkeeping is synchronized per view.
+/// It owns the native handles it has materialized, and each handle stores only
+/// weak publication/action endpoints
 /// plus stable semantic identity, so the cache cannot keep a removed semantic
 /// snapshot or the view alive. `provider_for()` materializes at most one native
 /// provider per requested identity: a 100k-item virtual ListView creates zero
@@ -547,11 +550,13 @@ public:
     /// destruction or after the publication source expires; `user_data` must
     /// stay valid for the endpoint's lifetime.
     void set_factory(Factory factory, void* user_data) noexcept {
+        std::lock_guard lock{mutex_};
         factory_ = factory;
         factory_user_data_ = user_data;
     }
 
     [[nodiscard]] bool available() const noexcept {
+        std::lock_guard lock{mutex_};
         return factory_ != nullptr && !publication_source_.expired();
     }
 
@@ -576,7 +581,16 @@ public:
     /// identity returns the identical cached handle.
     [[nodiscard]] Handle provider_for(
         const UiaProviderIdentity& identity) noexcept {
-        if (!identity.valid() || !factory_) {
+        if (!identity.valid()) {
+            return {};
+        }
+
+        // Native accessibility queries may arrive concurrently. Serialize the
+        // bounded cache/factory path so one semantic identity materializes one
+        // canonical provider. The factory is an internal native-provider
+        // constructor and must not re-enter this endpoint.
+        std::lock_guard lock{mutex_};
+        if (!factory_) {
             return {};
         }
         const auto existing = entries_.find(identity);
@@ -592,7 +606,7 @@ public:
         if (!read) {
             return {};
         }
-        return create_and_track(identity, *state, *read);
+        return create_and_track_locked(identity, *state, *read);
     }
 
     /// Materialize the current fragment root. No root identity means no
@@ -816,6 +830,7 @@ public:
     }
 
     [[nodiscard]] std::size_t tracked_identities() const noexcept {
+        std::lock_guard lock{mutex_};
         return entries_.size();
     }
 
@@ -848,41 +863,53 @@ public:
     /// handle receives exactly one `on_retired()` notification before the
     /// endpoint releases its reference.
     [[nodiscard]] std::size_t prune_defunct() noexcept {
-        std::size_t erased = 0U;
-        for (auto it = entries_.begin(); it != entries_.end();) {
-            bool stale = false;
+        std::vector<Handle> retired;
+        {
+            std::lock_guard lock{mutex_};
             try {
-                const auto state = state_for(it->first);
-                if (!state) {
-                    stale = true;
-                } else {
-                    const auto read = UiaProviderRead::from_state(*state);
-                    stale = !read.has_value();
-                }
+                retired.reserve(entries_.size());
             } catch (...) {
-                // Allocation/query failure is not proof of staleness.
-                stale = false;
+                return 0U;
             }
 
-            if (!stale) {
-                ++it;
-                continue;
-            }
+            for (auto it = entries_.begin(); it != entries_.end();) {
+                bool stale = false;
+                try {
+                    const auto state = state_for(it->first);
+                    if (!state) {
+                        stale = true;
+                    } else {
+                        const auto read = UiaProviderRead::from_state(*state);
+                        stale = !read.has_value();
+                    }
+                } catch (...) {
+                    stale = false;
+                }
 
-            Handle handle = std::move(it->second);
-            it = entries_.erase(it);
-            retire(handle);
-            ++erased;
+                if (!stale) {
+                    ++it;
+                    continue;
+                }
+
+                retired.push_back(std::move(it->second));
+                it = entries_.erase(it);
+            }
         }
-        return erased;
+
+        for (const auto& handle : retired) {
+            retire(handle);
+        }
+        return retired.size();
     }
 
     void clear() noexcept {
-        while (!entries_.empty()) {
-            auto it = entries_.begin();
-            Handle handle = std::move(it->second);
-            entries_.erase(it);
-            retire(handle);
+        EntryMap retired;
+        {
+            std::lock_guard lock{mutex_};
+            retired.swap(entries_);
+        }
+        for (const auto& entry : retired) {
+            retire(entry.second);
         }
     }
 
@@ -930,7 +957,7 @@ private:
         }
     }
 
-    [[nodiscard]] Handle create_and_track(
+    [[nodiscard]] Handle create_and_track_locked(
         const UiaProviderIdentity& identity,
         const UiaProviderState& state,
         const UiaProviderRead& read) noexcept {
@@ -965,6 +992,7 @@ private:
 
     std::weak_ptr<const SemanticNativePublicationSource> publication_source_;
     std::weak_ptr<const SemanticActionViewEndpoint> action_endpoint_;
+    mutable std::mutex mutex_;
     Factory factory_{};
     void* factory_user_data_{};
     EntryMap entries_;
