@@ -211,6 +211,24 @@ File-filter extensions include the leading dot. NativeUI accepts an extension on
 
 `open_url()` accepts only absolute HTTP(S) URLs (scheme matching is ASCII case-insensitive) with a non-empty authority. Relative URLs and other schemes are `InvalidArgument`; the public API does not expose arbitrary shell/scheme execution.
 
+### Option/result ownership and backend-call boundary
+
+The option structs are owned values. Request entry points take them by value, so callers may move temporary strings, paths and filter vectors into a request without extending the source objects' lifetime. The facade retains what it needs until backend start; a backend's `const ...Options&` parameter is only a **borrow for that synchronous `start_*` call** and must not be retained after the method returns.
+
+Field semantics are explicit:
+
+| Value | Contract |
+| --- | --- |
+| `FileFilter::description` | owned user-facing label; an empty label is allowed and presentation remains backend policy |
+| `FileFilter::extensions` | owned leading-dot extensions validated before start; an empty vector adds no NativeUI extension restriction |
+| `OpenFileOptions::title`, `SaveFileOptions::title`, `DirectoryOptions::title` | owned text; NativeUI does not invent a fallback title |
+| `initial_directory` | optional owned path forwarded without a public existence preflight |
+| `SaveFileOptions::suggested_filename` | optional filename only; directory separators are rejected |
+| `FileDialogResult::paths` | owned paths independent of service/backend lifetime after callback delivery |
+| `FileDialogResult::error` | owned diagnostic retained only for `Error`; every other normalized status clears it |
+
+Backend completion callables transfer to the backend at `start_*` entry and may be invoked synchronously or later from native/worker threads. `Accepted` from a backend start means the backend took responsibility for the request, not that application completion ran inline. The facade makes a backend completion terminal before Dispatcher marshalling, ignores duplicate/stale completion, and never falls back to running application code on the backend thread if posting/allocation fails. Application callback exceptions therefore surface only from the owning Dispatcher checkpoint.
+
 ### File result normalization
 
 NativeUI normalizes backend file-dialog results before application delivery:
