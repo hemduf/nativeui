@@ -46,6 +46,12 @@ void default_and_emissive_contract() {
     NUI_CHECK(material.has_emissive());
     NUI_CHECK(scalar_constant(material.emissive_intensity()) == 0.0f);
 
+    material.set_emissive(
+        ui::Brush{ui::Color{0.4f, 0.3f, 0.2f, 1.0f}},
+        8.0f);
+    NUI_CHECK(material.has_emissive());
+    NUI_CHECK(scalar_constant(material.emissive_intensity()) == 8.0f);
+
     material.clear_emissive();
     NUI_CHECK(!material.has_emissive());
     const auto* emissive =
