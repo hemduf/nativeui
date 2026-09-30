@@ -214,8 +214,9 @@ post-1.0 / later-release work already landed:
   T073(done) + T079(done) -> T088(done) -> T089(done) -> T090(done) -> T091(done) -> T092(done) -> T093(doing)
   #479(open regression, status:doing) ---------------------------> affected merge/Done qualification only
   T098(done) ---------------------------------------------------------------> T086(done)
-  T183(done) -> T184(blocked on T097) -> T185 -> T186 -> T182(closeout)
+  T183(done) -> T184(blocked on T097) -> T185 -> T186 -> T182/#469(closeout)
   T068 ----------------------------------------------> 1.2
+  T182/#481(accessibility follow-up from T068; duplicate ticket ID, outside the 1.1 raster-memoization gate) -> 1.2
 ```
 
 ## Milestone status
