@@ -22,6 +22,7 @@ struct ShaderBrushAccess;
 struct ImageTextureBrushAccess;
 struct ShaderBrushMaterializer;
 struct ShaderBrushSnapshot;
+struct MaterialAccess;
 }
 
 struct VisualOutset {
@@ -287,6 +288,7 @@ private:
     friend struct detail::ShaderBrushAccess;
     friend struct detail::ImageTextureBrushAccess;
     friend struct detail::ShaderBrushMaterializer;
+    friend struct detail::MaterialAccess;
     Storage value_;
 };
 
