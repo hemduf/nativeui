@@ -278,6 +278,34 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_scalar_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_material_description_tests ${PROJECT_SOURCE_DIR}/tests/material_description_tests.cpp)
   target_include_directories(nativeui_material_description_tests PRIVATE ${PROJECT_SOURCE_DIR})
+
+  # Material source/decode/backend counters live only in this isolated test
+  # executable. NativeUI::Core remains free of mutable test instrumentation.
+  add_executable(nativeui_material_source_contract_tests
+    ${PROJECT_SOURCE_DIR}/tests/material_source_contract_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+  )
+  target_include_directories(nativeui_material_source_contract_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_material_source_contract_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_material_source_contract_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_material_source_contract_tests PRIVATE
+    SkiaBuilder::svg
+    NativeUI::Core
+  )
+  nativeui_enable_project_warnings(nativeui_material_source_contract_tests)
+  nativeui_enable_sanitizers(nativeui_material_source_contract_tests)
+  add_test(
+    NAME nativeui_material_source_contract_tests
+    COMMAND nativeui_material_source_contract_tests
+  )
+  set_tests_properties(nativeui_material_source_contract_tests PROPERTIES LABELS "unit")
   nativeui_add_core_test(nativeui_scalar_source_fault_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_fault_tests.cpp)
   target_include_directories(nativeui_scalar_source_fault_tests PRIVATE ${PROJECT_SOURCE_DIR})
   add_executable(nativeui_scalar_source_source_tests
