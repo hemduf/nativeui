@@ -181,5 +181,5 @@ jobs:
         run: cmake --build build-benchmark --target nativeui_render_resource_cache_benchmarks
       - name: Run benchmark contract
         run: >-
-          ctest --test-dir build-benchmark --output-on-failure
+          ctest --test-dir build-benchmark --output-on-failure --verbose
           -R '^render_resource_cache\.benchmark$'
