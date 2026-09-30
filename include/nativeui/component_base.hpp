@@ -842,39 +842,63 @@ private:
 /// Polymorphic protocol implemented by retained custom controls.
 ///
 /// A component is owned by its retained `Node` after a `Spec` factory
-/// materializes it. Hooks execute in owning-tree UI/main-thread order.
-/// Implementations must not retain callback-scoped Paint/Input/Focus/Lifecycle
-/// contexts. These hooks are not audio/DSP real-time entry points.
+/// materializes it; application code normally owns only the originating recipe
+/// and external state, not the live Component object. Every virtual below runs
+/// in the owning Tree/UI domain. Callback arguments and child-metric containers
+/// are borrowed for that call unless documented otherwise and must not escape.
+///
+/// Virtuals may be invoked from measurement, reconciliation, input, lifecycle or
+/// paint transactions and may propagate ordinary C++ exceptions through the
+/// operation that entered them. Structural work requested re-entrantly is
+/// reconciled only at Tree/UI safe checkpoints; custom components must not mutate
+/// retained Node storage directly from a callback. None of these hooks is an
+/// audio/DSP real-time entry point.
 class Component {
 public:
     /// Destroy the component when its owning retained node is torn down.
     virtual ~Component() = default;
 
-    /// Whether this node may become the keyboard-focus owner.
+    /// Report whether this node is eligible to own keyboard focus.
+    ///
+    /// The answer is a local capability only. Effective visibility/enabled state,
+    /// active focus scopes and retained-tree policy can still make the node
+    /// ineligible. If this value can change, request `focus_invalidator()` from
+    /// the stored MountContext handle so focus structure is reconciled.
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
 
-    /// Whether this component may start a pointer route independently of keyboard focus.
-    /// The default preserves the historic retained-tree contract: focusable components are
-    /// pointer targets, while non-focusable components must explicitly opt in.
+    /// Report whether pointer hit testing may start a route at this node.
+    ///
+    /// This is independent from current effective availability, which the Tree
+    /// applies separately. The default preserves the historical contract that
+    /// focusable controls are pointer targets; non-focusable controls must opt in.
+    /// Dynamic changes require the same focus/interaction reconciliation discipline
+    /// as other targetability changes.
     [[nodiscard]] virtual bool pointer_targetable() const noexcept { return focusable(); }
 
-    /// Local availability supplied by generic wrappers/custom components. The
-    /// retained tree resolves this monotonically through ancestry and stores the
-    /// effective result on each component instance.
+    /// Return this component's local availability before ancestry is resolved.
+    ///
+    /// The Tree combines the owned value monotonically with ancestor availability
+    /// and caches the effective result. Components whose local value changes after
+    /// mount must invoke the MountContext availability invalidator; returning a
+    /// value here does not itself schedule repaint/layout/focus repair.
     [[nodiscard]] virtual ComponentAvailability local_availability() const noexcept { return {}; }
-    /// Return ancestry-resolved availability cached by the retained tree.
+
+    /// Return the ancestry-resolved availability snapshot cached by the Tree.
+    ///
+    /// The returned value is owned and remains valid after later reconciliation;
+    /// it does not force availability recomputation.
     [[nodiscard]] ComponentAvailability effective_availability() const noexcept {
         return effective_availability_;
     }
-    /// Convenience view of resolved visibility.
+    /// Return the cached effective visibility without triggering reconciliation.
     [[nodiscard]] VisibilityMode effective_visibility() const noexcept {
         return effective_availability_.visibility;
     }
-    /// Convenience view of resolved enabled state.
+    /// Return the cached effective enabled state without triggering reconciliation.
     [[nodiscard]] bool effective_enabled() const noexcept {
         return effective_availability_.enabled;
     }
-    /// Convenience view of resolved read-only state.
+    /// Return the cached effective read-only state without triggering reconciliation.
     [[nodiscard]] bool effective_read_only() const noexcept {
         return effective_availability_.read_only;
     }
@@ -902,50 +926,73 @@ public:
     /// scope traversal.
     [[nodiscard]] virtual std::size_t focus_scope_default_index() const noexcept { return 0; }
 
-    /// T045 platform-neutral semantic projection. The default `None` role
-    /// flattens the component while preserving semantic descendants. Decorators
-    /// such as Tooltip publish owned help text here so accessibility never
-    /// depends on whether a visual overlay is currently rendered. T068 owns the
-    /// immutable snapshot flattening that consumes this seam.
+    /// Return this node's platform-neutral semantic contribution as an owned value.
+    ///
+    /// The default `None` role flattens this component while preserving semantic
+    /// descendants. Text contained by the returned SemanticInfo is copied/owned by
+    /// that value; callers need not keep temporary source strings alive. Snapshot
+    /// construction may allocate and exceptions propagate to the operation asking
+    /// for semantics. This hook runs in the owning UI domain, not on an audio thread.
     [[nodiscard]] virtual SemanticInfo semantics() const { return {}; }
 
-    /// Optional main-axis flex factors consumed by Row/Column. Most components
-    /// remain intrinsic-sized; the `Flex` layout wrapper overrides this.
+    /// Return dimensionless main-axis flex weights consumed by flex-aware parents.
+    ///
+    /// The default opts out of both growth and shrink redistribution. The value is
+    /// an owned snapshot; returning it does not invalidate layout. Components whose
+    /// factors change after mount must request layout invalidation explicitly.
     [[nodiscard]] virtual FlexFactors flex_factors() const noexcept { return {}; }
 
-    /// Clip descendant painting and hit testing to this node's bounds. The
-    /// component itself is still painted under its inherited ancestor clip.
+    /// Return whether descendant paint and hit testing are clipped to this node.
+    ///
+    /// The component's own paint still receives the inherited ancestor clip.
+    /// This is retained layout/input metadata; changing it after mount requires
+    /// appropriate layout/paint/interaction invalidation by the component.
     [[nodiscard]] virtual bool clips_children() const noexcept { return false; }
 
-    /// Conservative continuous logical extension of this component's painted
-    /// pixels beyond its retained layout bounds. It affects paint invalidation
-    /// only; layout, measurement, focus and hit testing remain unchanged.
+    /// Return conservative logical paint overflow outside retained layout bounds.
+    ///
+    /// Each VisualOutset edge is interpreted in logical pixels and is used only
+    /// for damage/culling. It does not enlarge layout bounds, focus geometry or hit
+    /// testing. Under-reporting can cause stale pixels; over-reporting is safe but
+    /// may increase repaint work. Dynamic changes require paint invalidation.
     [[nodiscard]] virtual VisualOutset visual_outset() const noexcept { return {}; }
 
-    /// Existing intrinsic preferred-size hook. Kept source-compatible for
-    /// custom components while constrained measurement is layered around it.
-    /// Report intrinsic preferred size from borrowed child-metric snapshots.
+    /// Compute intrinsic preferred size from borrowed child metrics.
     ///
-    /// Sizes use logical pixels; `children` is ordered like retained children
-    /// and must not be retained beyond this call.
+    /// `children` is ordered exactly like retained children and is valid only for
+    /// this call. Returned width/height are logical pixels and are owned values.
+    /// This hook must not publish viewport geometry or retain child references.
+    /// Ordinary C++ exceptions propagate through the current measurement operation.
     [[nodiscard]] virtual Size measure(const std::vector<ChildMetrics>& children) const = 0;
 
-    /// Intrinsic minimum size before parent constraints are applied. Components
-    /// may override this independently from preferred size.
+    /// Compute intrinsic minimum size from borrowed child metrics.
+    ///
+    /// The vector has the same ordering/lifetime as `measure()`. Returned values
+    /// use logical pixels. The default is zero minimum size on both axes; parent
+    /// constraints are applied later by `measure_constrained()`.
     [[nodiscard]] virtual Size minimum_size(const std::vector<ChildMetrics>&) const {
         return {};
     }
 
-    /// Constraints used when recursively measuring one child. The default
-    /// removes the parent's minimum while preserving its maximum bounds.
+    /// Derive constraints for one retained child before recursively measuring it.
+    ///
+    /// The Constraints argument is borrowed for the call; the two size_t values
+    /// identify the child index and total child count in retained order. The
+    /// returned Constraints value is owned. The default removes parent minima
+    /// while preserving finite/infinite maxima via `Constraints::loosen()`.
     [[nodiscard]] virtual Constraints child_constraints(
         const Constraints& constraints, std::size_t, std::size_t) const {
         return constraints.loosen();
     }
 
-    /// Constraint-aware measurement. Most components only override `measure`
-    /// and optionally `minimum_size`; specialized components such as wrapped
-    /// text can override this later when their intrinsic size depends on bounds.
+    /// Perform constraint-aware measurement and return owned child metrics.
+    ///
+    /// `constraints` and `children` are callback-scoped borrows. The default
+    /// constrains the intrinsic minimum, raises preferred size to at least that
+    /// minimum, then constrains preferred size to the supplied bounds. Specialized
+    /// components may override when intrinsic size itself depends on constraints.
+    /// Measurement is synchronous UI-domain work, may allocate/throw through
+    /// overrides it calls, and does not itself schedule layout or paint.
     [[nodiscard]] virtual ChildMetrics measure_constrained(
         const Constraints& constraints,
         const std::vector<ChildMetrics>& children) const {
@@ -957,50 +1004,84 @@ public:
         return ChildMetrics{minimum, preferred};
     }
 
-    /// Compute logical placements for retained children.
+    /// Write logical placements for retained children after measurement.
     ///
-    /// Child metrics are borrowed input; placements is caller-owned output
-    /// corresponding by index to retained children. The default does nothing.
+    /// The Rect is this node's assigned logical bounds. Child metrics are borrowed
+    /// in retained order; `placements` is caller-owned mutable output whose
+    /// entries correspond by index to those children. Implementations should fill
+    /// the placements required by their layout policy without retaining either
+    /// container. The default performs no writes. Exceptions abort the current
+    /// layout transaction and propagate to the owning Tree/UI operation.
     virtual void layout_children(
         Rect,
         const std::vector<ChildMetrics>&,
         std::vector<ChildPlacement>&) const {}
 
-    /// Called exactly once after the runtime node is compiled. Parent nodes are
-    /// mounted before children.
+    /// Observe initial attachment to a compiled retained node.
+    ///
+    /// Called exactly once per Component instance after its node identity exists,
+    /// parent before child. The MountContext is borrowed only for this call, but
+    /// its returned invalidator functions are intentionally copyable for later
+    /// UI-domain use. Mount may allocate/re-enter application code through user
+    /// overrides; exceptions propagate through retained compilation/reconciliation.
     virtual void mount(MountContext&) {}
 
-    /// Called whenever the tree becomes active. Activation traverses parent to
-    /// child before keyboard focus is applied.
+    /// Observe transition of the owning tree into the active state.
+    ///
+    /// Activation traverses parent before child and occurs before keyboard focus is
+    /// applied. The LifecycleContext is callback-scoped. A Component may activate
+    /// more than once over its mounted lifetime as the tree toggles active state.
     virtual void activate(LifecycleContext&) {}
 
-    /// Called when the tree becomes inactive. Focus is removed first, then
-    /// components deactivate child-to-parent in reverse sibling order.
+    /// Observe transition of the owning tree out of the active state.
+    ///
+    /// Focus is removed first, then components deactivate child-to-parent in
+    /// reverse sibling order. The callback-scoped context must not be retained.
+    /// Later reactivation is permitted while the component remains mounted.
     virtual void deactivate(LifecycleContext&) {}
 
-    /// Called once before the runtime node is destroyed. Unmount traverses
-    /// child-to-parent in reverse sibling order.
+    /// Observe final detachment before this runtime node is destroyed.
+    ///
+    /// Called at most once after mount, child-to-parent in reverse sibling order.
+    /// Stored NodeId values become stale after detachment; long-lived invalidators
+    /// obtained from MountContext must therefore tolerate becoming inert.
     virtual void unmount(LifecycleContext&) {}
 
-    /// Observe focus gain/loss with a callback-scoped borrowed focus context.
+    /// Observe keyboard-focus gain or loss for this component.
+    ///
+    /// The bool is true on gain and false on loss. FocusContext is a callback-
+    /// scoped borrow providing logical bounds, text-input services and invalidation.
+    /// The hook can run during focus repair triggered by re-entrant UI work; do not
+    /// retain the context or assume surrounding retained objects survive callbacks.
     virtual void focus_changed(bool, FocusContext&) {}
 
-    /// Called on ancestors after keyboard focus moves to one of their descendants.
-    /// The descendant bounds are expressed in this component's local logical
-    /// coordinates for the current layout. The hook is not repeated when focus is
-    /// merely refreshed on the same node.
-    /// Observe descendant focus bounds in this component's local coordinates.
+    /// Observe focus moving to a retained descendant.
+    ///
+    /// The Rect is the focused descendant's current bounds expressed in this
+    /// component's local logical coordinates. The hook runs on ancestors only and
+    /// is not repeated when focus is merely refreshed on the same node. The value
+    /// is an owned snapshot and may be kept if application code needs the geometry.
     virtual void descendant_focus_changed(Rect) {}
 
-    /// Handle a targeted input event. Returning `Handled` consumes the event;
-    /// returning `Ignored` leaves it unconsumed. The current tree routes to one
-    /// leaf target first, then bubbles ignored input through ancestors.
+    /// Handle one targeted borrowed input event with callback-scoped services.
+    ///
+    /// Input first targets one retained leaf and bubbles through ancestors while
+    /// handlers return `Ignored`; returning `Handled` stops that propagation.
+    /// InputEvent and InputContext must not escape the call. Handlers may capture
+    /// the current pointer, invalidate retained state and invoke platform services;
+    /// those operations may re-enter application code or throw. Tree dispatch
+    /// restores its bookkeeping before propagating callback exceptions.
     virtual EventResult input(const InputEvent&, InputContext&) {
         return EventResult::Ignored;
     }
 
-    /// Paint using a callback-scoped borrowed context in logical coordinates.
-    /// Implementations must not retain the context or painter reference.
+    /// Paint this component synchronously in retained logical coordinates.
+    ///
+    /// PaintContext, its Painter reference and PlatformServices are borrowed only
+    /// for the callback. Drawing is clipped/translated by the owning Tree and may
+    /// allocate or throw through text/resource/platform work. Implementations must
+    /// not retain callback borrows, perform audio-thread work, or directly mutate
+    /// private retained Node geometry from paint.
     virtual void paint(PaintContext&) const = 0;
 
 private:

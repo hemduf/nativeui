@@ -45,6 +45,28 @@ The `CanvasContext2D` drawing overloads intentionally mirror `Painter` without c
 
 `MountContext::invalidator()`, `layout_invalidator()`, `focus_invalidator()` and `availability_invalidator()` are the exception to the callback-borrow rule: they are returned by value specifically so a mounted component can retain them. They schedule work through the owning retained runtime; they are not direct layout/paint calls and are not an audio-thread notification mechanism. The `NodeId` returned by `node_id()` remains non-owning and may become stale after structural reconciliation.
 
+#### Component virtual protocol
+
+The public `Component` virtuals form one transaction-oriented retained protocol rather than an unconstrained set of callbacks. All hooks execute in the owning Tree/UI domain. Borrowed vectors, events and contexts end when the call returns. Ordinary C++ exceptions are not translated into status codes by these virtuals: they propagate through the measurement, layout, lifecycle, dispatch or paint operation that invoked the hook, after the runtime restores the bookkeeping promised by that operation. A custom component must therefore keep its own invariants exception-safe and must request structural work through public invalidation/dynamic-composition mechanisms rather than mutating `Node` storage directly.
+
+| Virtual family | Inputs / units / ownership | Result, invariants and reentrancy |
+| --- | --- | --- |
+| `focusable()`, `pointer_targetable()` | no borrowed data; return local capability flags | effective availability/scope policy is applied separately; if capability changes after mount, request focus/interaction reconciliation |
+| `local_availability()` / effective accessors | returns an owned local snapshot; effective values are cached Tree snapshots | changing local visibility/enabled/read-only does not self-invalidate; use the availability invalidator; reads do not force reconciliation |
+| focus-scope metadata | no borrowed data; default index is an ordinal in retained descendant order | index is advisory and ineligible/out-of-range targets fall back to traversal; scope changes require focus invalidation |
+| `semantics()` | returns owned `SemanticInfo`; strings/data belong to the returned value | default `None` flattens the node while preserving semantic descendants; snapshot construction may allocate/throw |
+| `flex_factors()`, `clips_children()`, `visual_outset()` | dimensionless flex weights, boolean clip policy, logical-pixel paint overflow | these are metadata reads, not invalidation triggers; under-reporting visual outset can miss damage, while over-reporting only costs repaint work |
+| `measure()` / `minimum_size()` | borrowed child metrics in retained order; sizes are logical pixels | return owned intrinsic sizes; do not retain child references or publish viewport geometry |
+| `child_constraints()` | borrowed parent constraints plus child index/count | returns owned constraints for recursive measurement; default loosens minima while preserving maxima |
+| `measure_constrained()` | borrowed constraints and child metrics | default clamps minimum/preferred into constraints; synchronous measurement may allocate/throw but does not itself schedule layout |
+| `layout_children()` | assigned logical bounds + borrowed metrics + caller-owned output vector | placements correspond by retained child index; default writes nothing; failures abort the current layout transaction |
+| `mount()` | callback-scoped `MountContext`; invalidator functions returned from it are durable value handles | exactly once per Component instance, parent before child; mount failure propagates through compile/reconcile rather than yielding a half-documented ownership transfer |
+| `activate()` / `deactivate()` | callback-scoped `LifecycleContext` | a mounted component can see multiple active/inactive cycles; activation is parent→child, deactivation is child→parent after focus removal |
+| `unmount()` | callback-scoped `LifecycleContext` | final detach is child→parent; NodeId becomes stale afterward and retained invalidators must tolerate becoming inert |
+| `focus_changed()` / `descendant_focus_changed()` | focus context is borrowed; descendant Rect is an owned local-logical snapshot | focus repair may occur during re-entrant UI work; do not retain context or assume surrounding retained objects survive application callbacks |
+| `input()` | borrowed `InputEvent` and `InputContext` | `Handled` stops bubbling, `Ignored` continues; capture/invalidation/platform calls may re-enter or throw, with dispatch bookkeeping restored before propagation |
+| `paint()` | borrowed `PaintContext`, Painter and platform services; all geometry logical | synchronous retained rendering only; callback borrows cannot escape, resource/text work may allocate/throw, and paint is not a structural mutation boundary |
+
 A component that needs pointer capture and later repaint can keep only durable state plus the mount invalidator while using the input context transiently:
 
 ```cpp
