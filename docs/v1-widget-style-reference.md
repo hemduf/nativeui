@@ -221,15 +221,40 @@ ui::ResolvedMenuItemStyle resolved =
 
 ## TextInput
 
-`TextInputStylePatch` covers field/border, label/text/placeholder, selection/caret/composition underline, control/field geometry, padding/insets and typography. All float geometry is in logical UI units. `control_width` / `control_height` are the preferred measured size; `field_top` and `field_height` locate the editable field. `horizontal_padding` and `content_vertical_inset` define the clipped editable-content rectangle. Selection, caret and IME underline widths/insets are paint geometry inside that field.
+TextInputStylePatch covers field/border, label/text/placeholder, selection/caret/composition underline, control/field geometry, padding/insets and typography. All scalar geometry is in logical UI units. control_width / control_height are the preferred measured size; field_top and field_height locate the editable field. horizontal_padding and content_vertical_inset define the clipped editable-content rectangle. Selection, caret and IME underline widths/insets are paint geometry inside that field.
 
-Patch values are stored verbatim rather than sanitized by the style layer. `default_text_input_style(theme)` returns owned recipe data. `resolve_text_input_style()` applies inherited base, explicit base, one interaction branch (`disabled > pressed > hovered > normal`), read-only, then focused; explicit fields win inside each layer. The returned `ResolvedTextInputStyle` owns its font-family/fallback strings and borrows nothing from the input recipes.
+Patch optionals have literal layering semantics: disengaged means “inherit the value already resolved by earlier layers”; engaged means “replace it with this exact payload.” Numeric values are not clamped or normalized by the style resolver, including negative/non-finite payloads. Measurement-affecting fields include control/field extents, padding, text sizes and font selection; border/selection/caret/composition geometry is paint-side inside the retained field. The style value itself neither classifies nor publishes invalidation.
+
+default_text_input_style(theme) synchronously borrows the Theme and returns detached owned recipe data. Its built-in interaction patches preserve the baseline geometry and change presentation only. resolve_text_input_style() applies inherited base, explicit base, one interaction branch (disabled > pressed > hovered > normal), read-only, then focused; explicit/local fields win inside each layer. Missing fields remain default constructed rather than triggering a hidden Theme lookup or fallback.
+
+The returned ResolvedTextInputStyle owns its font-family/fallback strings and borrows nothing from either recipe or Theme. Resolution invokes no callbacks, performs no retained-tree mutation or invalidation and has no reentrant UI-dispatch path. Owned string/vector copies may allocate and allocation failure propagates; these helpers are UI/style-preparation work, not audio/DSP real-time operations.
 
 ## TextArea
 
-`TextAreaStylePatch` is the multiline counterpart. `control_width` / `control_height` are preferred measured bounds; `field_top` begins the field and `minimum_field_height` prevents it from collapsing below the configured height. `horizontal_padding` / `vertical_padding` define the multiline content viewport, `line_height` is the per-line vertical advance, and `newline_selection_width` extends a selection highlight when the selected range includes a line break.
+TextAreaStylePatch is the multiline counterpart. control_width / control_height are preferred measured bounds; field_top begins the field and minimum_field_height prevents it from collapsing below the configured height. horizontal_padding / vertical_padding define the multiline content viewport, line_height is the per-line vertical advance, and newline_selection_width extends a selection highlight when the selected range includes a line break.
 
-TextArea patch values are likewise stored verbatim. `resolve_text_area_style()` uses the same inherited/explicit and interaction/read-only/focused precedence and returns a fully owned `ResolvedTextAreaStyle`. Both text-style resolvers may allocate while copying font-family/fallback data and are not audio-real-time operations.
+TextArea uses the same exact optional-layering contract and likewise stores numeric payloads verbatim. Control/field extents, padding, line height, text sizes and font selection can affect measurement/layout. Border, selection, caret, newline-selection extension and composition underline geometry are paint-side properties inside the published multiline field.
+
+default_text_area_style(theme) borrows Theme data only for the call, owns all copied font data in the returned recipe and keeps the baseline geometry stable across its built-in interaction/read-only/focus variants. resolve_text_area_style() follows inherited/local base -> interaction -> read-only -> focused precedence, performs no implicit Theme lookup or numeric sanitization, and returns a fully owned ResolvedTextAreaStyle.
+
+Both text-style resolver families are callback-free and have no reentrancy path of their own. Applying a newly resolved style to a live editor remains UI/main-thread retained work; the detached recipe/resolver layer itself provides no cross-thread synchronization.
+
+### Text editor style example
+
+```cpp
+auto inherited = ui::default_text_input_style(theme);
+
+ui::TextInputStyle local;
+local.base.control_width = 480.0f;
+local.base.horizontal_padding = 16.0f;
+local.focused.border = ui::Color{0.2f, 0.7f, 1.0f, 1.0f};
+
+ui::VisualState state;
+state.focused = true;
+
+ui::ResolvedTextInputStyle resolved =
+    ui::resolve_text_input_style(inherited, local, state);
+```
 
 ## Example
 

@@ -11,8 +11,24 @@
 /// Patches are stored verbatim; resolving may allocate for owned font strings.
 namespace ui {
 
-/// Typed single-line text-input presentation and measurement overrides.
-/// Empty fields inherit from the already-resolved theme/inherited recipe.
+/// Typed single-line TextInput presentation and measurement overrides.
+///
+/// A disengaged optional inherits the value already produced by an earlier
+/// recipe layer; an engaged optional replaces it verbatim. Numeric geometry is
+/// expressed in logical UI units and is deliberately not clamped or normalized
+/// here, so callers can detect/configure invalid values before a live widget
+/// consumes the resolved recipe.
+///
+/// Geometry participates in different retained invalidation classes:
+/// control/field extents, padding, label/text sizes and font selection can affect
+/// measurement/layout; border, selection, caret and composition geometry are
+/// paint geometry inside the published field bounds. The patch itself does not
+/// classify or publish invalidation.
+///
+/// Font-family strings and fallback lists are owned. The patch retains no Theme,
+/// UI, Tree, widget, renderer, or native handle, invokes no callbacks, and has no
+/// reentrant dispatch path. Copying owned strings/vectors may allocate, so style
+/// construction/resolution is UI/setup work rather than an audio-RT contract.
 struct TextInputStylePatch {
     /// Field background.
     std::optional<Color> field_fill;
@@ -74,8 +90,17 @@ struct TextInputStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
-/// Complete single-line TextInput recipe. Patches may alter paint,
-/// typography and measurement/editor geometry.
+/// Complete single-line TextInput recipe.
+///
+/// Resolution order is base -> one interaction branch -> read_only -> focused.
+/// Interaction precedence is disabled > pressed > hovered > normal. Within every
+/// layer inherited fields are applied before component-local fields, so the
+/// component-local recipe wins on overlap.
+///
+/// Recipes are detached owned values. They may be copied, retained, or built
+/// before a UI exists and borrow nothing from the Theme used to create defaults.
+/// Merely mutating a recipe does not touch retained state or invoke invalidation;
+/// that happens only when a live TextInput consumes a new resolved style.
 struct TextInputStyle {
     /// Base patch.
     TextInputStylePatch base;
@@ -92,6 +117,16 @@ struct TextInputStyle {
 };
 
 /// Concrete single-line editor presentation/measurement values after resolution.
+///
+/// The snapshot is fully owned: font strings/vectors are copied and no field
+/// borrows from either input recipe or Theme. Default construction performs no
+/// Theme lookup, so a field omitted by both inherited and local recipes remains
+/// its ordinary zero/default value.
+///
+/// Numeric fields preserve the exact selected recipe payload, including
+/// negative/non-finite values. Resolution therefore never hides invalid style
+/// data behind fallback/clamping; validation/canonicalization belongs to the
+/// consuming widget/renderer contract.
 struct ResolvedTextInputStyle {
     /// Resolved field background.
     Color field_fill{};
@@ -208,7 +243,16 @@ inline void apply_text_input_interaction_patch(ResolvedTextInputStyle& target,
 
 } // namespace detail
 
-/// Build the default TextInput recipe from one Theme snapshot; returned data is owned.
+/// Build the complete default TextInput recipe from a synchronously borrowed Theme.
+///
+/// The Theme is read only for this call. The result owns copied family/fallback
+/// strings and can outlive the Theme. Default interaction variants preserve the
+/// normal control/field geometry; hover/pressed/disabled/focused defaults change
+/// presentation only.
+///
+/// No callback, retained-tree mutation, or platform/native lookup occurs here.
+/// Copying Theme-owned strings/vectors may allocate and allocation failure
+/// propagates. This helper is intended for UI/style setup, not audio/DSP RT use.
 [[nodiscard]] inline TextInputStyle default_text_input_style(const Theme& theme) {
     TextInputStyle style;
     style.base.field_fill = theme.palette.control_background;
@@ -253,9 +297,18 @@ inline void apply_text_input_interaction_patch(ResolvedTextInputStyle& target,
     return style;
 }
 
-/// Resolve inherited then explicit base, interaction, read-only and focused patches.
-/// Interaction precedence is disabled > pressed > hovered > normal; focused is last.
-/// The returned value owns its strings/vectors and borrows nothing from the inputs.
+/// Resolve inherited and component-local TextInput recipes for one VisualState.
+///
+/// Inputs are borrowed only for the synchronous call. Resolution is
+/// base -> interaction -> read_only -> focused, with
+/// disabled > pressed > hovered > normal interaction precedence and local fields
+/// overriding inherited fields within each layer. The returned snapshot owns all
+/// copied font strings/vectors.
+///
+/// The resolver performs no Theme lookup, numeric sanitization, retained-state
+/// mutation, invalidation, callback invocation, or reentrant UI dispatch. Fields
+/// omitted by both recipes remain default constructed. Owned string/vector copies
+/// may allocate and allocation failure propagates.
 [[nodiscard]] inline ResolvedTextInputStyle resolve_text_input_style(
     const TextInputStyle& inherited,
     const TextInputStyle& explicit_style,

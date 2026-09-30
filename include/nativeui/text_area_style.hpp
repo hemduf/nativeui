@@ -11,8 +11,23 @@
 /// Patch values are stored verbatim; resolution may allocate for font data.
 namespace ui {
 
-/// Typed multiline text-area presentation and measurement overrides.
-/// Empty fields inherit from the already-resolved theme/inherited recipe.
+/// Typed multiline TextArea presentation and measurement overrides.
+///
+/// A disengaged optional inherits the value already selected by an earlier
+/// recipe layer; an engaged optional replaces it verbatim. All scalar geometry
+/// is in logical UI units and is intentionally stored without clamping or
+/// finiteness checks.
+///
+/// Control/field extents, padding, line height, label/text sizes and font
+/// selection can affect measurement/layout. Border, selection, caret, newline
+/// selection extension and composition-underline geometry are paint geometry
+/// inside those retained bounds. This value layer does not itself publish or
+/// classify invalidation.
+///
+/// Font-family strings and fallback lists are owned. The patch borrows no Theme,
+/// UI, Tree, widget, renderer, or native object and invokes no callbacks. Copies
+/// may allocate for owned strings/vectors, so style preparation is not an
+/// audio/DSP real-time API.
 struct TextAreaStylePatch {
     /// Editor field background color.
     std::optional<Color> field_fill;
@@ -78,8 +93,15 @@ struct TextAreaStylePatch {
     std::optional<std::vector<std::string>> fallback_families;
 };
 
-/// Complete multiline TextArea recipe. Patches may alter paint, typography and
-/// measurement fields.
+/// Complete multiline TextArea recipe.
+///
+/// Resolution order is base -> one interaction branch -> read_only -> focused.
+/// Interaction precedence is disabled > pressed > hovered > normal. Inherited
+/// values are applied before component-local values inside every layer.
+///
+/// Recipes are detached owned values and can outlive the Theme used to create
+/// defaults. Mutating this value alone has no retained/UI side effects and does
+/// not trigger callbacks or invalidation.
 struct TextAreaStyle {
     /// Base patch applied before all state-specific patches.
     TextAreaStylePatch base;
@@ -96,6 +118,14 @@ struct TextAreaStyle {
 };
 
 /// Concrete multiline editor presentation/measurement values after resolution.
+///
+/// The snapshot is fully owned and borrows nothing from recipes or Theme.
+/// Default construction performs no implicit Theme lookup; fields omitted by both
+/// recipes retain their zero/default values.
+///
+/// Numeric fields remain exactly as selected by recipe precedence, including
+/// negative/non-finite payloads. Resolution does not silently clamp or replace
+/// them; the consuming TextArea/renderer contract owns any later validation.
 struct ResolvedTextAreaStyle {
     /// Resolved Editor field background color.
     Color field_fill{};
@@ -218,7 +248,15 @@ inline void apply_text_area_interaction_patch(ResolvedTextAreaStyle& target,
 
 } // namespace detail
 
-/// Build the default TextArea recipe from one Theme snapshot; returned data is owned.
+/// Build the complete default TextArea recipe from a synchronously borrowed Theme.
+///
+/// The Theme is not retained. The returned recipe owns copied font-family/fallback
+/// data and can outlive the Theme. Normal/hover/pressed/disabled/read-only/focus
+/// defaults keep the baseline geometry stable and vary presentation only.
+///
+/// No callbacks, retained-tree mutation, or platform/native lookup occur.
+/// Copying Theme-owned strings/vectors may allocate and propagate allocation
+/// failure. This helper belongs to UI/style setup and is not audio-RT safe.
 [[nodiscard]] inline TextAreaStyle default_text_area_style(const Theme& theme) {
     TextAreaStyle style;
     style.base.field_fill = theme.palette.control_background;
@@ -266,9 +304,18 @@ inline void apply_text_area_interaction_patch(ResolvedTextAreaStyle& target,
     return style;
 }
 
-/// Resolve inherited then explicit base, interaction, read-only and focused patches.
-/// Interaction precedence is disabled > pressed > hovered > normal; focused is last.
-/// The returned value owns its font strings/vectors and borrows no input data.
+/// Resolve inherited and component-local TextArea recipes for one VisualState.
+///
+/// Inputs are borrowed only during this call. Resolution is
+/// base -> interaction -> read_only -> focused, with
+/// disabled > pressed > hovered > normal interaction precedence and local fields
+/// winning over inherited fields inside every layer. The returned snapshot owns
+/// all copied font strings/vectors.
+///
+/// The resolver performs no Theme lookup, numeric sanitization, retained mutation,
+/// invalidation, callback invocation, or reentrant UI dispatch. Fields omitted by
+/// both recipes remain default constructed. String/vector copies may allocate and
+/// allocation failure propagates.
 [[nodiscard]] inline ResolvedTextAreaStyle resolve_text_area_style(
     const TextAreaStyle& inherited,
     const TextAreaStyle& explicit_style,
