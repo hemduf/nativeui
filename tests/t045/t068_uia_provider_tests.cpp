@@ -3,6 +3,8 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
 #include <nativeui/detail/semantic_native_view_bridge.hpp>
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -11,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -243,6 +246,27 @@ UiaProviderHandlePtr fake_factory(void* user_data,
     }
     CHECK(state.read().has_value());
     return std::make_shared<FakeHandle>(recorder);
+}
+
+struct ConcurrentFactoryRecorder final {
+    std::atomic<std::size_t> creations{0U};
+};
+
+class ConcurrentFakeHandle final : public UiaProviderHandle {};
+
+UiaProviderHandlePtr concurrent_fake_factory(
+    void* user_data,
+    const UiaProviderState& state,
+    const UiaProviderRead&) {
+    auto* recorder = static_cast<ConcurrentFactoryRecorder*>(user_data);
+    if (recorder) {
+        recorder->creations.fetch_add(1U, std::memory_order_relaxed);
+    }
+    CHECK(state.read().has_value());
+    for (int attempt = 0; attempt < 64; ++attempt) {
+        std::this_thread::yield();
+    }
+    return std::make_shared<ConcurrentFakeHandle>();
 }
 
 struct ProviderFixture final {
@@ -615,6 +639,48 @@ void hit_testing_primitives_stay_bounded_for_virtual_lists() {
     CHECK(item_read->virtual_child_count() == 0U);
 }
 
+void concurrent_queries_share_one_cached_provider() {
+    SemanticNativePublicationState state;
+    CHECK(state.publish(ordinary_snapshot(1U, true),
+                        {SemanticChange::StructureChanged},
+                        SemanticNativeGeometry{})
+              .has_value());
+
+    ConcurrentFactoryRecorder factory;
+    UiaProviderEndpoint endpoint{state.reader_source()};
+    endpoint.set_factory(&concurrent_fake_factory, &factory);
+
+    constexpr std::size_t kReaderCount = 16U;
+    std::array<UiaProviderHandlePtr, kReaderCount> handles;
+    std::array<std::thread, kReaderCount> readers;
+    std::atomic<std::size_t> ready{0U};
+    std::atomic<bool> start{false};
+
+    for (std::size_t index = 0U; index < kReaderCount; ++index) {
+        readers[index] = std::thread([&, index] {
+            ready.fetch_add(1U, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            handles[index] = endpoint.ordinary(2U);
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != kReaderCount) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& reader : readers) {
+        reader.join();
+    }
+
+    CHECK(handles.front() != nullptr);
+    for (const auto& handle : handles) {
+        CHECK(handle == handles.front());
+    }
+    CHECK(factory.creations.load(std::memory_order_relaxed) == 1U);
+    CHECK(endpoint.tracked_identities() == 1U);
+}
+
 void two_views_keep_isolated_caches() {
     SemanticNativePublicationState first_state;
     SemanticNativePublicationState second_state;
@@ -680,7 +746,7 @@ void bridge_shutdown_stales_existing_providers() {
     CHECK(fixture.endpoint->root() == nullptr);
 }
 
-void provider_actions_route_through_t065() {
+void provider_actions_route_through_dispatcher() {
     ProviderFixture fixture;
     CHECK(fixture.publish(ordinary_snapshot(1U, true)).has_value());
 
@@ -740,9 +806,10 @@ int main() {
         value_notification_classifies_the_target_domain();
         derivation_fails_closed_without_a_publication();
         hit_testing_primitives_stay_bounded_for_virtual_lists();
+        concurrent_queries_share_one_cached_provider();
         two_views_keep_isolated_caches();
         bridge_shutdown_stales_existing_providers();
-        provider_actions_route_through_t065();
+        provider_actions_route_through_dispatcher();
         retired_handles_are_released_through_the_retirement_hook();
         std::cout << "PASS semantic UIA provider\n";
         return EXIT_SUCCESS;
