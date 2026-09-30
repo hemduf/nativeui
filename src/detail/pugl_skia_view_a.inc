@@ -205,8 +205,8 @@ public:
     ViewCore(const ViewCore&) = delete;
     ViewCore& operator=(const ViewCore&) = delete;
 
-    /// Bind exactly one T068 semantic domain after the concrete native owner and
-    /// its T065 DispatcherOwner are fully constructed. Keeping this out of the
+    /// Bind exactly one accessibility semantic domain after the concrete native owner and
+    /// its dispatcher DispatcherOwner are fully constructed. Keeping this out of the
     /// ViewCore constructor avoids cross-casting a partially constructed
     /// DispatcherProvider and preserves one dispatcher namespace per view.
     void bind_semantics(Dispatcher dispatcher) {
@@ -232,17 +232,17 @@ public:
         return semantic_domain_;
     }
 
-    /// Retain the tiny T043 native-geometry source for an outer semantic pump.
+    /// Retain the tiny geometry native-geometry source for an outer semantic pump.
     /// The returned object contains only scale + physical screen origin values;
     /// it does not retain this ViewCore, the retained tree, or a native handle.
-    /// A pump may therefore keep it alive across a re-entrant T065 drain and
+    /// A pump may therefore keep it alive across a re-entrant dispatcher drain and
     /// sample it afterwards only if the independent view lifetime survives.
     [[nodiscard]] std::shared_ptr<const ViewNativeGeometryCaptureState>
     semantic_native_geometry_capture_state() {
         return geometry_.retain_native_geometry_capture_state();
     }
 
-    /// Retain the lifetime-safe write-back handle for the owned T043 geometry
+    /// Retain the lifetime-safe write-back handle for the owned geometry geometry
     /// state. The returned weak value owns nothing and stays valid across a
     /// re-entrant dispatcher drain; the pump locks it at the post-drain
     /// checkpoint before accepting one platform screen-origin observation.
@@ -350,7 +350,7 @@ public:
         return renderer_.take_readback();
     }
 
-    /// Deterministic T043 observation seam used by the platform publication
+    /// Deterministic geometry observation seam used by the platform publication
     /// smoke. Production geometry is still owned and validated by
     /// ViewGeometryState; these only expose the same accepted/rejected
     /// observation path to the UI-thread test callback.
@@ -362,7 +362,7 @@ public:
         return geometry_.observe_physical_screen_origin(origin);
     }
 
-    /// Read the retained T043 capture pair without creating a capture source.
+    /// Read the retained geometry capture pair without creating a capture source.
     [[nodiscard]] std::optional<detail::SemanticNativeGeometry>
     retained_native_geometry_for_test() const noexcept {
         const auto source = geometry_.native_geometry_capture_state();
@@ -627,7 +627,7 @@ public:
 
 private:
     // View lifetime is distinct from the UI/tree lifetime. Outer pump code takes
-    // only a weak copy so a T065 callback can close/destroy this native view
+    // only a weak copy so a dispatcher callback can close/destroy this native view
     // while a leased semantic domain safely finishes the checkpoint stack.
     std::shared_ptr<int> semantic_view_lifetime_{std::make_shared<int>(0)};
     std::shared_ptr<SemanticRetainedViewDomain> semantic_domain_;

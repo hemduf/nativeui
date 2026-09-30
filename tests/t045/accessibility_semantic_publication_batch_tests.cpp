@@ -18,7 +18,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot snapshot(double value) {
     ui::SemanticTreeSnapshot tree;
@@ -41,32 +41,32 @@ void publication_batch_retains_exact_immutable_generation() {
 
     view.stage(snapshot(0.0));
     auto first = view.checkpoint_publication();
-    T068_CHECK(first.has_value());
-    T068_CHECK(first->snapshot);
-    T068_CHECK(first->generation() == 1);
-    T068_CHECK(first->changes ==
+    ACCESSIBILITY_CHECK(first.has_value());
+    ACCESSIBILITY_CHECK(first->snapshot);
+    ACCESSIBILITY_CHECK(first->generation() == 1);
+    ACCESSIBILITY_CHECK(first->changes ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
-    T068_CHECK(first->snapshot.get() == view.current().get());
-    T068_CHECK(first->snapshot->nodes[0].info.numeric_value ==
+    ACCESSIBILITY_CHECK(first->snapshot.get() == view.current().get());
+    ACCESSIBILITY_CHECK(first->snapshot->nodes[0].info.numeric_value ==
                std::optional<double>{0.0});
 
     const auto retained_first = first->snapshot;
 
     view.stage(snapshot(1.0));
     auto second = view.checkpoint_publication();
-    T068_CHECK(second.has_value());
-    T068_CHECK(second->snapshot);
-    T068_CHECK(second->generation() == 2);
-    T068_CHECK(second->changes ==
+    ACCESSIBILITY_CHECK(second.has_value());
+    ACCESSIBILITY_CHECK(second->snapshot);
+    ACCESSIBILITY_CHECK(second->generation() == 2);
+    ACCESSIBILITY_CHECK(second->changes ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
-    T068_CHECK(second->snapshot.get() == view.current().get());
-    T068_CHECK(second->snapshot->nodes[0].info.numeric_value ==
+    ACCESSIBILITY_CHECK(second->snapshot.get() == view.current().get());
+    ACCESSIBILITY_CHECK(second->snapshot->nodes[0].info.numeric_value ==
                std::optional<double>{1.0});
 
     // A native callback that retained the previous batch keeps reading exactly
     // that immutable generation after the UI thread publishes a replacement.
-    T068_CHECK(retained_first->generation == 1);
-    T068_CHECK(retained_first->nodes[0].info.numeric_value ==
+    ACCESSIBILITY_CHECK(retained_first->generation == 1);
+    ACCESSIBILITY_CHECK(retained_first->nodes[0].info.numeric_value ==
                std::optional<double>{0.0});
 
     // Consuming a staged candidate is distinct from having no checkpoint work.
@@ -74,23 +74,23 @@ void publication_batch_retains_exact_immutable_generation() {
     // an empty notification vector, while a subsequent unstaged call is nullopt.
     view.stage(snapshot(1.0));
     auto unchanged = view.checkpoint_publication();
-    T068_CHECK(unchanged.has_value());
-    T068_CHECK(unchanged->changes.empty());
-    T068_CHECK(unchanged->generation() == 2);
-    T068_CHECK(unchanged->snapshot.get() == second->snapshot.get());
-    T068_CHECK(!view.checkpoint_publication().has_value());
+    ACCESSIBILITY_CHECK(unchanged.has_value());
+    ACCESSIBILITY_CHECK(unchanged->changes.empty());
+    ACCESSIBILITY_CHECK(unchanged->generation() == 2);
+    ACCESSIBILITY_CHECK(unchanged->snapshot.get() == second->snapshot.get());
+    ACCESSIBILITY_CHECK(!view.checkpoint_publication().has_value());
 }
 
 void failed_publication_keeps_pending_candidate_for_exact_retry_batch() {
     ui::detail::SemanticViewState view;
     auto baseline = view.publish_publication(snapshot(0.0));
-    T068_CHECK(baseline.has_value());
-    T068_CHECK(baseline->generation() == 1);
+    ACCESSIBILITY_CHECK(baseline.has_value());
+    ACCESSIBILITY_CHECK(baseline->generation() == 1);
 
     view.stage(snapshot(2.0));
     const auto before_failure = view.current();
     auto publisher = view.publisher();
-    T068_CHECK(publisher);
+    ACCESSIBILITY_CHECK(publisher);
     publisher->fail_next_publish_at_for_test(
         ui::detail::SemanticSnapshotPublisher::FailurePointForTest::SnapshotAllocation);
 
@@ -100,20 +100,20 @@ void failed_publication_keeps_pending_candidate_for_exact_retry_batch() {
     } catch (const std::bad_alloc&) {
         threw = true;
     }
-    T068_CHECK(threw);
-    T068_CHECK(view.has_pending_publication());
-    T068_CHECK(view.current().get() == before_failure.get());
-    T068_CHECK(view.current()->generation == 1);
+    ACCESSIBILITY_CHECK(threw);
+    ACCESSIBILITY_CHECK(view.has_pending_publication());
+    ACCESSIBILITY_CHECK(view.current().get() == before_failure.get());
+    ACCESSIBILITY_CHECK(view.current()->generation == 1);
 
     auto retry = view.checkpoint_publication();
-    T068_CHECK(retry.has_value());
-    T068_CHECK(retry->generation() == 2);
-    T068_CHECK(retry->changes ==
+    ACCESSIBILITY_CHECK(retry.has_value());
+    ACCESSIBILITY_CHECK(retry->generation() == 2);
+    ACCESSIBILITY_CHECK(retry->changes ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
-    T068_CHECK(retry->snapshot.get() == view.current().get());
-    T068_CHECK(retry->snapshot->nodes[0].info.numeric_value ==
+    ACCESSIBILITY_CHECK(retry->snapshot.get() == view.current().get());
+    ACCESSIBILITY_CHECK(retry->snapshot->nodes[0].info.numeric_value ==
                std::optional<double>{2.0});
-    T068_CHECK(!view.has_pending_publication());
+    ACCESSIBILITY_CHECK(!view.has_pending_publication());
 }
 
 } // namespace

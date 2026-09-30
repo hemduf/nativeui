@@ -179,7 +179,7 @@ public:
     }
 
     /// Materialize at most the currently selected child from one exact immutable
-    /// publication. Virtual selection uses the T067 selected token and token
+    /// publication. Virtual selection uses the virtual-list selected token and token
     /// index, so this creates at most one native proxy and never walks or
     /// materializes the full logical collection.
     [[nodiscard]] std::optional<ElementRange> appkit_selected_children(

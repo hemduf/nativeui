@@ -16,7 +16,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticInfo enabled_button_info() {
     ui::SemanticInfo info;
@@ -49,17 +49,17 @@ void lifetime_bound_target_fails_closed_after_owner_death() {
     ui::detail::SemanticActionRequest request;
     request.action = ui::SemanticAction::Activate;
 
-    T068_CHECK(target.current_semantics(identity).has_value());
-    T068_CHECK(target.dispatch_semantic_action(identity, request));
-    T068_CHECK(current_calls == 1);
-    T068_CHECK(dispatch_calls == 1);
+    ACCESSIBILITY_CHECK(target.current_semantics(identity).has_value());
+    ACCESSIBILITY_CHECK(target.dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(current_calls == 1);
+    ACCESSIBILITY_CHECK(dispatch_calls == 1);
 
     lifetime.reset();
 
-    T068_CHECK(!target.current_semantics(identity).has_value());
-    T068_CHECK(!target.dispatch_semantic_action(identity, request));
-    T068_CHECK(current_calls == 1);
-    T068_CHECK(dispatch_calls == 1);
+    ACCESSIBILITY_CHECK(!target.current_semantics(identity).has_value());
+    ACCESSIBILITY_CHECK(!target.dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(current_calls == 1);
+    ACCESSIBILITY_CHECK(dispatch_calls == 1);
 }
 
 void reentrant_owner_death_is_visible_to_nested_semantic_work() {
@@ -85,10 +85,10 @@ void reentrant_owner_death_is_visible_to_nested_semantic_work() {
         }};
     target_ptr = &target;
 
-    T068_CHECK(target.dispatch_semantic_action(identity, request));
-    T068_CHECK(nested_rejected);
-    T068_CHECK(!target.current_semantics(identity).has_value());
-    T068_CHECK(!target.dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(target.dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(nested_rejected);
+    ACCESSIBILITY_CHECK(!target.current_semantics(identity).has_value());
+    ACCESSIBILITY_CHECK(!target.dispatch_semantic_action(identity, request));
 }
 
 void independent_targets_do_not_share_lifetime_state() {
@@ -117,10 +117,10 @@ void independent_targets_do_not_share_lifetime_state() {
     request.action = ui::SemanticAction::Activate;
 
     lifetime_a.reset();
-    T068_CHECK(!target_a->dispatch_semantic_action(identity, request));
-    T068_CHECK(target_b->dispatch_semantic_action(identity, request));
-    T068_CHECK(dispatch_a == 0);
-    T068_CHECK(dispatch_b == 1);
+    ACCESSIBILITY_CHECK(!target_a->dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(target_b->dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(dispatch_a == 0);
+    ACCESSIBILITY_CHECK(dispatch_b == 1);
 }
 
 void callback_exception_leaves_target_reusable() {
@@ -153,10 +153,10 @@ void callback_exception_leaves_target_reusable() {
     } catch (const std::runtime_error&) {
         threw = true;
     }
-    T068_CHECK(threw);
-    T068_CHECK(dispatch_calls == 1);
-    T068_CHECK(target.dispatch_semantic_action(identity, request));
-    T068_CHECK(dispatch_calls == 2);
+    ACCESSIBILITY_CHECK(threw);
+    ACCESSIBILITY_CHECK(dispatch_calls == 1);
+    ACCESSIBILITY_CHECK(target.dispatch_semantic_action(identity, request));
+    ACCESSIBILITY_CHECK(dispatch_calls == 2);
 }
 
 void suite() {
@@ -171,10 +171,10 @@ void suite() {
 int main() {
     try {
         suite();
-        std::cout << "PASS t068 semantic action target binding\n";
+        std::cout << "PASS accessibility semantic action target binding\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic action target binding: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic action target binding: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

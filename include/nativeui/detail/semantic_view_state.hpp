@@ -71,7 +71,7 @@ public:
     /// checkpoint. Repeated state/layout changes before that checkpoint replace
     /// the pending value instead of manufacturing intermediate native
     /// notifications/generations. The retained candidate owns only immutable
-    /// semantic values/shared T067 metadata, never live tree pointers.
+    /// semantic values/shared virtual-list metadata, never live tree pointers.
     void stage(SemanticTreeSnapshot candidate) {
         if (!publisher_) return;
         pending_ = std::move(candidate);
@@ -89,7 +89,7 @@ public:
     ///
     /// The authoritative pending candidate is retained until publication has
     /// completed successfully. Copying the small snapshot shell does not copy a
-    /// virtual ListView's O(N) T067 metadata because those entries remain behind
+    /// virtual ListView's O(N) virtual-list metadata because those entries remain behind
     /// shared immutable storage. If snapshot copying, diff preparation or final
     /// snapshot allocation throws, the current published generation is unchanged
     /// and the same pending candidate remains available for a later checkpoint.

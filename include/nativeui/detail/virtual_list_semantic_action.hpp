@@ -10,7 +10,7 @@
 
 namespace ui::detail {
 
-/// Resolve one current logical ListView item from the immutable T067 token
+/// Resolve one current logical ListView item from the immutable virtual-list token
 /// index without consulting or materializing visual rows.
 ///
 /// Virtual ListView action dispatch requires the indexed metadata form. A
@@ -48,7 +48,7 @@ namespace ui::detail {
     return !item.read_only || !semantic_action_mutates_value(action);
 }
 
-/// Execute one logical-item semantic action for a retained T067 ListView.
+/// Execute one logical-item semantic action for a retained virtual-list ListView.
 ///
 /// The live-tree resolver has already rechecked effective container
 /// availability immediately before entering this helper. We still resolve the
@@ -61,7 +61,7 @@ namespace ui::detail {
 /// `SemanticAction::Focus` needs the owning tree's focus manager as well as the
 /// logical row index, so it is dispatched through `request_owner_focus`. The
 /// owner callback must move retained keyboard focus to the composite ListView
-/// and report success; only then does the normal T067 scroll/materialization
+/// and report success; only then does the normal virtual-list scroll/materialization
 /// window reveal the logical item. Focus is non-mutating: selection is left
 /// untouched. Stale tokens, disabled/read-only items, unadvertised actions and a
 /// rejected owner focus request all fail closed without touching the visual
@@ -83,7 +83,7 @@ template <class Runtime>
 
         // Retained keyboard focus moves to the composite owner first. A denied
         // owner leaves the visual window untouched; an accepted owner is
-        // followed by the ordinary T067 reveal so the offscreen logical item
+        // followed by the ordinary virtual-list reveal so the offscreen logical item
         // becomes the focused exception row without a second semantic lookup.
         if (!request_owner_focus || !request_owner_focus()) return false;
         return runtime.focus_index(*index);

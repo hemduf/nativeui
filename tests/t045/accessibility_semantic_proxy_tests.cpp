@@ -20,7 +20,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot ordinary_snapshot(std::string name) {
     ui::SemanticTreeSnapshot tree;
@@ -40,17 +40,17 @@ ui::SemanticTreeSnapshot ordinary_snapshot(std::string name) {
 
 void ordinary_proxy_reads_current_snapshot_and_keeps_old_read_alive() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(publisher->publish(ordinary_snapshot("Apply")) ==
+    ACCESSIBILITY_CHECK(publisher->publish(ordinary_snapshot("Apply")) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     auto proxy = ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42);
     const auto first = proxy.read();
-    T068_CHECK(first.has_value());
-    T068_CHECK(first->generation() == 1);
-    T068_CHECK(first->node_id() == 42);
-    T068_CHECK(!first->virtual_token().has_value());
-    T068_CHECK(first->info().name == "Apply");
-    T068_CHECK(first->bounds().x == 10.0f);
+    ACCESSIBILITY_CHECK(first.has_value());
+    ACCESSIBILITY_CHECK(first->generation() == 1);
+    ACCESSIBILITY_CHECK(first->node_id() == 42);
+    ACCESSIBILITY_CHECK(!first->virtual_token().has_value());
+    ACCESSIBILITY_CHECK(first->info().name == "Apply");
+    ACCESSIBILITY_CHECK(first->bounds().x == 10.0f);
 
     auto changed = ordinary_snapshot("Apply now");
     changed.nodes[0].bounds.x = 12.0f;
@@ -59,28 +59,28 @@ void ordinary_proxy_reads_current_snapshot_and_keeps_old_read_alive() {
         ui::SemanticChange::ValueChanged,
         ui::SemanticChange::BoundsChanged,
     };
-    T068_CHECK(changes == expected_changes);
+    ACCESSIBILITY_CHECK(changes == expected_changes);
 
     const auto second = proxy.read();
-    T068_CHECK(second.has_value());
-    T068_CHECK(second->generation() == 2);
-    T068_CHECK(second->info().name == "Apply now");
-    T068_CHECK(second->bounds().x == 12.0f);
+    ACCESSIBILITY_CHECK(second.has_value());
+    ACCESSIBILITY_CHECK(second->generation() == 2);
+    ACCESSIBILITY_CHECK(second->info().name == "Apply now");
+    ACCESSIBILITY_CHECK(second->bounds().x == 12.0f);
 
     // The first read owns its immutable generation. Publishing a replacement
     // cannot mutate or invalidate data a native reader already retained.
-    T068_CHECK(first->generation() == 1);
-    T068_CHECK(first->info().name == "Apply");
-    T068_CHECK(first->bounds().x == 10.0f);
+    ACCESSIBILITY_CHECK(first->generation() == 1);
+    ACCESSIBILITY_CHECK(first->info().name == "Apply");
+    ACCESSIBILITY_CHECK(first->bounds().x == 10.0f);
 
     ui::SemanticTreeSnapshot removed;
-    T068_CHECK(publisher->publish(std::move(removed)) ==
+    ACCESSIBILITY_CHECK(publisher->publish(std::move(removed)) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
-    T068_CHECK(!proxy.read().has_value());
+    ACCESSIBILITY_CHECK(!proxy.read().has_value());
 
     publisher.reset();
-    T068_CHECK(!proxy.read().has_value());
-    T068_CHECK(first->info().name == "Apply");
+    ACCESSIBILITY_CHECK(!proxy.read().has_value());
+    ACCESSIBILITY_CHECK(first->info().name == "Apply");
 }
 
 ui::VirtualSemanticChildren::TokenIndexSnapshot token_index_for(
@@ -144,16 +144,16 @@ void virtual_proxy_follows_token_across_reorder_and_becomes_defunct_on_removal()
     first_metadata->push_back({20, "Twenty", "", true, false,
                                ui::SemanticCheckedState::NotApplicable,
                                {ui::SemanticAction::Select, ui::SemanticAction::Focus}});
-    T068_CHECK(!publisher->publish(virtual_snapshot(1, first_metadata, 20, 0.0f)).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(virtual_snapshot(1, first_metadata, 20, 0.0f)).empty());
 
     auto proxy = ui::detail::SemanticSnapshotProxy::virtual_item(publisher, 7, 20);
     const auto first = proxy.read();
-    T068_CHECK(first.has_value());
-    T068_CHECK(first->node_id() == 7);
-    T068_CHECK(first->virtual_token() == std::optional<ui::VirtualSemanticItemToken>{20});
-    T068_CHECK(first->info().name == "Twenty");
-    T068_CHECK(first->info().selected);
-    T068_CHECK(first->bounds().y == 20.0f);
+    ACCESSIBILITY_CHECK(first.has_value());
+    ACCESSIBILITY_CHECK(first->node_id() == 7);
+    ACCESSIBILITY_CHECK(first->virtual_token() == std::optional<ui::VirtualSemanticItemToken>{20});
+    ACCESSIBILITY_CHECK(first->info().name == "Twenty");
+    ACCESSIBILITY_CHECK(first->info().selected);
+    ACCESSIBILITY_CHECK(first->bounds().y == 20.0f);
 
     auto reordered_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
     reordered_metadata->push_back({20, "Twenty reordered", "", true, false,
@@ -162,26 +162,26 @@ void virtual_proxy_follows_token_across_reorder_and_becomes_defunct_on_removal()
     reordered_metadata->push_back({10, "Ten", "", true, false,
                                    ui::SemanticCheckedState::NotApplicable,
                                    {ui::SemanticAction::Select, ui::SemanticAction::Focus}});
-    T068_CHECK(!publisher->publish(virtual_snapshot(2, reordered_metadata, 10, 5.0f)).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(virtual_snapshot(2, reordered_metadata, 10, 5.0f)).empty());
 
     const auto second = proxy.read();
-    T068_CHECK(second.has_value());
-    T068_CHECK(second->generation() == 2);
-    T068_CHECK(second->virtual_token() == std::optional<ui::VirtualSemanticItemToken>{20});
-    T068_CHECK(second->info().name == "Twenty reordered");
-    T068_CHECK(!second->info().selected);
-    T068_CHECK(second->bounds().y == -5.0f);
+    ACCESSIBILITY_CHECK(second.has_value());
+    ACCESSIBILITY_CHECK(second->generation() == 2);
+    ACCESSIBILITY_CHECK(second->virtual_token() == std::optional<ui::VirtualSemanticItemToken>{20});
+    ACCESSIBILITY_CHECK(second->info().name == "Twenty reordered");
+    ACCESSIBILITY_CHECK(!second->info().selected);
+    ACCESSIBILITY_CHECK(second->bounds().y == -5.0f);
 
-    T068_CHECK(first->generation() == 1);
-    T068_CHECK(first->info().name == "Twenty");
-    T068_CHECK(first->bounds().y == 20.0f);
+    ACCESSIBILITY_CHECK(first->generation() == 1);
+    ACCESSIBILITY_CHECK(first->info().name == "Twenty");
+    ACCESSIBILITY_CHECK(first->bounds().y == 20.0f);
 
     auto removed_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
     removed_metadata->push_back({10, "Ten", "", true, false,
                                  ui::SemanticCheckedState::NotApplicable,
                                  {ui::SemanticAction::Select, ui::SemanticAction::Focus}});
-    T068_CHECK(!publisher->publish(virtual_snapshot(3, removed_metadata, 10, 0.0f)).empty());
-    T068_CHECK(!proxy.read().has_value());
+    ACCESSIBILITY_CHECK(!publisher->publish(virtual_snapshot(3, removed_metadata, 10, 0.0f)).empty());
+    ACCESSIBILITY_CHECK(!proxy.read().has_value());
 }
 
 void virtual_proxy_requires_indexed_metadata_for_bounded_native_reads() {
@@ -191,14 +191,14 @@ void virtual_proxy_requires_indexed_metadata_for_bounded_native_reads() {
                          ui::SemanticCheckedState::NotApplicable,
                          {ui::SemanticAction::Select}});
 
-    T068_CHECK(!publisher->publish(unindexed_virtual_snapshot(metadata)).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(unindexed_virtual_snapshot(metadata)).empty());
     auto proxy = ui::detail::SemanticSnapshotProxy::virtual_item(publisher, 7, 20);
 
     // Generic immutable snapshots still support their documented linear
     // item_for_token() fallback. Native proxies deliberately do not: a native
-    // query must never turn a missing T067 index into an O(N) callback-thread
+    // query must never turn a missing virtual-list index into an O(N) callback-thread
     // scan of a potentially 100k-item logical collection.
-    T068_CHECK(!proxy.read().has_value());
+    ACCESSIBILITY_CHECK(!proxy.read().has_value());
 }
 
 void platform_identity_paths_are_view_scoped_and_stale_safe() {
@@ -206,27 +206,27 @@ void platform_identity_paths_are_view_scoped_and_stale_safe() {
     const auto sibling = ui::detail::AccessibilityRootIdentity::create(17, 102);
     const auto recreated = ui::detail::AccessibilityRootIdentity::create(17, 103);
 
-    T068_CHECK(first.has_value());
-    T068_CHECK(sibling.has_value());
-    T068_CHECK(recreated.has_value());
-    T068_CHECK(!ui::detail::AccessibilityRootIdentity::create(0, 101).has_value());
-    T068_CHECK(!ui::detail::AccessibilityRootIdentity::create(17, 0).has_value());
+    ACCESSIBILITY_CHECK(first.has_value());
+    ACCESSIBILITY_CHECK(sibling.has_value());
+    ACCESSIBILITY_CHECK(recreated.has_value());
+    ACCESSIBILITY_CHECK(!ui::detail::AccessibilityRootIdentity::create(0, 101).has_value());
+    ACCESSIBILITY_CHECK(!ui::detail::AccessibilityRootIdentity::create(17, 0).has_value());
 
     const auto first_node = first->atspi_node_path(42);
     const auto sibling_node = sibling->atspi_node_path(42);
     const auto recreated_node = recreated->atspi_node_path(42);
 
-    T068_CHECK(first_node == "/org/nativeui/a11y/17/101/42");
-    T068_CHECK(first_node != sibling_node);
-    T068_CHECK(first_node != recreated_node);
-    T068_CHECK(!first->atspi_node_path(ui::kInvalidSemanticId).size());
+    ACCESSIBILITY_CHECK(first_node == "/org/nativeui/a11y/17/101/42");
+    ACCESSIBILITY_CHECK(first_node != sibling_node);
+    ACCESSIBILITY_CHECK(first_node != recreated_node);
+    ACCESSIBILITY_CHECK(!first->atspi_node_path(ui::kInvalidSemanticId).size());
 
     const auto first_item = first->atspi_virtual_item_path(7, 20);
     const auto sibling_item = sibling->atspi_virtual_item_path(7, 20);
-    T068_CHECK(first_item == "/org/nativeui/a11y/17/101/7/item/20");
-    T068_CHECK(first_item != sibling_item);
-    T068_CHECK(first_item != first_node);
-    T068_CHECK(first->atspi_virtual_item_path(7, ui::kInvalidVirtualSemanticItemToken).empty());
+    ACCESSIBILITY_CHECK(first_item == "/org/nativeui/a11y/17/101/7/item/20");
+    ACCESSIBILITY_CHECK(first_item != sibling_item);
+    ACCESSIBILITY_CHECK(first_item != first_node);
+    ACCESSIBILITY_CHECK(first->atspi_virtual_item_path(7, ui::kInvalidVirtualSemanticItemToken).empty());
 }
 
 } // namespace
@@ -237,10 +237,10 @@ int main() {
         virtual_proxy_follows_token_across_reorder_and_becomes_defunct_on_removal();
         virtual_proxy_requires_indexed_metadata_for_bounded_native_reads();
         platform_identity_paths_are_view_scoped_and_stale_safe();
-        std::cout << "PASS t068 semantic proxy\n";
+        std::cout << "PASS accessibility semantic proxy\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic proxy: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic proxy: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

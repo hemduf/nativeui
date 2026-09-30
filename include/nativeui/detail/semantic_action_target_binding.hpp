@@ -19,7 +19,7 @@ namespace ui::detail {
 /// Deliberately do not lock the weak lifetime token into temporary shared
 /// ownership. Keeping that token alive across a callback would make nested
 /// semantic work incorrectly observe a view as alive after a re-entrant owner
-/// teardown. Target methods are UI-thread-only; T065 is responsible for
+/// teardown. Target methods are UI-thread-only; dispatcher is responsible for
 /// marshalling native actions onto that thread before invoking this object.
 class LifetimeBoundSemanticActionTarget final : public SemanticActionTarget {
 public:

@@ -226,7 +226,7 @@ macos_accessibility_appkit_action_request(
 /// supplied scalar/string and contains both Objective-C and C++ exceptions; no
 /// exception may escape the eventual NSAccessibility callback. Range policy is
 /// intentionally left to the existing UI-thread semantic action handler after
-/// T065 revalidation, while non-finite numeric values are rejected here.
+/// dispatcher revalidation, while non-finite numeric values are rejected here.
 [[nodiscard]] inline std::optional<SemanticActionRequest>
 macos_accessibility_appkit_value_action_request(
     const SemanticInfo& info,

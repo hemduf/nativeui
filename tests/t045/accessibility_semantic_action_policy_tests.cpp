@@ -20,7 +20,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 class VirtualActionProbe final : public ui::detail::VirtualSemanticActionHandler {
 public:
@@ -41,15 +41,15 @@ public:
 void read_only_mutation_policy_is_single_and_exhaustive() {
     using ui::SemanticAction;
 
-    T068_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Activate));
-    T068_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Toggle));
-    T068_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Focus));
-    T068_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Increment));
-    T068_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Decrement));
-    T068_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::SetValue));
-    T068_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Select));
-    T068_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Expand));
-    T068_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Collapse));
+    ACCESSIBILITY_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Activate));
+    ACCESSIBILITY_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Toggle));
+    ACCESSIBILITY_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Focus));
+    ACCESSIBILITY_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Increment));
+    ACCESSIBILITY_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Decrement));
+    ACCESSIBILITY_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::SetValue));
+    ACCESSIBILITY_CHECK(ui::detail::semantic_action_mutates_value(SemanticAction::Select));
+    ACCESSIBILITY_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Expand));
+    ACCESSIBILITY_CHECK(!ui::detail::semantic_action_mutates_value(SemanticAction::Collapse));
 
     ui::SemanticInfo info;
     info.enabled = true;
@@ -75,10 +75,10 @@ void read_only_mutation_policy_is_single_and_exhaustive() {
         SemanticAction::Expand,
         SemanticAction::Collapse,
     };
-    T068_CHECK(normalized.actions == expected);
+    ACCESSIBILITY_CHECK(normalized.actions == expected);
 
     for (const auto action : info.actions) {
-        T068_CHECK(ui::detail::semantic_action_allowed(info, action) ==
+        ACCESSIBILITY_CHECK(ui::detail::semantic_action_allowed(info, action) ==
                    !ui::detail::semantic_action_mutates_value(action));
     }
 }
@@ -93,7 +93,7 @@ void disabled_state_rejects_every_advertised_action() {
     };
 
     for (const auto action : info.actions) {
-        T068_CHECK(!ui::detail::semantic_action_allowed(info, action));
+        ACCESSIBILITY_CHECK(!ui::detail::semantic_action_allowed(info, action));
     }
 }
 
@@ -104,10 +104,10 @@ void virtual_action_handler_uses_stable_logical_token() {
     request.action = ui::SemanticAction::Select;
 
     constexpr ui::VirtualSemanticItemToken token = 73;
-    T068_CHECK(handler->perform_virtual_semantic_action(token, request));
-    T068_CHECK(probe.calls == 1);
-    T068_CHECK(probe.last_token == token);
-    T068_CHECK(probe.last_action == ui::SemanticAction::Select);
+    ACCESSIBILITY_CHECK(handler->perform_virtual_semantic_action(token, request));
+    ACCESSIBILITY_CHECK(probe.calls == 1);
+    ACCESSIBILITY_CHECK(probe.last_token == token);
+    ACCESSIBILITY_CHECK(probe.last_action == ui::SemanticAction::Select);
 }
 
 void virtual_live_resolution_requires_indexed_token_map() {
@@ -132,8 +132,8 @@ void virtual_live_resolution_requires_indexed_token_map() {
         ui::Rect{0.0f, 0.0f, 100.0f, 20.0f},
         20.0f,
         0.0f);
-    T068_CHECK(unindexed.item_for_token(token).has_value());
-    T068_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(unindexed, token));
+    ACCESSIBILITY_CHECK(unindexed.item_for_token(token).has_value());
+    ACCESSIBILITY_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(unindexed, token));
 
     auto token_index = std::make_shared<Children::TokenIndex>();
     token_index->emplace(token, 0);
@@ -147,10 +147,10 @@ void virtual_live_resolution_requires_indexed_token_map() {
         0.0f);
 
     const auto resolved = ui::detail::resolve_indexed_virtual_semantic_item(indexed, token);
-    T068_CHECK(resolved.has_value());
-    T068_CHECK(resolved->token == token);
-    T068_CHECK(resolved->info.name == "row");
-    T068_CHECK(resolved->info.supports(ui::SemanticAction::Select));
+    ACCESSIBILITY_CHECK(resolved.has_value());
+    ACCESSIBILITY_CHECK(resolved->token == token);
+    ACCESSIBILITY_CHECK(resolved->info.name == "row");
+    ACCESSIBILITY_CHECK(resolved->info.supports(ui::SemanticAction::Select));
 
     auto malformed_index = std::make_shared<Children::TokenIndex>();
     malformed_index->emplace(token, 1);
@@ -162,8 +162,8 @@ void virtual_live_resolution_requires_indexed_token_map() {
         ui::Rect{0.0f, 0.0f, 100.0f, 20.0f},
         20.0f,
         0.0f);
-    T068_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(malformed, token));
-    T068_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(
+    ACCESSIBILITY_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(malformed, token));
+    ACCESSIBILITY_CHECK(!ui::detail::resolve_indexed_virtual_semantic_item(
         indexed, ui::kInvalidVirtualSemanticItemToken));
 }
 
@@ -175,10 +175,10 @@ int main() {
         disabled_state_rejects_every_advertised_action();
         virtual_action_handler_uses_stable_logical_token();
         virtual_live_resolution_requires_indexed_token_map();
-        std::cout << "PASS t068 semantic action policy\n";
+        std::cout << "PASS accessibility semantic action policy\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic action policy: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic action policy: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

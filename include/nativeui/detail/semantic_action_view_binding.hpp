@@ -12,7 +12,7 @@ namespace ui::detail {
 /// Native adapters retain this object weakly and submit only stable semantic
 /// identity plus a typed request. The endpoint never owns retained Tree/Node/
 /// Component state: it weakly observes the view publisher/target and reuses the
-/// existing SemanticActionRouter/T065 path for snapshot and live-state
+/// existing SemanticActionRouter/dispatcher path for snapshot and live-state
 /// revalidation before any mutation can run.
 class SemanticActionViewEndpoint final {
 public:

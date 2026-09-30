@@ -66,7 +66,7 @@ ui::Canvas tab_panel(std::string title, std::string body) {
 // Custom component using the approved public semantic hook
 // ---------------------------------------------------------------------------
 
-/// Application component exercising the frozen T068 custom-component seam: the
+/// Application component exercising the frozen accessibility custom-component seam: the
 /// component owns its semantic projection through `Component::semantics()` and
 /// the retained tree exposes it through `UI::component_semantics(NodeId)`.
 class SemanticStatusBadge final : public ui::Component {
@@ -215,7 +215,7 @@ struct DemoState {
 ui::UI make_ui(DemoState& state, std::shared_ptr<ui::NodeId> badge_id) {
     return ui::UI{
         ui::Column{
-            ui::Label{"T068 — Accessibility semantics"}.size(22.0f).bold(),
+            ui::Label{"accessibility — Accessibility semantics"}.size(22.0f).bold(),
             ui::Label{
                 "Standard controls and a custom component publish Component::semantics(); "
                 "100,000 virtual rows share one immutable semantic metadata snapshot."}
@@ -462,7 +462,7 @@ int check_virtual_metadata_sharing() {
     return 0;
 }
 
-/// Virtual logical Select/Focus behavior at the public user level. T045
+/// Virtual logical Select/Focus behavior at the public user level. semantic
 /// deliberately keeps semantic-action dispatch internal to the platform
 /// bridge, so this exercises the public equivalents: logical token resolution
 /// against the current immutable metadata, the application-owned selection
@@ -642,5 +642,5 @@ int main(int argc, char** argv) {
     DemoState state;
     auto badge_id = std::make_shared<ui::NodeId>(ui::kInvalidNodeId);
     auto tree = make_ui(state, badge_id);
-    return example::run_window(tree, "NativeUI T068 Accessibility Semantics", {720.0f, 640.0f});
+    return example::run_window(tree, "NativeUI accessibility Accessibility Semantics", {720.0f, 640.0f});
 }

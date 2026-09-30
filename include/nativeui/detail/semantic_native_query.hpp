@@ -15,7 +15,7 @@ namespace ui::detail {
 /// Platform accessibility adapters retain the native publication itself rather
 /// than loading semantic data and geometry independently.  The semantic node or
 /// virtual item resolved below therefore always belongs to the same generation
-/// as the copied T043 screen geometry exposed by geometry().
+/// as the copied geometry screen geometry exposed by geometry().
 class SemanticNativeSnapshotRead final {
 public:
     [[nodiscard]] std::uint64_t generation() const noexcept {
@@ -399,7 +399,7 @@ private:
                 return std::nullopt;
             }
 
-            // Keep native virtual-item lookup O(1).  Missing/inconsistent T067
+            // Keep native virtual-item lookup O(1).  Missing/inconsistent virtual-list
             // token indexing is defunct rather than falling back to the generic
             // linear metadata scan on an OS callback thread.
             auto item = resolve_indexed_virtual_semantic_item(

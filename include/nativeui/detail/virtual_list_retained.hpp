@@ -210,7 +210,7 @@ public:
     }
 
     /// Reveal and retain one logical item as the materialization exception row
-    /// through the normal T067 scroll/window path.
+    /// through the normal virtual-list scroll/window path.
     ///
     /// Semantic `Focus` uses this after the owning tree accepted keyboard focus
     /// for the composite ListView. It never mutates selection, never scans O(N)
@@ -549,7 +549,7 @@ public:
         return list_view_semantic_info();
     }
 
-    /// The full logical dataset is exposed through the same immutable T067
+    /// The full logical dataset is exposed through the same immutable virtual-list
     /// metadata pointer used by the read-only presentation path; ordinary
     /// scroll/selection/focus generations never recopy it.
     [[nodiscard]] VirtualSemanticChildren virtual_semantic_children(

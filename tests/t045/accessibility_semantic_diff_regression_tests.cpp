@@ -20,7 +20,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::VirtualSemanticChildren::MetadataSnapshot metadata(
     std::initializer_list<std::pair<ui::VirtualSemanticItemToken, std::string>> entries) {
@@ -146,27 +146,27 @@ void storage_only_index_refresh_keeps_semantic_generation() {
     const auto first_index = token_index({10, 20});
     const auto replacement_index = token_index({10, 20});
 
-    T068_CHECK(first_index.get() != replacement_index.get());
-    T068_CHECK(view.publish(snapshot(1, items, 10, 0.0f, first_index)) ==
+    ACCESSIBILITY_CHECK(first_index.get() != replacement_index.get());
+    ACCESSIBILITY_CHECK(view.publish(snapshot(1, items, 10, 0.0f, first_index)) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     const auto baseline = view.current();
-    T068_CHECK(baseline);
-    T068_CHECK(baseline->generation == 1);
-    T068_CHECK(baseline->nodes[0].virtual_children->token_index_snapshot().get() ==
+    ACCESSIBILITY_CHECK(baseline);
+    ACCESSIBILITY_CHECK(baseline->generation == 1);
+    ACCESSIBILITY_CHECK(baseline->nodes[0].virtual_children->token_index_snapshot().get() ==
                first_index.get());
 
-    T068_CHECK(view.publish(snapshot(1, items, 10, 0.0f, replacement_index)).empty());
+    ACCESSIBILITY_CHECK(view.publish(snapshot(1, items, 10, 0.0f, replacement_index)).empty());
 
     const auto refreshed = view.current();
-    T068_CHECK(refreshed);
-    T068_CHECK(refreshed.get() != baseline.get());
-    T068_CHECK(refreshed->generation == baseline->generation);
-    T068_CHECK(refreshed->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(refreshed);
+    ACCESSIBILITY_CHECK(refreshed.get() != baseline.get());
+    ACCESSIBILITY_CHECK(refreshed->generation == baseline->generation);
+    ACCESSIBILITY_CHECK(refreshed->nodes[0].virtual_children->metadata_snapshot().get() ==
                items.get());
-    T068_CHECK(refreshed->nodes[0].virtual_children->token_index_snapshot().get() ==
+    ACCESSIBILITY_CHECK(refreshed->nodes[0].virtual_children->token_index_snapshot().get() ==
                replacement_index.get());
-    T068_CHECK(baseline->nodes[0].virtual_children->token_index_snapshot().get() ==
+    ACCESSIBILITY_CHECK(baseline->nodes[0].virtual_children->token_index_snapshot().get() ==
                first_index.get());
 }
 
@@ -175,7 +175,7 @@ void metadata_generation_alone_is_not_structure() {
     const auto after = snapshot(2, metadata({{10, "Ten"}, {20, "Twenty updated"}}), 10);
 
     const auto changes = ui::detail::diff_semantic_snapshots(before, after);
-    T068_CHECK(changes ==
+    ACCESSIBILITY_CHECK(changes ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
 }
 
@@ -184,7 +184,7 @@ void reorder_does_not_manufacture_value_change() {
     const auto after = snapshot(8, metadata({{20, "Twenty"}, {10, "Ten"}}), 10);
 
     const auto changes = ui::detail::diff_semantic_snapshots(before, after);
-    T068_CHECK(changes ==
+    ACCESSIBILITY_CHECK(changes ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 }
 
@@ -203,7 +203,7 @@ void structure_change_can_coexist_with_selection_value_and_bounds() {
         ui::SemanticChange::ValueChanged,
         ui::SemanticChange::BoundsChanged,
     };
-    T068_CHECK(changes == expected);
+    ACCESSIBILITY_CHECK(changes == expected);
 }
 
 void removing_focused_selected_node_keeps_state_notifications_in_structure_batch() {
@@ -216,7 +216,7 @@ void removing_focused_selected_node_keeps_state_notifications_in_structure_batch
         ui::SemanticChange::FocusChanged,
         ui::SemanticChange::SelectionChanged,
     };
-    T068_CHECK(changes == expected);
+    ACCESSIBILITY_CHECK(changes == expected);
 }
 
 void adding_focused_selected_node_keeps_state_notifications_in_structure_batch() {
@@ -229,7 +229,7 @@ void adding_focused_selected_node_keeps_state_notifications_in_structure_batch()
         ui::SemanticChange::FocusChanged,
         ui::SemanticChange::SelectionChanged,
     };
-    T068_CHECK(changes == expected);
+    ACCESSIBILITY_CHECK(changes == expected);
 }
 
 void removing_selected_virtual_container_keeps_selection_notification() {
@@ -241,7 +241,7 @@ void removing_selected_virtual_container_keeps_selection_notification() {
         ui::SemanticChange::StructureChanged,
         ui::SemanticChange::SelectionChanged,
     };
-    T068_CHECK(changes == expected);
+    ACCESSIBILITY_CHECK(changes == expected);
 }
 
 void publication_failure_keeps_previous_generation_and_retries_pending_state() {
@@ -249,12 +249,12 @@ void publication_failure_keeps_previous_generation_and_retries_pending_state() {
 
     ui::detail::SemanticViewState view;
     const auto initial_items = metadata({{10, "Ten"}, {20, "Twenty"}});
-    T068_CHECK(view.publish(snapshot(1, initial_items, 10)) ==
+    ACCESSIBILITY_CHECK(view.publish(snapshot(1, initial_items, 10)) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     const auto baseline = view.current();
-    T068_CHECK(baseline);
-    T068_CHECK(baseline->generation == 1);
+    ACCESSIBILITY_CHECK(baseline);
+    ACCESSIBILITY_CHECK(baseline->generation == 1);
 
     const auto updated_items = metadata({{10, "Ten"}, {20, "Twenty updated"}});
     view.publisher()->fail_next_publish_at_for_test(FailurePoint::DiffPreparation);
@@ -265,27 +265,27 @@ void publication_failure_keeps_previous_generation_and_retries_pending_state() {
         failed = true;
     }
 
-    T068_CHECK(failed);
-    T068_CHECK(view.has_pending_publication());
-    T068_CHECK(view.current().get() == baseline.get());
-    T068_CHECK(view.current()->generation == 1);
-    T068_CHECK(view.current()->nodes[0].virtual_children->dataset_generation() == 1);
-    T068_CHECK(view.current()->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(failed);
+    ACCESSIBILITY_CHECK(view.has_pending_publication());
+    ACCESSIBILITY_CHECK(view.current().get() == baseline.get());
+    ACCESSIBILITY_CHECK(view.current()->generation == 1);
+    ACCESSIBILITY_CHECK(view.current()->nodes[0].virtual_children->dataset_generation() == 1);
+    ACCESSIBILITY_CHECK(view.current()->nodes[0].virtual_children->metadata_snapshot().get() ==
                initial_items.get());
 
-    T068_CHECK(view.checkpoint() ==
+    ACCESSIBILITY_CHECK(view.checkpoint() ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
-    T068_CHECK(!view.has_pending_publication());
+    ACCESSIBILITY_CHECK(!view.has_pending_publication());
 
     const auto after_value_change = view.current();
-    T068_CHECK(after_value_change);
-    T068_CHECK(after_value_change->generation == 2);
-    T068_CHECK(after_value_change->nodes[0].virtual_children->dataset_generation() == 2);
-    T068_CHECK(after_value_change->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(after_value_change);
+    ACCESSIBILITY_CHECK(after_value_change->generation == 2);
+    ACCESSIBILITY_CHECK(after_value_change->nodes[0].virtual_children->dataset_generation() == 2);
+    ACCESSIBILITY_CHECK(after_value_change->nodes[0].virtual_children->metadata_snapshot().get() ==
                updated_items.get());
 
     const auto replacement_items = metadata({{10, "Ten"}, {20, "Twenty updated"}});
-    T068_CHECK(replacement_items.get() != updated_items.get());
+    ACCESSIBILITY_CHECK(replacement_items.get() != updated_items.get());
     view.publisher()->fail_next_publish_at_for_test(FailurePoint::SnapshotAllocation);
     failed = false;
     try {
@@ -294,23 +294,23 @@ void publication_failure_keeps_previous_generation_and_retries_pending_state() {
         failed = true;
     }
 
-    T068_CHECK(failed);
-    T068_CHECK(view.has_pending_publication());
-    T068_CHECK(view.current().get() == after_value_change.get());
-    T068_CHECK(view.current()->generation == 2);
-    T068_CHECK(view.current()->nodes[0].virtual_children->dataset_generation() == 2);
-    T068_CHECK(view.current()->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(failed);
+    ACCESSIBILITY_CHECK(view.has_pending_publication());
+    ACCESSIBILITY_CHECK(view.current().get() == after_value_change.get());
+    ACCESSIBILITY_CHECK(view.current()->generation == 2);
+    ACCESSIBILITY_CHECK(view.current()->nodes[0].virtual_children->dataset_generation() == 2);
+    ACCESSIBILITY_CHECK(view.current()->nodes[0].virtual_children->metadata_snapshot().get() ==
                updated_items.get());
 
-    T068_CHECK(view.checkpoint().empty());
-    T068_CHECK(!view.has_pending_publication());
+    ACCESSIBILITY_CHECK(view.checkpoint().empty());
+    ACCESSIBILITY_CHECK(!view.has_pending_publication());
 
     const auto refreshed = view.current();
-    T068_CHECK(refreshed);
-    T068_CHECK(refreshed.get() != after_value_change.get());
-    T068_CHECK(refreshed->generation == 2);
-    T068_CHECK(refreshed->nodes[0].virtual_children->dataset_generation() == 3);
-    T068_CHECK(refreshed->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(refreshed);
+    ACCESSIBILITY_CHECK(refreshed.get() != after_value_change.get());
+    ACCESSIBILITY_CHECK(refreshed->generation == 2);
+    ACCESSIBILITY_CHECK(refreshed->nodes[0].virtual_children->dataset_generation() == 3);
+    ACCESSIBILITY_CHECK(refreshed->nodes[0].virtual_children->metadata_snapshot().get() ==
                replacement_items.get());
 }
 
@@ -326,10 +326,10 @@ int main() {
         adding_focused_selected_node_keeps_state_notifications_in_structure_batch();
         removing_selected_virtual_container_keeps_selection_notification();
         publication_failure_keeps_previous_generation_and_retries_pending_state();
-        std::cout << "PASS t068 semantic diff regressions\n";
+        std::cout << "PASS accessibility semantic diff regressions\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic diff regressions: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic diff regressions: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

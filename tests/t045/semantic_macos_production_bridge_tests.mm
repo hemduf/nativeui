@@ -487,7 +487,7 @@ void setter_actions_contain_failures_on_live_and_defunct_proxies() {
     id const child = [children objectAtIndex:0U];
 
     // Posting succeeds, but the throwing live handler is revalidated on the UI
-    // thread. The proxy boundary never observes the handler failure; the T065
+    // thread. The proxy boundary never observes the handler failure; the dispatcher
     // pump propagates it like any other component fault and no action is
     // applied. The next accepted press still posts without guard poisoning.
     CHECK([child accessibilityPerformPress] == YES);

@@ -167,7 +167,7 @@ void retained_native_checkpoint_samples_t043_capture_source_after_dispatch() {
     NUI_CHECK(initial->publication->geometry == geometry(1.25f, 40.0f, 60.0f));
     const auto semantic_generation = initial->semantic_generation();
 
-    // Model the real T043 observation path as accepted T065 work. The retained
+    // Model the real geometry observation path as accepted dispatcher work. The retained
     // source must be sampled only after that work drains, so native readers see
     // the post-dispatch scale/origin pair rather than stale pre-dispatch state.
     NUI_CHECK(dispatcher_owner->dispatcher().post([&view_geometry] {
@@ -231,9 +231,9 @@ void retained_native_checkpoint_refreshes_platform_origin_after_dispatch() {
     const auto semantic_generation = initial->semantic_generation();
 
     // Embedded parents can move without producing a child configure event.
-    // Model the host movement as T065 work that changes only the native source
+    // Model the host movement as dispatcher work that changes only the native source
     // queried by the capture callback. The callback must run after the drain,
-    // refresh the retained T043 origin, then publish that exact post-dispatch
+    // refresh the retained geometry origin, then publish that exact post-dispatch
     // screen-space value without advancing the logical semantic generation.
     ui::Point platform_screen_origin{20.0f, 30.0f};
     NUI_CHECK(dispatcher_owner->dispatcher().post([&platform_screen_origin] {

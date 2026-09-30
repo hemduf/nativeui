@@ -9,8 +9,8 @@ namespace ui::detail {
 
 /// Classify whether a semantic action mutates the target's application value.
 ///
-/// T045/T059 use this one closed-set policy at both publication time and the
-/// T068 execution-time recheck. Keeping the classification in one helper avoids
+/// semantic/availability use this one closed-set policy at both publication time and the
+/// accessibility execution-time recheck. Keeping the classification in one helper avoids
 /// allowing a read-only action through one boundary while filtering it at the
 /// other.
 [[nodiscard]] inline bool semantic_action_mutates_value(SemanticAction action) noexcept {
@@ -33,14 +33,14 @@ namespace ui::detail {
 /// Apply retained effective availability/focus state to a component-provided
 /// semantic value before it is published in an immutable snapshot.
 ///
-/// T059 availability remains authoritative: effective Disabled removes focus
+/// availability availability remains authoritative: effective Disabled removes focus
 /// eligibility and all actions while preserving descriptive/value state;
 /// effective ReadOnly keeps navigation/focus behavior but removes semantic
 /// actions that mutate application values. The tree-provided focus flag is
 /// authoritative and is only exposed for an enabled, focusable node.
 ///
 /// One role-specific refinement is layered on the frozen generic
-/// classification: a read-only ComboBox never opens (T035
+/// classification: a read-only ComboBox never opens (combo-box
 /// `dismiss_overlay_when_read_only` and the input path reject opening), so its
 /// `Expand`/`Collapse` projections would advertise an action that can never
 /// execute. They are removed here for this role only; `Select` remains a

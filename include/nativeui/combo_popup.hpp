@@ -232,7 +232,7 @@ public:
     /// policy as pointer/key activation: the menu is logically closed first,
     /// the configured callback runs exactly once, and a rejected close never
     /// reports success or runs the callback. Retained detach and focus
-    /// restoration are scheduled through the shared T058 structural checkpoint,
+    /// restoration are scheduled through the shared structural structural checkpoint,
     /// exactly like `UI::close_overlay()`.
     [[nodiscard]] bool perform_semantic_action(
         const SemanticActionRequest& request) override {
@@ -884,9 +884,9 @@ public:
     /// Execute the advertised `Expand`/`Collapse`/`Select` through the widget's
     /// normal popup policy.
     ///
-    /// A semantic action runs on the owning UI thread at the T065 checkpoint,
+    /// A semantic action runs on the owning UI thread at the dispatcher checkpoint,
     /// outside input dispatch, so it uses the same borrowed `OverlayService`
-    /// seam as the T062 Tooltip (documented for T065 callbacks) instead of the
+    /// seam as the tooltip Tooltip (documented for dispatcher callbacks) instead of the
     /// input-only `OverlayComponentCommand` queue: the popup is presented or
     /// dismissed deterministically during the action and never waits for a
     /// later input event.
@@ -1084,7 +1084,7 @@ private:
     /// Capture one immutable option snapshot and its overlay/session policy.
     /// Shared by input opening (which queues an OverlayComponentCommand for the
     /// next UI dispatch) and semantic Expand/Select (which present directly
-    /// through the T065-callable OverlayService seam).
+    /// through the dispatcher-callable OverlayService seam).
     [[nodiscard]] PopupOverlayBuild build_popup_overlay() {
         auto snapshot = options_provider_ ? options_provider_() : display_options_;
         display_options_ = snapshot;
@@ -1180,7 +1180,7 @@ private:
         }
 
         // The logical close is committed. Retained detach/focus restoration
-        // follow the shared T058 structural checkpoint exactly like
+        // follow the shared structural structural checkpoint exactly like
         // UI::close_overlay(). Selection observers are application code and may
         // destroy this component, so publish the value last and touch no member
         // afterwards.

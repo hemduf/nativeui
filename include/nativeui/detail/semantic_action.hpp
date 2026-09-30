@@ -28,7 +28,7 @@ struct SemanticActionRequest {
 
 /// Internal widget-side semantic action seam.
 ///
-/// T045 deliberately exposes only Component::semantics() as the public custom
+/// semantic deliberately exposes only Component::semantics() as the public custom
 /// component accessibility hook. Built-in widgets that advertise mutating or
 /// activation actions implement this private detail interface so the UI-thread
 /// live-tree resolver can invoke their normal state/callback policy directly,
@@ -44,7 +44,7 @@ public:
 
 /// Internal logical-item action seam for virtual semantic collections.
 ///
-/// The token is the stable T067 logical identity, never a materialized row
+/// The token is the stable virtual-list logical identity, never a materialized row
 /// index or Component pointer. Implementations must resolve it against their
 /// current dataset at call time and fail closed when it is stale. This keeps
 /// native accessibility actions independent from the visual virtualization
@@ -61,7 +61,7 @@ public:
     /// item. `request_owner_focus` is supplied by the owning retained tree and
     /// moves keyboard focus to the logical collection's exposed node; the
     /// implementation must resolve/revalidate the token against current
-    /// immutable metadata, request normal T067 scroll/materialization, and
+    /// immutable metadata, request normal virtual-list scroll/materialization, and
     /// return false when the owner rejected focus. Token resolution must never
     /// materialize a visual row. The default fails closed for handlers that do
     /// not own a virtual focus path.
@@ -106,7 +106,7 @@ public:
 /// owning NativeUI UI thread.
 ///
 /// Native readers first validate against the current immutable semantic
-/// snapshot. Accepted requests are posted through T065 and, at execution, are
+/// snapshot. Accepted requests are posted through dispatcher and, at execution, are
 /// validated again against both the latest published snapshot and current live
 /// semantics supplied by the owning view. The target is weakly held so view
 /// teardown turns queued work into a safe no-op. Every router must carry the

@@ -208,7 +208,7 @@ void nativeui_header_compile_t038_text_area_style(const ui::Theme& theme,
     (void)spec;
 }
 
-class NativeUIHeaderT068SemanticComponent final : public ui::Component {
+class NativeUIHeaderAccessibilitySemanticComponent final : public ui::Component {
 public:
     [[nodiscard]] ui::SemanticInfo semantics() const override {
         ui::SemanticInfo info;
@@ -226,19 +226,19 @@ public:
     void paint(ui::PaintContext&) const override {}
 };
 
-void nativeui_header_compile_t068_custom_semantics() {
-    NativeUIHeaderT068SemanticComponent component;
+void nativeui_header_compile_accessibility_custom_semantics() {
+    NativeUIHeaderAccessibilitySemanticComponent component;
     const auto info = component.semantics();
     (void)info;
 }
 
-using NativeUIHeaderT068ComboBoxComponent = ui::detail::ComboBoxComponent<int>;
-using NativeUIHeaderT068ComboBoxSemantics =
-    ui::SemanticInfo (NativeUIHeaderT068ComboBoxComponent::*)() const;
+using NativeUIHeaderAccessibilityComboBoxComponent = ui::detail::ComboBoxComponent<int>;
+using NativeUIHeaderAccessibilityComboBoxSemantics =
+    ui::SemanticInfo (NativeUIHeaderAccessibilityComboBoxComponent::*)() const;
 static_assert(
     std::is_same_v<
-        decltype(&NativeUIHeaderT068ComboBoxComponent::semantics),
-        NativeUIHeaderT068ComboBoxSemantics>,
+        decltype(&NativeUIHeaderAccessibilityComboBoxComponent::semantics),
+        NativeUIHeaderAccessibilityComboBoxSemantics>,
     "ComboBoxComponent must expose its own semantic value/expanded-state snapshot");
 
 void nativeui_header_compile_t058_conditional(ui::State<bool>& visible) {

@@ -19,7 +19,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot hierarchy_snapshot() {
     ui::SemanticTreeSnapshot tree;
@@ -67,48 +67,48 @@ ui::SemanticTreeSnapshot hierarchy_snapshot() {
 
 void ordinary_reads_expose_parent_and_ordered_children() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(hierarchy_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(hierarchy_snapshot()).empty());
 
     const auto root = ui::detail::SemanticSnapshotProxy::ordinary(publisher, 1).read();
-    T068_CHECK(root.has_value());
-    T068_CHECK(root->parent_id() == ui::kInvalidSemanticId);
-    T068_CHECK(root->child_count() == 2);
-    T068_CHECK(root->child_at(0) == std::optional<ui::SemanticId>{2});
-    T068_CHECK(root->child_at(1) == std::optional<ui::SemanticId>{7});
-    T068_CHECK(!root->child_at(2).has_value());
-    T068_CHECK(root->virtual_child_count() == 0);
-    T068_CHECK(!root->virtual_child_token_at(0).has_value());
+    ACCESSIBILITY_CHECK(root.has_value());
+    ACCESSIBILITY_CHECK(root->parent_id() == ui::kInvalidSemanticId);
+    ACCESSIBILITY_CHECK(root->child_count() == 2);
+    ACCESSIBILITY_CHECK(root->child_at(0) == std::optional<ui::SemanticId>{2});
+    ACCESSIBILITY_CHECK(root->child_at(1) == std::optional<ui::SemanticId>{7});
+    ACCESSIBILITY_CHECK(!root->child_at(2).has_value());
+    ACCESSIBILITY_CHECK(root->virtual_child_count() == 0);
+    ACCESSIBILITY_CHECK(!root->virtual_child_token_at(0).has_value());
 
     const auto child = ui::detail::SemanticSnapshotProxy::ordinary(publisher, 2).read();
-    T068_CHECK(child.has_value());
-    T068_CHECK(child->parent_id() == 1);
-    T068_CHECK(child->child_count() == 0);
-    T068_CHECK(!child->child_at(0).has_value());
+    ACCESSIBILITY_CHECK(child.has_value());
+    ACCESSIBILITY_CHECK(child->parent_id() == 1);
+    ACCESSIBILITY_CHECK(child->child_count() == 0);
+    ACCESSIBILITY_CHECK(!child->child_at(0).has_value());
 }
 
 void virtual_collection_reads_expose_tokens_without_materialization() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(hierarchy_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(hierarchy_snapshot()).empty());
 
     const auto list = ui::detail::SemanticSnapshotProxy::ordinary(publisher, 7).read();
-    T068_CHECK(list.has_value());
-    T068_CHECK(list->parent_id() == 1);
-    T068_CHECK(list->child_count() == 0);
-    T068_CHECK(list->virtual_child_count() == 2);
-    T068_CHECK(list->virtual_child_token_at(0) ==
+    ACCESSIBILITY_CHECK(list.has_value());
+    ACCESSIBILITY_CHECK(list->parent_id() == 1);
+    ACCESSIBILITY_CHECK(list->child_count() == 0);
+    ACCESSIBILITY_CHECK(list->virtual_child_count() == 2);
+    ACCESSIBILITY_CHECK(list->virtual_child_token_at(0) ==
                std::optional<ui::VirtualSemanticItemToken>{10});
-    T068_CHECK(list->virtual_child_token_at(1) ==
+    ACCESSIBILITY_CHECK(list->virtual_child_token_at(1) ==
                std::optional<ui::VirtualSemanticItemToken>{20});
-    T068_CHECK(!list->virtual_child_token_at(2).has_value());
+    ACCESSIBILITY_CHECK(!list->virtual_child_token_at(2).has_value());
 
     const auto item =
         ui::detail::SemanticSnapshotProxy::virtual_item(publisher, 7, 20).read();
-    T068_CHECK(item.has_value());
-    T068_CHECK(item->parent_id() == 7);
-    T068_CHECK(item->child_count() == 0);
-    T068_CHECK(item->virtual_child_count() == 0);
-    T068_CHECK(!item->child_at(0).has_value());
-    T068_CHECK(!item->virtual_child_token_at(0).has_value());
+    ACCESSIBILITY_CHECK(item.has_value());
+    ACCESSIBILITY_CHECK(item->parent_id() == 7);
+    ACCESSIBILITY_CHECK(item->child_count() == 0);
+    ACCESSIBILITY_CHECK(item->virtual_child_count() == 0);
+    ACCESSIBILITY_CHECK(!item->child_at(0).has_value());
+    ACCESSIBILITY_CHECK(!item->virtual_child_token_at(0).has_value());
 }
 
 } // namespace
@@ -117,10 +117,10 @@ int main() {
     try {
         ordinary_reads_expose_parent_and_ordered_children();
         virtual_collection_reads_expose_tokens_without_materialization();
-        std::cout << "PASS t068 semantic children query\n";
+        std::cout << "PASS accessibility semantic children query\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic children query: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic children query: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

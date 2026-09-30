@@ -133,8 +133,8 @@ struct PlatformTestAccess final {
     [[nodiscard]] static SemanticPublicationDiagnostics
     semantic_publication_diagnostics(StandaloneWindow& window) noexcept;
 
-    /// Model one T043 platform geometry observation on the window's view, as an
-    /// accepted T065 dispatcher callback would during a real configure event.
+    /// Model one geometry platform geometry observation on the window's view, as an
+    /// accepted dispatcher dispatcher callback would during a real configure event.
     [[nodiscard]] static bool observe_native_scale(
         StandaloneWindow& window,
         float scale) noexcept;
@@ -164,7 +164,7 @@ struct PlatformTestAccess final {
         EmbeddedView& view,
         Point origin) noexcept;
 
-    /// Read the embedded view's retained per-view T043 capture pair (last valid
+    /// Read the embedded view's retained per-view geometry capture pair (last valid
     /// scale + physical screen origin) without creating a capture source.
     [[nodiscard]] static std::optional<SemanticNativeGeometry>
     retained_native_geometry(EmbeddedView& view) noexcept;

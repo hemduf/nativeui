@@ -1,4 +1,4 @@
-// Windows UI Automation fragment/provider implementation for T068.
+// Windows UI Automation fragment/provider implementation for accessibility.
 //
 // This translation unit is compiled only on Win32 into the platform target (and
 // into the Windows-only provider test). It implements the same internal C ABI
@@ -18,7 +18,7 @@
 //   * stale elements report UIA_E_ELEMENTNOTAVAILABLE and
 //     UiaDisconnectProvider is called when the per-view cache retires an
 //     identity;
-//   * patterns exist only for the advertised T045 actions plus the frozen
+//   * patterns exist only for the advertised semantic actions plus the frozen
 //     section 8 read patterns (read-only RangeValue, Selection/ItemContainer,
 //     Text);
 //   * notifications are derived from the committed native publication batch:
@@ -1422,7 +1422,7 @@ public:
 
     HRESULT STDMETHODCALLTYPE Realize() noexcept override {
         // The lazily materialized provider already is the fully addressable
-        // semantic item; T067 owns visual row materialization/scroll policy.
+        // semantic item; virtual-list owns visual row materialization/scroll policy.
         const auto read = current_read();
         if (!read) {
             return UIA_E_ELEMENTNOTAVAILABLE;

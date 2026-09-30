@@ -1,4 +1,4 @@
-// Windows-only T068 UIA provider suite.
+// Windows-only accessibility UIA provider suite.
 //
 // This remote-CI test compiles the real Win32 adapter source into the test
 // executable, creates a real window, attaches the production bridge and queries
@@ -7,7 +7,7 @@
 // registered only under if(WIN32) in tests/CMakeLists.txt.
 
 #if !defined(_WIN32)
-#error "nativeui_t068_uia_win32_provider_tests requires the Win32 platform"
+#error "nativeui_accessibility_uia_win32_provider_tests requires the Win32 platform"
 #endif
 
 #if !defined(WIN32_LEAN_AND_MEAN)
@@ -60,7 +60,7 @@ using ui::detail::SemanticNativeGeometry;
 using ui::detail::SemanticNativePublicationBatch;
 using ui::detail::SemanticNativeViewBridge;
 
-constexpr wchar_t kWindowClassName[] = L"NativeUI_T068_UIA_Win32_Test";
+constexpr wchar_t kWindowClassName[] = L"NativeUI_Accessibility_UIA_Win32_Test";
 constexpr std::size_t kVirtualItemCount = 100000U;
 constexpr VirtualSemanticItemToken kFirstToken = 9000U;
 
@@ -84,7 +84,7 @@ public:
         if (class_atom_ == 0U) {
             throw std::runtime_error("RegisterClassExW failed");
         }
-        hwnd_ = ::CreateWindowExW(0, kWindowClassName, L"NativeUI T068 UIA",
+        hwnd_ = ::CreateWindowExW(0, kWindowClassName, L"NativeUI accessibility UIA",
                                   WS_OVERLAPPEDWINDOW, 0, 0, 480, 320, nullptr,
                                   nullptr, window_class.hInstance, nullptr);
         if (!hwnd_) {

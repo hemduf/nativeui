@@ -1,4 +1,4 @@
-// T068 Batch 7b — concurrent old/new immutable snapshot reader coverage.
+// accessibility Batch 7b — concurrent old/new immutable snapshot reader coverage.
 //
 // One owning writer publishes a bounded, closed generation sequence while
 // several reader threads repeatedly load the atomically published immutable
@@ -59,7 +59,7 @@ void check_with_problem(bool condition,
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 constexpr std::uint64_t kRootId = 42;
 constexpr std::size_t kReaderCount = 6;
@@ -554,32 +554,32 @@ void concurrent_logical_readers_retain_old_generations() {
     // The writer stopped but has not retired the endpoint: the terminal
     // generation is still the documented new-load value.
     const auto terminal = publisher.current();
-    T068_CHECK(terminal != nullptr);
-    T068_CHECK(terminal->generation == kTotalGenerations);
-    T068_CHECK(writer_retained != nullptr);
-    T068_CHECK(writer_retained->generation == 1);
-    T068_CHECK(writer_retained.get() != terminal.get());
+    ACCESSIBILITY_CHECK(terminal != nullptr);
+    ACCESSIBILITY_CHECK(terminal->generation == kTotalGenerations);
+    ACCESSIBILITY_CHECK(writer_retained != nullptr);
+    ACCESSIBILITY_CHECK(writer_retained->generation == 1);
+    ACCESSIBILITY_CHECK(writer_retained.get() != terminal.get());
 
     for (const auto& result : results) {
         check_with_problem(result.content_mismatches == 0, result.first_problem,
                            "result.content_mismatches == 0", __LINE__);
-        T068_CHECK(result.monotonic_violations == 0);
-        T068_CHECK(result.null_loads == 0);
+        ACCESSIBILITY_CHECK(result.monotonic_violations == 0);
+        ACCESSIBILITY_CHECK(result.null_loads == 0);
         // Every reader observed each handshake generation while the writer was
         // still publishing: gap-free, monotonic overlap, not a timing guess.
-        T068_CHECK(result.observed_mask == kCompleteHandshakeMask);
-        T068_CHECK(result.observations >= kHandshakeGenerations);
-        T068_CHECK(result.distinct_generations >= kHandshakeGenerations);
-        T068_CHECK(result.highest_generation == kTotalGenerations);
-        T068_CHECK(result.first_retained != nullptr);
-        T068_CHECK(result.first_retained->generation == 1);
-        T068_CHECK(result.second_retained != nullptr);
-        T068_CHECK(result.second_retained->generation == 2);
-        T068_CHECK(result.first_retained.get() != terminal.get());
-        T068_CHECK(result.second_retained.get() != terminal.get());
-        T068_CHECK(result.first_retained->nodes.front().info.name ==
+        ACCESSIBILITY_CHECK(result.observed_mask == kCompleteHandshakeMask);
+        ACCESSIBILITY_CHECK(result.observations >= kHandshakeGenerations);
+        ACCESSIBILITY_CHECK(result.distinct_generations >= kHandshakeGenerations);
+        ACCESSIBILITY_CHECK(result.highest_generation == kTotalGenerations);
+        ACCESSIBILITY_CHECK(result.first_retained != nullptr);
+        ACCESSIBILITY_CHECK(result.first_retained->generation == 1);
+        ACCESSIBILITY_CHECK(result.second_retained != nullptr);
+        ACCESSIBILITY_CHECK(result.second_retained->generation == 2);
+        ACCESSIBILITY_CHECK(result.first_retained.get() != terminal.get());
+        ACCESSIBILITY_CHECK(result.second_retained.get() != terminal.get());
+        ACCESSIBILITY_CHECK(result.first_retained->nodes.front().info.name ==
                    generation_name(1));
-        T068_CHECK(result.second_retained->nodes.front().info.name ==
+        ACCESSIBILITY_CHECK(result.second_retained->nodes.front().info.name ==
                    generation_name(2));
     }
 
@@ -587,7 +587,7 @@ void concurrent_logical_readers_retain_old_generations() {
     check_snapshot(*writer_retained, "writer-retained generation 1", __LINE__);
 
     publisher.shutdown();
-    T068_CHECK(!publisher.current());
+    ACCESSIBILITY_CHECK(!publisher.current());
 
     // Retained generations stay exact across retirement, including generations
     // that outlived hundreds of later publications, while new loads are
@@ -606,7 +606,7 @@ void concurrent_logical_readers_retain_old_generations() {
 void concurrent_native_readers_retain_publications_through_weak_sources() {
     auto state = std::make_unique<ui::detail::SemanticNativePublicationState>();
     const auto weak_source = state->reader_source();
-    T068_CHECK(!weak_source.expired());
+    ACCESSIBILITY_CHECK(!weak_source.expired());
 
     std::array<NativeReaderResult, kReaderCount> results{};
     std::atomic<bool> stop{false};
@@ -699,27 +699,27 @@ void concurrent_native_readers_retain_publications_through_weak_sources() {
     }
 
     const auto terminal = state->current();
-    T068_CHECK(terminal != nullptr);
-    T068_CHECK(terminal->generation == kTotalGenerations);
-    T068_CHECK(writer_retained != nullptr);
-    T068_CHECK(writer_retained->generation == 1);
-    T068_CHECK(writer_retained.get() != terminal.get());
+    ACCESSIBILITY_CHECK(terminal != nullptr);
+    ACCESSIBILITY_CHECK(terminal->generation == kTotalGenerations);
+    ACCESSIBILITY_CHECK(writer_retained != nullptr);
+    ACCESSIBILITY_CHECK(writer_retained->generation == 1);
+    ACCESSIBILITY_CHECK(writer_retained.get() != terminal.get());
 
     for (const auto& result : results) {
         check_with_problem(result.content_mismatches == 0, result.first_problem,
                            "result.content_mismatches == 0", __LINE__);
-        T068_CHECK(result.monotonic_violations == 0);
-        T068_CHECK(result.null_loads == 0);
-        T068_CHECK(result.observed_mask == kCompleteHandshakeMask);
-        T068_CHECK(result.observations >= kHandshakeGenerations);
-        T068_CHECK(result.distinct_generations >= kHandshakeGenerations);
-        T068_CHECK(result.highest_generation == kTotalGenerations);
-        T068_CHECK(result.first_retained != nullptr);
-        T068_CHECK(result.first_retained->generation == 1);
-        T068_CHECK(result.second_retained != nullptr);
-        T068_CHECK(result.second_retained->generation == 2);
-        T068_CHECK(result.first_retained.get() != terminal.get());
-        T068_CHECK(result.second_retained.get() != terminal.get());
+        ACCESSIBILITY_CHECK(result.monotonic_violations == 0);
+        ACCESSIBILITY_CHECK(result.null_loads == 0);
+        ACCESSIBILITY_CHECK(result.observed_mask == kCompleteHandshakeMask);
+        ACCESSIBILITY_CHECK(result.observations >= kHandshakeGenerations);
+        ACCESSIBILITY_CHECK(result.distinct_generations >= kHandshakeGenerations);
+        ACCESSIBILITY_CHECK(result.highest_generation == kTotalGenerations);
+        ACCESSIBILITY_CHECK(result.first_retained != nullptr);
+        ACCESSIBILITY_CHECK(result.first_retained->generation == 1);
+        ACCESSIBILITY_CHECK(result.second_retained != nullptr);
+        ACCESSIBILITY_CHECK(result.second_retained->generation == 2);
+        ACCESSIBILITY_CHECK(result.first_retained.get() != terminal.get());
+        ACCESSIBILITY_CHECK(result.second_retained.get() != terminal.get());
     }
 
     check_publication(*terminal, "terminal native publication matches its tag",
@@ -728,13 +728,13 @@ void concurrent_native_readers_retain_publications_through_weak_sources() {
                       __LINE__);
 
     state->shutdown();
-    T068_CHECK(!state->current());
+    ACCESSIBILITY_CHECK(!state->current());
     {
         // The view still owns the source, so a weak reader reference stays
         // lockable while every new read is defunct.
         const auto source = weak_source.lock();
-        T068_CHECK(source != nullptr);
-        T068_CHECK(!source->current());
+        ACCESSIBILITY_CHECK(source != nullptr);
+        ACCESSIBILITY_CHECK(!source->current());
     }
 
     check_publication(*terminal, "retained terminal publication after shutdown",
@@ -749,7 +749,7 @@ void concurrent_native_readers_retain_publications_through_weak_sources() {
     }
 
     state.reset();
-    T068_CHECK(weak_source.expired());
+    ACCESSIBILITY_CHECK(weak_source.expired());
 }
 
 } // namespace
@@ -758,10 +758,10 @@ int main() {
     try {
         concurrent_logical_readers_retain_old_generations();
         concurrent_native_readers_retain_publications_through_weak_sources();
-        std::cout << "PASS t068 concurrent snapshot readers\n";
+        std::cout << "PASS accessibility concurrent snapshot readers\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 concurrent snapshot readers: " << error.what()
+        std::cerr << "FAIL accessibility concurrent snapshot readers: " << error.what()
                   << '\n';
         return EXIT_FAILURE;
     }

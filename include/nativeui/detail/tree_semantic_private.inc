@@ -9,7 +9,7 @@
         return focused ? focused->id : kInvalidNodeId;
     }
 
-    /// T068 live-state resolver used by the owning native view after T065 has
+    /// accessibility live-state resolver used by the owning native view after dispatcher has
     /// marshalled a platform request onto the UI thread. It borrows the retained
     /// root for this call only and fails closed during lifecycle transitions.
     [[nodiscard]] std::optional<SemanticInfo> current_semantics_for_action(
@@ -49,7 +49,7 @@
         return false;
     }
 
-    /// Re-resolve and dispatch one T068 action against the committed retained
+    /// Re-resolve and dispatch one accessibility action against the committed retained
     /// tree. Eligibility is rechecked by dispatch_live_semantic_action(); no
     /// Node/Component pointer is retained after the handler begins and lifecycle
     /// transitions reject rather than attempting a synchronous fallback. Focus

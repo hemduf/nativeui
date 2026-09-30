@@ -94,7 +94,7 @@ if(NATIVEUI_BUILD_PLATFORM)
       message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows, Linux/X11 and WebAssembly")
     endif()
 
-    # Windows compiles the real T068 UIA fragment provider into the platform
+    # Windows compiles the real accessibility UIA fragment provider into the platform
     # target (see the root CMakeLists.txt). Linux/WebAssembly keep the same
     # fail-closed accessibility C ABI stub so the portable platform layer can
     # call it unconditionally.

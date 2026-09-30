@@ -260,7 +260,7 @@ void standard_widget_actions_select_their_primary_patterns() {
 }
 
 void disabled_nodes_still_advertise_their_patterns() {
-    // Pattern capability follows the advertised T045 action set. The adapter
+    // Pattern capability follows the advertised semantic action set. The adapter
     // reports IsEnabled=false and every mutation is revalidated (and rejected)
     // on the UI thread, so a disabled control must not silently lose its
     // discoverable pattern.
@@ -271,7 +271,7 @@ void disabled_nodes_still_advertise_their_patterns() {
 void role_mandated_read_only_patterns_do_not_require_actions() {
     // §8 requires read-only RangeValue for ProgressBar/Meter, Selection and
     // ItemContainer for ListView, and text access for the text roles even
-    // though those read patterns have no corresponding mutating T045 action.
+    // though those read patterns have no corresponding mutating semantic action.
     const auto progress = semantic_uia_pattern_eligibility(
         ui::detail::bounded_display_semantic_info(0.5f, 0.0f, 1.0f, false));
     CHECK(progress.range_value);
