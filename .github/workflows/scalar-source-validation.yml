@@ -19,6 +19,7 @@ concurrency:
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
   CMAKE_BUILD_PARALLEL_LEVEL: '1'
+  EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   build:
@@ -39,9 +40,11 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
       - name: Verify exact head
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
       - name: Restore dependency cache
         uses: actions/cache@v4
         with:
@@ -126,8 +129,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
       - name: Verify exact head
-        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
       - name: Restore dependency cache
         uses: actions/cache@v4
         with:
