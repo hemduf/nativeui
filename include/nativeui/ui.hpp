@@ -865,7 +865,7 @@ private:
             return state_->show(std::move(overlay));
         }
 
-        /// Widget/anchor presentation from a T065 checkpoint. Mirrors
+        /// Widget/anchor presentation from a dispatcher checkpoint. Mirrors
         /// UI::show_overlay(): dismiss transient presentations first, then
         /// publish the overlay through the same OverlayState transaction.
         [[nodiscard]] OverlayHandle show(OverlaySpec overlay) override {

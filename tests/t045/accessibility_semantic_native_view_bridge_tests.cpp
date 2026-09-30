@@ -18,7 +18,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot button_snapshot(bool enabled = true) {
     ui::SemanticTreeSnapshot tree;
@@ -82,13 +82,13 @@ void bridge_routes_against_its_own_snapshot_and_target() {
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), target);
     target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
 
     auto router = bridge.make_ordinary_router(42);
-    T068_CHECK(router.post(activate_request()));
-    T068_CHECK(*count == 0);
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*count == 1);
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(*count == 0);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count == 1);
 }
 
 void bridge_exposes_lifetime_safe_native_action_endpoint() {
@@ -99,43 +99,43 @@ void bridge_exposes_lifetime_safe_native_action_endpoint() {
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), target);
     target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
 
     auto weak_endpoint = bridge.native_action_endpoint();
     auto endpoint = weak_endpoint.lock();
-    T068_CHECK(endpoint != nullptr);
+    ACCESSIBILITY_CHECK(endpoint != nullptr);
 
     const ui::detail::SemanticIdentity identity{42, std::nullopt};
-    T068_CHECK(endpoint->post(identity, activate_request()));
-    T068_CHECK(*count == 0);
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*count == 1);
+    ACCESSIBILITY_CHECK(endpoint->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(*count == 0);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count == 1);
 
     bridge.unbind_actions();
-    T068_CHECK(!endpoint->post(identity, activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 0);
-    T068_CHECK(*count == 1);
+    ACCESSIBILITY_CHECK(!endpoint->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(*count == 1);
 
     endpoint.reset();
-    T068_CHECK(weak_endpoint.expired());
+    ACCESSIBILITY_CHECK(weak_endpoint.expired());
 }
 
 void sibling_views_keep_query_proxies_isolated() {
     ui::detail::SemanticNativeViewBridge bridge_a;
     ui::detail::SemanticNativeViewBridge bridge_b;
 
-    T068_CHECK(!bridge_a.publish(button_snapshot(true)).empty());
-    T068_CHECK(!bridge_b.publish(button_snapshot(false)).empty());
+    ACCESSIBILITY_CHECK(!bridge_a.publish(button_snapshot(true)).empty());
+    ACCESSIBILITY_CHECK(!bridge_b.publish(button_snapshot(false)).empty());
 
     const auto proxy_a = bridge_a.make_ordinary_proxy(42);
     const auto proxy_b = bridge_b.make_ordinary_proxy(42);
     const auto read_a = proxy_a.read();
     const auto read_b = proxy_b.read();
-    T068_CHECK(read_a.has_value());
-    T068_CHECK(read_b.has_value());
-    T068_CHECK(read_a->info().enabled);
-    T068_CHECK(!read_b->info().enabled);
-    T068_CHECK(!bridge_a.make_ordinary_proxy(99).read().has_value());
+    ACCESSIBILITY_CHECK(read_a.has_value());
+    ACCESSIBILITY_CHECK(read_b.has_value());
+    ACCESSIBILITY_CHECK(read_a->info().enabled);
+    ACCESSIBILITY_CHECK(!read_b->info().enabled);
+    ACCESSIBILITY_CHECK(!bridge_a.make_ordinary_proxy(99).read().has_value());
 }
 
 void destroying_one_view_invalidates_only_its_domain() {
@@ -152,29 +152,29 @@ void destroying_one_view_invalidates_only_its_domain() {
     bridge_b.bind_actions(dispatcher_b.dispatcher(), target_b);
     target_a.reset();
     target_b.reset();
-    T068_CHECK(!bridge_a->publish(button_snapshot()).empty());
-    T068_CHECK(!bridge_b.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge_a->publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge_b.publish(button_snapshot()).empty());
 
     auto proxy_a = bridge_a->make_ordinary_proxy(42);
     auto proxy_b = bridge_b.make_ordinary_proxy(42);
     auto router_a = bridge_a->make_ordinary_router(42);
     auto router_b = bridge_b.make_ordinary_router(42);
-    T068_CHECK(router_a.post(activate_request()));
-    T068_CHECK(router_b.post(activate_request()));
+    ACCESSIBILITY_CHECK(router_a.post(activate_request()));
+    ACCESSIBILITY_CHECK(router_b.post(activate_request()));
 
     bridge_a.reset();
-    T068_CHECK(!proxy_a.read().has_value());
-    T068_CHECK(proxy_b.read().has_value());
-    T068_CHECK(!router_a.post(activate_request()));
+    ACCESSIBILITY_CHECK(!proxy_a.read().has_value());
+    ACCESSIBILITY_CHECK(proxy_b.read().has_value());
+    ACCESSIBILITY_CHECK(!router_a.post(activate_request()));
 
-    T068_CHECK(dispatcher_a.checkpoint() == 1);
-    T068_CHECK(dispatcher_b.checkpoint() == 1);
-    T068_CHECK(*count_a == 0);
-    T068_CHECK(*count_b == 1);
+    ACCESSIBILITY_CHECK(dispatcher_a.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(dispatcher_b.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count_a == 0);
+    ACCESSIBILITY_CHECK(*count_b == 1);
 
-    T068_CHECK(router_b.post(activate_request()));
-    T068_CHECK(dispatcher_b.checkpoint() == 1);
-    T068_CHECK(*count_b == 2);
+    ACCESSIBILITY_CHECK(router_b.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_b.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count_b == 2);
 }
 
 void sibling_views_keep_snapshot_and_action_domains_isolated() {
@@ -191,17 +191,17 @@ void sibling_views_keep_snapshot_and_action_domains_isolated() {
     bridge_b.bind_actions(dispatcher_b.dispatcher(), target_b);
     target_a.reset();
     target_b.reset();
-    T068_CHECK(!bridge_a.publish(button_snapshot(true)).empty());
-    T068_CHECK(!bridge_b.publish(button_snapshot(false)).empty());
+    ACCESSIBILITY_CHECK(!bridge_a.publish(button_snapshot(true)).empty());
+    ACCESSIBILITY_CHECK(!bridge_b.publish(button_snapshot(false)).empty());
 
     auto router_a = bridge_a.make_ordinary_router(42);
     auto router_b = bridge_b.make_ordinary_router(42);
-    T068_CHECK(router_a.post(activate_request()));
-    T068_CHECK(!router_b.post(activate_request()));
-    T068_CHECK(dispatcher_a.checkpoint() == 1);
-    T068_CHECK(dispatcher_b.checkpoint() == 0);
-    T068_CHECK(*count_a == 1);
-    T068_CHECK(*count_b == 0);
+    ACCESSIBILITY_CHECK(router_a.post(activate_request()));
+    ACCESSIBILITY_CHECK(!router_b.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_a.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(dispatcher_b.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(*count_a == 1);
+    ACCESSIBILITY_CHECK(*count_b == 0);
 }
 
 void rebind_cancels_old_queued_work_without_switching_targets() {
@@ -214,19 +214,19 @@ void rebind_cancels_old_queued_work_without_switching_targets() {
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), old_target);
     old_target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
     auto old_router = bridge.make_ordinary_router(42);
-    T068_CHECK(old_router.post(activate_request()));
+    ACCESSIBILITY_CHECK(old_router.post(activate_request()));
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), new_target);
     new_target.reset();
     auto new_router = bridge.make_ordinary_router(42);
-    T068_CHECK(new_router.post(activate_request()));
+    ACCESSIBILITY_CHECK(new_router.post(activate_request()));
 
-    T068_CHECK(dispatcher_owner.checkpoint() == 2);
-    T068_CHECK(*old_count == 0);
-    T068_CHECK(*new_count == 1);
-    T068_CHECK(!old_router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 2);
+    ACCESSIBILITY_CHECK(*old_count == 0);
+    ACCESSIBILITY_CHECK(*new_count == 1);
+    ACCESSIBILITY_CHECK(!old_router.post(activate_request()));
 }
 
 void unbind_rejects_queued_and_future_actions_but_keeps_snapshot_readable() {
@@ -237,19 +237,19 @@ void unbind_rejects_queued_and_future_actions_but_keeps_snapshot_readable() {
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), target);
     target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
     auto router = bridge.make_ordinary_router(42);
-    T068_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
 
     bridge.unbind_actions();
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*count == 0);
-    T068_CHECK(!router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count == 0);
+    ACCESSIBILITY_CHECK(!router.post(activate_request()));
 
     const auto snapshot = bridge.current();
-    T068_CHECK(snapshot);
-    T068_CHECK(snapshot->nodes.size() == 1);
-    T068_CHECK(snapshot->nodes.front().id == 42);
+    ACCESSIBILITY_CHECK(snapshot);
+    ACCESSIBILITY_CHECK(snapshot->nodes.size() == 1);
+    ACCESSIBILITY_CHECK(snapshot->nodes.front().id == 42);
 }
 
 void shutdown_makes_future_queries_and_actions_defunct_but_retains_inflight_read() {
@@ -260,48 +260,48 @@ void shutdown_makes_future_queries_and_actions_defunct_but_retains_inflight_read
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), target);
     target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
 
     auto retained_publisher = bridge.publisher();
-    T068_CHECK(retained_publisher);
+    ACCESSIBILITY_CHECK(retained_publisher);
     auto proxy = bridge.make_ordinary_proxy(42);
     auto retained_read = proxy.read();
-    T068_CHECK(retained_read.has_value());
-    T068_CHECK(retained_read->info().role == ui::SemanticRole::Button);
+    ACCESSIBILITY_CHECK(retained_read.has_value());
+    ACCESSIBILITY_CHECK(retained_read->info().role == ui::SemanticRole::Button);
 
     auto router = bridge.make_ordinary_router(42);
-    T068_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
 
     bridge.shutdown();
 
-    T068_CHECK(!bridge.publisher());
-    T068_CHECK(!bridge.current());
-    T068_CHECK(!retained_publisher->current());
-    T068_CHECK(!proxy.read().has_value());
-    T068_CHECK(!router.post(activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*count == 0);
+    ACCESSIBILITY_CHECK(!bridge.publisher());
+    ACCESSIBILITY_CHECK(!bridge.current());
+    ACCESSIBILITY_CHECK(!retained_publisher->current());
+    ACCESSIBILITY_CHECK(!proxy.read().has_value());
+    ACCESSIBILITY_CHECK(!router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count == 0);
 
     // The callback began its read before teardown and therefore keeps this
     // immutable generation alive independently of the retired publisher.
-    T068_CHECK(retained_read->node_id() == 42);
-    T068_CHECK(retained_read->info().name == "Target");
+    ACCESSIBILITY_CHECK(retained_read->node_id() == 42);
+    ACCESSIBILITY_CHECK(retained_read->info().name == "Target");
 
     // Shutdown is terminal: publication and action rebinding cannot resurrect
     // a native view whose semantic domain has already been retired, even if an
     // internal collaborator temporarily retained the old publisher strongly.
     bridge.stage(button_snapshot());
-    T068_CHECK(!bridge.has_pending_publication());
-    T068_CHECK(bridge.publish(button_snapshot()).empty());
-    T068_CHECK(retained_publisher->publish(button_snapshot()).empty());
-    T068_CHECK(!retained_publisher->current());
-    T068_CHECK(!bridge.current());
+    ACCESSIBILITY_CHECK(!bridge.has_pending_publication());
+    ACCESSIBILITY_CHECK(bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(retained_publisher->publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!retained_publisher->current());
+    ACCESSIBILITY_CHECK(!bridge.current());
 
     auto rebound_target = std::make_shared<RecordingTarget>(count);
     bridge.bind_actions(dispatcher_owner.dispatcher(), rebound_target);
     auto rebound_router = bridge.make_ordinary_router(42);
-    T068_CHECK(!rebound_router.post(activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(!rebound_router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 0);
 }
 
 void latest_publication_is_revalidated_before_queued_dispatch() {
@@ -312,13 +312,13 @@ void latest_publication_is_revalidated_before_queued_dispatch() {
 
     bridge.bind_actions(dispatcher_owner.dispatcher(), target);
     target.reset();
-    T068_CHECK(!bridge.publish(button_snapshot(true)).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot(true)).empty());
     auto router = bridge.make_ordinary_router(42);
-    T068_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
 
-    T068_CHECK(!bridge.publish(button_snapshot(false)).empty());
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*count == 0);
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot(false)).empty());
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count == 0);
 }
 
 void lifetime_binding_rejects_work_after_owner_death() {
@@ -345,23 +345,23 @@ void lifetime_binding_rejects_work_after_owner_death() {
             return identity.node_id == 42 && !identity.virtual_token &&
                    request.action == ui::SemanticAction::Activate;
         });
-    T068_CHECK(!bridge.publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!bridge.publish(button_snapshot()).empty());
 
     auto router = bridge.make_ordinary_router(42);
-    T068_CHECK(router.post(activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(current_calls == 1);
-    T068_CHECK(dispatch_calls == 1);
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(current_calls == 1);
+    ACCESSIBILITY_CHECK(dispatch_calls == 1);
 
-    T068_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
     owner_lifetime.reset();
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(current_calls == 1);
-    T068_CHECK(dispatch_calls == 1);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(current_calls == 1);
+    ACCESSIBILITY_CHECK(dispatch_calls == 1);
 
     const auto snapshot = bridge.current();
-    T068_CHECK(snapshot);
-    T068_CHECK(snapshot->nodes.size() == 1);
+    ACCESSIBILITY_CHECK(snapshot);
+    ACCESSIBILITY_CHECK(snapshot->nodes.size() == 1);
 }
 
 void suite() {
@@ -382,10 +382,10 @@ void suite() {
 int main() {
     try {
         suite();
-        std::cout << "PASS t068 semantic native view bridge\n";
+        std::cout << "PASS accessibility semantic native view bridge\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic native view bridge: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic native view bridge: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

@@ -5,7 +5,7 @@
 
         case PUGL_CONFIGURE: {
             // Pugl reports top-level configure positions in root/screen physical
-            // pixels. Retain that authoritative origin for T068 native bounds.
+            // pixels. Retain that authoritative origin for accessibility native bounds.
             // Embedded configure positions are parent-relative, so they require
             // a later platform parent-to-screen conversion and must not be
             // mistaken for screen coordinates here.

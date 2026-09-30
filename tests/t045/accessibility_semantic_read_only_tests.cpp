@@ -14,7 +14,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 void read_only_state_filters_mutation_actions() {
     ui::SemanticInfo info;
@@ -31,11 +31,11 @@ void read_only_state_filters_mutation_actions() {
     const auto normalized = ui::detail::normalize_semantic_info(
         std::move(info), true, true, false);
 
-    T068_CHECK(normalized.enabled);
-    T068_CHECK(normalized.read_only);
-    T068_CHECK(normalized.focusable);
-    T068_CHECK(!normalized.focused);
-    T068_CHECK(normalized.actions ==
+    ACCESSIBILITY_CHECK(normalized.enabled);
+    ACCESSIBILITY_CHECK(normalized.read_only);
+    ACCESSIBILITY_CHECK(normalized.focusable);
+    ACCESSIBILITY_CHECK(!normalized.focused);
+    ACCESSIBILITY_CHECK(normalized.actions ==
                std::vector<ui::SemanticAction>{ui::SemanticAction::Focus});
 }
 
@@ -49,10 +49,10 @@ void disabled_state_removes_all_interaction() {
     const auto normalized = ui::detail::normalize_semantic_info(
         std::move(info), false, false, true);
 
-    T068_CHECK(!normalized.enabled);
-    T068_CHECK(!normalized.focusable);
-    T068_CHECK(!normalized.focused);
-    T068_CHECK(normalized.actions.empty());
+    ACCESSIBILITY_CHECK(!normalized.enabled);
+    ACCESSIBILITY_CHECK(!normalized.focusable);
+    ACCESSIBILITY_CHECK(!normalized.focused);
+    ACCESSIBILITY_CHECK(normalized.actions.empty());
 }
 
 void suite() {

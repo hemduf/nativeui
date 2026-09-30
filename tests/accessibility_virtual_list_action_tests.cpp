@@ -340,7 +340,7 @@ void suite() {
 /// Production-path virtual Focus: one retained ListView under a real Tree with
 /// the generic Focus fallback disabled by an unrelated focusable sibling. The
 /// semantic action must focus the composite ListView, reveal/materialize the
-/// offscreen logical row through normal T067 state and retain the exact shared
+/// offscreen logical row through normal virtual-list state and retain the exact shared
 /// metadata generation.
 void retained_virtual_focus_contract() {
     using VirtualState = ui::VirtualListState<int>;
@@ -402,7 +402,7 @@ void retained_virtual_focus_contract() {
     NUI_CHECK(ui::detail::SemanticTreeActionAccess::dispatch_semantic_action(
         tree, ui::detail::SemanticIdentity{list_id, target->token}, focus));
 
-    // Normal T067 materialization pulled the offscreen row (and only a
+    // Normal virtual-list materialization pulled the offscreen row (and only a
     // viewport/overscan-bounded window) into the visual tree.
     NUI_CHECK(row_factory_calls > calls_before);
     NUI_CHECK(row_factory_calls - calls_before <= 40);
@@ -448,7 +448,7 @@ void retained_virtual_focus_contract() {
 } // namespace
 
 int main() {
-    return test::run("t068_virtual_list_action", [] {
+    return test::run("accessibility_virtual_list_action", [] {
         suite();
         retained_virtual_focus_contract();
     });

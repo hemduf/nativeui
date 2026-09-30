@@ -193,7 +193,7 @@ public:
         return token_index_;
     }
 
-    // Diagnostic counters for T068 qualification. They count only construction
+    // Diagnostic counters for accessibility qualification. They count only construction
     // of the shared O(N) semantic metadata object on an accepted dataset
     // replacement. Ordinary semantic projections must leave both counters
     // unchanged.

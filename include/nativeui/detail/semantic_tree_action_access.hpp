@@ -18,12 +18,12 @@ namespace ui::detail {
 /// Stable semantic identities cross dispatcher checkpoints; Tree/Node/Component
 /// pointers never do. Operations borrow the retained tree only for the duration
 /// of one UI-thread call and delegate lifecycle/current-state validation to the
-/// T068 Tree seam.
+/// accessibility Tree seam.
 struct SemanticTreeActionAccess final {
     /// Build one detached immutable semantic candidate from the committed
     /// retained tree. Lifecycle transitions fail closed so a native bridge never
     /// publishes a half-mutated retained state. The returned snapshot owns only
-    /// values/shared immutable T067 metadata; it retains no live tree pointer.
+    /// values/shared immutable virtual-list metadata; it retains no live tree pointer.
     [[nodiscard]] static std::optional<SemanticTreeSnapshot> build_snapshot(
         const Tree& tree) {
         if (!tree.root_ || tree.lifecycle_transition_active()) {
@@ -50,7 +50,7 @@ struct SemanticTreeActionAccess final {
 };
 
 /// Production binding seam between one native-view semantic domain and its
-/// retained Tree. ViewCore supplies the existing T065 Dispatcher plus the weak
+/// retained Tree. ViewCore supplies the existing dispatcher Dispatcher plus the weak
 /// lifetime token of the object that owns `tree`; this helper deliberately adds
 /// no scheduler, queue, or ownership of retained state.
 ///
@@ -98,7 +98,7 @@ struct SemanticRetainedViewBinding final {
 /// Stateful per-view owner for the retained semantic bridge.
 ///
 /// This is the object a real ViewCore can keep next to its native endpoint: it
-/// binds exactly one retained Tree to the existing per-window T065 Dispatcher,
+/// binds exactly one retained Tree to the existing per-window dispatcher Dispatcher,
 /// keeps query/action identity in one SemanticNativeViewBridge, and centralizes
 /// terminal teardown. The referenced Tree must outlive this domain; the supplied
 /// weak owner lifetime is the independent guard that makes already queued action
@@ -323,14 +323,14 @@ private:
 
 /// Lifecycle-safe production checkpoint seam for a native view.
 ///
-/// T065 callbacks always drain exactly once at the native-view pump boundary,
+/// dispatcher callbacks always drain exactly once at the native-view pump boundary,
 /// independent of whether the semantic endpoint is still alive. Semantic/view
 /// lifetime gates only the subsequent retained projection/publication: retiring
 /// accessibility must never strand unrelated work that was already accepted by
 /// the owning dispatcher.
 ///
 /// The dispatcher owner is held strongly for the drain, and the semantic domain
-/// is copied into an independent shared lease before that drain begins. A T065
+/// is copied into an independent shared lease before that drain begins. A dispatcher
 /// callback may therefore release the surrounding view's own domain reference
 /// without invalidating this checkpoint stack frame. Owner death published
 /// before or during the drain makes publication fail closed after the drain.
@@ -354,7 +354,7 @@ struct SemanticRetainedViewCheckpoint final {
     }
 
     /// Native-reader form of the production pump seam for callers that already
-    /// own a copied geometry value. Accepted T065 work drains first; the copied
+    /// own a copied geometry value. Accepted dispatcher work drains first; the copied
     /// value is then committed with the resulting retained state. New platform
     /// wiring should prefer drain_and_publish_native_with_capture() so geometry
     /// that can change during accepted dispatcher work is sampled afterwards.
@@ -372,7 +372,7 @@ struct SemanticRetainedViewCheckpoint final {
     }
 
     /// Native-reader production seam when geometry belongs to the owning view.
-    /// The capture callable is invoked exactly once, only after all accepted T065
+    /// The capture callable is invoked exactly once, only after all accepted dispatcher
     /// work has drained and only if the independent native-view lifetime still
     /// survives. A durable native batch awaiting retry is the sole exception:
     /// it already owns its exact geometry, so retry commits that batch without

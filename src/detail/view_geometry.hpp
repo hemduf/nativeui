@@ -82,7 +82,7 @@ inline constexpr float kPuglMaximumViewSpan = 10000.0f;
 
 /// Convert one logical view-relative rectangle to physical screen coordinates.
 /// The origin is already expressed in physical coordinates, so translation is
-/// deliberately applied after the T043 scale/covering conversion and exactly
+/// deliberately applied after the geometry scale/covering conversion and exactly
 /// once.
 [[nodiscard]] inline Rect logical_to_physical_screen_rect(
     Rect logical,
@@ -94,7 +94,7 @@ inline constexpr float kPuglMaximumViewSpan = 10000.0f;
     return physical;
 }
 
-/// Lifetime-detached source for the small T043 native geometry pair used by
+/// Lifetime-detached source for the small geometry native geometry pair used by
 /// retained semantic checkpoints. ViewGeometryState remains the sole authority:
 /// valid UI-thread observations update this source in-place, while invalid
 /// observations leave the last valid pair untouched.
@@ -127,7 +127,7 @@ class ViewGeometryState;
 /// The owning ViewGeometryState keeps the only strong reference; a native-view
 /// pump retains only the weak handle returned by
 /// ViewGeometryState::retain_native_geometry_observation_writer(). Locking the
-/// handle proves the per-view T043 authority is still alive, so a post-drain
+/// handle proves the per-view geometry authority is still alive, so a post-drain
 /// platform observation can be accepted through the same
 /// observe_physical_screen_origin() path used by the top-level configure
 /// handler. ViewGeometryState destruction detaches the raw owner, so even a

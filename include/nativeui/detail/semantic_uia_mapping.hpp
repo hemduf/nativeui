@@ -6,7 +6,7 @@
 
 namespace ui::detail {
 
-/// Backend-neutral UIA control-type tokens for the frozen T045 §8 mapping.
+/// Backend-neutral UIA control-type tokens for the frozen semantic §8 mapping.
 ///
 /// The Win32 adapter translates these tokens to the concrete
 /// `UIA_*ControlTypeId` constants; no UIAutomationCore type crosses this header
@@ -37,7 +37,7 @@ enum class UiaControlType {
 /// `Invoke`, `Toggle`, `SelectionItem`, `RangeValue`, `ExpandCollapse` and
 /// `Value` are action-driven. `Text`, the read-only `RangeValue` of
 /// ProgressBar/Meter, and `Selection`/`ItemContainer` on ListView are
-/// role-mandated read patterns from §8: they carry no mutating T045 action but
+/// role-mandated read patterns from §8: they carry no mutating semantic action but
 /// are required so assistive technology can read the frozen semantic content.
 enum class UiaPattern {
     Invoke,
@@ -143,7 +143,7 @@ semantic_uia_role_mapping(SemanticRole role) noexcept {
 /// Pattern eligibility derived from one semantic role plus the actions that
 /// role currently advertises.
 ///
-/// Eligibility follows `SemanticInfo::actions` (the frozen T045 advertisement)
+/// Eligibility follows `SemanticInfo::actions` (the frozen semantic advertisement)
 /// rather than the transient `enabled`/`read_only` state: a disabled control
 /// keeps its discoverable pattern and reports `IsEnabled = FALSE`, and every
 /// mutation is revalidated on the UI thread by the existing semantic action
@@ -196,7 +196,7 @@ uia_has_pattern(const UiaPatternEligibility& eligibility,
 
 /// Project one semantic node's advertised action set onto the closed UIA
 /// pattern set. `virtual_item` marks the lazily materialized logical row of a
-/// T067 ListView, which additionally exposes `VirtualizedItemPattern` without
+/// virtual-list ListView, which additionally exposes `VirtualizedItemPattern` without
 /// ever being materialized as a visual row.
 [[nodiscard]] constexpr UiaPatternEligibility
 semantic_uia_pattern_eligibility(const SemanticInfo& info,
@@ -218,9 +218,9 @@ semantic_uia_pattern_eligibility(const SemanticInfo& info,
         case SemanticRole::RadioButton:
         case SemanticRole::Tab:
         case SemanticRole::ListItem:
-            // T045/T059: read-only nodes reject the mutating Select action.
+            // semantic/availability: read-only nodes reject the mutating Select action.
             // Ordinary nodes already lose it during normalization; virtual
-            // T067 ListItems are projected from app-declared immutable metadata
+            // virtual-list ListItems are projected from app-declared immutable metadata
             // before that normalization, so reflect the live read-only
             // eligibility here as well and never advertise SelectionItem for a
             // row whose every Select() would fail closed.

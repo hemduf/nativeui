@@ -23,7 +23,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 struct FakeNativeProxy {
     explicit FakeNativeProxy(ui::detail::SemanticSnapshotProxy source)
@@ -77,7 +77,7 @@ ui::SemanticTreeSnapshot virtual_snapshot(
 
 void ordinary_identity_is_stable_and_cache_values_are_weak() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(ordinary_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(ordinary_snapshot()).empty());
 
     ui::detail::SemanticProxyCache<FakeNativeProxy> cache{publisher};
     int factory_calls = 0;
@@ -88,33 +88,33 @@ void ordinary_identity_is_stable_and_cache_values_are_weak() {
 
     auto first = cache.ordinary(42, factory);
     auto second = cache.ordinary(42, factory);
-    T068_CHECK(first != nullptr);
-    T068_CHECK(first.get() == second.get());
-    T068_CHECK(factory_calls == 1);
-    T068_CHECK(cache.tracked_identities() == 1);
+    ACCESSIBILITY_CHECK(first != nullptr);
+    ACCESSIBILITY_CHECK(first.get() == second.get());
+    ACCESSIBILITY_CHECK(factory_calls == 1);
+    ACCESSIBILITY_CHECK(cache.tracked_identities() == 1);
 
     std::weak_ptr<FakeNativeProxy> weak = first;
     first.reset();
     second.reset();
-    T068_CHECK(weak.expired());
+    ACCESSIBILITY_CHECK(weak.expired());
 
     auto replacement = cache.ordinary(42, factory);
-    T068_CHECK(replacement != nullptr);
-    T068_CHECK(factory_calls == 2);
-    T068_CHECK(cache.tracked_identities() == 1);
+    ACCESSIBILITY_CHECK(replacement != nullptr);
+    ACCESSIBILITY_CHECK(factory_calls == 2);
+    ACCESSIBILITY_CHECK(cache.tracked_identities() == 1);
 
     ui::SemanticTreeSnapshot removed;
-    T068_CHECK(!publisher->publish(std::move(removed)).empty());
-    T068_CHECK(!replacement->source.read().has_value());
+    ACCESSIBILITY_CHECK(!publisher->publish(std::move(removed)).empty());
+    ACCESSIBILITY_CHECK(!replacement->source.read().has_value());
     replacement.reset();
-    T068_CHECK(cache.prune_expired() == 1);
-    T068_CHECK(cache.tracked_identities() == 0);
+    ACCESSIBILITY_CHECK(cache.prune_expired() == 1);
+    ACCESSIBILITY_CHECK(cache.tracked_identities() == 0);
 
     // A removed identity cannot manufacture a fresh native proxy solely from a
     // stale platform request after its last live proxy has gone away.
     auto stale = cache.ordinary(42, factory);
-    T068_CHECK(stale == nullptr);
-    T068_CHECK(factory_calls == 2);
+    ACCESSIBILITY_CHECK(stale == nullptr);
+    ACCESSIBILITY_CHECK(factory_calls == 2);
 }
 
 void virtual_identity_uses_list_and_token_and_is_per_view() {
@@ -127,7 +127,7 @@ void virtual_identity_uses_list_and_token_and_is_per_view() {
                          {ui::SemanticAction::Select, ui::SemanticAction::Focus}});
 
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(virtual_snapshot(metadata)).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(virtual_snapshot(metadata)).empty());
 
     ui::detail::SemanticProxyCache<FakeNativeProxy> first_view{publisher};
     ui::detail::SemanticProxyCache<FakeNativeProxy> second_view{publisher};
@@ -140,23 +140,23 @@ void virtual_identity_uses_list_and_token_and_is_per_view() {
     const auto ten = first_view.virtual_item(7, 10, factory);
     const auto twenty_other_view = second_view.virtual_item(7, 20, factory);
 
-    T068_CHECK(twenty_a != nullptr);
-    T068_CHECK(twenty_a.get() == twenty_b.get());
-    T068_CHECK(ten != nullptr);
-    T068_CHECK(ten.get() != twenty_a.get());
-    T068_CHECK(twenty_other_view != nullptr);
-    T068_CHECK(twenty_other_view.get() != twenty_a.get());
-    T068_CHECK(first_view.tracked_identities() == 2);
-    T068_CHECK(second_view.tracked_identities() == 1);
+    ACCESSIBILITY_CHECK(twenty_a != nullptr);
+    ACCESSIBILITY_CHECK(twenty_a.get() == twenty_b.get());
+    ACCESSIBILITY_CHECK(ten != nullptr);
+    ACCESSIBILITY_CHECK(ten.get() != twenty_a.get());
+    ACCESSIBILITY_CHECK(twenty_other_view != nullptr);
+    ACCESSIBILITY_CHECK(twenty_other_view.get() != twenty_a.get());
+    ACCESSIBILITY_CHECK(first_view.tracked_identities() == 2);
+    ACCESSIBILITY_CHECK(second_view.tracked_identities() == 1);
 
-    T068_CHECK(twenty_a->source.read().has_value());
-    T068_CHECK(twenty_a->source.read()->virtual_token() ==
+    ACCESSIBILITY_CHECK(twenty_a->source.read().has_value());
+    ACCESSIBILITY_CHECK(twenty_a->source.read()->virtual_token() ==
                std::optional<ui::VirtualSemanticItemToken>{20});
 }
 
 void concurrent_lookup_returns_one_canonical_proxy() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(ordinary_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(ordinary_snapshot()).empty());
 
     ui::detail::SemanticProxyCache<FakeNativeProxy> cache{publisher};
     std::atomic<int> factory_calls{0};
@@ -176,11 +176,11 @@ void concurrent_lookup_returns_one_canonical_proxy() {
     }
     for (auto& worker : workers) worker.join();
 
-    T068_CHECK(results[0] != nullptr);
+    ACCESSIBILITY_CHECK(results[0] != nullptr);
     for (const auto& result : results) {
-        T068_CHECK(result.get() == results[0].get());
+        ACCESSIBILITY_CHECK(result.get() == results[0].get());
     }
-    T068_CHECK(factory_calls.load(std::memory_order_relaxed) == 1);
+    ACCESSIBILITY_CHECK(factory_calls.load(std::memory_order_relaxed) == 1);
 }
 
 } // namespace
@@ -190,10 +190,10 @@ int main() {
         ordinary_identity_is_stable_and_cache_values_are_weak();
         virtual_identity_uses_list_and_token_and_is_per_view();
         concurrent_lookup_returns_one_canonical_proxy();
-        std::cout << "PASS t068 semantic proxy cache\n";
+        std::cout << "PASS accessibility semantic proxy cache\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic proxy cache: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic proxy cache: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

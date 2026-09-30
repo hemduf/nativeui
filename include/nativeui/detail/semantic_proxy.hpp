@@ -153,7 +153,7 @@ public:
             // Native virtual-item queries must remain bounded even for a 100k
             // logical collection. Unlike generic snapshot inspection, a native
             // proxy never falls back to VirtualSemanticChildren's linear token
-            // scan: missing or inconsistent immutable T067 indexing is treated
+            // scan: missing or inconsistent immutable virtual-list indexing is treated
             // as a defunct/unavailable item until a valid indexed generation is
             // published.
             auto item = resolve_indexed_virtual_semantic_item(

@@ -20,7 +20,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot button_snapshot() {
     ui::SemanticTreeSnapshot tree;
@@ -38,7 +38,7 @@ ui::SemanticTreeSnapshot button_snapshot() {
 
 std::shared_ptr<ui::detail::SemanticSnapshotPublisher> published_button() {
     auto publisher = std::make_shared<ui::detail::SemanticSnapshotPublisher>();
-    T068_CHECK(!publisher->publish(button_snapshot()).empty());
+    ACCESSIBILITY_CHECK(!publisher->publish(button_snapshot()).empty());
     return publisher;
 }
 
@@ -103,10 +103,10 @@ void binding_routes_only_at_the_t065_checkpoint() {
 
     auto router = binding.make_router(
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42));
-    T068_CHECK(router.post(activate_request()));
-    T068_CHECK(*dispatch_count == 0);
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*dispatch_count == 1);
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(*dispatch_count == 0);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*dispatch_count == 1);
 }
 
 void reset_invalidates_already_queued_and_future_work() {
@@ -121,12 +121,12 @@ void reset_invalidates_already_queued_and_future_work() {
     auto router = binding.make_router(
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42));
 
-    T068_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
     binding.reset();
 
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*dispatch_count == 0);
-    T068_CHECK(!router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*dispatch_count == 0);
+    ACCESSIBILITY_CHECK(!router.post(activate_request()));
 }
 
 void reset_during_live_recheck_blocks_dispatch() {
@@ -145,10 +145,10 @@ void reset_during_live_recheck_blocks_dispatch() {
     auto router = binding.make_router(
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42));
 
-    T068_CHECK(router.post(activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*dispatch_count == 0);
-    T068_CHECK(!router.post(activate_request()));
+    ACCESSIBILITY_CHECK(router.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*dispatch_count == 0);
+    ACCESSIBILITY_CHECK(!router.post(activate_request()));
 }
 
 void reentrant_reset_rejects_nested_future_work() {
@@ -171,11 +171,11 @@ void reentrant_reset_rejects_nested_future_work() {
     router.emplace(binding.make_router(
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42)));
 
-    T068_CHECK(router->post(activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*dispatch_count == 1);
-    T068_CHECK(!nested_post_accepted);
-    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(router->post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*dispatch_count == 1);
+    ACCESSIBILITY_CHECK(!nested_post_accepted);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 0);
 }
 
 void independent_view_bindings_do_not_share_target_lifetime() {
@@ -201,12 +201,12 @@ void independent_view_bindings_do_not_share_target_lifetime() {
         ui::detail::SemanticSnapshotProxy::ordinary(publisher_b, 42));
 
     binding_a.reset();
-    T068_CHECK(!router_a.post(activate_request()));
-    T068_CHECK(router_b.post(activate_request()));
-    T068_CHECK(dispatcher_a.checkpoint() == 0);
-    T068_CHECK(dispatcher_b.checkpoint() == 1);
-    T068_CHECK(*count_a == 0);
-    T068_CHECK(*count_b == 1);
+    ACCESSIBILITY_CHECK(!router_a.post(activate_request()));
+    ACCESSIBILITY_CHECK(router_b.post(activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_a.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(dispatcher_b.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count_a == 0);
+    ACCESSIBILITY_CHECK(*count_b == 1);
 }
 
 void platform_endpoint_routes_stable_identity_only_through_t065() {
@@ -220,17 +220,17 @@ void platform_endpoint_routes_stable_identity_only_through_t065() {
     target.reset();
 
     const auto endpoint = binding.endpoint().lock();
-    T068_CHECK(endpoint != nullptr);
+    ACCESSIBILITY_CHECK(endpoint != nullptr);
 
     const ui::detail::SemanticIdentity identity{42, std::nullopt};
-    T068_CHECK(endpoint->post(identity, activate_request()));
-    T068_CHECK(*dispatch_count == 0);
-    T068_CHECK(dispatcher_owner.checkpoint() == 1);
-    T068_CHECK(*dispatch_count == 1);
+    ACCESSIBILITY_CHECK(endpoint->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(*dispatch_count == 0);
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*dispatch_count == 1);
 
     const ui::detail::SemanticIdentity missing{43, std::nullopt};
-    T068_CHECK(!endpoint->post(missing, activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(!endpoint->post(missing, activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 0);
 }
 
 void platform_endpoint_fails_closed_after_binding_retirement() {
@@ -245,18 +245,18 @@ void platform_endpoint_fails_closed_after_binding_retirement() {
 
     auto weak_endpoint = binding.endpoint();
     auto in_flight_endpoint = weak_endpoint.lock();
-    T068_CHECK(in_flight_endpoint != nullptr);
-    T068_CHECK(in_flight_endpoint->available());
+    ACCESSIBILITY_CHECK(in_flight_endpoint != nullptr);
+    ACCESSIBILITY_CHECK(in_flight_endpoint->available());
 
     binding.reset();
-    T068_CHECK(!in_flight_endpoint->available());
+    ACCESSIBILITY_CHECK(!in_flight_endpoint->available());
     const ui::detail::SemanticIdentity identity{42, std::nullopt};
-    T068_CHECK(!in_flight_endpoint->post(identity, activate_request()));
-    T068_CHECK(dispatcher_owner.checkpoint() == 0);
-    T068_CHECK(*dispatch_count == 0);
+    ACCESSIBILITY_CHECK(!in_flight_endpoint->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_owner.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(*dispatch_count == 0);
 
     in_flight_endpoint.reset();
-    T068_CHECK(weak_endpoint.expired());
+    ACCESSIBILITY_CHECK(weak_endpoint.expired());
 }
 
 void endpoint_isolation_matches_view_binding_isolation() {
@@ -278,18 +278,18 @@ void endpoint_isolation_matches_view_binding_isolation() {
 
     const auto endpoint_a = binding_a.endpoint().lock();
     const auto endpoint_b = binding_b.endpoint().lock();
-    T068_CHECK(endpoint_a != nullptr);
-    T068_CHECK(endpoint_b != nullptr);
-    T068_CHECK(endpoint_a.get() != endpoint_b.get());
+    ACCESSIBILITY_CHECK(endpoint_a != nullptr);
+    ACCESSIBILITY_CHECK(endpoint_b != nullptr);
+    ACCESSIBILITY_CHECK(endpoint_a.get() != endpoint_b.get());
 
     binding_a.reset();
     const ui::detail::SemanticIdentity identity{42, std::nullopt};
-    T068_CHECK(!endpoint_a->post(identity, activate_request()));
-    T068_CHECK(endpoint_b->post(identity, activate_request()));
-    T068_CHECK(dispatcher_a.checkpoint() == 0);
-    T068_CHECK(dispatcher_b.checkpoint() == 1);
-    T068_CHECK(*count_a == 0);
-    T068_CHECK(*count_b == 1);
+    ACCESSIBILITY_CHECK(!endpoint_a->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(endpoint_b->post(identity, activate_request()));
+    ACCESSIBILITY_CHECK(dispatcher_a.checkpoint() == 0);
+    ACCESSIBILITY_CHECK(dispatcher_b.checkpoint() == 1);
+    ACCESSIBILITY_CHECK(*count_a == 0);
+    ACCESSIBILITY_CHECK(*count_b == 1);
 }
 
 void empty_binding_fails_closed() {
@@ -298,8 +298,8 @@ void empty_binding_fails_closed() {
     auto router = binding.make_router(
         ui::detail::SemanticSnapshotProxy::ordinary(publisher, 42));
 
-    T068_CHECK(!router.post(activate_request()));
-    T068_CHECK(binding.endpoint().expired());
+    ACCESSIBILITY_CHECK(!router.post(activate_request()));
+    ACCESSIBILITY_CHECK(binding.endpoint().expired());
 }
 
 void suite() {
@@ -319,10 +319,10 @@ void suite() {
 int main() {
     try {
         suite();
-        std::cout << "PASS t068 semantic action view binding\n";
+        std::cout << "PASS accessibility semantic action view binding\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic action view binding: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic action view binding: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

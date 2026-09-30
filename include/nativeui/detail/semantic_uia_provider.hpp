@@ -22,7 +22,7 @@ namespace ui::detail {
 ///
 /// Ordinary providers carry their own `SemanticId`. Virtual collection
 /// providers carry the owning ListView `SemanticId` plus the immutable logical
-/// token minted by T067. No native object, retained-tree pointer or component
+/// token minted by virtual-list. No native object, retained-tree pointer or component
 /// pointer is ever stored here.
 struct UiaProviderIdentity final {
     SemanticId node_id{kInvalidSemanticId};
@@ -139,7 +139,7 @@ public:
     }
 
     /// Resolve this identity against the latest immutable per-view publication.
-    /// A retired view, a removed identity or a missing/inconsistent T067 token
+    /// A retired view, a removed identity or a missing/inconsistent virtual-list token
     /// index reports absent rather than scanning or guessing.
     [[nodiscard]] std::optional<SemanticNativeSnapshotRead> read() const {
         try {
@@ -162,7 +162,7 @@ public:
         }
     }
 
-    /// Post one typed request through the owning view's T065 endpoint. The
+    /// Post one typed request through the owning view's dispatcher endpoint. The
     /// router revalidates the advertised action, the exact generation and the
     /// current live semantics on the UI thread; this boundary only fails
     /// closed and never lets an exception cross a foreign callback ABI.
@@ -259,7 +259,7 @@ public:
 
     [[nodiscard]] const SemanticInfo& info() const noexcept { return read_.info(); }
 
-    /// Logical, view-relative bounds. The Win32 boundary applies the T043
+    /// Logical, view-relative bounds. The Win32 boundary applies the geometry
     /// scale/screen-origin pair exactly once through `geometry()`.
     [[nodiscard]] Rect logical_bounds() const noexcept {
         return read_.logical_bounds();
@@ -378,7 +378,7 @@ enum class UiaValueKind {
 
 /// UIA-facing projection of one committed native publication batch.
 ///
-/// T045's closed change categories deliberately do not carry per-node diff
+/// semantic's closed change categories deliberately do not carry per-node diff
 /// data, so the target identities are resolved from the exact committed
 /// generation: structure and bounds target the fragment root, focus targets the
 /// currently focused node (falling back to the root so clients can requery a

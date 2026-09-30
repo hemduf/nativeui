@@ -22,7 +22,7 @@ void check(bool condition, const char* expression, int line) {
     }
 }
 
-#define T068_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
+#define ACCESSIBILITY_CHECK(expr) check(static_cast<bool>(expr), #expr, __LINE__)
 
 ui::SemanticTreeSnapshot snapshot(ui::SemanticId id, std::string name) {
     ui::SemanticTreeSnapshot tree;
@@ -99,9 +99,9 @@ void independent_view_state_destroy_a_keeps_b_alive() {
     auto first = std::make_unique<ui::detail::SemanticViewState>();
     auto second = std::make_unique<ui::detail::SemanticViewState>();
 
-    T068_CHECK(first->publish(snapshot(11, "First")) ==
+    ACCESSIBILITY_CHECK(first->publish(snapshot(11, "First")) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
-    T068_CHECK(second->publish(snapshot(22, "Second")) ==
+    ACCESSIBILITY_CHECK(second->publish(snapshot(22, "Second")) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     const auto first_proxy = ui::detail::SemanticSnapshotProxy::ordinary(
@@ -109,76 +109,76 @@ void independent_view_state_destroy_a_keeps_b_alive() {
     const auto second_proxy = ui::detail::SemanticSnapshotProxy::ordinary(
         second->publisher(), 22);
 
-    T068_CHECK(first_proxy.read().has_value());
-    T068_CHECK(first_proxy.read()->info().name == "First");
-    T068_CHECK(second_proxy.read().has_value());
-    T068_CHECK(second_proxy.read()->info().name == "Second");
+    ACCESSIBILITY_CHECK(first_proxy.read().has_value());
+    ACCESSIBILITY_CHECK(first_proxy.read()->info().name == "First");
+    ACCESSIBILITY_CHECK(second_proxy.read().has_value());
+    ACCESSIBILITY_CHECK(second_proxy.read()->info().name == "Second");
 
     first.reset();
-    T068_CHECK(!first_proxy.read().has_value());
-    T068_CHECK(second_proxy.read().has_value());
-    T068_CHECK(second_proxy.read()->info().name == "Second");
+    ACCESSIBILITY_CHECK(!first_proxy.read().has_value());
+    ACCESSIBILITY_CHECK(second_proxy.read().has_value());
+    ACCESSIBILITY_CHECK(second_proxy.read()->info().name == "Second");
 
-    T068_CHECK(second->publish(snapshot(22, "Second updated")) ==
+    ACCESSIBILITY_CHECK(second->publish(snapshot(22, "Second updated")) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
-    T068_CHECK(second_proxy.read().has_value());
-    T068_CHECK(second_proxy.read()->generation() == 2);
-    T068_CHECK(second_proxy.read()->info().name == "Second updated");
+    ACCESSIBILITY_CHECK(second_proxy.read().has_value());
+    ACCESSIBILITY_CHECK(second_proxy.read()->generation() == 2);
+    ACCESSIBILITY_CHECK(second_proxy.read()->info().name == "Second updated");
 }
 
 void no_change_publish_preserves_generation_and_snapshot_identity() {
     ui::detail::SemanticViewState view;
-    T068_CHECK(!view.publish(snapshot(7, "Stable")).empty());
+    ACCESSIBILITY_CHECK(!view.publish(snapshot(7, "Stable")).empty());
 
     const auto first = view.current();
-    T068_CHECK(first);
-    T068_CHECK(first->generation == 1);
+    ACCESSIBILITY_CHECK(first);
+    ACCESSIBILITY_CHECK(first->generation == 1);
 
-    T068_CHECK(view.publish(snapshot(7, "Stable")).empty());
+    ACCESSIBILITY_CHECK(view.publish(snapshot(7, "Stable")).empty());
     const auto second = view.current();
-    T068_CHECK(second.get() == first.get());
-    T068_CHECK(second->generation == 1);
+    ACCESSIBILITY_CHECK(second.get() == first.get());
+    ACCESSIBILITY_CHECK(second->generation == 1);
 }
 
 void identical_dataset_replacement_refreshes_backing_storage_without_semantic_generation() {
     ui::detail::SemanticViewState view;
     const auto first_metadata = virtual_metadata();
-    T068_CHECK(view.publish(virtual_snapshot(1, first_metadata)) ==
+    ACCESSIBILITY_CHECK(view.publish(virtual_snapshot(1, first_metadata)) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     const auto first = view.current();
-    T068_CHECK(first);
-    T068_CHECK(first->generation == 1);
-    T068_CHECK(first->nodes.size() == 1);
-    T068_CHECK(first->nodes[0].virtual_children.has_value());
-    T068_CHECK(first->nodes[0].virtual_children->dataset_generation() == 1);
-    T068_CHECK(first->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(first);
+    ACCESSIBILITY_CHECK(first->generation == 1);
+    ACCESSIBILITY_CHECK(first->nodes.size() == 1);
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children.has_value());
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children->dataset_generation() == 1);
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children->metadata_snapshot().get() ==
                first_metadata.get());
 
     // Model an explicit dataset replacement that happens to expose identical
-    // accessibility values. T068 must publish the new T067 immutable metadata
+    // accessibility values. accessibility must publish the new virtual-list immutable metadata
     // object so subsequent native readers use the current dataset generation,
     // while preserving the semantic generation because no exposed data changed.
     const auto replacement_metadata = virtual_metadata();
-    T068_CHECK(replacement_metadata.get() != first_metadata.get());
-    T068_CHECK(view.publish(virtual_snapshot(2, replacement_metadata)).empty());
+    ACCESSIBILITY_CHECK(replacement_metadata.get() != first_metadata.get());
+    ACCESSIBILITY_CHECK(view.publish(virtual_snapshot(2, replacement_metadata)).empty());
 
     const auto second = view.current();
-    T068_CHECK(second);
-    T068_CHECK(second.get() != first.get());
-    T068_CHECK(second->generation == first->generation);
-    T068_CHECK(second->nodes[0].virtual_children.has_value());
-    T068_CHECK(second->nodes[0].virtual_children->dataset_generation() == 2);
-    T068_CHECK(second->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(second);
+    ACCESSIBILITY_CHECK(second.get() != first.get());
+    ACCESSIBILITY_CHECK(second->generation == first->generation);
+    ACCESSIBILITY_CHECK(second->nodes[0].virtual_children.has_value());
+    ACCESSIBILITY_CHECK(second->nodes[0].virtual_children->dataset_generation() == 2);
+    ACCESSIBILITY_CHECK(second->nodes[0].virtual_children->metadata_snapshot().get() ==
                replacement_metadata.get());
 
     // A reader that retained the old immutable generation remains valid and
     // continues to own the original metadata object after publication swaps.
-    T068_CHECK(first->nodes[0].virtual_children->dataset_generation() == 1);
-    T068_CHECK(first->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children->dataset_generation() == 1);
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children->metadata_snapshot().get() ==
                first_metadata.get());
-    T068_CHECK(first->nodes[0].virtual_children->item_at(1)->info.name == "Twenty");
-    T068_CHECK(second->nodes[0].virtual_children->item_at(1)->info.name == "Twenty");
+    ACCESSIBILITY_CHECK(first->nodes[0].virtual_children->item_at(1)->info.name == "Twenty");
+    ACCESSIBILITY_CHECK(second->nodes[0].virtual_children->item_at(1)->info.name == "Twenty");
 }
 
 void large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publications() {
@@ -202,26 +202,26 @@ void large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publicatio
     }
 
     Model model;
-    T068_CHECK(model.replace(std::move(items)));
-    T068_CHECK(model.generation() == 1);
-    T068_CHECK(model.metadata_rebuild_count() == 1);
-    T068_CHECK(model.metadata_item_build_count() == kItemCount);
+    ACCESSIBILITY_CHECK(model.replace(std::move(items)));
+    ACCESSIBILITY_CHECK(model.generation() == 1);
+    ACCESSIBILITY_CHECK(model.metadata_rebuild_count() == 1);
+    ACCESSIBILITY_CHECK(model.metadata_item_build_count() == kItemCount);
 
     const auto shared_metadata = model.metadata_snapshot();
     const auto shared_token_index = model.token_index_snapshot();
-    T068_CHECK(shared_metadata);
-    T068_CHECK(shared_metadata->size() == kItemCount);
-    T068_CHECK(shared_token_index);
-    T068_CHECK(shared_token_index->size() == kItemCount);
+    ACCESSIBILITY_CHECK(shared_metadata);
+    ACCESSIBILITY_CHECK(shared_metadata->size() == kItemCount);
+    ACCESSIBILITY_CHECK(shared_token_index);
+    ACCESSIBILITY_CHECK(shared_token_index->size() == kItemCount);
 
     const ui::Rect list_bounds{0.0f, 0.0f, 120.0f, 40.0f};
     auto initial = model.semantic_children(
         std::size_t{0}, list_bounds, 20.0f, 0.0f);
-    T068_CHECK(initial.metadata_snapshot().get() == shared_metadata.get());
-    T068_CHECK(initial.token_index_snapshot().get() == shared_token_index.get());
+    ACCESSIBILITY_CHECK(initial.metadata_snapshot().get() == shared_metadata.get());
+    ACCESSIBILITY_CHECK(initial.token_index_snapshot().get() == shared_token_index.get());
 
     ui::detail::SemanticViewState view;
-    T068_CHECK(view.publish(virtual_snapshot(
+    ACCESSIBILITY_CHECK(view.publish(virtual_snapshot(
                    model.generation(),
                    initial.metadata_snapshot(),
                    initial.selected_token(),
@@ -240,17 +240,17 @@ void large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publicatio
         const float scroll_y = static_cast<float>(iteration) * 0.5f;
         const bool focused = iteration % 2 != 0;
 
-        // This path is the real T067 -> T068 projection seam. Selection lookup
+        // This path is the real virtual-list -> accessibility projection seam. Selection lookup
         // is indexed from the immutable dataset and publication reuses the exact
         // metadata object. The counters prove no O(N) metadata construction
         // occurs during these 1,000 semantic generations.
         auto projection = model.semantic_children(
             selected_key, list_bounds, 20.0f, scroll_y);
-        T068_CHECK(projection.dataset_generation() == model.generation());
-        T068_CHECK(projection.metadata_snapshot().get() == shared_metadata.get());
-        T068_CHECK(projection.token_index_snapshot().get() == shared_token_index.get());
-        T068_CHECK(model.metadata_rebuild_count() == rebuild_count);
-        T068_CHECK(model.metadata_item_build_count() == item_build_count);
+        ACCESSIBILITY_CHECK(projection.dataset_generation() == model.generation());
+        ACCESSIBILITY_CHECK(projection.metadata_snapshot().get() == shared_metadata.get());
+        ACCESSIBILITY_CHECK(projection.token_index_snapshot().get() == shared_token_index.get());
+        ACCESSIBILITY_CHECK(model.metadata_rebuild_count() == rebuild_count);
+        ACCESSIBILITY_CHECK(model.metadata_item_build_count() == item_build_count);
 
         const auto changes = view.publish(virtual_snapshot(
             model.generation(),
@@ -264,50 +264,50 @@ void large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publicatio
             ui::SemanticChange::SelectionChanged,
             ui::SemanticChange::BoundsChanged,
         };
-        T068_CHECK(changes == expected);
+        ACCESSIBILITY_CHECK(changes == expected);
 
         const auto current = view.current();
-        T068_CHECK(current);
-        T068_CHECK(current->generation == iteration + 1);
-        T068_CHECK(current->nodes.size() == 1);
-        T068_CHECK(current->nodes[0].virtual_children.has_value());
+        ACCESSIBILITY_CHECK(current);
+        ACCESSIBILITY_CHECK(current->generation == iteration + 1);
+        ACCESSIBILITY_CHECK(current->nodes.size() == 1);
+        ACCESSIBILITY_CHECK(current->nodes[0].virtual_children.has_value());
         const auto& virtual_children = *current->nodes[0].virtual_children;
-        T068_CHECK(virtual_children.dataset_generation() == model.generation());
-        T068_CHECK(virtual_children.size() == kItemCount);
-        T068_CHECK(virtual_children.metadata_snapshot().get() == shared_metadata.get());
-        T068_CHECK(virtual_children.token_index_snapshot().get() == shared_token_index.get());
+        ACCESSIBILITY_CHECK(virtual_children.dataset_generation() == model.generation());
+        ACCESSIBILITY_CHECK(virtual_children.size() == kItemCount);
+        ACCESSIBILITY_CHECK(virtual_children.metadata_snapshot().get() == shared_metadata.get());
+        ACCESSIBILITY_CHECK(virtual_children.token_index_snapshot().get() == shared_token_index.get());
     }
 
-    T068_CHECK(model.metadata_rebuild_count() == 1);
-    T068_CHECK(model.metadata_item_build_count() == kItemCount);
+    ACCESSIBILITY_CHECK(model.metadata_rebuild_count() == 1);
+    ACCESSIBILITY_CHECK(model.metadata_item_build_count() == kItemCount);
     const auto final_snapshot = view.current();
-    T068_CHECK(final_snapshot);
-    T068_CHECK(final_snapshot->generation == 1001);
-    T068_CHECK(final_snapshot->nodes[0].virtual_children->metadata_snapshot().get() ==
+    ACCESSIBILITY_CHECK(final_snapshot);
+    ACCESSIBILITY_CHECK(final_snapshot->generation == 1001);
+    ACCESSIBILITY_CHECK(final_snapshot->nodes[0].virtual_children->metadata_snapshot().get() ==
                shared_metadata.get());
-    T068_CHECK(final_snapshot->nodes[0].virtual_children->token_index_snapshot().get() ==
+    ACCESSIBILITY_CHECK(final_snapshot->nodes[0].virtual_children->token_index_snapshot().get() ==
                shared_token_index.get());
 
     const auto last_token = model.token_for_key(kItemCount - 1);
-    T068_CHECK(last_token.has_value());
+    ACCESSIBILITY_CHECK(last_token.has_value());
     const auto last_proxy = ui::detail::SemanticSnapshotProxy::virtual_item(
         view.publisher(), 7, *last_token);
     const auto last_read = last_proxy.read();
-    T068_CHECK(last_read.has_value());
-    T068_CHECK(last_read->virtual_token() == last_token);
-    T068_CHECK(last_read->bounds().y ==
+    ACCESSIBILITY_CHECK(last_read.has_value());
+    ACCESSIBILITY_CHECK(last_read->virtual_token() == last_token);
+    ACCESSIBILITY_CHECK(last_read->bounds().y ==
                list_bounds.y + static_cast<float>(kItemCount - 1) * 20.0f -
                    final_snapshot->nodes[0].virtual_children->scroll_y());
 }
 
 void staged_changes_coalesce_to_one_generation_and_one_batch() {
     ui::detail::SemanticViewState view;
-    T068_CHECK(view.publish(snapshot(7, "Initial")) ==
+    ACCESSIBILITY_CHECK(view.publish(snapshot(7, "Initial")) ==
                std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
 
     const auto baseline = view.current();
-    T068_CHECK(baseline);
-    T068_CHECK(baseline->generation == 1);
+    ACCESSIBILITY_CHECK(baseline);
+    ACCESSIBILITY_CHECK(baseline->generation == 1);
 
     auto focus_only = snapshot(7, "Intermediate");
     focus_only.nodes[0].info.focused = true;
@@ -319,8 +319,8 @@ void staged_changes_coalesce_to_one_generation_and_one_batch() {
     final.nodes[0].bounds = {1.0f, 2.0f, 80.0f, 24.0f};
     view.stage(std::move(final));
 
-    T068_CHECK(view.has_pending_publication());
-    T068_CHECK(view.current().get() == baseline.get());
+    ACCESSIBILITY_CHECK(view.has_pending_publication());
+    ACCESSIBILITY_CHECK(view.current().get() == baseline.get());
 
     const std::vector<ui::SemanticChange> expected{
         ui::SemanticChange::FocusChanged,
@@ -328,31 +328,31 @@ void staged_changes_coalesce_to_one_generation_and_one_batch() {
         ui::SemanticChange::ValueChanged,
         ui::SemanticChange::BoundsChanged,
     };
-    T068_CHECK(view.checkpoint() == expected);
+    ACCESSIBILITY_CHECK(view.checkpoint() == expected);
 
     const auto published = view.current();
-    T068_CHECK(published);
-    T068_CHECK(published.get() != baseline.get());
-    T068_CHECK(published->generation == 2);
-    T068_CHECK(published->nodes.size() == 1);
-    T068_CHECK(published->nodes[0].info.name == "Final");
-    T068_CHECK(published->nodes[0].info.focused);
-    T068_CHECK(published->nodes[0].info.selected);
-    T068_CHECK(published->nodes[0].bounds.x == 1.0f);
-    T068_CHECK(published->nodes[0].bounds.y == 2.0f);
-    T068_CHECK(published->nodes[0].bounds.w == 80.0f);
-    T068_CHECK(published->nodes[0].bounds.h == 24.0f);
-    T068_CHECK(!view.has_pending_publication());
+    ACCESSIBILITY_CHECK(published);
+    ACCESSIBILITY_CHECK(published.get() != baseline.get());
+    ACCESSIBILITY_CHECK(published->generation == 2);
+    ACCESSIBILITY_CHECK(published->nodes.size() == 1);
+    ACCESSIBILITY_CHECK(published->nodes[0].info.name == "Final");
+    ACCESSIBILITY_CHECK(published->nodes[0].info.focused);
+    ACCESSIBILITY_CHECK(published->nodes[0].info.selected);
+    ACCESSIBILITY_CHECK(published->nodes[0].bounds.x == 1.0f);
+    ACCESSIBILITY_CHECK(published->nodes[0].bounds.y == 2.0f);
+    ACCESSIBILITY_CHECK(published->nodes[0].bounds.w == 80.0f);
+    ACCESSIBILITY_CHECK(published->nodes[0].bounds.h == 24.0f);
+    ACCESSIBILITY_CHECK(!view.has_pending_publication());
 
-    T068_CHECK(view.checkpoint().empty());
-    T068_CHECK(view.current().get() == published.get());
-    T068_CHECK(view.current()->generation == 2);
+    ACCESSIBILITY_CHECK(view.checkpoint().empty());
+    ACCESSIBILITY_CHECK(view.current().get() == published.get());
+    ACCESSIBILITY_CHECK(view.current()->generation == 2);
 }
 
 void virtual_bounds_follow_scroll_and_t043_fractional_conversion() {
     const auto metadata = virtual_metadata();
     ui::detail::SemanticViewState view;
-    T068_CHECK(view.publish(virtual_snapshot(
+    ACCESSIBILITY_CHECK(view.publish(virtual_snapshot(
                    1,
                    metadata,
                    ui::VirtualSemanticItemToken{20},
@@ -363,21 +363,21 @@ void virtual_bounds_follow_scroll_and_t043_fractional_conversion() {
     const auto proxy = ui::detail::SemanticSnapshotProxy::virtual_item(
         view.publisher(), 7, 20);
     const auto first = proxy.read();
-    T068_CHECK(first.has_value());
+    ACCESSIBILITY_CHECK(first.has_value());
     const auto first_logical = first->bounds();
-    T068_CHECK(first_logical.x == 0.0f);
-    T068_CHECK(first_logical.y == 14.5f);
-    T068_CHECK(first_logical.w == 120.0f);
-    T068_CHECK(first_logical.h == 20.0f);
+    ACCESSIBILITY_CHECK(first_logical.x == 0.0f);
+    ACCESSIBILITY_CHECK(first_logical.y == 14.5f);
+    ACCESSIBILITY_CHECK(first_logical.w == 120.0f);
+    ACCESSIBILITY_CHECK(first_logical.h == 20.0f);
 
     const auto first_physical =
         ui::detail::logical_to_physical_covering_rect(first_logical, 1.25f);
-    T068_CHECK(first_physical.x == 0.0f);
-    T068_CHECK(first_physical.y == 18.0f);
-    T068_CHECK(first_physical.w == 150.0f);
-    T068_CHECK(first_physical.h == 26.0f);
+    ACCESSIBILITY_CHECK(first_physical.x == 0.0f);
+    ACCESSIBILITY_CHECK(first_physical.y == 18.0f);
+    ACCESSIBILITY_CHECK(first_physical.w == 150.0f);
+    ACCESSIBILITY_CHECK(first_physical.h == 26.0f);
 
-    T068_CHECK(view.publish(virtual_snapshot(
+    ACCESSIBILITY_CHECK(view.publish(virtual_snapshot(
                    1,
                    metadata,
                    ui::VirtualSemanticItemToken{20},
@@ -386,19 +386,19 @@ void virtual_bounds_follow_scroll_and_t043_fractional_conversion() {
                std::vector<ui::SemanticChange>{ui::SemanticChange::BoundsChanged});
 
     const auto second = proxy.read();
-    T068_CHECK(second.has_value());
+    ACCESSIBILITY_CHECK(second.has_value());
     const auto second_logical = second->bounds();
-    T068_CHECK(second_logical.x == 0.0f);
-    T068_CHECK(second_logical.y == 9.75f);
-    T068_CHECK(second_logical.w == 120.0f);
-    T068_CHECK(second_logical.h == 20.0f);
+    ACCESSIBILITY_CHECK(second_logical.x == 0.0f);
+    ACCESSIBILITY_CHECK(second_logical.y == 9.75f);
+    ACCESSIBILITY_CHECK(second_logical.w == 120.0f);
+    ACCESSIBILITY_CHECK(second_logical.h == 20.0f);
 
     const auto second_physical =
         ui::detail::logical_to_physical_covering_rect(second_logical, 1.25f);
-    T068_CHECK(second_physical.x == 0.0f);
-    T068_CHECK(second_physical.y == 12.0f);
-    T068_CHECK(second_physical.w == 150.0f);
-    T068_CHECK(second_physical.h == 26.0f);
+    ACCESSIBILITY_CHECK(second_physical.x == 0.0f);
+    ACCESSIBILITY_CHECK(second_physical.y == 12.0f);
+    ACCESSIBILITY_CHECK(second_physical.w == 150.0f);
+    ACCESSIBILITY_CHECK(second_physical.h == 26.0f);
 }
 
 } // namespace
@@ -411,10 +411,10 @@ int main() {
         large_virtual_dataset_reuses_exact_metadata_across_1000_semantic_publications();
         staged_changes_coalesce_to_one_generation_and_one_batch();
         virtual_bounds_follow_scroll_and_t043_fractional_conversion();
-        std::cout << "PASS t068 semantic view state\n";
+        std::cout << "PASS accessibility semantic view state\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {
-        std::cerr << "FAIL t068 semantic view state: " << error.what() << '\n';
+        std::cerr << "FAIL accessibility semantic view state: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

@@ -94,7 +94,7 @@ namespace semantic_snapshot_detail {
 }
 
 // A virtual dataset replacement can intentionally carry identical exposed
-// semantic values while still replacing the immutable T067 metadata object.
+// semantic values while still replacing the immutable virtual-list metadata object.
 // Native readers must observe the new backing generation, but the semantic
 // generation must not advance when the exposed accessibility data is unchanged.
 [[nodiscard]] inline bool virtual_storage_refresh_required(
@@ -277,7 +277,7 @@ public:
         store(nullptr);
     }
 
-    // Deterministic, per-publisher failure seam used by the T068 exception
+    // Deterministic, per-publisher failure seam used by the accessibility exception
     // regressions. Publication is UI-thread owned, so this test control remains
     // instance-local and never introduces mutable process/global test state.
     void fail_next_publish_at_for_test(FailurePointForTest point) noexcept {
@@ -297,7 +297,7 @@ public:
 
             // Replace only the immutable backing storage. The exposed semantic
             // data did not change, so keep the semantic generation stable while
-            // allowing new readers to retain the current T067 dataset object.
+            // allowing new readers to retain the current virtual-list dataset object.
             candidate.generation = previous->generation;
             fail_if_requested_for_test(FailurePointForTest::SnapshotAllocation);
             store(std::make_shared<const SemanticTreeSnapshot>(std::move(candidate)));

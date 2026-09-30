@@ -148,7 +148,7 @@ public:
 
     /// Lifetime-safe endpoint for platform semantic action requests. The
     /// binding owns the endpoint; native adapters retain only this weak handle
-    /// and post stable semantic identity plus a typed request through T065.
+    /// and post stable semantic identity plus a typed request through dispatcher.
     /// Rebind/unbind/shutdown retire the endpoint lifetime before target or
     /// retained-view teardown, so an in-flight strong endpoint lease fails
     /// closed rather than extending live UI state.

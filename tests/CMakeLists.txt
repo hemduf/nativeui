@@ -78,10 +78,10 @@ if(NATIVEUI_BUILD_TESTS)
       -P "${PROJECT_SOURCE_DIR}/tests/t067_root_integration_contract.cmake"
   )
   add_test(
-    NAME nativeui_t068_root_integration_contract
+    NAME nativeui_accessibility_root_integration_contract
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
-      -P "${PROJECT_SOURCE_DIR}/tests/t068_root_integration_contract.cmake"
+      -P "${PROJECT_SOURCE_DIR}/tests/accessibility_root_integration_contract.cmake"
   )
   add_test(
     NAME nativeui_t079_shader_contract
@@ -146,8 +146,8 @@ if(NATIVEUI_BUILD_TESTS)
     PROPERTIES LABELS "build;cmake;t067" TIMEOUT 300
   )
   set_tests_properties(
-    nativeui_t068_root_integration_contract
-    PROPERTIES LABELS "build;cmake;t068;accessibility" TIMEOUT 300
+    nativeui_accessibility_root_integration_contract
+    PROPERTIES LABELS "build;cmake;accessibility;accessibility" TIMEOUT 300
   )
   set_tests_properties(
     nativeui_t079_shader_contract
@@ -481,12 +481,12 @@ if(NATIVEUI_BUILD_TESTS)
     NATIVEUI_TEST_FONT_DIR="${PROJECT_SOURCE_DIR}/tests/resources"
   )
 
-  # T045/T068 accessibility suites. These cover the immutable semantic
-  # snapshot/proxy core, the T065 action bridge and the macOS accessibility
+  # semantic/accessibility accessibility suites. These cover the immutable semantic
+  # snapshot/proxy core, the dispatcher action bridge and the macOS accessibility
   # mapping. They mirror the standalone tests/t045 and tests/t067_retained
   # projects and deliberately stay outside the Pugl platform build so the
   # portable suites join the Linux sanitizer unit label run.
-  # tests/t068_root_integration_contract.cmake guards the registrations, their
+  # tests/accessibility_root_integration_contract.cmake guards the registrations, their
   # labels and the isolated semantics public-header target below.
   function(nativeui_add_accessibility_test name source)
     nativeui_add_core_test(${name} ${source})
@@ -498,84 +498,84 @@ if(NATIVEUI_BUILD_TESTS)
       ${PROJECT_SOURCE_DIR}/tests
     )
     set_tests_properties(${name} PROPERTIES
-      LABELS "unit;accessibility;t068"
+      LABELS "unit;accessibility;accessibility"
     )
   endfunction()
 
   nativeui_add_accessibility_test(nativeui_t045_semantics
     ${PROJECT_SOURCE_DIR}/tests/t045_semantics_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_proxy
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_proxy_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_children_query
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_children_query_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_proxy_cache
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_proxy_cache_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_diff_regression
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_diff_regression_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_action_policy
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_action_policy_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_action_router
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_action_router_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_action_target_binding
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_action_target_binding_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_action_view_binding
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_action_view_binding_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_native_view_bridge
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_native_view_bridge_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_native_generation
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_native_generation_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_read_only
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_read_only_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_widget_semantic_values
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_widget_semantic_values_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_widget_component_semantics
-    ${PROJECT_SOURCE_DIR}/tests/t068_widget_component_semantics_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_view_state
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_view_state_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_publication_batch
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_publication_batch_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_native_bounds
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_native_bounds_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_semantic_native_geometry_capture
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_semantic_native_geometry_capture_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_retained_action_bridge_tests
-    ${PROJECT_SOURCE_DIR}/tests/t068_retained_action_bridge_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_retained_native_checkpoint_tests
-    ${PROJECT_SOURCE_DIR}/tests/t068_retained_native_checkpoint_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_publication_sink_tests
-    ${PROJECT_SOURCE_DIR}/tests/t068_publication_sink_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_virtual_list_action_tests
-    ${PROJECT_SOURCE_DIR}/tests/t068_virtual_list_action_tests.cpp)
-  # T068 Batch 7b concurrent reader-vs-publisher stress: platform-free and
-  # header-only, so it also joins the standalone T045 project.
-  nativeui_add_accessibility_test(nativeui_t068_concurrent_snapshot_readers
-    ${PROJECT_SOURCE_DIR}/tests/t068_concurrent_snapshot_readers.cpp)
-  # T068 Batch 4 neutral Windows UIA mapping/provider core. These suites are
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_proxy
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_proxy_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_children_query
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_children_query_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_proxy_cache
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_proxy_cache_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_diff_regression
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_diff_regression_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_action_policy
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_action_policy_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_action_router
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_action_router_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_action_target_binding
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_action_target_binding_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_action_view_binding
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_action_view_binding_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_native_view_bridge
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_native_view_bridge_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_native_generation
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_native_generation_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_read_only
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_read_only_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_widget_semantic_values
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_widget_semantic_values_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_widget_component_semantics
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_widget_component_semantics_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_view_state
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_view_state_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_publication_batch
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_publication_batch_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_native_bounds
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_native_bounds_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_semantic_native_geometry_capture
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_semantic_native_geometry_capture_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_retained_action_bridge_tests
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_retained_action_bridge_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_retained_native_checkpoint_tests
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_retained_native_checkpoint_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_publication_sink_tests
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_publication_sink_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_virtual_list_action_tests
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_virtual_list_action_tests.cpp)
+  # accessibility Batch 7b concurrent reader-vs-publisher stress: platform-free and
+  # header-only, so it also joins the standalone semantic project.
+  nativeui_add_accessibility_test(nativeui_accessibility_concurrent_snapshot_readers
+    ${PROJECT_SOURCE_DIR}/tests/accessibility_concurrent_snapshot_readers.cpp)
+  # accessibility Batch 4 neutral Windows UIA mapping/provider core. These suites are
   # platform-free and run on every host; the Win32 adapter below is remote-CI
   # only.
-  nativeui_add_accessibility_test(nativeui_t068_uia_mapping
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_mapping_tests.cpp)
-  nativeui_add_accessibility_test(nativeui_t068_uia_provider
-    ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_provider_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_uia_mapping
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_uia_mapping_tests.cpp)
+  nativeui_add_accessibility_test(nativeui_accessibility_uia_provider
+    ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_uia_provider_tests.cpp)
 
   # The action-router/view-bridge suites compile src/dispatcher.cpp directly,
-  # exactly like their standalone projects, so they exercise the real T065
+  # exactly like their standalone projects, so they exercise the real dispatcher
   # Dispatcher without depending on a second shared copy.
-  target_sources(nativeui_t068_semantic_action_router PRIVATE
+  target_sources(nativeui_accessibility_semantic_action_router PRIVATE
     ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
   )
-  target_sources(nativeui_t068_semantic_action_view_binding PRIVATE
+  target_sources(nativeui_accessibility_semantic_action_view_binding PRIVATE
     ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
   )
-  target_sources(nativeui_t068_semantic_native_view_bridge PRIVATE
+  target_sources(nativeui_accessibility_semantic_native_view_bridge PRIVATE
     ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
   )
   find_package(Threads REQUIRED)
-  target_link_libraries(nativeui_t068_semantic_action_router PRIVATE Threads::Threads)
-  target_link_libraries(nativeui_t068_semantic_action_view_binding PRIVATE Threads::Threads)
-  target_link_libraries(nativeui_t068_semantic_native_view_bridge PRIVATE Threads::Threads)
-  target_link_libraries(nativeui_t068_semantic_proxy_cache PRIVATE Threads::Threads)
-  target_link_libraries(nativeui_t068_concurrent_snapshot_readers PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_accessibility_semantic_action_router PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_accessibility_semantic_action_view_binding PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_accessibility_semantic_native_view_bridge PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_accessibility_semantic_proxy_cache PRIVATE Threads::Threads)
+  target_link_libraries(nativeui_accessibility_concurrent_snapshot_readers PRIVATE Threads::Threads)
 
   if(APPLE)
     # The macOS mapping/AppKit suites mirror tests/t045's standalone project:
@@ -590,8 +590,8 @@ if(NATIVEUI_BUILD_TESTS)
         OBJCXX_STANDARD_REQUIRED YES
         OBJCXX_EXTENSIONS NO
       )
-      find_library(_nativeui_t068_appkit_framework AppKit REQUIRED)
-      target_link_libraries(${name} PRIVATE "${_nativeui_t068_appkit_framework}")
+      find_library(_nativeui_accessibility_appkit_framework AppKit REQUIRED)
+      target_link_libraries(${name} PRIVATE "${_nativeui_accessibility_appkit_framework}")
     endfunction()
 
     nativeui_add_macos_accessibility_test(nativeui_semantic_macos_child_projection
@@ -611,41 +611,41 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_add_macos_accessibility_test(nativeui_semantic_macos_interaction
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_interaction_tests.mm)
 
-    # T068 Batch 3 production macOS bridge. The standalone suites compile the
+    # accessibility Batch 3 production macOS bridge. The standalone suites compile the
     # same per-consumer Objective-C++ source the real platform bridge uses,
-    # plus the real T065 dispatcher used by the action path.
-    set(_nativeui_t068_accessibility_bridge_impl
+    # plus the real dispatcher dispatcher used by the action path.
+    set(_nativeui_accessibility_bridge_impl
       ${PROJECT_SOURCE_DIR}/src/detail/native_accessibility_macos.mm)
     nativeui_add_macos_accessibility_test(nativeui_semantic_macos_production_bridge
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_production_bridge_tests.mm)
     nativeui_add_macos_accessibility_test(nativeui_semantic_macos_notifications
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_notification_tests.mm)
-    nativeui_add_macos_accessibility_test(nativeui_t068_objc_runtime_prefix_probe
+    nativeui_add_macos_accessibility_test(nativeui_accessibility_objc_runtime_prefix_probe
       ${PROJECT_SOURCE_DIR}/tests/t045/semantic_macos_runtime_prefix_probe_tests.mm)
-    foreach(_nativeui_t068_bridge_test IN ITEMS
+    foreach(_nativeui_accessibility_bridge_test IN ITEMS
         nativeui_semantic_macos_production_bridge
         nativeui_semantic_macos_notifications
-        nativeui_t068_objc_runtime_prefix_probe)
-      target_sources(${_nativeui_t068_bridge_test} PRIVATE
-        ${_nativeui_t068_accessibility_bridge_impl}
+        nativeui_accessibility_objc_runtime_prefix_probe)
+      target_sources(${_nativeui_accessibility_bridge_test} PRIVATE
+        ${_nativeui_accessibility_bridge_impl}
         ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
       )
-      target_link_libraries(${_nativeui_t068_bridge_test} PRIVATE Threads::Threads)
+      target_link_libraries(${_nativeui_accessibility_bridge_test} PRIVATE Threads::Threads)
     endforeach()
   endif()
 
   if(WIN32)
-    # T068 Batch 4 Win32 UIA provider suite. It compiles the real per-platform
+    # accessibility Batch 4 Win32 UIA provider suite. It compiles the real per-platform
     # adapter source, exactly like the macOS production bridge suites, and is
     # remote-Windows-CI only. The test creates a real window and drives a real
     # IUIAutomation client against the fragment provider.
-    nativeui_add_accessibility_test(nativeui_t068_uia_win32_provider_tests
-      ${PROJECT_SOURCE_DIR}/tests/t045/t068_uia_win32_provider_tests.cpp)
-    target_sources(nativeui_t068_uia_win32_provider_tests PRIVATE
+    nativeui_add_accessibility_test(nativeui_accessibility_uia_win32_provider_tests
+      ${PROJECT_SOURCE_DIR}/tests/t045/accessibility_uia_win32_provider_tests.cpp)
+    target_sources(nativeui_accessibility_uia_win32_provider_tests PRIVATE
       ${PROJECT_SOURCE_DIR}/src/detail/native_accessibility_windows.cpp
       ${PROJECT_SOURCE_DIR}/src/dispatcher.cpp
     )
-    target_link_libraries(nativeui_t068_uia_win32_provider_tests PRIVATE
+    target_link_libraries(nativeui_accessibility_uia_win32_provider_tests PRIVATE
       Threads::Threads
       uiautomationcore ole32 oleaut32 uuid user32 comctl32
     )
@@ -774,10 +774,10 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_smoke_embedded)
     nativeui_enable_sanitizers(nativeui_smoke_embedded)
 
-    # T068 platform publication smoke. The private PlatformTestAccess seam is
+    # accessibility platform publication smoke. The private PlatformTestAccess seam is
     # only compiled into the test-enabled platform target, so this executable
     # exercises the real Application/legacy/Embedded pumps with a per-view
-    # notification sink and deterministic T043 geometry observations.
+    # notification sink and deterministic geometry geometry observations.
     add_executable(nativeui_smoke_accessibility ${PROJECT_SOURCE_DIR}/tests/smoke_accessibility.cpp)
     target_include_directories(nativeui_smoke_accessibility PRIVATE
       "${PROJECT_SOURCE_DIR}"
@@ -860,7 +860,7 @@ if(NATIVEUI_BUILD_TESTS)
         TIMEOUT 300
       )
 
-      # The T068 smoke owns its own consumer-scoped AppKit bridge, so its
+      # The accessibility smoke owns its own consumer-scoped AppKit bridge, so its
       # prefix is audited independently of the embedded smoke bridge.
       nativeui_compute_objc_runtime_prefix(
         _nativeui_smoke_accessibility_prefix
@@ -875,7 +875,7 @@ if(NATIVEUI_BUILD_TESTS)
           -P "${PROJECT_SOURCE_DIR}/tests/check_objc_runtime_prefix.cmake"
       )
       set_tests_properties(nativeui_smoke_accessibility_objc_runtime_prefix PROPERTIES
-        LABELS "integration;platform;macos;objc-runtime;t053;accessibility;t068"
+        LABELS "integration;platform;macos;objc-runtime;t053;accessibility;accessibility"
         TIMEOUT 300
       )
     endif()
@@ -905,7 +905,7 @@ if(NATIVEUI_BUILD_TESTS)
         TIMEOUT 60
       )
       set_tests_properties(nativeui_smoke_accessibility PROPERTIES
-        LABELS "integration;platform;smoke;accessibility;t068"
+        LABELS "integration;platform;smoke;accessibility;accessibility"
         TIMEOUT 60
       )
       set_tests_properties(nativeui_image_texture_gpu_reference_tests

@@ -124,12 +124,12 @@ using SemanticFocusRequester = std::function<bool(SemanticId)>;
 /// ordinary identities request focus for the exposed node (resolved by the tree
 /// to the nearest retained focusable, so composite widgets keep one keyboard Tab
 /// stop) and virtual identities delegate to `VirtualSemanticActionHandler` so
-/// the logical item can be revealed through normal T067 scroll/materialization
+/// the logical item can be revealed through normal virtual-list scroll/materialization
 /// after the owner accepted focus. A missing requester therefore fails Focus
 /// closed.
 ///
 /// Virtual identities are resolved through the owning logical collection using
-/// their stable T067 token and are dispatched only to VirtualSemanticActionHandler.
+/// their stable virtual-list token and are dispatched only to VirtualSemanticActionHandler.
 /// They are never redirected to a currently materialized visual row. The live
 /// action path requires an immutable token index so resolution cannot silently
 /// degrade to O(N) for very large virtual collections.
@@ -201,7 +201,7 @@ using SemanticFocusRequester = std::function<bool(SemanticId)>;
             // The handler re-resolves the token against current immutable
             // metadata, requests retained keyboard focus for the composite
             // owner through this tree callback, and only then applies normal
-            // T067 scroll/materialization. A denied callback fails closed.
+            // virtual-list scroll/materialization. A denied callback fails closed.
             return handler->perform_virtual_semantic_focus(
                 token,
                 [&request_focus, container] {

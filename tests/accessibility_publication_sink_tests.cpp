@@ -514,7 +514,7 @@ void invalid_physical_origin_preserves_previous_publication() {
     NUI_CHECK(first->publication->geometry == geometry(1.5f, 20.0f, 30.0f));
     NUI_CHECK(fixture.sink->calls == 1);
 
-    // A rejected platform scale/origin report fails closed: T043 keeps the last
+    // A rejected platform scale/origin report fails closed: geometry keeps the last
     // valid pair and the checkpoint must not manufacture a delivery for it.
     const float nan = std::numeric_limits<float>::quiet_NaN();
     NUI_CHECK(!view_geometry.observe_physical_screen_origin({nan, 30.0f}));
@@ -550,7 +550,7 @@ void invalid_physical_origin_preserves_previous_publication() {
 } // namespace
 
 int main() {
-    return test::run("t068_publication_sink_tests", [] {
+    return test::run("accessibility_publication_sink_tests", [] {
         sink_observes_each_committed_native_batch_exactly_once();
         durable_retry_delivers_the_exact_pending_batch_once();
         shutdown_and_retirement_never_deliver();

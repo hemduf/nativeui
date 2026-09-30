@@ -18,7 +18,7 @@ public:
 };
 
 /// Resolve a virtual semantic item through the immutable token index used by
-/// T067/T068 live action routing.
+/// virtual-list/accessibility live action routing.
 ///
 /// Native accessibility actions must never degrade into a linear scan of a
 /// potentially 100k-item logical collection. Sources that do not publish an

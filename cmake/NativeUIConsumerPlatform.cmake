@@ -280,7 +280,7 @@ function(_nativeui_prepare_package_platform out_var)
           "NativeUI package platform attachment supports macOS, Windows, Linux/X11 and WebAssembly")
       endif()
 
-      # Windows compiles the real T068 UIA fragment provider into the package
+      # Windows compiles the real accessibility UIA fragment provider into the package
       # platform target below; Linux/WebAssembly keep the fail-closed stub so
       # the portable platform layer can call the same C ABI unconditionally.
       if(NOT WIN32)
@@ -336,7 +336,7 @@ function(_nativeui_prepare_package_platform out_var)
     "${_nativeui_root}/src/pugl_skia.cpp"
   )
   if(WIN32)
-    # T068: the Win32 UIA fragment provider is part of the platform target and
+    # accessibility: the Win32 UIA fragment provider is part of the platform target and
     # replaces the accessibility stub for package consumers.
     target_sources(_nativeui_package_platform PRIVATE
       "${_nativeui_root}/src/detail/native_accessibility_windows.cpp"

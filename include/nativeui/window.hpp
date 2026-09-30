@@ -162,7 +162,7 @@ private:
     friend struct detail::PlatformTestAccess;
 
     /// Test-only construction path for the pre-v1 unmanaged window. The public
-    /// pre-v1 constructor is deprecated for production consumers, but the T068
+    /// pre-v1 constructor is deprecated for production consumers, but the accessibility
     /// platform smoke must still exercise the real unmanaged
     /// StandaloneWindow::poll checkpoint without opting the build into the
     /// deprecated-declaration warning. Production construction never uses this.

@@ -117,7 +117,7 @@ void test_physical_screen_origin_validation_and_retention() {
     NUI_CHECK(geometry.last_screen_origin_observation_valid());
     NUI_CHECK(same(geometry.physical_screen_origin(), restored));
 
-    // Translation is applied after T043 covering conversion and exactly once.
+    // Translation is applied after geometry covering conversion and exactly once.
     NUI_CHECK(same(ui::detail::logical_to_physical_screen_rect(
                        {1.25f, 2.25f, 3.5f, 4.5f}, 1.5f, retained),
                    {-1919.5f, -237.25f, 7.0f, 8.0f}));

@@ -533,7 +533,7 @@ struct Application::Impl final {
 
         // Snapshot after native dispatch: a native close may have destroyed a
         // logical owner, while another callback may have created a new one.
-        // Each retained checkpoint holds the T065 owner and the tiny T043
+        // Each retained checkpoint holds the dispatcher owner and the tiny geometry
         // geometry source strongly, weakly locks the per-view semantic domain,
         // drains accepted work exactly once, then samples scale/origin only if
         // the independent native-view lifetime survived that drain. Lifecycle
@@ -1264,10 +1264,10 @@ bool EmbeddedView::poll() {
 #endif
     const bool alive = impl_->core.poll(0.0);
 
-    // Embedded configure coordinates are parent-relative, so T068 bounds never
-    // use them. After accepted T065 work has drained, the realized child's
+    // Embedded configure coordinates are parent-relative, so accessibility bounds never
+    // use them. After accepted dispatcher work has drained, the realized child's
     // physical screen origin is queried once through the platform seam. A valid
-    // sample is accepted into the per-view T043 state through its lifetime-safe
+    // sample is accepted into the per-view geometry state through its lifetime-safe
     // writer and the retained pair is what gets published, so the native reader
     // and every later capture observe the exact same value; missing, non-finite
     // or post-death observations fail closed to the previous retained pair.

@@ -16,9 +16,9 @@
 namespace ui {
 
 /// Test-only accessor for the per-tree borrowed overlay seam. Production code
-/// obtains this pointer from the owning UI before mount; the T068 semantic
+/// obtains this pointer from the owning UI before mount; the accessibility semantic
 /// action suites inject the same seam to exercise popup presentation from a
-/// T065 checkpoint without a native view.
+/// dispatcher checkpoint without a native view.
 struct TreeTestAccess {
     static void set_overlay_service(Tree& tree, detail::OverlayService* service) {
         tree.set_overlay_service(service);
@@ -282,7 +282,7 @@ void retained_checkpoint_observes_dispatcher_mutation_after_drain() {
     increment.action = ui::SemanticAction::Increment;
     NUI_CHECK(router.post(increment));
 
-    // A semantic checkpoint before the existing T065 drain can only observe
+    // A semantic checkpoint before the existing dispatcher drain can only observe
     // pre-action retained state and therefore cannot publish the accepted native
     // mutation yet. Production uses SemanticRetainedViewCheckpoint below to
     // enforce the inverse ordering at the native-view pump boundary.
@@ -402,7 +402,7 @@ void retained_view_checkpoint_stops_after_reentrant_view_teardown() {
     NUI_CHECK(dispatcher.post([&] {
         // Production view teardown publishes lifetime death before releasing its
         // semantic domain. drain_and_publish() owns an independent domain lease,
-        // so this release cannot invalidate its stack while the T065 drain runs.
+        // so this release cannot invalidate its stack while the dispatcher drain runs.
         view_owner.reset();
         domain.reset();
     }));
@@ -435,7 +435,7 @@ void retained_view_checkpoint_drains_dispatcher_after_semantic_retirement() {
     auto dispatcher = dispatcher_owner->dispatcher();
     NUI_CHECK(dispatcher.post([&] { ++callbacks; }));
 
-    // Semantic retirement must not suppress the owning T065 checkpoint. The
+    // Semantic retirement must not suppress the owning dispatcher checkpoint. The
     // dispatcher can contain unrelated accepted work even when accessibility is
     // already defunct; only semantic publication is gated by view lifetime.
     auto publication = ui::detail::SemanticRetainedViewCheckpoint::drain_and_publish(
@@ -1068,7 +1068,7 @@ void read_only_combo_box_router_rejects_expand_collapse_select() {
     // The platform mappings are pure functions of the advertised action set, so
     // the read-only ComboBox stops exposing the ExpandCollapse pattern and any
     // action-bearing selection pattern. The role-level container Selection
-    // pattern (read-only GetSelection) is unchanged by T045 section 8.
+    // pattern (read-only GetSelection) is unchanged by semantic section 8.
     const auto eligibility =
         ui::detail::semantic_uia_pattern_eligibility(read->info());
     NUI_CHECK(!eligibility.expand_collapse);
@@ -1109,4 +1109,4 @@ void suite() {
 
 } // namespace
 
-int main() { return test::run("t068_retained_action_bridge", &suite); }
+int main() { return test::run("accessibility_retained_action_bridge", &suite); }

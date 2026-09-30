@@ -192,7 +192,7 @@ public:
 
     /// The visible modal panel is the exposed Dialog semantic node: it owns the
     /// title and child actions. It exists in the retained tree only while the
-    /// T063 modal overlay is visible, so its presence is the modal state.
+    /// dialog modal overlay is visible, so its presence is the modal state.
     [[nodiscard]] SemanticInfo semantics() const override {
         return dialog_semantic_info(title_);
     }

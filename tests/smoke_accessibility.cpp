@@ -40,7 +40,7 @@ int fail(std::string_view stage, std::string_view message) {
            near(left.w, right.w) && near(left.h, right.h);
 }
 
-/// Independent oracle for the T043 embedded conversion contract: the platform
+/// Independent oracle for the geometry embedded conversion contract: the platform
 /// physical screen origin is applied after the scale/covering conversion and
 /// exactly once. A second translation or a parent-relative configure coordinate
 /// would change the recomputed expected rectangle.
@@ -176,7 +176,7 @@ int run_application_standalone() {
     }
     if (!window->last_error().empty()) return fail(stage, window->last_error());
 
-    // Accepted T065 work changes the T043 scale/origin, and the Application
+    // Accepted dispatcher work changes the geometry scale/origin, and the Application
     // pump must capture it only after the drain, publish exactly one
     // bounds-only generation and deliver that exact batch once.
     stage = "application-post-drain-geometry";
@@ -233,7 +233,7 @@ int run_application_standalone() {
         return fail(stage, "invalid platform geometry replaced the retained origin");
     }
 
-    // Destroying the owning window re-entrantly during the T065 drain must not
+    // Destroying the owning window re-entrantly during the dispatcher drain must not
     // reach the sink and must not touch destroyed view state.
     stage = "application-reentrant-destruction";
     const int calls_before_destruction = sink->calls;
@@ -402,7 +402,7 @@ int run_embedded() {
         return fail(stage, "committed publication and sink delivery diverged");
     }
 
-    // The committed native-reader pair must also be the retained per-view T043
+    // The committed native-reader pair must also be the retained per-view geometry
     // pair: the embedded pump accepts the post-drain platform query into the
     // live ViewGeometryState before publishing. The exposed root's logical
     // bounds must then convert with one scale and one translation.
@@ -411,7 +411,7 @@ int run_embedded() {
         PlatformTestAccess::retained_native_geometry(*child);
     if (!retained_after_post_drain ||
         !same_geometry(*retained_after_post_drain, moved.geometry)) {
-        return fail(stage, "retained T043 capture source does not match the native reader");
+        return fail(stage, "retained geometry capture source does not match the native reader");
     }
     stage = "embedded-bounds-once";
     if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
@@ -454,7 +454,7 @@ int run_embedded() {
     const auto override_retained =
         PlatformTestAccess::retained_native_geometry(*child);
     if (!override_retained || !same_geometry(*override_retained, overridden.geometry)) {
-        return fail(stage, "retained T043 capture source does not match the override publication");
+        return fail(stage, "retained geometry capture source does not match the override publication");
     }
     if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
         return fail(stage, "overridden bounds are not scaled then translated exactly once");
@@ -486,7 +486,7 @@ int run_embedded() {
     const auto failure_retained =
         PlatformTestAccess::retained_native_geometry(*child);
     if (!failure_retained || !same_geometry(*failure_retained, sink->last_geometry)) {
-        return fail(stage, "failed query mutated the retained T043 capture source");
+        return fail(stage, "failed query mutated the retained geometry capture source");
     }
 
     // A non-finite platform observation is rejected the same way, and a later
@@ -534,7 +534,7 @@ int run_embedded() {
     const auto recovered_retained =
         PlatformTestAccess::retained_native_geometry(*child);
     if (!recovered_retained || !same_geometry(*recovered_retained, sink->last_geometry)) {
-        return fail(stage, "recovered origin was not retained in the T043 capture source");
+        return fail(stage, "recovered origin was not retained in the geometry capture source");
     }
     if (!bounds_convert_scaled_then_translated_once(*sink->last_publication)) {
         return fail(stage, "recovered bounds are not scaled then translated exactly once");

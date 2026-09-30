@@ -21,7 +21,7 @@ public:
     explicit SemanticNativeBoundsTransform(SemanticNativeGeometry geometry) noexcept
         : geometry_(geometry) {}
 
-    /// Capture the complete retained T043 native geometry as one copied value.
+    /// Capture the complete retained geometry native geometry as one copied value.
     /// ViewGeometryState is UI-thread-owned; native readers retain only this
     /// immutable scale/origin pair and never observe later live geometry changes.
     explicit SemanticNativeBoundsTransform(const ViewGeometryState& geometry) noexcept
@@ -64,8 +64,8 @@ private:
     SemanticNativeGeometry geometry_{};
 };
 
-/// Strong lifetime lease for one view's tiny T043 native-geometry capture
-/// source. Pump records may copy this object before entering a re-entrant T065
+/// Strong lifetime lease for one view's tiny geometry native-geometry capture
+/// source. Pump records may copy this object before entering a re-entrant dispatcher
 /// drain without retaining ViewCore, Tree, Node, Component or a native handle.
 /// Calling the lease afterwards samples the source's latest UI-thread values and
 /// immediately returns an immutable copied pair suitable for native publication.
@@ -84,10 +84,10 @@ public:
         return SemanticNativeBoundsTransform{*source_}.geometry();
     }
 
-    /// Pair the latest retained T043 scale with one authoritative platform
+    /// Pair the latest retained geometry scale with one authoritative platform
     /// screen-origin sample taken at the current checkpoint. Embedded parents
     /// can move without a child PUGL_CONFIGURE, so their platform adapter needs
-    /// this narrow override after T065 drains. Missing or non-finite samples
+    /// this narrow override after dispatcher drains. Missing or non-finite samples
     /// fail closed to the retained per-view origin and never mutate the source.
     [[nodiscard]] SemanticNativeGeometry capture_with_physical_screen_origin(
         std::optional<Point> captured_origin) const noexcept {
@@ -110,7 +110,7 @@ private:
 /// existing UI-thread pump after accepted dispatcher work has drained.
 ///
 /// At invocation a valid platform sample is first accepted into the live
-/// per-view T043 ViewGeometryState through its writer and only then is the
+/// per-view geometry ViewGeometryState through its writer and only then is the
 /// retained capture source sampled. The returned immutable pair is therefore
 /// exactly the pair native readers commit and later captures observe: one
 /// platform query, one scale/translation conversion, no stale pre-dispatch
