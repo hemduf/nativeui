@@ -131,6 +131,35 @@ Ordinary component semantic production happens in the retained UI domain. Immuta
 
 Semantic state is per UI/view. NativeUI's public data model does not define a process-global semantic registry or current semantic root.
 
+## Declaration-level ownership, validation and failure contracts
+
+The public semantic structs are ordinary owned C++ values rather than live accessibility handles. Identity values do not keep a component, tree, view or native proxy alive. `kInvalidSemanticId` and `kInvalidVirtualSemanticItemToken` are zero sentinels; runtime-produced live identities are non-zero and meaningful only within the owner that minted them.
+
+`SemanticInfo` owns its UTF-8 strings, optional values and action vector. Default construction produces `role=None`, `enabled=true`, no checked/expanded state, no value, no focus and no advertised actions. Numeric values and `SemanticValueRange::{minimum,maximum,step}` are application-domain values, not pixels. `SemanticValueRange` performs no clamping, ordering or finite-value validation: the producer must publish a coherent range. Defaulted equality is exact, including floating-point fields and action-vector ordering.
+
+Actions are explicit capabilities. `SemanticInfo::supports()` is a linear allocation-free membership test; it does not infer actions from role and does not deduplicate repeated entries. Copying semantic values can allocate because strings and vectors are owned. Component semantic production and snapshot construction are UI/application-domain work rather than audio/DSP real-time APIs.
+
+`VirtualSemanticChildren::from_metadata()` shares a non-null `MetadataSnapshot` without recopying O(N) item metadata. A null handle is normalized to a newly allocated empty immutable vector. Dataset generation, selected token, list bounds, row height and vertical scroll offset are carried verbatim; this low-level constructor does not sanitize finite/positive geometry. NativeUI's virtual-list producer validates those invariants before publication, and another producer must do the same.
+
+Published virtual metadata must remain immutable. Although the public handle is `shared_ptr<const Metadata>`, code retaining another mutable alias must stop mutating it after publication. Copying `metadata_snapshot()` extends metadata lifetime in O(1); retaining only the returned reference does not extend the `VirtualSemanticChildren` object's lifetime.
+
+`size()` is O(1). `index_of_selected_item()` is an allocation-free O(N) token scan. `item_at()` never calls the visual row factory or mutates the retained tree, but it copies owned name/description/action data into a new `SemanticInfo`; those copies may allocate and throw. Item bounds are logical and are not clipped to the visible list rectangle, so off-screen logical rows may legitimately lie outside it.
+
+A `SemanticNodeSnapshot` owns its `SemanticInfo`, child-ID vector and optional virtual-children value. The root uses `kInvalidSemanticId` as its parent. `SemanticTreeSnapshot::generation` is producer-owned: NativeUI publishes coherent generations, while the aggregate itself does not enforce monotonicity. Copying a tree creates an independent node vector while virtual O(N) metadata remains intentionally shared through immutable metadata owners.
+
+The snapshot aggregates provide no internal locking. Once published, a generation should be treated as immutable; concurrent mutation requires external synchronization. References or pointers into owned strings/vectors follow normal C++ invalidation rules and must not be retained across mutation or destruction.
+
+```cpp
+auto virtual_children = controller.semantic_children(list_bounds);
+auto metadata = virtual_children.metadata_snapshot(); // O(1) shared ownership
+
+if (auto item = virtual_children.item_at(42)) {
+    use_semantic_item(*item); // materialized info owns copied strings/actions
+}
+
+// metadata can outlive virtual_children.
+```
+
 ## Related public surfaces
 
 - [`Component::semantics()`](../include/nativeui/component_base.hpp) — custom component projection seam;
