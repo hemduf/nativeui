@@ -8,45 +8,69 @@
 
 namespace ui {
 
-/// Sentinel used by layout constraints to represent an unbounded maximum
-/// extent on one axis.
+/// Positive-infinity sentinel for an unbounded maximum extent on one axis.
+///
+/// Use this only for `Constraints::max`; minima normalize non-finite values to
+/// zero. The value is constexpr and carries no runtime state or ownership.
 inline constexpr float kUnboundedExtent = std::numeric_limits<float>::infinity();
 
 /// Box constraints expressed in logical pixels. `max` may be +infinity to
 /// represent an unbounded axis; all other invalid/negative values are
 /// normalized so layout never propagates NaN or negative extents.
 struct Constraints {
+    /// Normalized minimum logical extent for each axis.
+    ///
+    /// Public aggregate mutation can bypass constructor normalization; helpers
+    /// that consume Constraints defensively normalize as documented below.
     Size min{};
+    /// Normalized maximum logical extent; +infinity means unbounded.
     Size max{kUnboundedExtent, kUnboundedExtent};
 
-    /// Creates normalized constraints. Negative or non-finite minima become
-    /// zero. Positive infinity is accepted for a maximum; other non-finite
-    /// maxima collapse to the normalized minimum. Each maximum is always at
-    /// least its corresponding minimum.
+    /// Construct zero-minimum, unbounded-maximum constraints.
     Constraints() = default;
+
+    /// Construct and normalize explicit minimum/maximum logical extents.
+    ///
+    /// Negative or non-finite minima become zero. Positive infinity is accepted
+    /// for a maximum; other non-finite maxima collapse to the normalized minimum.
+    /// Each maximum is always at least its corresponding minimum. Inputs are copied,
+    /// no caller storage is retained, and construction allocates/invokes nothing.
     Constraints(Size minimum, Size maximum)
         : min{sanitize_min(minimum.w), sanitize_min(minimum.h)},
           max{sanitize_max(maximum.w, min.w), sanitize_max(maximum.h, min.h)} {}
 
-    /// Returns constraints with zero minima and unbounded maxima.
+    /// Return zero-minimum, unbounded-maximum constraints.
+    ///
+    /// The owned result is allocation-free and contains no hidden runtime state.
     [[nodiscard]] static Constraints unbounded() noexcept { return {}; }
-    /// Returns zero-minimum constraints bounded by `maximum` after normal
-    /// sanitization.
+    /// Return zero-minimum constraints bounded by copied `maximum`.
+    ///
+    /// The maximum is normalized exactly like the two-argument constructor;
+    /// positive infinity stays unbounded while NaN/negative infinity collapse to
+    /// zero. No caller storage is retained.
     [[nodiscard]] static Constraints loose(Size maximum) noexcept {
         return Constraints{{0.0f, 0.0f}, maximum};
     }
-    /// Returns constraints that force exactly `size`, after negative and
-    /// non-finite extents are normalized to zero.
+    /// Return constraints that force exactly the copied `size`.
+    ///
+    /// Negative and every non-finite extent, including +infinity, normalize to
+    /// zero because an exact size must be finite. The result owns its values and
+    /// the helper allocates/invokes nothing.
     [[nodiscard]] static Constraints tight(Size size) noexcept {
         const Size clean{sanitize_min(size.w), sanitize_min(size.h)};
         return Constraints{clean, clean};
     }
 
-    /// Returns whether the maximum width is finite.
+    /// Return whether the current maximum width is finite and non-negative.
+    ///
+    /// This is a pure value query: it does not normalize or mutate a Constraints
+    /// object whose public fields were modified directly.
     [[nodiscard]] bool bounded_width() const noexcept {
         return std::isfinite(max.w) && max.w >= 0.0f;
     }
-    /// Returns whether the maximum height is finite.
+    /// Return whether the current maximum height is finite and non-negative.
+    ///
+    /// Like `bounded_width()`, this does not repair directly-mutated public fields.
     [[nodiscard]] bool bounded_height() const noexcept {
         return std::isfinite(max.h) && max.h >= 0.0f;
     }

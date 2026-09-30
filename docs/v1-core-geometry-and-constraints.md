@@ -10,7 +10,15 @@ The foundational values are `ui::Size`, `ui::Point`, `ui::Rect`, `ui::Transform2
 
 ## `Size` and `Point`
 
-`Size {w, h}` represents extents and `Point {x, y}` represents a position. The receiving API defines validity. Layout code should use `Constraints` to normalize extents rather than assuming arbitrary `Size` values are valid.
+`Size {w, h}` represents extents and `Point {x, y}` represents a position. Their fields are plain copied `float` values: neither type clamps, normalizes, allocates, retains external storage, or invokes callbacks. Negative/non-finite values therefore remain representable until a consuming API defines a stronger contract.
+
+| declaration | units / meaning | validation and lifetime |
+| --- | --- | --- |
+| `Size::w`, `Size::h` | logical horizontal/vertical extents by default | stored verbatim; use `Constraints` when valid layout extents are required |
+| `Point::x`, `Point::y` | logical position in the caller-named coordinate space | stored verbatim; no finite-value repair |
+| `kPi` | radians helper constant | compile-time value; no runtime initialization/ownership |
+
+These are detached value types, so returning or storing a copy creates no borrow into UI/tree state.
 
 ## `Rect`
 
@@ -30,9 +38,11 @@ ui::Rect combined = ui::unite(a, b);            // {0,0,60,40}
 
 ## `Transform2D`
 
-`Transform2D` stores the affine matrix `[m00 m01 m02; m10 m11 m12; 0 0 1]`. Points are column vectors. NativeUI provides `identity()`, `translation(x, y)`, `scaling(x, y)`, and `rotation(radians)`.
+`Transform2D` stores the affine matrix `[m00 m01 m02; m10 m11 m12; 0 0 1]`. `m00/m01/m10/m11` are dimensionless linear coefficients; `m02/m12` are logical translation terms. Points are column vectors. NativeUI provides `identity()`, `translation(x, y)`, `scaling(x, y)`, and `rotation(radians)`.
 
-`rotation()` returns identity for non-finite input so invalid angles do not poison downstream geometry.
+The constructors intentionally do **not** share one validation policy. `translation()` and `scaling()` store their float inputs verbatim, including non-finite values; `rotation()` instead returns identity for a non-finite angle so an invalid trigonometric input does not poison downstream geometry. A zero/negative finite scale is representable, but zero scale is not invertible.
+
+`map_point()` and matrix multiplication return owned values, allocate nothing, retain no references and perform no repair. A non-finite input matrix/point can therefore produce non-finite output.
 
 ### Composition order
 
@@ -57,11 +67,15 @@ if (auto inv = transform.inverse()) {
 
 ## `Color`
 
-`Color` stores floating-point RGBA channels and defaults alpha to `1.0f`. The value type itself does not clamp channels. Consuming APIs define any additional normalization. `ui::colors` exposes the built-in convenience palette used by NativeUI defaults; semantic application theming should use the theme/style APIs.
+`Color` stores copied floating-point RGBA channels: `r`, `g`, `b`, and `a`, with alpha defaulting to `1.0f`. The value type itself does not clamp channels to `[0, 1]`, assign a color space, allocate, or retain renderer state. Consuming APIs define any additional normalization/materialization.
+
+`ui::colors` exposes compile-time convenience constants for background/panel surfaces, borders/focus, primary/muted text, accent, knob surfaces, track/toggle/input surfaces, selection and caret colors. These are literal defaults rather than semantic theme bindings; application theming should use the theme/style APIs when colors must vary by theme.
 
 ## `Constraints`
 
-`Constraints` represents minimum and maximum sizes per axis. `kUnboundedExtent` is positive infinity and is the supported sentinel for an unbounded maximum.
+`Constraints` represents minimum and maximum sizes per axis. `min` and `max` are public owned `Size` snapshots in logical pixels; `kUnboundedExtent` is positive infinity and is the supported sentinel for an unbounded **maximum**. Minima never use infinity after normal construction.
+
+Because the fields remain public value data, a caller can directly write a non-normalized state after construction. Helpers that create/consume ranges document whether they normalize defensively; `bounded_width()` / `bounded_height()` are pure queries and do not mutate/repair the object.
 
 ### Constructor normalization
 
@@ -76,8 +90,10 @@ The `Constraints(Size minimum, Size maximum)` constructor guarantees a usable ra
 ### Factories
 
 - `unbounded()` — zero minima and unbounded maxima;
-- `loose(maximum)` — zero minima with normalized maxima;
-- `tight(size)` — identical minima/maxima after normalization.
+- `loose(maximum)` — copies the maximum and normalizes it as a constructor maximum; +infinity remains unbounded while NaN/negative infinity collapse to zero;
+- `tight(size)` — identical finite minima/maxima; negative and **all** non-finite extents, including +infinity, normalize to zero.
+
+All three return detached owned values, allocate nothing, retain no caller storage and invoke no callbacks.
 
 ```cpp
 auto exact = ui::Constraints::tight({120.0f, 32.0f});
