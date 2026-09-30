@@ -448,11 +448,11 @@ public:
         }
         *object = nullptr;
 
-        UiaPatternEligibility patterns;
-        if (const auto read = current_read()) {
-            patterns = read->patterns();
-        }
-
+        // COM identity requires QueryInterface support to remain stable for the
+        // lifetime of this object. Pattern availability is dynamic semantic
+        // state and is exposed only through GetPatternProvider; individual
+        // pattern methods still fail closed when the current snapshot no longer
+        // supports the requested operation.
         void* result = nullptr;
         if (::IsEqualIID(iid, IID_IUnknown) ||
             ::IsEqualIID(iid, IID_IRawElementProviderSimple)) {
@@ -462,31 +462,25 @@ public:
         } else if (fragment_root_ &&
                    ::IsEqualIID(iid, IID_IRawElementProviderFragmentRoot)) {
             result = static_cast<IRawElementProviderFragmentRoot*>(this);
-        } else if (patterns.invoke && ::IsEqualIID(iid, IID_IInvokeProvider)) {
+        } else if (::IsEqualIID(iid, IID_IInvokeProvider)) {
             result = static_cast<IInvokeProvider*>(this);
-        } else if (patterns.toggle && ::IsEqualIID(iid, IID_IToggleProvider)) {
+        } else if (::IsEqualIID(iid, IID_IToggleProvider)) {
             result = static_cast<IToggleProvider*>(this);
-        } else if (patterns.selection_item &&
-                   ::IsEqualIID(iid, IID_ISelectionItemProvider)) {
+        } else if (::IsEqualIID(iid, IID_ISelectionItemProvider)) {
             result = static_cast<ISelectionItemProvider*>(this);
-        } else if (patterns.range_value &&
-                   ::IsEqualIID(iid, IID_IRangeValueProvider)) {
+        } else if (::IsEqualIID(iid, IID_IRangeValueProvider)) {
             result = static_cast<IRangeValueProvider*>(this);
-        } else if (patterns.expand_collapse &&
-                   ::IsEqualIID(iid, IID_IExpandCollapseProvider)) {
+        } else if (::IsEqualIID(iid, IID_IExpandCollapseProvider)) {
             result = static_cast<IExpandCollapseProvider*>(this);
-        } else if (patterns.value && ::IsEqualIID(iid, IID_IValueProvider)) {
+        } else if (::IsEqualIID(iid, IID_IValueProvider)) {
             result = static_cast<IValueProvider*>(this);
-        } else if (patterns.text && ::IsEqualIID(iid, IID_ITextProvider)) {
+        } else if (::IsEqualIID(iid, IID_ITextProvider)) {
             result = static_cast<ITextProvider*>(this);
-        } else if (patterns.selection &&
-                   ::IsEqualIID(iid, IID_ISelectionProvider)) {
+        } else if (::IsEqualIID(iid, IID_ISelectionProvider)) {
             result = static_cast<ISelectionProvider*>(this);
-        } else if (patterns.item_container &&
-                   ::IsEqualIID(iid, IID_IItemContainerProvider)) {
+        } else if (::IsEqualIID(iid, IID_IItemContainerProvider)) {
             result = static_cast<IItemContainerProvider*>(this);
-        } else if (patterns.virtualized_item &&
-                   ::IsEqualIID(iid, IID_IVirtualizedItemProvider)) {
+        } else if (::IsEqualIID(iid, IID_IVirtualizedItemProvider)) {
             result = static_cast<IVirtualizedItemProvider*>(this);
         } else {
             return E_NOINTERFACE;
