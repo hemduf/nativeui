@@ -245,6 +245,48 @@ void copy_assignment_failure_contract() {
     NUI_CHECK(scalar_constant(destination.metallic()) == 0.8f);
 }
 
+void emissive_publication_failure_contract() {
+    ui::Material material;
+    material.set_emissive(
+        ui::Brush{ui::Color{0.8f, 0.2f, 0.1f, 1.0f}},
+        ui::ScalarSource{2.0f});
+
+    ui::LinearGradient gradient{
+        {0.0f, 0.0f},
+        {16.0f, 0.0f},
+        ui::Color{0.1f, 0.2f, 0.3f, 1.0f},
+        ui::Color{0.7f, 0.8f, 0.9f, 1.0f}};
+    ui::Brush replacement_color{std::move(gradient)};
+
+    bool failed = false;
+    fail_next_allocation = true;
+    try {
+        material.set_emissive(
+            replacement_color,
+            ui::ScalarSource{4.0f});
+    } catch (const std::bad_alloc&) {
+        failed = true;
+    }
+    fail_next_allocation = false;
+
+    NUI_CHECK(failed);
+    NUI_CHECK(material.has_emissive());
+    const auto* unchanged =
+        ui::detail::MaterialAccess::solid_color(material.emissive_color());
+    NUI_CHECK(unchanged != nullptr);
+    check_color(*unchanged, {0.8f, 0.2f, 0.1f, 1.0f});
+    NUI_CHECK(scalar_constant(material.emissive_intensity()) == 2.0f);
+
+    material.set_emissive(
+        replacement_color,
+        ui::ScalarSource{4.0f});
+    NUI_CHECK(material.has_emissive());
+    NUI_CHECK(
+        ui::detail::MaterialAccess::solid_color(material.emissive_color()) ==
+        nullptr);
+    NUI_CHECK(scalar_constant(material.emissive_intensity()) == 4.0f);
+}
+
 void independent_material_contract() {
     ui::Material second{
         ui::Brush{ui::Color{0.1f, 0.7f, 0.2f, 1.0f}}};
@@ -278,28 +320,53 @@ void sanitation_contract() {
         {0.0f, 0.25f, 1.0f, 0.0f});
 
     NUI_CHECK(A::sanitize_roughness(-1.0f) == 0.045f);
+    NUI_CHECK(A::sanitize_roughness(0.0f) == 0.045f);
+    NUI_CHECK(A::sanitize_roughness(0.045f) == 0.045f);
     NUI_CHECK(A::sanitize_roughness(0.5f) == 0.5f);
+    NUI_CHECK(A::sanitize_roughness(1.0f) == 1.0f);
     NUI_CHECK(A::sanitize_roughness(2.0f) == 1.0f);
     NUI_CHECK(A::sanitize_roughness(
                   std::numeric_limits<float>::quiet_NaN()) == 0.5f);
+    NUI_CHECK(A::sanitize_roughness(
+                  std::numeric_limits<float>::infinity()) == 0.5f);
+    NUI_CHECK(A::sanitize_roughness(
+                  -std::numeric_limits<float>::infinity()) == 0.5f);
 
     NUI_CHECK(A::sanitize_metallic(-1.0f) == 0.0f);
+    NUI_CHECK(A::sanitize_metallic(0.0f) == 0.0f);
     NUI_CHECK(A::sanitize_metallic(0.4f) == 0.4f);
+    NUI_CHECK(A::sanitize_metallic(1.0f) == 1.0f);
     NUI_CHECK(A::sanitize_metallic(2.0f) == 1.0f);
+    NUI_CHECK(A::sanitize_metallic(
+                  std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    NUI_CHECK(A::sanitize_metallic(
+                  std::numeric_limits<float>::infinity()) == 0.0f);
     NUI_CHECK(A::sanitize_metallic(
                   -std::numeric_limits<float>::infinity()) == 0.0f);
 
     NUI_CHECK(A::sanitize_emissive_channel(-1.0f) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_channel(0.0f) == 0.0f);
     NUI_CHECK(A::sanitize_emissive_channel(0.7f) == 0.7f);
+    NUI_CHECK(A::sanitize_emissive_channel(1.0f) == 1.0f);
     NUI_CHECK(A::sanitize_emissive_channel(3.0f) == 1.0f);
     NUI_CHECK(A::sanitize_emissive_channel(
                   std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_channel(
+                  std::numeric_limits<float>::infinity()) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_channel(
+                  -std::numeric_limits<float>::infinity()) == 0.0f);
 
     NUI_CHECK(A::sanitize_emissive_intensity(-1.0f) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_intensity(0.0f) == 0.0f);
     NUI_CHECK(A::sanitize_emissive_intensity(8.0f) == 8.0f);
+    NUI_CHECK(A::sanitize_emissive_intensity(64.0f) == 64.0f);
     NUI_CHECK(A::sanitize_emissive_intensity(128.0f) == 64.0f);
     NUI_CHECK(A::sanitize_emissive_intensity(
+                  std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_intensity(
                   std::numeric_limits<float>::infinity()) == 0.0f);
+    NUI_CHECK(A::sanitize_emissive_intensity(
+                  -std::numeric_limits<float>::infinity()) == 0.0f);
 }
 
 } // namespace
@@ -310,6 +377,7 @@ int main() {
     move_contract();
     allocation_free_value_contract();
     copy_assignment_failure_contract();
+    emissive_publication_failure_contract();
     independent_material_contract();
     sanitation_contract();
     return 0;
