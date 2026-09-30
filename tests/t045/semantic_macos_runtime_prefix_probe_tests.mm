@@ -52,9 +52,9 @@ bool has_suffix(const std::string& value, const char* suffix) {
 
 void distinct_consumer_prefixed_runtime_names_and_lookup_reuse() {
     Class const first_class = test_view_class(
-        "NUI_t068_runtime_probe_first_6a6a6a6a6a6a_PuglWrapperView");
+        "NUI_accessibility_runtime_probe_first_6a6a6a6a6a6a_PuglWrapperView");
     Class const second_class = test_view_class(
-        "NUI_t068_runtime_probe_second_7b7b7b7b7b7b_PuglOpenGLView");
+        "NUI_accessibility_runtime_probe_second_7b7b7b7b7b7b_PuglOpenGLView");
     NSView* const first = [[first_class alloc] init];
     NSView* const second = [[second_class alloc] init];
 
