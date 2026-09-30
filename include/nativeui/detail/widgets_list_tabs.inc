@@ -966,18 +966,60 @@ private:
 
 } // namespace detail
 
+/// Detached builder for a retained, vertically scrollable single-selection list.
+///
+/// `T` is the stable item identity used for selection and activation. Static
+/// lists require equality comparison and copying because keys are compared against
+/// the bound selection and copied into accepted selection/activation operations.
+///
+/// The builder owns static item keys, child `Spec` values, style and activation
+/// callback plus a reference-like `Binding<std::optional<T>>`. The `State`
+/// overload converts to a Binding immediately; the builder/spec never borrows the
+/// `State` object itself. If that State is later destroyed, retained bindings keep
+/// the last committed value readable but become invalid for writes/observation.
+///
+/// The `VirtualListState` overload is different: the detached builder borrows the
+/// controller until `spec() &&` consumes it. The controller must therefore outlive
+/// the builder up to that call. The resulting retained Spec shares the controller's
+/// runtime and no longer borrows the builder object.
+///
+/// Construction/materialization, selection writes and callbacks belong to the UI/main
+/// thread, may allocate, and are not audio/DSP real-time operations.
 template <class T>
 class ListView {
 public:
+    /// Callback invoked after a row activation has successfully selected its key.
+    ///
+    /// The `const T&` argument is borrowed only for the duration of the call;
+    /// copy it if it must escape. NativeUI copies the callback before invocation, so
+    /// application code may re-enter UI/state work or destroy surrounding retained
+    /// objects. Exceptions are not converted to an error status and propagate.
     using ActivationCallback = std::function<void(const T&)>;
 
+    /// Build from a reference-like selection handle owned by this builder/runtime.
     explicit ListView(Binding<std::optional<T>> selection)
         : selection_(std::move(selection)) {}
+
+    /// Convenience overload that immediately captures `selection.binding()`.
+    ///
+    /// No raw borrow of the `State` object is retained.
     explicit ListView(State<std::optional<T>>& selection)
         : ListView(selection.binding()) {}
+
+    /// Build the virtualized ListView path from an existing controller.
+    ///
+    /// `state` is borrowed until `spec() &&`. Do not destroy it while the
+    /// detached builder can still be materialized.
     explicit ListView(VirtualListState<T>& state)
         : selection_(state.selection().binding()), virtual_state_(&state) {}
 
+    /// Append one owned static row.
+    ///
+    /// `key` becomes list-owned identity, `child` is converted to an owned
+    /// `Spec`, and `enabled == false` keeps the row present while excluding it
+    /// from pointer/keyboard selection and activation. Duplicate keys throw
+    /// `std::invalid_argument`. Calling this on the virtualized path throws
+    /// `std::logic_error` because that dataset is controlled by `VirtualListState`.
     template <class Child>
     ListView&& item(T key, Child&& child, bool enabled = true) && {
         if (virtual_state_) {
@@ -989,16 +1031,35 @@ public:
         return std::move(*this);
     }
 
+    /// Replace the owned activation callback.
+    ///
+    /// Ordinary keyboard navigation may change selection without activation;
+    /// this callback runs only for an accepted activation (for example Enter,
+    /// Space or a completed pointer activation) and runs after selection is set.
     ListView&& on_activate(ActivationCallback callback) && {
         activation_callback_ = std::move(callback);
         return std::move(*this);
     }
 
+    /// Replace the owned list style.
+    ///
+    /// Geometry fields in `ListViewStyle` are logical UI units.
     ListView&& style(ListViewStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume the builder and return a self-contained retained specification.
+    ///
+    /// Static lists materialize all appended rows beneath a vertical `ScrollView`.
+    /// The current selection is not normalized: null, unknown or disabled keys are
+    /// permitted and simply produce no selected enabled row until application/user
+    /// interaction writes an eligible key. Materialization copies/moves keys, Specs
+    /// and callbacks into retained runtime storage and may allocate or propagate
+    /// application/allocator exceptions.
+    ///
+    /// Virtualized lists transfer configuration to the shared `VirtualListState`
+    /// runtime instead. In both modes the returned `Spec` borrows no builder object.
     Spec spec() && {
         if (virtual_state_) {
             virtual_state_->runtime()->set_activation_callback(std::move(activation_callback_));
@@ -1064,12 +1125,35 @@ private:
     ListViewStyle style_;
 };
 
+/// Detached builder for a retained single-selection tab strip and panel stack.
+///
+/// The builder owns tab keys, UTF-8 labels, child `Spec` values, style and a
+/// reference-like `Binding<T>`. `T` is compared for stable identity and is
+/// copied when interaction commits a selection. The `State<T>&` overload converts
+/// immediately to a Binding, so no raw State borrow remains in the builder/spec.
+///
+/// External selection is authoritative and is never coerced to an enabled tab. A key
+/// that matches no tab collapses every panel. If application code selects a disabled
+/// tab key directly, that panel is still selected/visible; disabled only removes the
+/// tab from pointer and keyboard selection.
+///
+/// Tabs are UI/main-thread retained objects. Materialization and selection may allocate,
+/// synchronous State observers may re-enter NativeUI, and this API is not RT-safe.
 template <class T>
 class Tabs {
 public:
+    /// Build from a reference-like selection handle owned by this builder/runtime.
     explicit Tabs(Binding<T> selection) : selection_(std::move(selection)) {}
+
+    /// Convenience overload that immediately captures `selection.binding()`.
     explicit Tabs(State<T>& selection) : Tabs(selection.binding()) {}
 
+    /// Append one owned tab and panel.
+    ///
+    /// `label` bytes and the converted panel Spec are owned by the builder.
+    /// `enabled == false` keeps the tab/panel in the retained structure while
+    /// excluding the tab from pointer/keyboard selection. Duplicate keys throw
+    /// `std::invalid_argument`.
     template <class Child>
     Tabs&& tab(T key, std::string label, Child&& panel, bool enabled = true) && {
         reject_duplicate(key);
@@ -1079,11 +1163,23 @@ public:
         return std::move(*this);
     }
 
+    /// Replace the owned tab-container style.
+    ///
+    /// Header, inset, gap and border dimensions use logical UI units.
     Tabs&& style(TabsStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume the builder and return a self-contained retained tab specification.
+    ///
+    /// Every panel remains a retained child; availability collapses all panels except
+    /// the one whose key equals the current selection. Left/Right navigation wraps
+    /// across enabled tabs, Home/End choose the first/last enabled tab, and accepted
+    /// input writes synchronously through the Binding. Observer exceptions propagate.
+    ///
+    /// The returned `Spec` owns tab metadata, panels and style and borrows no
+    /// builder object. Construction/materialization may allocate.
     Spec spec() && {
         auto runtime = std::make_shared<detail::TabsRuntime<T>>(
             selection_, std::move(style_));

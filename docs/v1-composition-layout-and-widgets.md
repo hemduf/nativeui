@@ -293,6 +293,37 @@ Slider and range-slider scalar values are application-defined units. Orientation
 
 All activation/value/formatter paths are owning-UI work, may allocate, and are outside audio/DSP real-time constraints.
 
+### Static ListView<T> and Tabs<T> contracts
+
+[`ListView<T>`](../include/nativeui/detail/widgets_list_tabs.inc) and [`Tabs<T>`](../include/nativeui/detail/widgets_list_tabs.inc) are detached builders exposed through `widgets.hpp`. Both own their item/tab metadata, retained child Specs, styles and Binding handles; `spec() &&` consumes the builder and leaves no builder-object borrow.
+
+For a static `ListView<T>`, `item(key, child, enabled)` owns the key and converted child Spec. Keys must be unique; a duplicate throws `std::invalid_argument`. Disabled rows remain in layout/presentation but are skipped by pointer and keyboard selection/activation. The virtualized constructor instead borrows a `VirtualListState<T>` controller only until `spec() &&`; adding static `item()` rows on that path throws `std::logic_error`. The retained virtualized Spec shares the controller runtime after materialization.
+
+List selection is externally observable `State<std::optional<T>>` data, not an internal index. Null, unknown and disabled selected keys are accepted without normalization. Keyboard navigation may write an eligible selection without invoking `on_activate`; activation (Enter, Space or completed pointer activation) first commits the selected key and then invokes the owned callback. Its `const T&` argument is borrowed only for the call. The callback is copied before invocation, may perform reentrant UI/state work or destroy surrounding retained objects, and exceptions propagate through input dispatch.
+
+For `Tabs<T>`, each `tab(key, label, panel, enabled)` owns its key, UTF-8 label and panel Spec; duplicate keys throw `std::invalid_argument`. Disabled tabs are skipped by pointer/keyboard navigation but external selection remains authoritative. Consequently an externally selected disabled key still exposes that panel, while an unknown key collapses all panels. Left/Right wraps among enabled tabs; Home/End moves to the first/last enabled tab. Selection writes synchronously through the Binding and observer exceptions are not translated into fallback behavior.
+
+The `State<T>&` convenience constructors for both builders immediately call `binding()`; retained controls keep the Binding control block, not the State object itself. Destroying the owning State invalidates future writes/observations while the last committed value remains readable according to the shared State/Binding contract. List/Tabs construction, retained materialization, selection writes and application callbacks are UI/main-thread work, may allocate, and are outside audio/DSP real-time constraints.
+
+```cpp
+ui::State<std::optional<int>> selected_row{std::nullopt};
+ui::State<int> selected_tab{0};
+
+auto list = ui::ListView<int>{selected_row}
+    .item(1, ui::Label{"One"})
+    .item(2, ui::Label{"Unavailable"}, false)
+    .on_activate([](const int& key) {
+        // key is borrowed for this callback only; copy it if it must escape.
+        activate_row(key);
+    })
+    .spec();
+
+auto tabs = ui::Tabs<int>{selected_tab}
+    .tab(0, "Overview", overview_panel())
+    .tab(1, "Advanced", advanced_panel())
+    .spec();
+```
+
 Focused executable examples are the preferred behavioral references:
 
 | Widget/interaction family | Focused example |
