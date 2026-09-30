@@ -227,6 +227,49 @@ These focused programs also expose the repository `--self-test` convention. Beca
 
 Widgets are retained NativeUI components. They share the same layout, availability, focus, input, style/theme and invalidation model as custom components rather than delegating ownership to a second native-widget hierarchy.
 
+### Core detached-builder contracts
+
+The small builders implemented behind `widgets.hpp` are value/configuration objects first and retained components second. `Label`, `Header`, `Canvas`, `Knob`, `Toggle`, `TextInput` and `TextArea` own the strings, styles, callbacks and `Binding<T>` handles passed to them. Calling fluent setters changes only the detached builder. `spec() &&` is the ownership-transfer boundary: it consumes the builder and returns a retained recipe that does not borrow the builder object.
+
+For state-backed widgets, the `State<T>&` constructors immediately obtain a `Binding<T>`. The component owns that binding control-block handle, not the source `State` object. If the source `State` is destroyed, the binding becomes logically invalid: the last committed value remains readable while later writes and subscriptions become inert. State mutation/observation is still UI/main-thread confined and synchronous.
+
+| Builder API | Contract |
+| --- | --- |
+| `Label::size()` | logical UI units; negative values clamp to zero before storage |
+| `Label::style()` | replaces the entire owned `TextStyle`, including fields set by earlier fluent calls |
+| `Canvas(Size,...)` | requested extent is logical UI pixels; draw/input callbacks are owned by the retained component |
+| `Canvas::on_input()` | `EventResult` callbacks control propagation; `void` callbacks are adapted to `Handled`; installing one also enables focusability |
+| `Knob::range(min,max)` | scalar edit domain; retained construction normalizes a non-increasing range to `[min,min+1]` |
+| `Knob::wheel_enabled()` | pointer-wheel edits are opt-in; keyboard/pointer editing remains retained input behavior |
+| `Toggle::style()` | replaces the complete typed style value; edit callbacks are owned and synchronous |
+| `TextInput::max_length()` | future insertion/composition budget in the `TextEditModel` code-point-like unit; zero means unlimited and existing source text is not truncated |
+| `TextInput::on_key_down()` | runs before built-in non-IME KeyDown handling; `Handled` suppresses the standard command, `Ignored` preserves it |
+| `TextArea::max_length()` | same future-edit budget contract as the underlying text-edit model; zero is unlimited |
+
+`Canvas` draw/input contexts are callback-scoped borrows. They must not be retained after the callback returns. `TextInput::SubmitCallback` receives a borrowed reference to the component's current text for that synchronous callback only. Application callbacks may re-enter NativeUI or destroy surrounding objects, so implementations complete their internal event bookkeeping before relying on user code and callers must not assume callback objects survive re-entry.
+
+Builder configuration itself does not require a live `UI`, but materialization, input, painting, text editing, IME, clipboard integration and edit callbacks execute in the owning UI/render/input domain. These paths may allocate and propagate ordinary C++ exceptions; they are not audio/DSP real-time facilities.
+
+```cpp
+ui::State<float> gain{0.5f};
+ui::State<std::string> name{"Lead"};
+
+auto panel = ui::Column{
+    ui::Label{"Gain"}.size(13.0f).bold(),
+    ui::Knob{"Gain", gain}
+        .range(0.0f, 1.0f)
+        .wheel_enabled(),
+    ui::TextInput{"Name", name}
+        .placeholder("Preset name")
+        .max_length(64)
+        .on_key_down([](const ui::InputEvent& event) {
+            return event.key == ui::Key::Tab
+                ? ui::EventResult::Handled
+                : ui::EventResult::Ignored;
+        }),
+};
+```
+
 Focused executable examples are the preferred behavioral references:
 
 | Widget/interaction family | Focused example |
