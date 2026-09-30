@@ -88,7 +88,7 @@ public:
         return *this;
     }
 
-    Material& set_emissive(Brush color, float intensity) {
+    Material& set_emissive(Brush color, float intensity) noexcept {
         emissive_color_ = std::move(color);
         emissive_intensity_ = ScalarSource{intensity};
         has_emissive_ = true;
