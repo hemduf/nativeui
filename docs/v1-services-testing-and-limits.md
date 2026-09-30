@@ -326,7 +326,9 @@ Constructor/resize inputs must use finite positive logical dimensions and scale;
 
 `render(UI&)` resizes the UI to the renderer's logical viewport, clears the raster target, applies the configured scale and runs the normal NativeUI paint path. It returns `false` only when the backing raster surface/canvas/pixel view cannot be produced; ordinary component/layout/paint exceptions remain C++ exceptions.
 
-`rgba_pixels()` returns a borrowed tightly packed RGBA8888 buffer in top-to-bottom, left-to-right order. The reference is tied to the renderer's current snapshot and may be invalidated by render/resize/move/destruction. `pixel(x,y)` samples physical raster coordinates and throws `std::out_of_range` outside the surface.
+`rgba_pixels()` returns a borrowed tightly packed premultiplied RGBA8888 buffer in top-to-bottom, left-to-right order. The reference is tied to the renderer's current snapshot and may be invalidated by render/resize/move/destruction. It is empty before the first successful render and after resize. `pixel(x,y)` samples zero-based physical raster coordinates from a top-left origin, returns an owned `Rgba8` value, and throws `std::out_of_range` outside the surface or when no successful snapshot exists yet.
+
+The renderer owns no `UI` and provides no internal synchronization. Calls belong to the owning UI/main-thread domain; moving the renderer transfers its surface and snapshot, and the moved-from source is only for destruction or assignment.
 
 This API is intended for deterministic tests, golden/reference images and offscreen validation. It is not an audio-thread facility.
 
