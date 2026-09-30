@@ -105,6 +105,8 @@ static_assert(std::is_nothrow_move_assignable_v<ui::Material>);
 static_assert(std::is_nothrow_destructible_v<ui::Material>);
 static_assert(noexcept(std::declval<ui::Material&>().set_roughness(0.0f)));
 static_assert(noexcept(std::declval<ui::Material&>().set_metallic(0.0f)));
+static_assert(noexcept(std::declval<ui::Material&>().set_emissive(
+    std::declval<ui::Brush>(), 0.0f)));
 static_assert(noexcept(std::declval<ui::Material&>().clear_emissive()));
 
 float scalar_constant(const ui::ScalarSource& source) {
