@@ -129,7 +129,7 @@ void retained_native_checkpoint_pairs_post_dispatch_state_and_geometry() {
     NUI_CHECK(first_native->semantic_generation() == first_semantic_generation);
 }
 
-void retained_native_checkpoint_samples_t043_capture_source_after_dispatch() {
+void retained_native_checkpoint_samples_geometry_capture_source_after_dispatch() {
     auto state = std::make_shared<ProbeState>();
     ui::Spec spec;
     spec.factory = [state] {
@@ -382,7 +382,7 @@ void native_checkpoint_retry_keeps_committed_geometry_before_newer_capture() {
 
 int main() {
     retained_native_checkpoint_pairs_post_dispatch_state_and_geometry();
-    retained_native_checkpoint_samples_t043_capture_source_after_dispatch();
+    retained_native_checkpoint_samples_geometry_capture_source_after_dispatch();
     retained_native_checkpoint_refreshes_platform_origin_after_dispatch();
     native_geometry_capture_is_suppressed_after_reentrant_view_death();
     native_checkpoint_retry_keeps_committed_geometry_before_newer_capture();
