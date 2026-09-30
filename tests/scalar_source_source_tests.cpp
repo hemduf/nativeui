@@ -70,6 +70,24 @@ void source_creation_contract() {
               initial_image_materialization,
           "constant ScalarSource construction materialized ImageTexture state");
 
+    const auto invalid_source = ui::ScalarSource::from_brush(
+        ui::Brush{ui::Color{0.2f, 0.4f, 0.6f, 1.0f}},
+        static_cast<ui::ScalarChannel>(255));
+    check(ui::detail::ScalarSourceAccess::is_constant(invalid_source),
+          "invalid ScalarChannel did not canonicalize to constant zero");
+    check(ui::detail::ScalarSourceAccess::constant_value(invalid_source) == 0.0f,
+          "invalid ScalarChannel did not produce exact scalar zero");
+    check(ui::detail::shader_compile_call_count_for_test() == initial_compile,
+          "invalid ScalarChannel compiled source");
+    check(ui::detail::shader_materialization_call_count_for_test() ==
+              initial_materialization,
+          "invalid ScalarChannel performed backend work");
+    check(ui::detail::image_decode_call_count_for_test() == initial_decode,
+          "invalid ScalarChannel decoded image data");
+    check(ui::detail::image_texture_materialization_call_count_for_test() ==
+              initial_image_materialization,
+          "invalid ScalarChannel materialized ImageTexture state");
+
     const auto compiled = ui::ShaderProgram::compile(R"(
         half4 main(float2) { return half4(0.25, 0.5, 0.75, 1.0); }
     )");
