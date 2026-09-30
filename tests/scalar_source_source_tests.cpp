@@ -651,6 +651,48 @@ void backend_failure_retry_contract() {
           "ScalarSource did not recover after backend materialization failure");
 }
 
+
+void failed_renderer_does_not_contaminate_other_contract() {
+    const auto first_program = compile_probe(R"(
+        half4 main(float2) {
+            return half4(0.8, 0.1, 0.1, 1.0);
+        }
+    )");
+    const auto second_program = compile_probe(R"(
+        half4 main(float2) {
+            return half4(0.1, 0.7, 0.1, 1.0);
+        }
+    )");
+
+    ui::ShaderInstance first_shader{first_program};
+    ui::ShaderInstance second_shader{second_program};
+    const auto first = ui::ScalarSource::from_brush(
+        ui::Brush{first_shader}, ui::ScalarChannel::Red);
+    const auto second = ui::ScalarSource::from_brush(
+        ui::Brush{second_shader}, ui::ScalarChannel::Green);
+
+    ui::detail::set_shader_materialization_failure_for_test(
+        ui::detail::ShaderMaterializationFailurePoint::BeforeUniformData);
+
+    bool first_failed = false;
+    try {
+        (void)render_probe(scalar_probe(first), 8, 8);
+    } catch (const std::bad_alloc&) {
+        first_failed = true;
+    }
+    check(first_failed,
+          "first ScalarSource renderer did not exercise the failure seam");
+
+    const auto second_pixel =
+        render_probe(scalar_probe(second), 8, 8);
+    check(second_pixel[0] > 0.65f && second_pixel[0] < 0.75f,
+          "failed ScalarSource renderer contaminated an independent renderer");
+
+    const auto second_repeat =
+        render_probe(scalar_probe(second), 8, 8);
+    check_pixel_near(second_repeat, second_pixel);
+}
+
 void two_renderer_isolation_contract() {
     const auto first = ui::ScalarSource::from_brush(
         ui::Brush{ui::Color{0.8f, 0.1f, 0.1f, 1.0f}},
@@ -723,6 +765,7 @@ int main() {
     snapshot_lifetime_contract();
     noise_sampling_contract();
     backend_failure_retry_contract();
+    failed_renderer_does_not_contaminate_other_contract();
     independent_source_contract();
     two_renderer_isolation_contract();
     return 0;
