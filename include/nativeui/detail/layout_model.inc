@@ -257,7 +257,7 @@ public:
     /// The callable is owned until Subscription reset/destruction. Registration
     /// may allocate/throw. Callbacks may re-enter mutation, disconnect observers
     /// or destroy ScrollState; the dispatch transaction tolerates those cases.
-    [[nodiscard]] Subscription observe(std::function<void(Point)> callback) {
+    Subscription observe(std::function<void(Point)> callback) {
         auto control = control_;
         if (!control->owner_alive) return {};
         const auto id = control->next_listener_id++;
