@@ -5,9 +5,97 @@
 #include "test_support.hpp"
 
 #include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <limits>
+#include <new>
 #include <type_traits>
 #include <utility>
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
+
+namespace {
+
+thread_local bool track_allocations = false;
+thread_local bool fail_next_allocation = false;
+thread_local std::size_t allocation_count = 0;
+
+void before_allocation() {
+    if (fail_next_allocation) {
+        fail_next_allocation = false;
+        throw std::bad_alloc{};
+    }
+    if (track_allocations) ++allocation_count;
+}
+
+void* allocate_memory(std::size_t size) {
+    before_allocation();
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc{};
+}
+
+void* allocate_aligned_memory(std::size_t size, std::size_t alignment) {
+    before_allocation();
+#if defined(_MSC_VER)
+    if (void* memory = _aligned_malloc(size == 0 ? 1 : size, alignment)) {
+        return memory;
+    }
+#else
+    void* memory = nullptr;
+    if (posix_memalign(&memory, alignment, size == 0 ? 1 : size) == 0) {
+        return memory;
+    }
+#endif
+    throw std::bad_alloc{};
+}
+
+void free_aligned_memory(void* memory) noexcept {
+#if defined(_MSC_VER)
+    _aligned_free(memory);
+#else
+    std::free(memory);
+#endif
+}
+
+} // namespace
+
+void* operator new(std::size_t size) { return allocate_memory(size); }
+void* operator new[](std::size_t size) { return allocate_memory(size); }
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    try { return allocate_memory(size); } catch (...) { return nullptr; }
+}
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+    try { return allocate_memory(size); } catch (...) { return nullptr; }
+}
+void operator delete(void* memory, const std::nothrow_t&) noexcept {
+    std::free(memory);
+}
+void operator delete[](void* memory, const std::nothrow_t&) noexcept {
+    std::free(memory);
+}
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    return allocate_aligned_memory(size, static_cast<std::size_t>(alignment));
+}
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    return allocate_aligned_memory(size, static_cast<std::size_t>(alignment));
+}
+void operator delete(void* memory, std::align_val_t) noexcept {
+    free_aligned_memory(memory);
+}
+void operator delete[](void* memory, std::align_val_t) noexcept {
+    free_aligned_memory(memory);
+}
+void operator delete(void* memory, std::size_t, std::align_val_t) noexcept {
+    free_aligned_memory(memory);
+}
+void operator delete[](void* memory, std::size_t, std::align_val_t) noexcept {
+    free_aligned_memory(memory);
+}
 
 namespace {
 
@@ -107,6 +195,81 @@ void move_contract() {
     NUI_CHECK(!moved.has_emissive());
 }
 
+void allocation_free_value_contract() {
+    allocation_count = 0;
+    track_allocations = true;
+    {
+        ui::Material material;
+        material.set_roughness(-2.0f)
+                .set_metallic(8.0f);
+        material.clear_emissive();
+    }
+    track_allocations = false;
+
+    NUI_CHECK(allocation_count == 0);
+}
+
+void copy_assignment_failure_contract() {
+    ui::LinearGradient gradient{
+        {0.0f, 0.0f},
+        {16.0f, 0.0f},
+        ui::Color{0.1f, 0.2f, 0.3f, 1.0f},
+        ui::Color{0.7f, 0.8f, 0.9f, 1.0f}};
+    ui::Material source{ui::Brush{std::move(gradient)}};
+    source.set_roughness(0.2f).set_metallic(0.8f);
+
+    ui::Material destination{
+        ui::Brush{ui::Color{0.9f, 0.1f, 0.2f, 1.0f}}};
+    destination.set_roughness(0.7f).set_metallic(0.3f);
+
+    bool failed = false;
+    fail_next_allocation = true;
+    try {
+        destination = source;
+    } catch (const std::bad_alloc&) {
+        failed = true;
+    }
+    fail_next_allocation = false;
+
+    NUI_CHECK(failed);
+    const auto* unchanged =
+        ui::detail::MaterialAccess::solid_color(destination.albedo());
+    NUI_CHECK(unchanged != nullptr);
+    check_color(*unchanged, {0.9f, 0.1f, 0.2f, 1.0f});
+    NUI_CHECK(scalar_constant(destination.roughness()) == 0.7f);
+    NUI_CHECK(scalar_constant(destination.metallic()) == 0.3f);
+
+    destination = source;
+    NUI_CHECK(ui::detail::MaterialAccess::solid_color(destination.albedo()) == nullptr);
+    NUI_CHECK(scalar_constant(destination.roughness()) == 0.2f);
+    NUI_CHECK(scalar_constant(destination.metallic()) == 0.8f);
+}
+
+void independent_material_contract() {
+    ui::Material second{
+        ui::Brush{ui::Color{0.1f, 0.7f, 0.2f, 1.0f}}};
+    second.set_roughness(0.4f).set_metallic(0.6f);
+
+    {
+        ui::Material first{
+            ui::Brush{ui::Color{0.8f, 0.2f, 0.1f, 1.0f}}};
+        first.set_roughness(0.2f)
+             .set_metallic(0.9f)
+             .set_emissive(
+                 ui::Brush{ui::Color{1.0f, 0.4f, 0.2f, 1.0f}},
+                 4.0f);
+        first.clear_emissive();
+    }
+
+    const auto* color =
+        ui::detail::MaterialAccess::solid_color(second.albedo());
+    NUI_CHECK(color != nullptr);
+    check_color(*color, {0.1f, 0.7f, 0.2f, 1.0f});
+    NUI_CHECK(scalar_constant(second.roughness()) == 0.4f);
+    NUI_CHECK(scalar_constant(second.metallic()) == 0.6f);
+    NUI_CHECK(!second.has_emissive());
+}
+
 void sanitation_contract() {
     using A = ui::detail::MaterialAccess;
     check_color(
@@ -145,6 +308,9 @@ int main() {
     default_and_emissive_contract();
     producer_values_are_not_preclamped();
     move_contract();
+    allocation_free_value_contract();
+    copy_assignment_failure_contract();
+    independent_material_contract();
     sanitation_contract();
     return 0;
 }
