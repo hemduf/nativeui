@@ -1,6 +1,9 @@
 name: Scalar Source Validation
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/scalar-source-material-data
