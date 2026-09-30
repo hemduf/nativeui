@@ -1,19 +1,31 @@
 #include <nativeui/image.hpp>
 #include <nativeui/material.hpp>
 #include <nativeui/noise.hpp>
+#include <nativeui/paint.hpp>
 #include <nativeui/shader.hpp>
 
 #include "src/detail/image_texture_brush_access.hpp"
 #include "src/detail/image_texture_test_seams.hpp"
+#include "src/detail/material_access.hpp"
 #include "src/detail/scalar_source_access.hpp"
 #include "src/detail/shader_brush_access.hpp"
 #include "src/detail/shader_test_seams.hpp"
 
+#include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace {
 
@@ -31,6 +43,110 @@ constexpr std::array<std::byte, 70> kAlphaPayloadPng{
 
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error{message};
+}
+
+std::shared_ptr<const ui::ShaderProgram> compile_probe(std::string_view source) {
+    const auto compiled = ui::ShaderProgram::compile(source);
+    check(compiled.ok() && compiled.program != nullptr,
+          "Material probe shader compilation failed");
+    return compiled.program;
+}
+
+std::string channel_expression(ui::ScalarChannel channel) {
+    switch (channel) {
+    case ui::ScalarChannel::Red:
+        return "value.r";
+    case ui::ScalarChannel::Green:
+        return "value.g";
+    case ui::ScalarChannel::Blue:
+        return "value.b";
+    case ui::ScalarChannel::Alpha:
+        return "value.a";
+    }
+    throw std::runtime_error{"invalid Material probe channel"};
+}
+
+ui::Brush select_channel(const ui::Brush& brush, ui::ScalarChannel channel) {
+    std::string source{
+        "uniform shader source;\n"
+        "half4 main(float2 p) {\n"
+        "    half4 value = source.eval(p);\n"
+        "    half scalar = "};
+    source += channel_expression(channel);
+    source +=
+        ";\n"
+        "    return half4(scalar, scalar, scalar, 1.0);\n"
+        "}\n";
+
+    ui::ShaderInstance probe{compile_probe(source)};
+    check(probe.set_child("source", brush) == ui::ShaderSetResult::Ok,
+          "Material probe child binding failed");
+    return ui::Brush{probe};
+}
+
+ui::Brush scalar_probe(const ui::ScalarSource& source) {
+    if (ui::detail::ScalarSourceAccess::is_constant(source)) {
+        auto program = compile_probe(R"(
+            uniform float scalar;
+            half4 main(float2) {
+                return half4(scalar, scalar, scalar, 1.0);
+            }
+        )");
+        ui::ShaderInstance probe{std::move(program)};
+        check(probe.set_float(
+                  "scalar",
+                  ui::detail::ScalarSourceAccess::constant_value(source)) ==
+                  ui::ShaderSetResult::Ok,
+              "Material constant probe binding failed");
+        return ui::Brush{probe};
+    }
+
+    const auto* brush = ui::detail::ScalarSourceAccess::brush(source);
+    check(brush != nullptr, "Material probe lost ScalarSource Brush storage");
+    return select_channel(
+        *brush, ui::detail::ScalarSourceAccess::channel(source));
+}
+
+std::array<float, 4> render_probe(const ui::Brush& brush,
+                                  int x,
+                                  int y,
+                                  float translate_x = 0.0f) {
+    const auto info = SkImageInfo::Make(
+        24,
+        16,
+        kRGBA_F32_SkColorType,
+        kPremul_SkAlphaType,
+        SkColorSpace::MakeSRGBLinear());
+    auto surface = SkSurfaces::Raster(info);
+    check(surface != nullptr, "Material probe surface creation failed");
+    auto* canvas = surface->getCanvas();
+    check(canvas != nullptr, "Material probe canvas missing");
+    canvas->clear(SK_ColorTRANSPARENT);
+
+    ui::Painter painter{*canvas};
+    if (translate_x == 0.0f) {
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 16.0f, 16.0f}, 0.0f, brush);
+    } else {
+        auto state = painter.scoped_state();
+        painter.translate(translate_x, 0.0f);
+        painter.fill_rounded_rect(
+            {0.0f, 0.0f, 16.0f, 16.0f}, 0.0f, brush);
+    }
+
+    SkPixmap pixmap;
+    check(surface->peekPixels(&pixmap), "Material probe pixels missing");
+    const auto value = pixmap.getColor4f(x, y);
+    return {value.fR, value.fG, value.fB, value.fA};
+}
+
+void check_pixel_near(const std::array<float, 4>& actual,
+                      const std::array<float, 4>& expected,
+                      float tolerance = 0.0025f) {
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        check(std::abs(actual[index] - expected[index]) <= tolerance,
+              "Material probe pixel mismatch");
+    }
 }
 
 void prepared_setters_do_no_source_or_backend_work() {
@@ -230,6 +346,105 @@ void nested_source_mapping_and_lifetime_contract() {
           "Material did not retain NoiseSource-backed metallic ownership");
 }
 
+void shared_painter_coordinate_and_post_sample_sanitation_contract() {
+    const auto program = compile_probe(R"(
+        half4 main(float2 p) {
+            return half4(p.x / 16.0, p.y / 16.0, p.x / 4.0 - 1.0, 1.0);
+        }
+    )");
+    ui::ShaderInstance shader{program};
+    const ui::Brush coordinate_source{shader};
+
+    ui::Material material{coordinate_source};
+    material
+        .set_roughness(ui::ScalarSource::from_brush(
+            coordinate_source, ui::ScalarChannel::Blue))
+        .set_metallic(ui::ScalarSource::from_brush(
+            coordinate_source, ui::ScalarChannel::Red))
+        .set_emissive(
+            coordinate_source,
+            ui::ScalarSource::from_brush(
+                coordinate_source, ui::ScalarChannel::Green));
+
+    const auto roughness = scalar_probe(material.roughness());
+    const auto metallic = scalar_probe(material.metallic());
+    const auto emissive_intensity = scalar_probe(material.emissive_intensity());
+
+    check_pixel_near(
+        render_probe(roughness, 3, 7),
+        render_probe(
+            select_channel(material.albedo(), ui::ScalarChannel::Blue),
+            3, 7));
+    check_pixel_near(
+        render_probe(metallic, 12, 7),
+        render_probe(
+            select_channel(material.albedo(), ui::ScalarChannel::Red),
+            12, 7));
+    check_pixel_near(
+        render_probe(emissive_intensity, 7, 7, 2.0f),
+        render_probe(
+            select_channel(material.emissive_color(), ui::ScalarChannel::Green),
+            7, 7, 2.0f));
+
+    const auto low = render_probe(roughness, 0, 7);
+    const auto high = render_probe(roughness, 12, 7);
+    check(low[0] < 0.0f,
+          "Material pre-clamped a negative sampled roughness source");
+    check(high[0] > 1.0f,
+          "Material pre-clamped an above-one sampled roughness source");
+    check(ui::detail::MaterialAccess::sanitize_roughness(low[0]) == 0.045f,
+          "Material roughness sanitation did not occur after sampling");
+    check(ui::detail::MaterialAccess::sanitize_roughness(high[0]) == 1.0f,
+          "Material roughness upper sanitation did not occur after sampling");
+}
+
+void color_and_data_source_semantics_survive_material_storage() {
+    const auto image = ui::Image::decode(kAlphaPayloadPng);
+    check(image.valid(), "Material Color/Data fixture image decode failed");
+
+    ui::ImageTexture color_texture{
+        image,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 16.0f, 16.0f}};
+    color_texture.set_interpretation(ui::TextureInterpretation::Color);
+    auto data_texture = color_texture;
+    data_texture.set_interpretation(ui::TextureInterpretation::Data);
+
+    const ui::Brush color_brush{color_texture};
+    const ui::Brush data_brush{data_texture};
+    const auto data_scalar = ui::ScalarSource::from_brush(
+        data_brush, ui::ScalarChannel::Green);
+
+    ui::Material material{color_brush};
+    material.set_roughness(data_scalar);
+
+    check_pixel_near(
+        render_probe(material.albedo(), 8, 8),
+        render_probe(color_brush, 8, 8));
+    check_pixel_near(
+        render_probe(scalar_probe(material.roughness()), 8, 8),
+        render_probe(scalar_probe(data_scalar), 8, 8));
+
+    const auto* stored_color =
+        ui::detail::ImageTextureBrushAccess::texture(material.albedo());
+    check(stored_color != nullptr &&
+              stored_color->interpretation() == ui::TextureInterpretation::Color,
+          "Material changed Color texture interpretation");
+
+    const auto* stored_data_brush =
+        ui::detail::ScalarSourceAccess::brush(material.roughness());
+    check(stored_data_brush != nullptr,
+          "Material lost Data-backed ScalarSource storage");
+    const auto* stored_data =
+        ui::detail::ImageTextureBrushAccess::texture(*stored_data_brush);
+    check(stored_data != nullptr &&
+              stored_data->interpretation() == ui::TextureInterpretation::Data,
+          "Material changed Data texture interpretation");
+    check(ui::detail::ScalarSourceAccess::channel(material.roughness()) ==
+              ui::ScalarChannel::Green,
+          "Material changed Data ScalarSource channel");
+}
+
 void clear_releases_emissive_resource_ownership() {
     std::weak_ptr<const ui::ShaderProgram> program_lifetime;
     ui::Material original;
@@ -266,6 +481,8 @@ int main() {
     prepared_setters_do_no_source_or_backend_work();
     shader_snapshot_is_owned_independently();
     nested_source_mapping_and_lifetime_contract();
+    shared_painter_coordinate_and_post_sample_sanitation_contract();
+    color_and_data_source_semantics_survive_material_storage();
     clear_releases_emissive_resource_ownership();
     return 0;
 }
