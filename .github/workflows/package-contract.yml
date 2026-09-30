@@ -1,0 +1,100 @@
+name: Package Contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-contract.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/features/**'
+      - '*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Intel disabled: the macos-15-intel runner is far slower than
+          # the other platforms and adds no additional coverage. Re-enable by
+          # uncommenting the two entries below.
+          # - name: macOS Intel
+          #   os: macos-15-intel
+          - name: macOS ARM64
+            os: macos-15
+          - name: Windows x64
+            os: windows-latest
+          - name: Linux x64
+            os: ubuntu-latest
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libdbus-1-dev libx11-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: >-
+          cmake -S . -B build-package -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_BUILD_PACKAGE_TESTS=ON
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-package -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DNATIVEUI_BUILD_PLATFORM=ON
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=OFF
+          -DNATIVEUI_BUILD_PACKAGE_TESTS=ON
+
+      - name: Build
+        run: cmake --build build-package --config Release
+
+      - name: Test package consumers
+        run: ctest --test-dir build-package --output-on-failure -C Release -L '^package$'
