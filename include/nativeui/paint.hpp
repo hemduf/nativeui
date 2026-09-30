@@ -437,7 +437,11 @@ public:
         const Transform2D operation = Transform2D::translation(x, y);
         apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
     }
-    /// Convenience overload for a logical translation vector.
+    /// Post-concatenate a logical translation vector.
+    ///
+    /// `offset.x` and `offset.y` are logical UI units. The value is copied and
+    /// no caller storage is retained. Non-finite components are ignored exactly
+    /// like the scalar overload, leaving backend and tracked transform unchanged.
     void translate(Point offset) { translate(offset.x, offset.y); }
     /// Post-concatenate dimensionless X/Y scale factors; non-finite input is ignored.
     void scale(float x, float y) {
@@ -445,9 +449,15 @@ public:
         const Transform2D operation = Transform2D::scaling(x, y);
         apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
     }
-    /// Apply one dimensionless scale factor to both axes.
+    /// Post-concatenate one dimensionless scale factor on both axes.
+    ///
+    /// Non-finite input is ignored. Zero and negative finite factors are forwarded;
+    /// callers that require invertible geometry must enforce that invariant.
     void scale(float uniform) { scale(uniform, uniform); }
-    /// Post-concatenate rotation in radians; non-finite input is ignored.
+    /// Post-concatenate a rotation measured in radians.
+    ///
+    /// Finite values are forwarded to affine composition. Non-finite input is a
+    /// no-op and does not publish partial tracked transform state.
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
         const Transform2D operation = Transform2D::rotation(radians);
@@ -482,14 +492,22 @@ public:
                               make_fill_paint(color, {}));
     }
 
-    /// Fill a rounded logical rectangle with a linear gradient.
+    /// Fill a rounded logical rectangle with a borrowed linear gradient.
+    ///
+    /// Rect/radius are logical and are forwarded without clip-style canonicalization.
+    /// Gradient storage is read only during this call; materialization may allocate
+    /// or throw, and Painter retains no reference after return.
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(gradient, options));
     }
 
-    /// Fill a rounded logical rectangle with a radial gradient.
+    /// Fill a rounded logical rectangle with a borrowed radial gradient.
+    ///
+    /// Geometry is logical and forwarded without primitive-level validation.
+    /// Gradient storage is consumed synchronously; materialization may allocate
+    /// or throw, and no caller-owned reference survives return.
     void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
@@ -508,7 +526,10 @@ public:
                               make_fill_paint(brush, options));
     }
 
-    /// Stroke a rounded rectangle; radius/width are logical lengths.
+    /// Stroke a rounded rectangle with a copied solid color.
+    ///
+    /// Radius and width are logical lengths. This convenience overload delegates
+    /// to the Brush path and adds no finite/positive geometry validation.
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         stroke_rounded_rect(rect, radius, width, Brush{color});
     }
@@ -524,19 +545,28 @@ public:
                               make_stroke_paint(brush, StrokeStyle{width}, options));
     }
 
-    /// Fill a logical-coordinate circle with a solid color.
+    /// Fill a logical-coordinate circle with a copied solid color.
+    ///
+    /// Center/radius use logical units. Geometry is forwarded directly, so portable
+    /// deterministic output requires a finite center and finite non-negative radius.
     void circle(Point center, float radius, Color color) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(color, {}));
     }
 
-    /// Fill a logical-coordinate circle from any Brush source.
+    /// Fill a logical-coordinate circle from a borrowed Brush source.
+    ///
+    /// Brush materialization is synchronous and may allocate or throw. No reference
+    /// into caller-owned Brush state is retained after the draw returns.
     void circle(Point center, float radius, const Brush& brush,
                 PaintOptions options = {}) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(brush, options));
     }
 
-    /// Stroke an arc; angles are radians and radius/width are logical lengths.
-    /// Sweep is end-start and caps are round.
+    /// Stroke an arc with a copied solid color.
+    ///
+    /// Start/end are radians, sweep is end-start, and radius/width are logical.
+    /// Round caps are used. The overload delegates to the Brush path and retains
+    /// no caller-owned state.
     void arc(Point center, float radius, float start, float end, float width, Color color) {
         arc(center, radius, start, end, width, Brush{color});
     }
@@ -556,7 +586,10 @@ public:
         canvas_.drawArc(oval, start * rad_to_deg, (end - start) * rad_to_deg, false, paint);
     }
 
-    /// Stroke a logical-coordinate line segment with round caps.
+    /// Stroke a logical-coordinate line segment with a copied solid color.
+    ///
+    /// Endpoints and width are logical and round caps are used. The overload
+    /// delegates to the Brush path and performs no additional validation.
     void line(Point a, Point b, float width, Color color) {
         line(a, b, width, Brush{color});
     }
@@ -641,7 +674,10 @@ public:
         }
     }
 
-    /// Convenience overload constructing TextStyle from size/color/alignment.
+    /// Draw text using an ephemeral TextStyle built from scalar arguments.
+    ///
+    /// Position/size use logical units. The UTF-8 view is borrowed only until
+    /// return; fallback/layout may allocate or throw and no caller view is retained.
     void text(Point position, std::string_view text, float size, Color color,
               TextAlign align = TextAlign::Left) {
         TextStyle style{};
@@ -662,7 +698,10 @@ public:
         canvas_.clipRect(to_sk_rect(rect), SkClipOp::kIntersect, true);
     }
 
-    /// Restore the state pushed by push_clip().
+    /// Restore the state pushed by the matching successful `push_clip()`.
+    ///
+    /// This follows manual stack discipline and the same protected restore-floor
+    /// rules as `restore()`; prefer scoped_clip() for exception-safe pairing.
     void pop_clip() { restore(); }
 
     /// Measure UTF-8 text width in logical units using TextService defaults.

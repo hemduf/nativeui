@@ -159,6 +159,34 @@ The effect overload adds `Effect` filtering. Zero Gaussian blur reduces to an or
 
 Painter also draws rounded rectangles, circles, lines and arcs. Arc start/end are in **radians**, sweep is `end - start`, and arc/line helpers use round caps.
 
+The overload-level contracts matter when implementing custom controls:
+
+| API family | Borrow/ownership | Units and validation | Failure / fallback |
+| --- | --- | --- | --- |
+| `translate(Point)`, `scale(uniform)`, `rotate(radians)` | value arguments are copied; no external lifetime | translation is logical, scale dimensionless, rotation radians; non-finite transforms are ignored | backend mutation completes before tracked transform publication |
+| rounded-rect gradient fills | gradient/stop storage is borrowed for the synchronous call | rect/radius are logical and forwarded without clip-style clamping | source materialization may allocate/throw; no gradient reference is retained |
+| `circle(..., Brush)` | Brush is borrowed only for materialization/draw | logical center/radius; caller supplies finite meaningful geometry | materialization may allocate/throw; no caller Brush reference survives return |
+| solid `stroke_rounded_rect`, `arc`, `line` | Color is copied and the overload delegates through a temporary Brush | logical widths/radii, arc angles in radians; no extra finite/positive canonicalization | same propagation behavior as the Brush overload |
+| scalar `text(..., size, color, align)` | UTF-8 view is borrowed until return; style scalars are copied | logical position/size; same alignment/baseline contract as the TextStyle overload | fallback/layout/repair may allocate/throw; no caller text view is retained |
+| `push_clip` / `pop_clip` | no external ownership | logical Rect forwarded directly; manual save/restore pairing | no scoped transactional protection; prefer `scoped_clip()` in fallible code |
+
+A custom component can keep transform/clip lifetime explicit without leaking borrowed paint state:
+
+```cpp
+void paint(ui::PaintContext& context) const override {
+    auto state = context.painter.scoped_state();
+    context.painter.translate({12.0f, 8.0f});
+
+    auto clip = context.painter.scoped_clip({0.0f, 0.0f, 120.0f, 32.0f}, 6.0f);
+    context.painter.circle(
+        {16.0f, 16.0f},
+        5.0f,
+        ui::Brush{ui::Color{1.0f, 1.0f, 1.0f, 1.0f}});
+}
+```
+
+Both guards borrow the callback-scoped Painter and therefore must be destroyed before `paint()` returns.
+
 Primitive drawing and protected clipping intentionally have different invalid-input contracts. `scoped_clip(...)` canonicalizes invalid geometry to an empty clip because an unbounded/invalid clip would threaten retained traversal correctness. Primitive draw helpers instead forward geometry to the backend. Callers should therefore provide finite points/rectangles/angles, non-negative radii and finite positive stroke widths when they need portable deterministic output. In particular, rounded-rectangle draw radii are **not** clamped the way rounded clip radii are.
 
 Path draw calls borrow the `Path` only for the synchronous call and convert it to backend geometry immediately; conversion may allocate. `fill_path()` treats an empty path as a no-op. `stroke_path()` additionally treats `width <= 0` as a no-op and clamps the miter limit to at least zero. A NaN stroke width is not rejected by the `<= 0` check, and non-finite path commands are not rejected by the draw path, so finite inputs remain the caller contract. By contrast, `scoped_clip(path)` validates every command and fails closed to an empty clip.
