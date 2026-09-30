@@ -16,17 +16,27 @@
 
 namespace ui {
 
+/// Primary geometry axis for Slider and RangeSlider.
 enum class SliderOrientation {
+    /// Minimum-to-maximum runs left to right in logical UI geometry.
     Horizontal,
+    /// Minimum-to-maximum runs bottom to top in logical UI geometry.
     Vertical,
 };
 
+/// Resolved interaction presentation state for slider controls.
 enum class SliderVisualState {
+    /// Enabled, writable and idle.
     Normal,
+    /// Pointer is hovering the active control.
     Hover,
+    /// A pointer drag is active.
     Pressed,
+    /// Keyboard focus without an active drag.
     Focused,
+    /// Effective availability disables interaction.
     Disabled,
+    /// Effective availability permits focus/presentation but forbids value mutation.
     ReadOnly,
 };
 
@@ -498,49 +508,87 @@ private:
 
 } // namespace detail
 
+/// Detached scalar slider builder backed by a Binding<float>.
+///
+/// The retained component owns the Binding handle and all configured callbacks.
+/// External State values are not silently rewritten merely for paint: non-finite
+/// values render as minimum and finite out-of-range values are clamped for
+/// presentation. User edits are normalized to the configured domain/step before
+/// writing. Input, formatting and edit callbacks run synchronously in the owning
+/// UI domain, may allocate/throw, and are not audio/DSP real-time.
 class Slider {
 public:
+    /// Paint-time formatter receiving the effective finite/clamped scalar value.
+    ///
+    /// The callback is owned by the component and invoked synchronously during
+    /// paint. Its returned string is consumed immediately. Structural reentrancy
+    /// from a paint formatter is not a supported mutation boundary.
     using Formatter = detail::SliderComponent::Formatter;
 
+    /// Take ownership of a copyable binding handle.
     explicit Slider(Binding<float> state) : state_(std::move(state)) {}
+    /// Convenience overload that immediately obtains state.binding().
     explicit Slider(State<float>& state) : Slider(state.binding()) {}
 
+    /// Configure the scalar domain.
+    ///
+    /// Values are unitless application scalars. Retained materialization throws
+    /// std::invalid_argument unless both endpoints are finite and minimum < maximum.
     Slider&& range(float minimum, float maximum) && {
         minimum_ = minimum;
         maximum_ = maximum;
         return std::move(*this);
     }
 
+    /// Configure edit quantization; zero means continuous.
+    ///
+    /// Retained materialization throws std::invalid_argument for negative or
+    /// non-finite steps. Positive steps quantize from the configured minimum
+    /// before clamping to the range.
     Slider&& step(float value) && {
         step_ = value;
         return std::move(*this);
     }
 
+    /// Select horizontal or vertical logical-geometry mapping.
     Slider&& orientation(SliderOrientation value) && {
         orientation_ = value;
         return std::move(*this);
     }
 
+    /// Take ownership of an optional paint-time value formatter.
     Slider&& formatter(Formatter value) && {
         formatter_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Replace the complete owned SliderStyle value.
     Slider&& style(SliderStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Take ownership of synchronous begin/update/end edit callbacks.
+    ///
+    /// Callback/state reentrancy follows EditSession semantics. Pointer-edit
+    /// exceptions unwind through input dispatch after best-effort capture/edit cleanup.
     Slider&& on_edit(EditCallbacks<float> callbacks) && {
         callbacks_ = std::move(callbacks);
         return std::move(*this);
     }
 
+    /// Enable pointer-wheel mutation; disabled by default.
+    ///
+    /// Keyboard and pointer-drag editing remain available independently.
     Slider&& wheel_enabled(bool value = true) && {
         wheel_enabled_ = value;
         return std::move(*this);
     }
 
+    /// Consume the builder and transfer binding/domain/callback/style configuration.
+    ///
+    /// The returned Spec borrows nothing from this Slider object. Range/step
+    /// validation occurs when its retained component is materialized.
     Spec spec() && {
         auto state = std::move(state_);
         const float minimum = minimum_;

@@ -16,8 +16,11 @@
 
 namespace ui {
 
+/// Fill geometry for ProgressBar and Meter.
 enum class ProgressOrientation {
+    /// Minimum-to-maximum fill grows left to right.
     Horizontal,
+    /// Minimum-to-maximum fill grows bottom to top.
     Vertical,
 };
 
@@ -199,28 +202,52 @@ private:
 
 } // namespace detail
 
+/// Read-only retained bounded-value display.
+///
+/// Unlike Binding-backed controls, ProgressBar intentionally stores a raw borrow
+/// of State<float>. That State must outlive the builder, produced Spec and every
+/// retained component materialized from it. The widget never writes the State.
+/// Non-finite source values display as minimum; finite values are clamped for
+/// presentation without modifying State. It is non-focusable/non-interactive.
 class ProgressBar {
 public:
+    /// Paint-time formatter receiving the effective finite/clamped value.
+    ///
+    /// The callback is owned by the retained component, runs synchronously during
+    /// paint and may allocate/throw. Structural mutation from a paint formatter
+    /// is not a supported reentrant boundary.
     using Formatter = detail::BoundedDisplayComponent::Formatter;
 
+    /// Borrow state and configure the scalar display domain.
+    ///
+    /// state must outlive every Spec/component produced from this builder.
+    /// Retained materialization throws std::invalid_argument unless minimum and
+    /// maximum are finite and minimum < maximum.
     explicit ProgressBar(State<float>& state, float minimum = 0.0f, float maximum = 1.0f)
         : state_(&state), minimum_(minimum), maximum_(maximum) {}
 
+    /// Select horizontal or vertical logical fill geometry.
     ProgressBar&& orientation(ProgressOrientation value) && {
         orientation_ = value;
         return std::move(*this);
     }
 
+    /// Take ownership of an optional paint-time formatter.
     ProgressBar&& formatter(Formatter value) && {
         formatter_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Replace the complete owned ProgressBarStyle value.
     ProgressBar&& style(ProgressBarStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume this builder while preserving the State borrow in the Spec.
+    ///
+    /// The returned Spec owns formatter/style configuration but still borrows
+    /// the original State<float>; materialization performs range validation.
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;
@@ -251,28 +278,43 @@ private:
     ProgressBarStyle style_;
 };
 
+/// Read-only retained bounded-value meter.
+///
+/// Ownership, State borrowing, range validation, effective-value clamping,
+/// threading and formatter/reentrancy rules are identical to ProgressBar; Meter
+/// differs only in the style family used to resolve its presentation.
 class Meter {
 public:
+    /// Paint-time formatter receiving the effective finite/clamped value.
     using Formatter = detail::BoundedDisplayComponent::Formatter;
 
+    /// Borrow state and configure the scalar domain.
+    ///
+    /// state must outlive the builder, produced Spec and retained component.
+    /// Invalid finite ordering/non-finite endpoints throw std::invalid_argument
+    /// when the retained component is materialized.
     explicit Meter(State<float>& state, float minimum = 0.0f, float maximum = 1.0f)
         : state_(&state), minimum_(minimum), maximum_(maximum) {}
 
+    /// Select horizontal or vertical logical fill geometry.
     Meter&& orientation(ProgressOrientation value) && {
         orientation_ = value;
         return std::move(*this);
     }
 
+    /// Take ownership of an optional synchronous paint-time formatter.
     Meter&& formatter(Formatter value) && {
         formatter_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Replace the complete owned MeterStyle value.
     Meter&& style(MeterStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume this builder; the produced Spec continues to borrow State<float>.
     Spec spec() && {
         auto* state = state_;
         const float minimum = minimum_;

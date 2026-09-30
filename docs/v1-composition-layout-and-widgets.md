@@ -270,6 +270,29 @@ auto panel = ui::Column{
 };
 ```
 
+### Standard activation, selection and bounded-value contracts
+
+The remaining standard value controls expose materially different lifetime boundaries and are documented at declaration level rather than merely linked from this chapter.
+
+| API | State/ownership contract | Domain and failure contract |
+| --- | --- | --- |
+| `Button` | owns label, callback and `ButtonStyle`; `spec() &&` leaves no builder borrow | activation callback is copied after internal interaction bookkeeping, then invoked synchronously; it may re-enter/destroy surrounding retained objects and exceptions propagate |
+| `Checkbox` | owns a `Binding<bool>` handle; the `State<bool>&` overload immediately converts to a binding | accepted activation toggles synchronously; effective read-only consumes mutating input without writing |
+| `RadioGroup<T>` / `RadioButton<T>` | buttons copy the group's binding/token/registry, so a constructed button/spec does not borrow the `RadioGroup` object | equal live option values in one group are rejected by `RadioButton::spec()` with `std::invalid_argument`; selection writes through the binding synchronously |
+| `Slider` | owns its `Binding<float>`, formatter, edit callbacks and style | retained materialization requires finite `minimum < maximum`; step must be finite and non-negative, with zero meaning continuous |
+| `RangeSlider` | owns its `Binding<RangeValue>` and style | external endpoints are clamped/ordered only for presentation; interaction writes finite ordered endpoints and applies the same range/step validation as `Slider` |
+| `ProgressBar` / `Meter` | **borrow** `State<float>&` through the produced `Spec`; the State must outlive builder, Spec and retained component | retained materialization requires finite `minimum < maximum`; non-finite source values display as minimum and finite out-of-range values clamp without rewriting State |
+
+Slider and range-slider scalar values are application-defined units. Orientation changes only logical UI geometry. Positive slider steps quantize from the configured minimum before clamping; zero leaves pointer input continuous. Painting does not normalize externally supplied State back into application storage. `Slider::Formatter`, `ProgressBar::Formatter` and `Meter::Formatter` receive the effective finite/clamped value and run synchronously during paint; returned strings are consumed immediately. Paint formatters may allocate or throw, and retained structural mutation from those callbacks is not a supported reentrant mutation boundary.
+
+`Slider::on_edit()` transfers the complete `EditCallbacks<float>` set into the retained edit session. Pointer, keyboard and opt-in wheel edits publish synchronously in the UI/input domain. Pointer-edit exceptions unwind only after best-effort pointer-capture/edit cleanup; disabling, deactivation, Escape and pointer cancellation terminate an active edit according to the shared edit-session contract. `Slider::wheel_enabled()` is opt-in and does not disable ordinary pointer-drag or keyboard editing.
+
+`RangeValue` is a plain two-field value. A reversed or non-finite externally written pair is made safe for paint/hit-testing only: low falls back to minimum, high to maximum, both are clamped, then ordered. User interaction writes an ordered pair and does not let the active thumb cross the other endpoint.
+
+`ProgressBar` and `Meter` are intentionally different from the Binding-backed controls: they retain a raw `State<float>` borrow so that long-lived telemetry-style state is observed directly. Destroying that State while a derived Spec/component can still materialize or paint violates the public lifetime contract. Both displays ignore input and are not focusable.
+
+All activation/value/formatter paths are owning-UI work, may allocate, and are outside audio/DSP real-time constraints.
+
 Focused executable examples are the preferred behavioral references:
 
 | Widget/interaction family | Focused example |
