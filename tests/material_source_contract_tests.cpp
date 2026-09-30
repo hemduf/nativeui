@@ -136,6 +136,100 @@ void shader_snapshot_is_owned_independently() {
           "Material observed later caller-side ShaderInstance mutation");
 }
 
+void check_rect(ui::Rect actual, ui::Rect expected) {
+    check(actual.x == expected.x &&
+              actual.y == expected.y &&
+              actual.w == expected.w &&
+              actual.h == expected.h,
+          "Material changed ImageTexture mapping rectangle");
+}
+
+void check_transform(ui::Transform2D actual, ui::Transform2D expected) {
+    check(actual.m00 == expected.m00 &&
+              actual.m01 == expected.m01 &&
+              actual.m02 == expected.m02 &&
+              actual.m10 == expected.m10 &&
+              actual.m11 == expected.m11 &&
+              actual.m12 == expected.m12,
+          "Material introduced a second source transform");
+}
+
+void nested_source_mapping_and_lifetime_contract() {
+    ui::Material material;
+    const ui::Rect albedo_destination{2.0f, 3.0f, 18.0f, 20.0f};
+    const ui::Rect roughness_destination{5.0f, 7.0f, 11.0f, 13.0f};
+    const auto albedo_transform =
+        ui::Transform2D::translation(3.0f, 4.0f) *
+        ui::Transform2D::scaling(0.5f, 0.75f);
+    const auto roughness_transform =
+        ui::Transform2D::translation(-2.0f, 6.0f);
+
+    {
+        const auto image = ui::Image::decode(kAlphaPayloadPng);
+        check(image.valid(), "Material mapping fixture image decode failed");
+
+        ui::ImageTexture albedo_texture{
+            image,
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            albedo_destination};
+        albedo_texture
+            .set_interpretation(ui::TextureInterpretation::Color)
+            .set_transform(albedo_transform);
+
+        ui::ImageTexture roughness_texture{
+            image,
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            roughness_destination};
+        roughness_texture
+            .set_interpretation(ui::TextureInterpretation::Data)
+            .set_transform(roughness_transform);
+
+        const auto noise = ui::NoiseSource::create(
+            ui::NoiseType::Value,
+            {.feature_size = 20.0f, .seed = 0x10203040u});
+        check(noise.ok(), "Material mapping fixture noise creation failed");
+
+        material
+            .set_albedo(ui::Brush{albedo_texture})
+            .set_roughness(ui::ScalarSource::from_brush(
+                ui::Brush{roughness_texture},
+                ui::ScalarChannel::Green))
+            .set_metallic(ui::ScalarSource::from_noise(noise.noise));
+    }
+
+    const auto* stored_albedo =
+        ui::detail::ImageTextureBrushAccess::texture(material.albedo());
+    check(stored_albedo != nullptr && stored_albedo->valid(),
+          "Material did not retain ImageTexture albedo ownership");
+    check(stored_albedo->interpretation() == ui::TextureInterpretation::Color,
+          "Material changed Color texture interpretation");
+    check_rect(stored_albedo->destination(), albedo_destination);
+    check_transform(stored_albedo->transform(), albedo_transform);
+
+    const auto* roughness_brush =
+        ui::detail::ScalarSourceAccess::brush(material.roughness());
+    check(roughness_brush != nullptr,
+          "Material did not retain Brush-backed roughness ownership");
+    const auto* stored_roughness =
+        ui::detail::ImageTextureBrushAccess::texture(*roughness_brush);
+    check(stored_roughness != nullptr && stored_roughness->valid(),
+          "Material lost roughness ImageTexture ownership");
+    check(stored_roughness->interpretation() ==
+              ui::TextureInterpretation::Data,
+          "Material changed Data texture interpretation");
+    check(ui::detail::ScalarSourceAccess::channel(material.roughness()) ==
+              ui::ScalarChannel::Green,
+          "Material changed roughness source channel");
+    check_rect(stored_roughness->destination(), roughness_destination);
+    check_transform(stored_roughness->transform(), roughness_transform);
+
+    const auto* metallic_brush =
+        ui::detail::ScalarSourceAccess::brush(material.metallic());
+    check(metallic_brush != nullptr &&
+              ui::detail::ShaderBrushAccess::is_shader(*metallic_brush),
+          "Material did not retain NoiseSource-backed metallic ownership");
+}
+
 void clear_releases_emissive_resource_ownership() {
     std::weak_ptr<const ui::ShaderProgram> program_lifetime;
     ui::Material original;
@@ -171,6 +265,7 @@ void clear_releases_emissive_resource_ownership() {
 int main() {
     prepared_setters_do_no_source_or_backend_work();
     shader_snapshot_is_owned_independently();
+    nested_source_mapping_and_lifetime_contract();
     clear_releases_emissive_resource_ownership();
     return 0;
 }
