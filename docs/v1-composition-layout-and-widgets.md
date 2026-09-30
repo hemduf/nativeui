@@ -217,6 +217,43 @@ The public layout entry point is [`include/nativeui/layout.hpp`](../include/nati
 
 The stable container families include rows/columns, alignment, flex sizing, grid placement and scrollable content. Layout invalidation propagates through the retained tree; application code should request the appropriate NativeUI invalidation rather than manually calling private layout passes.
 
+### Public layout value, builder and scroll contracts
+
+The primary declarations behind `layout.hpp` are header-only and remain public even when their definitions live in `include/nativeui/detail/*.inc`.
+
+| API family | Contract |
+| --- | --- |
+| `Align` / `Justify` | cross-axis placement and main-axis distribution after measurement/flex allocation |
+| `Track` / `GridTracks` | fixed extents use logical pixels; flex weights are dimensionless; negative/non-finite values normalize to zero |
+| `Row` / `Column` / `Grid` | detached builders owning child recipes; gaps/padding use logical pixels and normalize during retained materialization |
+| `Flex` | one-child dimensionless grow/shrink weights; invalid/negative weights behave as zero |
+| `Spacer` / `Padding` / `Clip` / `Stack` | detached value builders; `spec() &&` transfers ownership into the retained recipe |
+| `ScrollState` | application-owned logical offset/geometry controller; retained views borrow through weak lifetime tokens |
+| `ScrollState::Subscription` | move-only RAII observer registration; reset/destruction disconnects without extending controller lifetime |
+| `ScrollView` | owns content/style configuration but borrows `ScrollState`; wheel/pan/layout are UI-thread and non-RT |
+| `ensure_visible()` / `ScrollAlignment` | derive a requested content offset, then rely on ScrollState normalization/clamping |
+
+`ScrollState::set_offset()` commits the normalized value before synchronous observers run. Disabled axes become zero; negative/non-finite coordinates normalize to zero; after retained metrics exist, offsets clamp to `max_offset()`. Reentrant writes are serialized through the active observer transaction. If an observer throws, the committed value remains while the unstarted observer suffix and pending recursive work are not retried implicitly.
+
+Retained scroll recipes do **not** own their `ScrollState`. Destroying the application controller invalidates lifetime tokens and makes retained borrowers inert. Builder configuration is detached, but retained layout may publish metrics, clamp an offset and synchronously notify observers; those paths may therefore re-enter or throw.
+
+```cpp
+ui::ScrollState scroll{ui::ScrollAxis::Vertical};
+auto subscription = scroll.observe([](ui::Point offset) {
+    // Committed logical-pixel offset.
+});
+
+auto content = ui::ScrollView{
+    scroll,
+    ui::Column{ui::Label{"One"}, ui::Label{"Two"}}}
+    .pointer_pan()
+    .spec();
+
+scroll.set_offset({0.0f, 120.0f});
+(void)ui::ensure_visible(
+    scroll, ui::Rect{0.0f, 240.0f, 100.0f, 24.0f}, ui::ScrollAlignment::Nearest);
+```
+
 ### Focused layout examples
 
 The feature examples are the maintained executable references for individual layout families:

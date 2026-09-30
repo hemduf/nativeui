@@ -1,7 +1,15 @@
+/// Programmatic alignment for revealing scroll content.
+///
+/// Coordinates use logical UI pixels and the final target is clamped by
+/// ScrollState.
 enum class ScrollAlignment {
+    /// Keep visible content in place; otherwise move minimally.
     Nearest,
+    /// Align descendant start with viewport start.
     Start,
+    /// Center descendant in the viewport.
     Center,
+    /// Align descendant end with viewport end.
     End,
 };
 
@@ -509,6 +517,15 @@ private:
 
 } // namespace detail
 
+/// Scroll enough to reveal one descendant rectangle.
+///
+/// `descendant_bounds` is in ScrollState content coordinates, in logical pixels.
+/// Only configured axes participate. Invalid geometry leaves that coordinate
+/// unchanged; ScrollState then normalizes/clamps the target.
+///
+/// Returns true when a committed offset changed. Synchronous observers may
+/// re-enter, destroy the controller or throw; accepted mutation remains committed
+/// according to ScrollState's transaction contract. UI-thread/non-RT.
 [[nodiscard]] inline bool ensure_visible(
     ScrollState& state,
     Rect descendant_bounds,
@@ -705,8 +722,15 @@ private:
     Point offset_origin_{};
 };
 
+/// Detached one-child scroll-view builder with overlay scrollbars.
+///
+/// The builder owns converted child/style configuration but borrows the
+/// application-owned ScrollState. Retained borrowers use a weak lifetime token
+/// and become inert safely after state destruction. spec() && consumes the
+/// builder. Retained scrolling is UI-thread work and not audio-RT safe.
 class ScrollView {
 public:
+    /// Borrow state and own the converted child recipe.
     template <class Child>
     ScrollView(ScrollState& state, Child&& child)
         : state_(&state),
@@ -714,16 +738,23 @@ public:
           lifetime_(state.lifetime_token()),
           content_(make_spec(std::forward<Child>(child))) {}
 
+    /// Enable/disable drag-to-pan pointer capture. Disabled by default.
     ScrollView&& pointer_pan(bool enabled = true) && {
         pointer_pan_ = enabled;
         return std::move(*this);
     }
 
+    /// Replace the owned scrollbar style for both axis overlays.
     ScrollView&& style(ScrollbarStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume into a retained recipe.
+    ///
+    /// The Spec owns content/style/configuration but continues to borrow
+    /// ScrollState through pointer+lifetime token. Building child recipes may
+    /// allocate and propagates allocation failures.
     Spec spec() && {
         auto* state = state_;
         const auto axis = axis_;
