@@ -88,6 +88,13 @@ public:
         return *this;
     }
 
+    Material& set_emissive(Brush color, float intensity) {
+        emissive_color_ = std::move(color);
+        emissive_intensity_ = ScalarSource{intensity};
+        has_emissive_ = true;
+        return *this;
+    }
+
     Material& clear_emissive() noexcept {
         has_emissive_ = false;
         emissive_color_ = transparent_brush();
