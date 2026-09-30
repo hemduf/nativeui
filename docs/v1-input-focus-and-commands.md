@@ -195,6 +195,58 @@ auto scoped = ui::CommandScope{
 
 [`t017_commands.cpp`](../examples/features/t017_commands.cpp) demonstrates TextInput owning Copy/Paste, a scoped Undo handler and global fallback.
 
+## Generic edit sessions
+
+[`edit.hpp`](../include/nativeui/edit.hpp) defines `EditSession<T>`, a UI-thread edit-lifetime helper around an ordinary `Binding<T>`. It gives retained controls explicit begin/change/end-or-cancel semantics without turning NativeUI into a plug-in automation layer: `EditSource` is callback metadata only and does not imply host automation, normalization, or audio-thread transport.
+
+### Ownership and callback order
+
+The session owns its Binding handle and `EditCallbacks<T>` by value. Callback captures follow normal C++ lifetime rules; objects captured by reference/pointer are not kept alive by NativeUI. The originating `State<T>` remains the logical value owner, and direct State/Binding writes do not synthesize edit callbacks.
+
+A successful edit has this ordering:
+
+```text
+begin
+  -> zero or more [State observers -> change]
+  -> exactly one end | cancel
+```
+
+The source passed to `begin(source)` remains fixed until the terminal callback. `change` receives a borrowed `const T&` valid only for that callback. State observers run first, so change sees the final committed value after synchronous observer-side normalization. If that final value compares equal to the value present before the update, change is suppressed.
+
+Cancellation is a lifetime/interaction result, not rollback: the latest committed State value remains in place. If the originating State expires, later mutation is rejected and an active edit becomes cancellation when a session operation observes the invalid Binding. `active()` only reads the session's local flag and deliberately does not trigger this validation/cancellation itself.
+
+### Reentrancy, failures and return values
+
+While begin/change dispatch is active, `begin()`, `update()`, `set()` and reentrant `finish()` do not create a nested transaction. Reentrant `end()`/`cancel()` are deferred until the callback returns; cancellation wins over a competing deferred end.
+
+`begin()` can therefore return false even after its begin callback ran: if that callback requested end/cancel, the deferred terminal notification has already made the session inactive. `update(value)` returns true only when the final committed State value differs from the value seen before the update.
+
+`finish(value)` performs the update and then requests end while retaining internal control state, so removing the owning subtree from an observer/callback does not invalidate the in-flight method. An equal final value still ends an active session and returns false. A reentrant finish returns false immediately and leaves the current transaction unchanged.
+
+`set(value, source)` is the discrete one-shot form. It runs begin -> update -> end only for a live, valid, inactive, non-reentrant session whose value differs from the current State. Equal/rejected calls emit no edit callbacks and do not interrupt an existing edit.
+
+Exceptions from begin/change/State observers cancel the edit once and then rethrow the original exception. Explicit terminal callback exceptions propagate after the session is already inactive and are never retried. Destructor-triggered cancellation suppresses terminal exceptions to preserve the noexcept destructor.
+
+```cpp
+ui::State<float> gain{0.5f};
+
+ui::EditSession<float> edit{
+    gain.binding(),
+    {
+        .begin = [](ui::EditSource source) { begin_ui_edit(source); },
+        .change = [](const float& value, ui::EditSource) { preview_gain(value); },
+        .end = [](ui::EditSource) { commit_ui_edit(); },
+        .cancel = [](ui::EditSource) { abandon_ui_edit(); },
+    }};
+
+if (edit.begin(ui::EditSource::Pointer)) {
+    edit.update(0.65f);
+    edit.finish(0.7f);
+}
+```
+
+The helper may allocate and invoke arbitrary application callbacks. It belongs to the owning UI/main-thread domain and is not an audio/DSP real-time primitive or cross-thread synchronization object.
+
 ## Reusable click/drag gestures
 
 [`gesture.hpp`](../include/nativeui/gesture.hpp) provides `DragGesture`, a small synchronous value-only state machine for controls that need click-versus-drag classification without owning another event subsystem.
@@ -276,11 +328,19 @@ ui::EventResult input(
 
 [`t016_gestures.cpp`](../examples/features/t016_gestures.cpp) demonstrates this pattern with pointer capture and a horizontal drag value.
 
+### State inspection and terminal edge cases
+
+`active()`, `dragging()`, `phase()`, `origin()`, `current()` and `threshold()` are allocation-free value queries. Origin/current retain the last stored sample after end/cancel; phase/active are the liveness indicators. Calling `begin()` while already active restarts at the new origin and does not synthesize an end/cancel for the abandoned gesture.
+
+Idle `move()`, `end()` and `cancel()` return a zero/default `DragUpdate`. `end(position)` samples the final position with the same threshold logic as `move()` before click-versus-drag classification. With a zero threshold, that final sample crosses the threshold even with zero displacement, so it terminates as a drag rather than a click. `cancel()` does not sample a new position: returned delta is zero and total reflects the last current() sample.
+
+The gesture owns only value state, invokes no callbacks, performs no allocation or retained-tree/platform work, and has no internal synchronization. NativeUI controls normally mutate one instance from their owning UI thread. Pointer capture remains a separate `InputContext` responsibility.
+
 ### Mapping drag distance to values
 
-`drag_axis_delta()` projects a `Point` onto Horizontal or Vertical. `drag_value_delta()` additionally multiplies by a caller-provided value-per-logical-pixel scale and optionally inverts the sign.
+`drag_axis_delta()` returns exactly the x or y component of the supplied `Point`. `drag_value_delta()` multiplies that component by a caller-provided application-value-units-per-coordinate-unit scale (normally value per logical pixel) and optionally negates the result.
 
-These helpers deliberately do not clamp application values. The control/application retains responsibility for its value domain.
+Neither helper clamps to an application range, validates finite inputs, retains state, or invokes callbacks. The control/application remains responsible for its final value domain.
 
 ## TextEditModel
 
