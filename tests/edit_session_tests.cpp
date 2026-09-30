@@ -123,5 +123,4 @@ int main() {
     CHECK(edit.begin(ui::EditSource::Pointer));
     CHECK(other.set(0.4f,ui::EditSource::Keyboard));
     CHECK(edit.active()); edit.end(); CHECK(trace=="BE");
-    return 0;
 }
