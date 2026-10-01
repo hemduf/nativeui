@@ -35,7 +35,7 @@ enum class ShaderCompileError {
     UnsupportedInterface,
 };
 
-/// Owned diagnostic returned by ShaderProgram::compile().
+/// Owned diagnostic returned by shader-program compilation.
 struct ShaderDiagnostic {
     /// Machine-readable failure category.
     ShaderCompileError code{};
