@@ -372,6 +372,19 @@ once before publication. Fractal configuration is a value-only, allocation-free
 paint-time compilation is introduced. Worley F1/F2 remain explicitly excluded
 as NativeUI 1.1 fractal bases.
 
+T093 adds `ScalarSource` as the backend-neutral immutable numeric-source
+counterpart to `Brush`. A scalar source stores either an unclamped float or a
+channel selection from an immutable Brush snapshot; `from_noise()` reuses the
+existing opaque-black-to-white NoiseSource Brush semantics and does not compile
+or materialize a second source. Constants, moved-from values and invalid channel
+enumerators have deterministic value semantics, while Brush-backed sources keep
+the same Painter-local coordinates, Color/Data interpretation and renderer-owned
+materialization/failure behavior as ordinary Brush child sampling. ScalarSource
+does not apply destination coverage/blending, color conversion, alpha
+unpremultiplication or material-specific physical clamping. It introduces no
+public backend type, callback, mutable global registry or renderer ownership;
+later Material consumers own per-property sanitization and physical ranges.
+
 ---
 
 ## 7. Logical coordinates and high DPI

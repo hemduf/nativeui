@@ -201,6 +201,16 @@ Every Brush-taking primitive borrows the Brush only until return. Gradient/image
 
 `measure_text(text, size)` is the width-only convenience path through `TextService` with the same borrowed-input and allocation/error boundary. Use the full text service/style APIs when ascent/descent or explicit typography is required.
 
+## Scalar numeric sources
+
+[`include/nativeui/scalar_source.hpp`](../include/nativeui/scalar_source.hpp) defines `ScalarSource`, the backend-neutral immutable scalar-input value used for numeric material/data channels. It stores either an unclamped floating-point constant or an owned `Brush` snapshot plus one `ScalarChannel` selection (`Red`, `Green`, `Blue` or `Alpha`).
+
+`ScalarSource::constant(value)` and the floating-point constructor preserve the supplied value; the type does not impose physical-range or material-specific clamping. `from_brush(brush, channel)` owns the passed Brush value, so later replacement of the caller's Brush object does not alter the source. An invalid channel enumerator is rejected deterministically by returning the default zero source. `from_noise(noise)` reuses the existing opaque-black-to-white `NoiseSource` Brush representation and selects its red channel rather than introducing a second noise materialization path.
+
+Copying produces an independent value snapshot. Move construction and move assignment leave the moved-from source in the defined zero-constant state; self-move also resets the value to zero. Destruction is `noexcept`. Brush-backed construction or copying belongs to ordinary UI/resource-preparation code rather than an audio real-time callback.
+
+`ScalarSource` exposes no Skia/Pugl/platform type, process-global registry, callback or renderer ownership. Sampling coordinates and Color/Data interpretation follow the underlying Brush contract. The scalar layer itself does not apply destination blending/coverage, color conversion or alpha unpremultiplication; consumers that attach physical meaning to a scalar remain responsible for their own range validation and sanitization.
+
 ## Brushes, gradients, paint options and effects
 
 [`paint_style.hpp`](../include/nativeui/paint_style.hpp) stores renderer-neutral values; backend resources are materialized later by Painter.
@@ -591,6 +601,7 @@ The table describes the stable design intent; the component/style implementation
 | widget-family style recipes | [Widget style reference](v1-widget-style-reference.md) |
 | drawing/path/paint style | [`include/nativeui/paint.hpp`](../include/nativeui/paint.hpp), [`include/nativeui/paint_style.hpp`](../include/nativeui/paint_style.hpp), [`include/nativeui/path.hpp`](../include/nativeui/path.hpp) |
 | runtime shaders and per-instance bindings | [`include/nativeui/shader.hpp`](../include/nativeui/shader.hpp) |
+| scalar numeric inputs | [`include/nativeui/scalar_source.hpp`](../include/nativeui/scalar_source.hpp) |
 | text presentation | [`include/nativeui/text.hpp`](../include/nativeui/text.hpp) |
 | image/vector presentation | [`include/nativeui/image.hpp`](../include/nativeui/image.hpp), [`include/nativeui/svg.hpp`](../include/nativeui/svg.hpp) |
 | retained invalidation / damage accumulation | [`include/nativeui/invalidation.hpp`](../include/nativeui/invalidation.hpp), [low-level Tree runtime](v1-low-level-tree-runtime.md) |
