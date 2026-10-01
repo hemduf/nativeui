@@ -126,6 +126,27 @@ private:
         // eviction-plan allocation and owned-key construction may throw, but
         // retained state and LRU order remain untouched until staging succeeds.
         auto eviction_plan = prepare_evictions(accounted_bytes);
+
+        // Recompute the exact post-eviction byte count before mutating retained
+        // state. This keeps both subtraction and the final insertion addition
+        // checked even if an internal accounting invariant is violated.
+        std::size_t retained_after_eviction = retained_accounted_bytes_;
+        for (const auto& victim : eviction_plan) {
+            if (victim.entry->accounted_bytes > retained_after_eviction) {
+                throw std::logic_error(
+                    "RenderResourceCache retained-byte accounting underflow");
+            }
+            retained_after_eviction -= victim.entry->accounted_bytes;
+        }
+        if (retained_after_eviction > limits_.max_accounted_bytes ||
+            accounted_bytes >
+                limits_.max_accounted_bytes - retained_after_eviction) {
+            throw std::logic_error(
+                "RenderResourceCache retained-byte accounting overflow");
+        }
+        const auto retained_after_insert =
+            retained_after_eviction + accounted_bytes;
+
         Key stored_key = std::invoke(std::forward<KeyFactory>(key_factory));
 
         // Stage every potentially-throwing insertion before evicting an
@@ -148,7 +169,7 @@ private:
         }
 
         commit_evictions(eviction_plan);
-        retained_accounted_bytes_ += accounted_bytes;
+        retained_accounted_bytes_ = retained_after_insert;
         return {std::move(resource), false, true};
     }
 
@@ -235,7 +256,6 @@ private:
     void commit_evictions(
         const std::vector<EvictionVictim>& victims) noexcept {
         for (const auto& victim : victims) {
-            retained_accounted_bytes_ -= victim.entry->accounted_bytes;
             index_.erase(victim.index);
             entries_.erase(victim.entry);
         }
