@@ -186,8 +186,10 @@ require_text("${_header_fixture_content}" "#include <nativeui/semantics.hpp>"
 # use its own consumer identity and expose its AppKit bridge for the prefix
 # audit. The portable publication-sink suite above covers the domain contract;
 # this guards the real-pump registration.
+# Identify the shared smoke group: the macOS visibility suite has its own
+# earlier opt-in block, which must not shadow the accessibility registration.
 require_conditional_body("${_tests_cmake}"
-  "if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)"
+  "if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)\n      add_test(NAME nativeui_smoke_standalone"
   "platform smoke gate" _smoke_gate)
 require_text("${_smoke_gate}" "add_test(NAME nativeui_smoke_accessibility "
   "accessibility smoke CTest registration inside the smoke gate")
