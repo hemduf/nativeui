@@ -165,6 +165,24 @@ if(NATIVEUI_BUILD_TESTS)
     set_tests_properties(${name} PROPERTIES LABELS "unit")
   endfunction()
 
+  if(NOT EMSCRIPTEN)
+    add_executable(nativeui_graphite_depth_experiment_tests
+      ${PROJECT_SOURCE_DIR}/tests/graphite_depth_experiment_tests.cpp)
+    target_include_directories(nativeui_graphite_depth_experiment_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    target_compile_features(nativeui_graphite_depth_experiment_tests PRIVATE cxx_std_20)
+    target_link_libraries(nativeui_graphite_depth_experiment_tests PRIVATE SkiaBuilder::skia)
+    nativeui_enable_project_warnings(nativeui_graphite_depth_experiment_tests)
+    nativeui_enable_sanitizers(nativeui_graphite_depth_experiment_tests)
+    add_test(
+      NAME nativeui_graphite_depth_experiment_tests
+      COMMAND nativeui_graphite_depth_experiment_tests)
+    set_tests_properties(nativeui_graphite_depth_experiment_tests PROPERTIES
+      LABELS "unit;research;graphite"
+      TIMEOUT 30)
+  endif()
+
   nativeui_add_core_test(
     nativeui_advanced_rendering_docs_snippets
     ${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_snippets.cpp)
