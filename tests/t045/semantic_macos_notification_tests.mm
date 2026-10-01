@@ -77,6 +77,7 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot(
     std::uint64_t generation,
     bool focused = false,
     bool selected = false,
+    bool value_capable = false,
     ui::SemanticRole root_role = ui::SemanticRole::Group) {
     auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
     snapshot->generation = generation;
@@ -96,7 +97,43 @@ std::shared_ptr<const ui::SemanticTreeSnapshot> ordinary_snapshot(
     child.info.name = "action";
     child.info.focused = focused;
     child.info.selected = selected;
+    if (value_capable) {
+        child.info.text_value = "value";
+    }
     snapshot->nodes.push_back(std::move(child));
+    return snapshot;
+}
+
+std::shared_ptr<const ui::SemanticTreeSnapshot> ambiguous_value_snapshot(
+    std::uint64_t generation,
+    std::string first_value,
+    std::string second_value) {
+    auto snapshot = std::make_shared<ui::SemanticTreeSnapshot>();
+    snapshot->generation = generation;
+    snapshot->root = 1U;
+
+    ui::SemanticNodeSnapshot root;
+    root.id = 1U;
+    root.info.role = ui::SemanticRole::Group;
+    root.info.name = "root";
+    root.children = {2U, 3U};
+    snapshot->nodes.push_back(std::move(root));
+
+    ui::SemanticNodeSnapshot first;
+    first.id = 2U;
+    first.parent = 1U;
+    first.info.role = ui::SemanticRole::Button;
+    first.info.name = "first";
+    first.info.text_value = std::move(first_value);
+    snapshot->nodes.push_back(std::move(first));
+
+    ui::SemanticNodeSnapshot second;
+    second.id = 3U;
+    second.parent = 1U;
+    second.info.role = ui::SemanticRole::Button;
+    second.info.name = "second";
+    second.info.text_value = std::move(second_value);
+    snapshot->nodes.push_back(std::move(second));
     return snapshot;
 }
 
@@ -187,7 +224,7 @@ void value_only_batch_never_reposts_structure() {
     fixture.log.records.clear();
 
     const auto value_only = fixture.publication.publish(
-        ordinary_snapshot(2U),
+        ordinary_snapshot(2U, false, false, true),
         {Change::ValueChanged},
         ui::detail::SemanticNativeGeometry{1.0f, {0.0f, 0.0f}});
     CHECK(value_only.has_value());
@@ -198,8 +235,38 @@ void value_only_batch_never_reposts_structure() {
     CHECK(!fixture.log.has_appkit(NSAccessibilityCreatedNotification));
     CHECK(!fixture.log.has_appkit(NSAccessibilityLayoutChangedNotification));
     CHECK(!fixture.log.has_appkit(NSAccessibilityUIElementDestroyedNotification));
-    CHECK(fixture.log.records[0U].element == (const void*)root);
+    NSArray* const children = appkit_children(root);
+    CHECK(children != nil && [children count] == 1U);
+    CHECK(fixture.log.records[0U].element ==
+          (const void*)[children objectAtIndex:0U]);
     CHECK(view_root(fixture.view) == root);
+}
+
+void ambiguous_value_batch_falls_back_to_root() {
+    BridgeFixture fixture;
+    fixture.attach();
+
+    const auto initial = fixture.publication.publish(
+        ambiguous_value_snapshot(1U, "first", "second"),
+        {Change::StructureChanged},
+        ui::detail::SemanticNativeGeometry{1.0f, {0.0f, 0.0f}});
+    CHECK(initial.has_value());
+    CHECK(fixture.deliver(*initial));
+
+    id const root = view_root(fixture.view);
+    CHECK(root != nil);
+    fixture.log.records.clear();
+
+    const auto value_only = fixture.publication.publish(
+        ambiguous_value_snapshot(2U, "updated-first", "updated-second"),
+        {Change::ValueChanged},
+        ui::detail::SemanticNativeGeometry{1.0f, {0.0f, 0.0f}});
+    CHECK(value_only.has_value());
+    CHECK(fixture.deliver(*value_only));
+
+    CHECK(fixture.log.records.size() == 1U);
+    CHECK(fixture.log.has_appkit(NSAccessibilityValueChangedNotification));
+    CHECK(fixture.log.records[0U].element == (const void*)root);
 }
 
 void bounds_only_batch_maps_to_layout_without_structure() {
@@ -208,6 +275,8 @@ void bounds_only_batch_maps_to_layout_without_structure() {
     const auto initial = fixture.publish_structure(1U);
     CHECK(initial.has_value());
     CHECK(fixture.deliver(*initial));
+    id const root = view_root(fixture.view);
+    CHECK(root != nil);
     fixture.log.records.clear();
 
     const auto bounds_only = fixture.publication.publish(
@@ -224,6 +293,7 @@ void bounds_only_batch_maps_to_layout_without_structure() {
     CHECK(!fixture.log.has_appkit(NSAccessibilityCreatedNotification));
     CHECK(!fixture.log.has_appkit(NSAccessibilityUIElementDestroyedNotification));
     CHECK(!fixture.log.has_appkit(NSAccessibilityValueChangedNotification));
+    CHECK(fixture.log.records[0U].element == (const void*)root);
 }
 
 void focus_and_selection_use_the_committed_categories_only() {
@@ -259,7 +329,8 @@ void focus_and_selection_use_the_committed_categories_only() {
     CHECK(fixture.log.records.size() == 1U);
     CHECK(fixture.log.has_appkit(
         NSAccessibilitySelectedChildrenChangedNotification));
-    CHECK(fixture.log.records[0U].element == (const void*)root);
+    CHECK(fixture.log.records[0U].element ==
+          (const void*)[children objectAtIndex:0U]);
 }
 
 void combined_categories_emit_exactly_one_notification_per_category() {
@@ -484,6 +555,7 @@ int main() {
         try {
             structure_batch_announces_created_root_and_children_layout();
             value_only_batch_never_reposts_structure();
+            ambiguous_value_batch_falls_back_to_root();
             bounds_only_batch_maps_to_layout_without_structure();
             focus_and_selection_use_the_committed_categories_only();
             combined_categories_emit_exactly_one_notification_per_category();

@@ -18,10 +18,12 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <optional>
 #include <vector>
 
 namespace {
 
+using ui::detail::MacOSAccessibilityChildIdentity;
 using ui::detail::MacOSAccessibilityProxyCache;
 using ui::detail::NativeAccessibilityAttachBinding;
 using ui::detail::SemanticNativePublicationBatch;
@@ -125,6 +127,107 @@ void emit_notification(NativeUIAccessibilityBridge* bridge,
     return nil;
 }
 
+[[nodiscard]] bool has_semantic_value(const ui::SemanticInfo& info) noexcept {
+    return info.expanded != ui::SemanticExpandedState::NotApplicable ||
+           info.checked != ui::SemanticCheckedState::NotApplicable ||
+           info.text_value.has_value() || info.numeric_value.has_value() ||
+           info.value_range.has_value();
+}
+
+[[nodiscard]] std::optional<MacOSAccessibilityChildIdentity>
+selection_target_identity(const SemanticNativePublicationBatch& batch) noexcept {
+    try {
+        if (!batch.publication || !batch.publication->semantic_snapshot) {
+            return std::nullopt;
+        }
+        const auto& snapshot = *batch.publication->semantic_snapshot;
+        for (const auto& node : snapshot.nodes) {
+            if (node.info.selected) {
+                return MacOSAccessibilityChildIdentity{node.id, std::nullopt};
+            }
+        }
+        for (const auto& node : snapshot.nodes) {
+            if (!node.virtual_children) {
+                continue;
+            }
+            const auto token = node.virtual_children->selected_token();
+            if (token) {
+                return MacOSAccessibilityChildIdentity{node.id, *token};
+            }
+        }
+    } catch (...) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<MacOSAccessibilityChildIdentity>
+value_target_identity(const SemanticNativePublicationBatch& batch) noexcept {
+    try {
+        if (!batch.publication || !batch.publication->semantic_snapshot) {
+            return std::nullopt;
+        }
+        const auto& snapshot = *batch.publication->semantic_snapshot;
+
+        const ui::SemanticNodeSnapshot* root = nullptr;
+        const ui::SemanticNodeSnapshot* focused = nullptr;
+        for (const auto& node : snapshot.nodes) {
+            if (node.id == snapshot.root) {
+                root = &node;
+            }
+            if (!focused && node.info.focused) {
+                focused = &node;
+            }
+        }
+
+        const ui::SemanticNodeSnapshot* target = nullptr;
+        if (focused && has_semantic_value(focused->info)) {
+            target = focused;
+        } else {
+            const ui::SemanticNodeSnapshot* single = nullptr;
+            std::size_t candidates = 0U;
+            for (const auto& node : snapshot.nodes) {
+                if (!has_semantic_value(node.info)) {
+                    continue;
+                }
+                single = &node;
+                ++candidates;
+                if (candidates > 1U) {
+                    break;
+                }
+            }
+            if (candidates == 1U) {
+                target = single;
+            } else if (focused) {
+                target = focused;
+            } else {
+                target = root;
+            }
+        }
+
+        if (target) {
+            return MacOSAccessibilityChildIdentity{target->id, std::nullopt};
+        }
+    } catch (...) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] NSAccessibilityElement* notification_target_element(
+    NativeUIAccessibilityBridge* bridge,
+    const std::optional<MacOSAccessibilityChildIdentity>& identity) noexcept {
+    if (!bridge || !bridge->cache || !identity || !identity->valid() ||
+        ![NSThread isMainThread]) {
+        return nil;
+    }
+    if (identity->virtual_token) {
+        return bridge->cache->virtual_item(
+            identity->node_id, *identity->virtual_token);
+    }
+    return bridge->cache->ordinary(identity->node_id);
+}
+
 /// Map one committed batch onto the closed macOS notification set. Structure
 /// posts created/destroyed notifications for an announced root transition plus
 /// the AppKit layout notification that replaced the removed historical
@@ -175,13 +278,21 @@ void emit_committed_batch(NativeUIAccessibilityBridge* bridge,
     }
 
     if (selection) {
-        id const target = bridge->last_root ? (id)bridge->last_root : (id)bridge->view;
+        NSAccessibilityElement* const selected =
+            notification_target_element(bridge, selection_target_identity(batch));
+        id const target = selected
+            ? (id)selected
+            : (bridge->last_root ? (id)bridge->last_root : (id)bridge->view);
         emit_notification(bridge, NSAccessibilitySelectedChildrenChangedNotification,
                           target);
     }
 
     if (value) {
-        id const target = bridge->last_root ? (id)bridge->last_root : (id)bridge->view;
+        NSAccessibilityElement* const value_element =
+            notification_target_element(bridge, value_target_identity(batch));
+        id const target = value_element
+            ? (id)value_element
+            : (bridge->last_root ? (id)bridge->last_root : (id)bridge->view);
         emit_notification(bridge, NSAccessibilityValueChangedNotification, target);
     }
 }
