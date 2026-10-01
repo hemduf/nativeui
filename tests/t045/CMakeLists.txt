@@ -5,17 +5,144 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(t045_semantics ../t045_semantics_tests.cpp)
-target_include_directories(t045_semantics PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}/../../include
-  ${CMAKE_CURRENT_LIST_DIR}/..
-)
+find_package(Threads REQUIRED)
 
-if(MSVC)
-  target_compile_options(t045_semantics PRIVATE /W4 /WX /permissive-)
-else()
-  target_compile_options(t045_semantics PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+function(nativeui_add_semantics_test target source)
+  add_executable(${target} ${source})
+  target_include_directories(${target} PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
+  )
+
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
+
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
 
 enable_testing()
-add_test(NAME t045_semantics COMMAND t045_semantics)
+nativeui_add_semantics_test(t045_semantics ../t045_semantics_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_proxy accessibility_semantic_proxy_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_children_query accessibility_semantic_children_query_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_proxy_cache accessibility_semantic_proxy_cache_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_diff_regression accessibility_semantic_diff_regression_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_action_policy accessibility_semantic_action_policy_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_action_router accessibility_semantic_action_router_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_action_target_binding accessibility_semantic_action_target_binding_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_action_view_binding accessibility_semantic_action_view_binding_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_native_view_bridge accessibility_semantic_native_view_bridge_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_native_generation accessibility_semantic_native_generation_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_read_only accessibility_semantic_read_only_tests.cpp)
+nativeui_add_semantics_test(accessibility_widget_semantic_values accessibility_widget_semantic_values_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_view_state accessibility_semantic_view_state_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_publication_batch accessibility_semantic_publication_batch_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_native_bounds accessibility_semantic_native_bounds_tests.cpp)
+nativeui_add_semantics_test(accessibility_semantic_native_geometry_capture accessibility_semantic_native_geometry_capture_tests.cpp)
+nativeui_add_semantics_test(accessibility_concurrent_snapshot_readers ../accessibility_concurrent_snapshot_readers.cpp)
+nativeui_add_semantics_test(accessibility_uia_mapping accessibility_uia_mapping_tests.cpp)
+nativeui_add_semantics_test(accessibility_uia_provider accessibility_uia_provider_tests.cpp)
+target_sources(accessibility_uia_provider PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+)
+target_link_libraries(accessibility_uia_provider PRIVATE Threads::Threads)
+nativeui_add_semantics_test(semantic_macos_child_projection semantic_macos_child_projection_tests.cpp)
+nativeui_add_semantics_test(semantic_macos_mapping semantic_macos_mapping_tests.cpp)
+nativeui_add_semantics_test(semantic_macos_frame semantic_macos_frame_tests.cpp)
+
+if(APPLE)
+  enable_language(OBJCXX)
+  nativeui_add_semantics_test(semantic_macos_appkit semantic_macos_appkit_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_appkit_frame semantic_macos_appkit_frame_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_proxy_cache semantic_macos_proxy_cache_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_children_callbacks semantic_macos_children_callbacks_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_interaction semantic_macos_interaction_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_production_bridge semantic_macos_production_bridge_tests.mm)
+  nativeui_add_semantics_test(semantic_macos_notifications semantic_macos_notification_tests.mm)
+  nativeui_add_semantics_test(accessibility_objc_runtime_prefix_probe semantic_macos_runtime_prefix_probe_tests.mm)
+  set_target_properties(
+    semantic_macos_appkit
+    semantic_macos_appkit_frame
+    semantic_macos_proxy_cache
+    semantic_macos_children_callbacks
+    semantic_macos_interaction
+    semantic_macos_production_bridge
+    semantic_macos_notifications
+    accessibility_objc_runtime_prefix_probe
+    PROPERTIES
+      OBJCXX_STANDARD 20
+      OBJCXX_STANDARD_REQUIRED YES
+      OBJCXX_EXTENSIONS NO
+  )
+  # accessibility Batch 3 production macOS bridge implementation. The standalone suites
+  # compile the same per-consumer source the real platform bridge uses; it is a
+  # plain Objective-C++ translation unit with no Pugl dependency.
+  set(_accessibility_bridge_impl
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/detail/native_accessibility_macos.mm)
+  target_sources(semantic_macos_production_bridge PRIVATE
+    ${_accessibility_bridge_impl})
+  target_sources(semantic_macos_notifications PRIVATE
+    ${_accessibility_bridge_impl})
+  target_sources(accessibility_objc_runtime_prefix_probe PRIVATE
+    ${_accessibility_bridge_impl})
+  find_library(T045_APPKIT_FRAMEWORK AppKit REQUIRED)
+  target_link_libraries(semantic_macos_appkit PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_appkit_frame PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_proxy_cache PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_children_callbacks PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_interaction PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_production_bridge PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(semantic_macos_notifications PRIVATE "${T045_APPKIT_FRAMEWORK}")
+  target_link_libraries(accessibility_objc_runtime_prefix_probe PRIVATE "${T045_APPKIT_FRAMEWORK}")
+endif()
+
+target_sources(accessibility_semantic_action_router PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+)
+target_sources(accessibility_semantic_action_view_binding PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+)
+target_sources(accessibility_semantic_native_view_bridge PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+)
+target_link_libraries(accessibility_semantic_action_router PRIVATE Threads::Threads)
+target_link_libraries(accessibility_semantic_action_view_binding PRIVATE Threads::Threads)
+target_link_libraries(accessibility_semantic_native_view_bridge PRIVATE Threads::Threads)
+target_link_libraries(accessibility_semantic_proxy_cache PRIVATE Threads::Threads)
+target_link_libraries(accessibility_concurrent_snapshot_readers PRIVATE Threads::Threads)
+
+# The AppKit suites resolve the dispatcher Dispatcher used by the action router and
+# bridge; compile the real implementation directly exactly like the portable
+# dispatcher-backed suites above.
+if(APPLE)
+  foreach(_semantic_macos_dispatcher_test IN ITEMS
+      semantic_macos_appkit
+      semantic_macos_appkit_frame
+      semantic_macos_proxy_cache
+      semantic_macos_children_callbacks
+      semantic_macos_production_bridge
+      semantic_macos_notifications
+      accessibility_objc_runtime_prefix_probe)
+    target_sources(${_semantic_macos_dispatcher_test} PRIVATE
+      ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+    )
+    target_link_libraries(${_semantic_macos_dispatcher_test} PRIVATE Threads::Threads)
+  endforeach()
+endif()
+
+# accessibility Batch 4 Win32 UIA provider suite. Remote-Windows-CI only: it compiles the
+# real adapter source and drives a real IUIAutomation client against a real
+# window.
+if(WIN32)
+  nativeui_add_semantics_test(accessibility_uia_win32_provider accessibility_uia_win32_provider_tests.cpp)
+  target_sources(accessibility_uia_win32_provider PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/detail/native_accessibility_windows.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../src/dispatcher.cpp
+  )
+  target_link_libraries(accessibility_uia_win32_provider PRIVATE
+    Threads::Threads
+    uiautomationcore ole32 oleaut32 uuid user32 comctl32
+  )
+endif()

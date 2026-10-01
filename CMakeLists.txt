@@ -180,6 +180,14 @@ if(NATIVEUI_BUILD_PLATFORM)
     # keep the Win32 macros out of this target instead of rewriting portable
     # code around macro expansion. Pugl's C target is intentionally unchanged.
     target_compile_definitions(nativeui PRIVATE NOMINMAX)
+    # accessibility: the real Win32 UIA fragment provider replaces the fail-closed
+    # accessibility stub on Windows. Uiautomationcore exposes both the provider
+    # API and the client coclass used by the Windows smoke/tests; uuid supplies
+    # the UIA interface/coclass GUIDs.
+    target_sources(nativeui PRIVATE src/detail/native_accessibility_windows.cpp)
+    target_link_libraries(nativeui PRIVATE
+      uiautomationcore ole32 oleaut32 uuid comctl32
+    )
   endif()
   if(APPLE)
     target_compile_definitions(nativeui PRIVATE GL_SILENCE_DEPRECATION)

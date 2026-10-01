@@ -406,6 +406,30 @@ void progress_meter_visual_and_idle_contract() {
     }
 }
 
+void toggle_semantic_action_uses_normal_state_policy() {
+    ui::State<bool> value{false};
+    int writes = 0;
+    auto observer = value.observe([&](const bool&) { ++writes; });
+    ui::ToggleComponent toggle{"Bypass", value.binding(), {}};
+    ui::detail::SemanticActionHandler& handler = toggle;
+
+    ui::detail::SemanticActionRequest request;
+    request.action = ui::SemanticAction::Toggle;
+    NUI_CHECK(handler.perform_semantic_action(request));
+    NUI_CHECK(value.get());
+    NUI_CHECK(writes == 1);
+
+    NUI_CHECK(handler.perform_semantic_action(request));
+    NUI_CHECK(!value.get());
+    NUI_CHECK(writes == 2);
+
+    ui::detail::SemanticActionRequest unsupported;
+    unsupported.action = ui::SemanticAction::Activate;
+    NUI_CHECK(!handler.perform_semantic_action(unsupported));
+    NUI_CHECK(!value.get());
+    NUI_CHECK(writes == 2);
+}
+
 void binding_value_toggle_entry_points_contract() {
     test::MockPlatform platform;
 
@@ -509,6 +533,7 @@ void suite() {
     layout_tree.activate(platform);
     NUI_CHECK(layout_tree.dirty());
 
+    toggle_semantic_action_uses_normal_state_policy();
     value_widgets_respect_effective_read_only_state();
     slider_pointer_keyboard_contract();
     slider_t059_contract();

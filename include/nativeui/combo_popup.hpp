@@ -3,6 +3,9 @@
 #include <nativeui/combo_popup_style.hpp>
 #include <nativeui/component.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
+#include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/state.hpp>
@@ -198,6 +201,88 @@ struct MenuPopupSession final {
     OverlayHandle handle;
     std::size_t highlighted{kNoPopupIndex};
     bool completion_queued{};
+};
+
+/// One retained semantic MenuItem child of an open menu popup.
+///
+/// MenuPopupComponent keeps all painting, pointer handling and keyboard
+/// traversal, so the open menu stays one focusable overlay element; these
+/// children only own the exposed MenuItem role/name/enabled/selected state and
+/// execute the advertised `Activate` through the menu's normal commit policy.
+class MenuPopupItemComponent final : public Component,
+                                     public SemanticActionHandler {
+public:
+    MenuPopupItemComponent(
+        std::shared_ptr<MenuPopupSession> session,
+        std::size_t index)
+        : session_(std::move(session)), index_(index) {}
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        if (index_ >= session_->items.size()) return {};
+        const auto& item = session_->items[index_];
+        if (item.kind != PopupMenuItem::Kind::Action) return {};
+        return menu_item_semantic_info(
+            item.label,
+            item.actionable(),
+            index_ == session_->highlighted,
+            item.actionable());
+    }
+
+    /// Execute the advertised `Activate` through the same close-then-invoke
+    /// policy as pointer/key activation: the menu is logically closed first,
+    /// the configured callback runs exactly once, and a rejected close never
+    /// reports success or runs the callback. Retained detach and focus
+    /// restoration are scheduled through the shared structural structural checkpoint,
+    /// exactly like `UI::close_overlay()`.
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Activate) return false;
+        if (index_ >= session_->items.size()) return false;
+        const auto& item = session_->items[index_];
+        if (!item.actionable() || session_->completion_queued) return false;
+
+        const auto handle = session_->handle;
+        auto* overlay_service = overlay_service_;
+        if (!overlay_service || !handle.valid()) return false;
+
+        auto callback = item.callback;
+        session_->completion_queued = true;
+        try {
+            if (!overlay_service->dismiss(handle)) {
+                session_->completion_queued = false;
+                return false;
+            }
+        } catch (...) {
+            session_->completion_queued = false;
+            return false;
+        }
+
+        // The logical close is committed. Mirror the input commit policy: the
+        // callback is skipped when the menu anchor is no longer mounted, and it
+        // is application code that may destroy this subtree, so nothing below
+        // may touch this component or the session.
+        auto anchor = session_->anchor;
+        if (!anchor || !anchor->mounted) return true;
+        if (callback) callback();
+        return true;
+    }
+
+    void mount(MountContext& context) override {
+        overlay_service_ = context.overlay_service();
+    }
+
+    void unmount(LifecycleContext&) override { overlay_service_ = nullptr; }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    std::shared_ptr<MenuPopupSession> session_;
+    std::size_t index_{};
+    OverlayService* overlay_service_{};
 };
 
 template <class T>
@@ -459,6 +544,10 @@ public:
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
 
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return popup_menu_semantic_info();
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto base = base_item_style();
         float width = current_theme().controls.minimum_width;
@@ -477,6 +566,28 @@ public:
             height += std::max(0.0f, resolved.row_height);
         }
         return {width, std::max(height, std::max(0.0f, base.row_height))};
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        // Mirror the paint/index geometry so retained MenuItem semantic children
+        // expose the same rows the user sees and clicks.
+        const auto base = base_item_style();
+        float y = bounds.y;
+        for (std::size_t index = 0; index < placements.size(); ++index) {
+            float height = 0.0f;
+            if (index < session_->items.size()) {
+                if (session_->items[index].kind == PopupMenuItem::Kind::Separator) {
+                    height = std::max(0.0f, base.separator_height);
+                } else {
+                    height = std::max(0.0f, resolved_item_style(index).row_height);
+                }
+            }
+            placements[index].bounds = Rect{bounds.x, y, bounds.w, height};
+            y += height;
+        }
     }
 
     EventResult input(const InputEvent& event, InputContext& context) override {
@@ -742,7 +853,8 @@ template <class T>
 class ComboBoxComponent final : public Component,
                                 public ThemeBinding,
                                 public OverlayCommandSource,
-                                public OverlayAnchorPolicy {
+                                public OverlayAnchorPolicy,
+                                public SemanticActionHandler {
 public:
     using OptionsProvider = std::function<std::vector<ComboBoxOption<T>>() >;
 
@@ -763,8 +875,46 @@ public:
           runtime_(std::move(runtime)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return combo_box_semantic_info(display_text(), runtime_->handle.valid());
+    }
     [[nodiscard]] bool dismiss_overlay_on_tab() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return true; }
+
+    /// Execute the advertised `Expand`/`Collapse`/`Select` through the widget's
+    /// normal popup policy.
+    ///
+    /// A semantic action runs on the owning UI thread at the dispatcher checkpoint,
+    /// outside input dispatch, so it uses the same borrowed `OverlayService`
+    /// seam as the tooltip Tooltip (documented for dispatcher callbacks) instead of the
+    /// input-only `OverlayComponentCommand` queue: the popup is presented or
+    /// dismissed deterministically during the action and never waits for a
+    /// later input event.
+    ///
+    /// - `Expand` opens the immutable option snapshot exactly once and is
+    ///   idempotent while the popup is already open.
+    /// - `Collapse` closes the popup without committing and is idempotent while
+    ///   already closed (a queued input open that has not committed yet is
+    ///   cancelled).
+    /// - `Select` commits the currently highlighted enabled option of the open
+    ///   popup exactly once and then closes it. With no open popup there is no
+    ///   selection target, so it fails closed instead of inventing a value.
+    ///
+    /// Disabled state is rejected by the live action recheck; read-only state
+    /// follows the widget's own policy of never opening or committing.
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        switch (request.action) {
+            case SemanticAction::Expand:
+                return semantic_expand();
+            case SemanticAction::Collapse:
+                return semantic_collapse();
+            case SemanticAction::Select:
+                return semantic_select();
+            default:
+                return false;
+        }
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);
@@ -777,6 +927,7 @@ public:
     }
 
     void mount(MountContext& context) override {
+        overlay_service_ = context.overlay_service();
         runtime_->node_id = context.node_id();
         runtime_->mounted = true;
         runtime_->selection = selection_;
@@ -792,6 +943,8 @@ public:
 
     void unmount(LifecycleContext&) override {
         subscription_.reset();
+        overlay_service_ = nullptr;
+        session_.reset();
         runtime_->selection.reset();
         runtime_->mounted = false;
         runtime_->node_id = kInvalidNodeId;
@@ -923,13 +1076,18 @@ private:
         });
     }
 
-    EventResult open_popup(InputContext& context, Key opening_key) {
-        if (runtime_->handle.valid() || pending_command_) return EventResult::Handled;
+    struct PopupOverlayBuild final {
+        OverlaySpec overlay;
+        std::shared_ptr<ComboPopupSession<T>> session;
+    };
 
+    /// Capture one immutable option snapshot and its overlay/session policy.
+    /// Shared by input opening (which queues an OverlayComponentCommand for the
+    /// next UI dispatch) and semantic Expand/Select (which present directly
+    /// through the dispatcher-callable OverlayService seam).
+    [[nodiscard]] PopupOverlayBuild build_popup_overlay() {
         auto snapshot = options_provider_ ? options_provider_() : display_options_;
         display_options_ = snapshot;
-        context.invalidate_layout();
-        context.invalidate();
 
         auto session = std::make_shared<ComboPopupSession<T>>();
         session->anchor = runtime_;
@@ -946,11 +1104,105 @@ private:
         overlay.content = Spec{
             [session] { return std::make_unique<ComboPopupComponent<T>>(session); },
             {}};
+        return PopupOverlayBuild{std::move(overlay), std::move(session)};
+    }
 
+    [[nodiscard]] bool semantic_expand() {
+        if (!effective_enabled() || effective_read_only()) return false;
+        if (runtime_->handle.valid()) return true;
+        // A queued input open has not committed an overlay yet; do not present
+        // a competing popup. A later Expand observes the committed handle.
+        if (pending_command_ || !overlay_service_) return false;
+
+        auto* overlay_service = overlay_service_;
+        auto runtime = runtime_;
+        try {
+            auto built = build_popup_overlay();
+            // show() follows the public UI::show_overlay() policy, including
+            // global transient-presentation dismissal; present() remains the
+            // Tooltip self-presentation seam. OverlayState::show() rolls back
+            // its provisional entry on failure, so a failed presentation is
+            // never reported as executed.
+            const auto handle = overlay_service->show(std::move(built.overlay));
+            if (!handle.valid()) return false;
+            built.session->handle = handle;
+            session_ = built.session;
+            runtime->handle = handle;
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    [[nodiscard]] bool semantic_collapse() {
+        if (!runtime_->handle.valid()) {
+            // Nothing committed yet: cancel a queued input open so the
+            // requested collapsed state holds.
+            pending_command_.reset();
+            return true;
+        }
+        if (!overlay_service_) return false;
+
+        const auto handle = runtime_->handle;
+        try {
+            if (!overlay_service_->dismiss(handle)) return false;
+        } catch (...) {
+            return false;
+        }
+        runtime_->handle = {};
+        runtime_->suppress_until_key_up = Key::None;
+        session_.reset();
+        return true;
+    }
+
+    [[nodiscard]] bool semantic_select() {
+        if (!effective_enabled() || effective_read_only()) return false;
+        if (!runtime_->handle.valid() || !overlay_service_) return false;
+
+        auto session = session_.lock();
+        if (!session || session->completion_queued) return false;
+        if (session->highlighted == kNoPopupIndex ||
+            session->highlighted >= session->options.size() ||
+            !session->options[session->highlighted].enabled) {
+            return false;
+        }
+
+        T value = session->options[session->highlighted].value;
+        session->completion_queued = true;
+        try {
+            if (!overlay_service_->dismiss(runtime_->handle)) {
+                session->completion_queued = false;
+                return false;
+            }
+        } catch (...) {
+            session->completion_queued = false;
+            return false;
+        }
+
+        // The logical close is committed. Retained detach/focus restoration
+        // follow the shared structural structural checkpoint exactly like
+        // UI::close_overlay(). Selection observers are application code and may
+        // destroy this component, so publish the value last and touch no member
+        // afterwards.
+        runtime_->handle = {};
+        runtime_->suppress_until_key_up = Key::None;
+        session_.reset();
+        selection_.set(std::move(value));
+        return true;
+    }
+
+    EventResult open_popup(InputContext& context, Key opening_key) {
+        if (runtime_->handle.valid() || pending_command_) return EventResult::Handled;
+
+        auto built = build_popup_overlay();
+        context.invalidate_layout();
+        context.invalidate();
+
+        session_ = built.session;
         if (opening_key != Key::None) runtime_->suppress_until_key_up = opening_key;
         pending_command_ = OverlayComponentCommand::show(
-            std::move(overlay),
-            [session, runtime = runtime_](OverlayHandle handle) {
+            std::move(built.overlay),
+            [session = std::move(built.session), runtime = runtime_](OverlayHandle handle) {
                 session->handle = handle;
                 runtime->handle = handle;
                 if (!handle.valid()) runtime->suppress_until_key_up = Key::None;
@@ -965,9 +1217,11 @@ private:
     ComboBoxStyle style_;
     MenuItemStyle item_style_;
     std::shared_ptr<ComboAnchorRuntime<T>> runtime_;
+    std::weak_ptr<ComboPopupSession<T>> session_;
     typename Binding<T>::Subscription subscription_;
     PressActivationState interaction_;
     std::optional<OverlayComponentCommand> pending_command_;
+    OverlayService* overlay_service_{};
     bool focused_{};
 };
 
@@ -993,6 +1247,15 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_on_tab() const noexcept override { return true; }
     [[nodiscard]] bool dismiss_overlay_when_read_only() const noexcept override { return false; }
+
+    /// The persistent PopupMenu anchor is the widget's semantic surface. While
+    /// a popup is open, the retained menu overlay contributes its own PopupMenu
+    /// node with ordered MenuItem children.
+    [[nodiscard]] SemanticInfo semantics() const override {
+        auto info = popup_menu_semantic_info();
+        info.name = label_;
+        return info;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);
@@ -1125,6 +1388,16 @@ private:
         session->items = std::move(snapshot);
         session->item_style = item_style_;
 
+        std::vector<Spec> item_children;
+        item_children.reserve(session->items.size());
+        for (std::size_t index = 0; index < session->items.size(); ++index) {
+            item_children.push_back(Spec{
+                [session, index] {
+                    return std::make_unique<MenuPopupItemComponent>(session, index);
+                },
+                {}});
+        }
+
         OverlaySpec overlay;
         overlay.mode = OverlayMode::Modal;
         overlay.anchor = runtime_->node_id;
@@ -1133,7 +1406,7 @@ private:
         overlay.dismiss_on_outside_pointer_down = true;
         overlay.content = Spec{
             [session] { return std::make_unique<MenuPopupComponent>(session); },
-            {}};
+            std::move(item_children)};
 
         if (opening_key != Key::None) runtime_->suppress_until_key_up = opening_key;
         pending_command_ = OverlayComponentCommand::show(

@@ -1,5 +1,8 @@
 #include <nativeui/detail/dispatcher_owner.hpp>
+#include <nativeui/detail/semantic_tree_action_access.hpp>
 
+#include "detail/native_screen_origin.hpp"
+#include "detail/semantic_native_bounds.hpp"
 #include "detail/pugl_button_translation.hpp"
 #include "detail/pugl_pointer_translation.hpp"
 #include "detail/scoped_borrow_state.hpp"
@@ -42,6 +45,8 @@
 #elif defined(__linux__)
 #  include "detail/linux_desktop_services.hpp"
 #endif
+#include "detail/native_accessibility_binding.hpp"
+#include "detail/native_accessibility_bridge.h"
 #include "detail/native_ime_bridge.h"
 #include "detail/pugl_skia_setup.inc"
 #include "detail/pugl_skia_show_policy.inc"

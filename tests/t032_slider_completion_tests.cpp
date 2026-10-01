@@ -277,6 +277,83 @@ void formatter_is_display_only_and_uses_effective_value() {
     NUI_CHECK_NEAR(value.get(), 2.0f, 0.0001f);
 }
 
+void slider_semantic_actions_follow_normal_value_policy() {
+    ui::State<float> value{0.50f};
+    int writes = 0;
+    auto observer = value.observe([&](const float&) { ++writes; });
+    ui::detail::SliderComponent slider{
+        value.binding(),
+        0.0f,
+        1.0f,
+        0.25f,
+        ui::SliderOrientation::Horizontal,
+        {},
+        {}};
+    ui::detail::SemanticActionHandler& handler = slider;
+
+    ui::detail::SemanticActionRequest increment;
+    increment.action = ui::SemanticAction::Increment;
+    NUI_CHECK(handler.perform_semantic_action(increment));
+    NUI_CHECK_NEAR(value.get(), 0.75f, 0.0001f);
+    NUI_CHECK(writes == 1);
+
+    ui::detail::SemanticActionRequest decrement;
+    decrement.action = ui::SemanticAction::Decrement;
+    NUI_CHECK(handler.perform_semantic_action(decrement));
+    NUI_CHECK_NEAR(value.get(), 0.50f, 0.0001f);
+    NUI_CHECK(writes == 2);
+
+    ui::detail::SemanticActionRequest set_value;
+    set_value.action = ui::SemanticAction::SetValue;
+    set_value.numeric_value = 0.64;
+    NUI_CHECK(handler.perform_semantic_action(set_value));
+    NUI_CHECK_NEAR(value.get(), 0.75f, 0.0001f);
+    NUI_CHECK(writes == 3);
+
+    ui::detail::SemanticActionRequest missing_value;
+    missing_value.action = ui::SemanticAction::SetValue;
+    NUI_CHECK(!handler.perform_semantic_action(missing_value));
+    NUI_CHECK_NEAR(value.get(), 0.75f, 0.0001f);
+    NUI_CHECK(writes == 3);
+
+    ui::detail::SemanticActionRequest non_finite;
+    non_finite.action = ui::SemanticAction::SetValue;
+    non_finite.numeric_value = std::numeric_limits<double>::quiet_NaN();
+    NUI_CHECK(!handler.perform_semantic_action(non_finite));
+    NUI_CHECK_NEAR(value.get(), 0.75f, 0.0001f);
+    NUI_CHECK(writes == 3);
+
+    ui::detail::SemanticActionRequest unsupported;
+    unsupported.action = ui::SemanticAction::Toggle;
+    NUI_CHECK(!handler.perform_semantic_action(unsupported));
+    NUI_CHECK(writes == 3);
+}
+
+void slider_semantics_follow_effective_state() {
+    ui::State<float> value{5.0f};
+    ui::detail::SliderComponent slider{
+        value.binding(),
+        -1.0f,
+        1.0f,
+        0.25f,
+        ui::SliderOrientation::Horizontal,
+        {},
+        {}};
+
+    const auto info = slider.semantics();
+    NUI_CHECK(info.role == ui::SemanticRole::Slider);
+    NUI_CHECK(info.numeric_value.has_value());
+    NUI_CHECK_NEAR(static_cast<float>(*info.numeric_value), 1.0f, 0.0001f);
+    NUI_CHECK(info.value_range.has_value());
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->minimum), -1.0f, 0.0001f);
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->maximum), 1.0f, 0.0001f);
+    NUI_CHECK_NEAR(static_cast<float>(info.value_range->step), 0.25f, 0.0001f);
+    NUI_CHECK(info.supports(ui::SemanticAction::Increment));
+    NUI_CHECK(info.supports(ui::SemanticAction::Decrement));
+    NUI_CHECK(info.supports(ui::SemanticAction::SetValue));
+    NUI_CHECK(info.supports(ui::SemanticAction::Focus));
+}
+
 void suite() {
     external_invalid_state_is_render_only();
     observer_reentrancy_does_not_duplicate_widget_writes();
@@ -285,6 +362,8 @@ void suite() {
     pointer_mapping_matches_rendered_thumb_axis();
     extreme_finite_range_interaction_is_stable();
     formatter_is_display_only_and_uses_effective_value();
+    slider_semantic_actions_follow_normal_value_policy();
+    slider_semantics_follow_effective_state();
 }
 
 } // namespace

@@ -58,6 +58,44 @@ void checkbox_activation_contract() {
     NUI_CHECK(!checked.get());
 }
 
+void semantic_action_contract() {
+    ui::State<bool> checked{false};
+    ui::detail::CheckboxComponent checkbox{checked.binding(), "Enable", {}};
+    ui::detail::SemanticActionHandler& checkbox_handler = checkbox;
+
+    ui::detail::SemanticActionRequest toggle;
+    toggle.action = ui::SemanticAction::Toggle;
+    NUI_CHECK(checkbox_handler.perform_semantic_action(toggle));
+    NUI_CHECK(checked.get());
+
+    ui::detail::SemanticActionRequest checkbox_unsupported;
+    checkbox_unsupported.action = ui::SemanticAction::Select;
+    NUI_CHECK(!checkbox_handler.perform_semantic_action(checkbox_unsupported));
+    NUI_CHECK(checked.get());
+
+    bool selected = false;
+    auto group = std::make_shared<ui::detail::RadioGroupToken>();
+    ui::detail::RadioButtonComponent radio{
+        std::move(group),
+        "Mode A",
+        [&selected] { return selected; },
+        [&selected] { selected = true; },
+        ui::detail::RadioButtonComponent::Observe{},
+        {}};
+    ui::detail::SemanticActionHandler& radio_handler = radio;
+
+    ui::detail::SemanticActionRequest select;
+    select.action = ui::SemanticAction::Select;
+    NUI_CHECK(radio_handler.perform_semantic_action(select));
+    NUI_CHECK(selected);
+
+    selected = false;
+    ui::detail::SemanticActionRequest radio_unsupported;
+    radio_unsupported.action = ui::SemanticAction::Toggle;
+    NUI_CHECK(!radio_handler.perform_semantic_action(radio_unsupported));
+    NUI_CHECK(!selected);
+}
+
 void checkbox_availability_contract() {
     test::MockPlatform platform;
 
@@ -516,6 +554,7 @@ void visual_state_goldens() {
 
 void suite() {
     checkbox_activation_contract();
+    semantic_action_contract();
     checkbox_availability_contract();
     radio_typed_selection_contract();
     radio_navigation_and_tab_entry();

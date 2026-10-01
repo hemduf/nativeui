@@ -165,6 +165,11 @@ void dataset_identity_contract() {
     check(token20.has_value() && *token20 != ui::kInvalidVirtualSemanticItemToken);
     check(token30.has_value() && *token30 != ui::kInvalidVirtualSemanticItemToken);
     check(token10 != token20 && token10 != token30 && token20 != token30);
+    check(token10 && model.index_for_token(*token10) == 0);
+    check(token20 && model.index_for_token(*token20) == 1);
+    check(token30 && model.index_for_token(*token30) == 2);
+    check(!model.index_for_token(ui::kInvalidVirtualSemanticItemToken));
+    check(!model.index_for_token(999999));
 
     const auto metadata1 = model.metadata_snapshot();
     check(metadata1 && metadata1->size() == 3);
@@ -187,6 +192,9 @@ void dataset_identity_contract() {
     check(model.token_for_key(10) == token10);
     check(model.token_for_key(20) == token20);
     check(model.token_for_key(30) == token30);
+    check(token30 && model.index_for_token(*token30) == 0);
+    check(token10 && model.index_for_token(*token10) == 1);
+    check(token20 && model.index_for_token(*token20) == 2);
     const auto metadata2 = model.metadata_snapshot();
     check(metadata2.get() != metadata1.get());
 
@@ -196,6 +204,7 @@ void dataset_identity_contract() {
     check(model.generation() == generation_before_duplicate);
     check(model.metadata_snapshot().get() == metadata_before_duplicate.get());
     check(model.size() == 3);
+    check(token10 && model.index_for_token(*token10) == 1);
 
     check(model.replace({
         Input{30, "thirty", false},
@@ -204,6 +213,7 @@ void dataset_identity_contract() {
     }));
     check(model.generation() == generation_before_duplicate);
     check(model.metadata_snapshot().get() == metadata_before_duplicate.get());
+    check(token20 && model.index_for_token(*token20) == 2);
 }
 
 void dataset_scroll_contract() {
@@ -276,6 +286,14 @@ void large_dataset_contract() {
         check(view.dataset_generation() == generation);
         check(view.metadata_snapshot().get() == metadata.get());
     }
+
+    const auto last_token = model.token_for_key(99999);
+    check(last_token.has_value());
+    for (std::size_t i = 0; i < 1000; ++i) {
+        check(last_token && model.index_for_token(*last_token) == 99999);
+    }
+    check(model.metadata_snapshot().get() == metadata.get());
+    check(model.generation() == generation);
 }
 
 } // namespace

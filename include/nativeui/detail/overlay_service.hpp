@@ -2,6 +2,8 @@
 
 #include <nativeui/overlay.hpp>
 
+#include <utility>
+
 namespace ui::detail {
 
 /// Per-UI T061 overlay seam handed to retained components through MountContext.
@@ -16,7 +18,21 @@ class OverlayService {
 public:
     virtual ~OverlayService() = default;
 
+    /// Self-presentation (for example a Tooltip showing itself): create the
+    /// overlay without dismissing other transient presentations. This must not
+    /// run the global transient-dismissal policy, because a Tooltip presenting
+    /// itself would otherwise immediately cancel itself.
     [[nodiscard]] virtual OverlayHandle present(OverlaySpec overlay) = 0;
+
+    /// Widget/anchor presentation that follows the public `UI::show_overlay()`
+    /// policy, including the global transient-presentation dismissal performed
+    /// whenever a new interactive overlay opens. The default keeps the
+    /// `present()` contract for implementations that do not distinguish the
+    /// two; the real UI presenter overrides it with the full policy.
+    [[nodiscard]] virtual OverlayHandle show(OverlaySpec overlay) {
+        return present(std::move(overlay));
+    }
+
     [[nodiscard]] virtual bool dismiss(OverlayHandle handle) = 0;
 };
 

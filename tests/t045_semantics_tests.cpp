@@ -1,3 +1,4 @@
+#include <nativeui/detail/semantic_snapshot.hpp>
 #include <nativeui/semantics.hpp>
 
 #include <cstdint>
@@ -140,6 +141,208 @@ void semantic_tree_generation_contract() {
     T045_CHECK(tree.nodes.size() == 1);
 }
 
+ui::SemanticTreeSnapshot make_diff_snapshot() {
+    ui::SemanticTreeSnapshot tree;
+    tree.generation = 3;
+    tree.root = 1;
+
+    ui::SemanticNodeSnapshot root;
+    root.id = 1;
+    root.parent = ui::kInvalidSemanticId;
+    root.bounds = {0.0f, 0.0f, 100.0f, 40.0f};
+    root.info.role = ui::SemanticRole::Button;
+    root.info.name = "Apply";
+    root.info.enabled = true;
+    root.info.focusable = true;
+    root.info.actions = {ui::SemanticAction::Activate, ui::SemanticAction::Focus};
+    tree.nodes.push_back(std::move(root));
+    return tree;
+}
+
+void semantic_snapshot_diff_ignores_generation_only_changes() {
+    auto before = make_diff_snapshot();
+    auto after = before;
+    after.generation = 99;
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    T045_CHECK(changes.empty());
+}
+
+void semantic_snapshot_diff_classifies_exposed_changes_once() {
+    const auto before = make_diff_snapshot();
+    auto after = before;
+
+    ui::SemanticNodeSnapshot child;
+    child.id = 2;
+    child.parent = 1;
+    child.bounds = {0.0f, 20.0f, 100.0f, 20.0f};
+    child.info.role = ui::SemanticRole::Text;
+    child.info.name = "Status";
+    after.nodes.push_back(child);
+    after.nodes[0].children.push_back(2);
+
+    after.nodes[0].info.focused = true;
+    after.nodes[0].info.selected = true;
+    after.nodes[0].info.name = "Apply now";
+    after.nodes[0].bounds.x = 4.0f;
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    const std::vector<ui::SemanticChange> expected{
+        ui::SemanticChange::StructureChanged,
+        ui::SemanticChange::FocusChanged,
+        ui::SemanticChange::SelectionChanged,
+        ui::SemanticChange::ValueChanged,
+        ui::SemanticChange::BoundsChanged,
+    };
+    T045_CHECK(changes == expected);
+}
+
+void semantic_snapshot_diff_coalesces_multiple_value_fields() {
+    const auto before = make_diff_snapshot();
+    auto after = before;
+    after.nodes[0].info.enabled = false;
+    after.nodes[0].info.read_only = true;
+    after.nodes[0].info.description = "Unavailable while processing";
+    after.nodes[0].info.numeric_value = 0.5;
+    after.nodes[0].info.checked = ui::SemanticCheckedState::Mixed;
+    after.nodes[0].info.expanded = ui::SemanticExpandedState::Expanded;
+    after.nodes[0].info.actions = {ui::SemanticAction::Focus};
+
+    const auto changes = ui::detail::diff_semantic_snapshots(before, after);
+    T045_CHECK(changes == std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
+}
+
+ui::SemanticTreeSnapshot make_virtual_diff_snapshot(
+    ui::VirtualSemanticChildren virtual_children) {
+    auto tree = make_diff_snapshot();
+    tree.nodes[0].info.role = ui::SemanticRole::ListView;
+    tree.nodes[0].virtual_children = std::move(virtual_children);
+    return tree;
+}
+
+void semantic_snapshot_diff_tracks_virtual_selection_without_metadata_rebuild() {
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->push_back({1, "One", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+    mutable_metadata->push_back({2, "Two", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata = mutable_metadata;
+
+    const auto before_children = ui::VirtualSemanticChildren::from_metadata(
+        7, metadata, ui::VirtualSemanticItemToken{1},
+        {0.0f, 0.0f, 100.0f, 40.0f}, 20.0f, 0.0f);
+    const auto after_children = ui::VirtualSemanticChildren::from_metadata(
+        7, metadata, ui::VirtualSemanticItemToken{2},
+        {0.0f, 0.0f, 100.0f, 40.0f}, 20.0f, 0.0f);
+    T045_CHECK(before_children.metadata_snapshot().get() == after_children.metadata_snapshot().get());
+
+    const auto changes = ui::detail::diff_semantic_snapshots(
+        make_virtual_diff_snapshot(before_children),
+        make_virtual_diff_snapshot(after_children));
+    T045_CHECK(changes == std::vector<ui::SemanticChange>{ui::SemanticChange::SelectionChanged});
+}
+
+void semantic_snapshot_diff_tracks_virtual_bounds_without_metadata_rebuild() {
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->push_back({1, "One", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata = mutable_metadata;
+
+    const auto before_children = ui::VirtualSemanticChildren::from_metadata(
+        11, metadata, ui::VirtualSemanticItemToken{1},
+        {10.0f, 20.0f, 100.0f, 40.0f}, 20.0f, 5.0f);
+    const auto after_children = ui::VirtualSemanticChildren::from_metadata(
+        11, metadata, ui::VirtualSemanticItemToken{1},
+        {12.0f, 24.0f, 100.0f, 40.0f}, 20.0f, 15.0f);
+    T045_CHECK(before_children.metadata_snapshot().get() == after_children.metadata_snapshot().get());
+
+    const auto changes = ui::detail::diff_semantic_snapshots(
+        make_virtual_diff_snapshot(before_children),
+        make_virtual_diff_snapshot(after_children));
+    T045_CHECK(changes == std::vector<ui::SemanticChange>{ui::SemanticChange::BoundsChanged});
+}
+
+void semantic_snapshot_publisher_skips_identical_exposed_state() {
+    ui::detail::SemanticSnapshotPublisher publisher;
+    const auto initial = publisher.current();
+    T045_CHECK(initial != nullptr);
+    T045_CHECK(initial->generation == 0);
+    T045_CHECK(initial->root == ui::kInvalidSemanticId);
+    T045_CHECK(initial->nodes.empty());
+
+    auto first_candidate = make_diff_snapshot();
+    first_candidate.generation = 77;
+    const auto first_changes = publisher.publish(std::move(first_candidate));
+    T045_CHECK(first_changes ==
+               std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
+
+    const auto first = publisher.current();
+    T045_CHECK(first != nullptr);
+    T045_CHECK(first->generation == 1);
+    T045_CHECK(first->nodes.size() == 1);
+    T045_CHECK(first->nodes[0].info.name == "Apply");
+
+    auto equal_candidate = *first;
+    equal_candidate.generation = 999;
+    const auto equal_changes = publisher.publish(std::move(equal_candidate));
+    T045_CHECK(equal_changes.empty());
+    T045_CHECK(publisher.current().get() == first.get());
+    T045_CHECK(publisher.current()->generation == 1);
+
+    auto changed_candidate = *first;
+    changed_candidate.nodes[0].info.name = "Apply now";
+    const auto changed = publisher.publish(std::move(changed_candidate));
+    T045_CHECK(changed == std::vector<ui::SemanticChange>{ui::SemanticChange::ValueChanged});
+
+    const auto second = publisher.current();
+    T045_CHECK(second->generation == 2);
+    T045_CHECK(second->nodes[0].info.name == "Apply now");
+    T045_CHECK(first->generation == 1);
+    T045_CHECK(first->nodes[0].info.name == "Apply");
+}
+
+void semantic_snapshot_publisher_reuses_virtual_metadata_for_scalar_changes() {
+    auto mutable_metadata = std::make_shared<ui::VirtualSemanticChildren::Metadata>();
+    mutable_metadata->push_back({1, "One", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+    mutable_metadata->push_back({2, "Two", "", true, false,
+                                 ui::SemanticCheckedState::NotApplicable,
+                                 {ui::SemanticAction::Select}});
+    ui::VirtualSemanticChildren::MetadataSnapshot metadata = mutable_metadata;
+
+    ui::detail::SemanticSnapshotPublisher publisher;
+    auto first_candidate = make_virtual_diff_snapshot(ui::VirtualSemanticChildren::from_metadata(
+        21, metadata, ui::VirtualSemanticItemToken{1},
+        {0.0f, 0.0f, 100.0f, 40.0f}, 20.0f, 0.0f));
+    T045_CHECK(publisher.publish(std::move(first_candidate)) ==
+               std::vector<ui::SemanticChange>{ui::SemanticChange::StructureChanged});
+
+    const auto first = publisher.current();
+    T045_CHECK(first->nodes[0].virtual_children.has_value());
+    const auto* const metadata_address =
+        first->nodes[0].virtual_children->metadata_snapshot().get();
+    T045_CHECK(metadata_address == metadata.get());
+
+    auto second_candidate = make_virtual_diff_snapshot(ui::VirtualSemanticChildren::from_metadata(
+        21, metadata, ui::VirtualSemanticItemToken{2},
+        {0.0f, 0.0f, 100.0f, 40.0f}, 20.0f, 0.0f));
+    T045_CHECK(publisher.publish(std::move(second_candidate)) ==
+               std::vector<ui::SemanticChange>{ui::SemanticChange::SelectionChanged});
+
+    const auto second = publisher.current();
+    T045_CHECK(second->generation == 2);
+    T045_CHECK(second->nodes[0].virtual_children.has_value());
+    T045_CHECK(second->nodes[0].virtual_children->metadata_snapshot().get() == metadata_address);
+    T045_CHECK(first->nodes[0].virtual_children->selected_token() ==
+               std::optional<ui::VirtualSemanticItemToken>{1});
+    T045_CHECK(second->nodes[0].virtual_children->selected_token() ==
+               std::optional<ui::VirtualSemanticItemToken>{2});
+}
+
 } // namespace
 
 int main() {
@@ -150,6 +353,13 @@ int main() {
         virtual_metadata_is_immutable_after_publication();
         virtual_tokens_and_tristate_contract();
         semantic_tree_generation_contract();
+        semantic_snapshot_diff_ignores_generation_only_changes();
+        semantic_snapshot_diff_classifies_exposed_changes_once();
+        semantic_snapshot_diff_coalesces_multiple_value_fields();
+        semantic_snapshot_diff_tracks_virtual_selection_without_metadata_rebuild();
+        semantic_snapshot_diff_tracks_virtual_bounds_without_metadata_rebuild();
+        semantic_snapshot_publisher_skips_identical_exposed_state();
+        semantic_snapshot_publisher_reuses_virtual_metadata_for_scalar_changes();
         std::cout << "PASS t045 semantics\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

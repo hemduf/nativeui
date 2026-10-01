@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -140,6 +141,8 @@ class VirtualSemanticChildren {
 public:
     using Metadata = std::vector<VirtualSemanticItemMetadata>;
     using MetadataSnapshot = std::shared_ptr<const Metadata>;
+    using TokenIndex = std::unordered_map<VirtualSemanticItemToken, std::size_t>;
+    using TokenIndexSnapshot = std::shared_ptr<const TokenIndex>;
 
     VirtualSemanticChildren()
         : metadata_(std::make_shared<const Metadata>()) {}
@@ -155,7 +158,34 @@ public:
             metadata = std::make_shared<const Metadata>();
         }
         return VirtualSemanticChildren{
-            dataset_generation, std::move(metadata), selected, list_bounds, row_height, scroll_y};
+            dataset_generation,
+            std::move(metadata),
+            {},
+            selected,
+            list_bounds,
+            row_height,
+            scroll_y};
+    }
+
+    [[nodiscard]] static VirtualSemanticChildren from_indexed_metadata(
+        std::uint64_t dataset_generation,
+        MetadataSnapshot metadata,
+        TokenIndexSnapshot token_index,
+        std::optional<VirtualSemanticItemToken> selected,
+        Rect list_bounds,
+        float row_height,
+        float scroll_y) {
+        if (!metadata) {
+            metadata = std::make_shared<const Metadata>();
+        }
+        return VirtualSemanticChildren{
+            dataset_generation,
+            std::move(metadata),
+            std::move(token_index),
+            selected,
+            list_bounds,
+            row_height,
+            scroll_y};
     }
 
     [[nodiscard]] std::uint64_t dataset_generation() const noexcept {
@@ -192,6 +222,29 @@ public:
         return item;
     }
 
+    [[nodiscard]] std::optional<VirtualSemanticItem> item_for_token(
+        VirtualSemanticItemToken token) const {
+        if (token == kInvalidVirtualSemanticItemToken) {
+            return std::nullopt;
+        }
+
+        if (token_index_) {
+            const auto found = token_index_->find(token);
+            if (found == token_index_->end() || found->second >= metadata_->size() ||
+                (*metadata_)[found->second].token != token) {
+                return std::nullopt;
+            }
+            return item_at(found->second);
+        }
+
+        for (std::size_t index = 0; index < metadata_->size(); ++index) {
+            if ((*metadata_)[index].token == token) {
+                return item_at(index);
+            }
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] std::optional<std::size_t> index_of_selected_item() const noexcept {
         if (!selected_.has_value()) {
             return std::nullopt;
@@ -208,15 +261,37 @@ public:
         return metadata_;
     }
 
+    [[nodiscard]] const TokenIndexSnapshot& token_index_snapshot() const noexcept {
+        return token_index_;
+    }
+
+    [[nodiscard]] std::optional<VirtualSemanticItemToken> selected_token() const noexcept {
+        return selected_;
+    }
+
+    [[nodiscard]] Rect list_bounds() const noexcept {
+        return list_bounds_;
+    }
+
+    [[nodiscard]] float row_height() const noexcept {
+        return row_height_;
+    }
+
+    [[nodiscard]] float scroll_y() const noexcept {
+        return scroll_y_;
+    }
+
 private:
     VirtualSemanticChildren(std::uint64_t dataset_generation,
                             MetadataSnapshot metadata,
+                            TokenIndexSnapshot token_index,
                             std::optional<VirtualSemanticItemToken> selected,
                             Rect list_bounds,
                             float row_height,
                             float scroll_y)
         : dataset_generation_(dataset_generation),
           metadata_(std::move(metadata)),
+          token_index_(std::move(token_index)),
           selected_(selected),
           list_bounds_(list_bounds),
           row_height_(row_height),
@@ -224,6 +299,7 @@ private:
 
     std::uint64_t dataset_generation_{};
     MetadataSnapshot metadata_;
+    TokenIndexSnapshot token_index_;
     std::optional<VirtualSemanticItemToken> selected_;
     Rect list_bounds_{};
     float row_height_{};

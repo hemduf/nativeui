@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/ui.hpp>
@@ -170,10 +171,12 @@ public:
     DialogPanelComponent(
         DialogPanelLayout layout,
         std::shared_ptr<ScrollState> body_scroll,
-        std::function<void()> on_default)
+        std::function<void()> on_default,
+        std::string title)
         : layout_(std::move(layout)),
           body_scroll_(std::move(body_scroll)),
-          on_default_(std::move(on_default)) {}
+          on_default_(std::move(on_default)),
+          title_(std::move(title)) {}
 
     // The nested focus scope lets T061 first enter this Dialog as one modal
     // unit, then select its first logical descendant. build_content() orders an
@@ -186,6 +189,13 @@ public:
     [[nodiscard]] bool focus_scope_traps() const noexcept override { return true; }
     [[nodiscard]] std::size_t focus_scope_default_index() const noexcept override { return 1; }
     [[nodiscard]] bool clips_children() const noexcept override { return true; }
+
+    /// The visible modal panel is the exposed Dialog semantic node: it owns the
+    /// title and child actions. It exists in the retained tree only while the
+    /// dialog modal overlay is visible, so its presence is the modal state.
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return dialog_semantic_info(title_);
+    }
 
     [[nodiscard]] Constraints child_constraints(
         const Constraints& constraints, std::size_t, std::size_t) const override {
@@ -367,6 +377,7 @@ private:
     // descendants only borrow it and are destroyed before this parent.
     std::shared_ptr<ScrollState> body_scroll_;
     std::function<void()> on_default_;
+    std::string title_;
 };
 
 } // namespace detail
@@ -569,7 +580,7 @@ private:
         if (!spec.title.empty()) {
             title_index = children.size();
             children.push_back(make_spec(
-                Label{std::move(spec.title)}.size(18.0f).bold()));
+                Label{spec.title}.size(18.0f).bold()));
         }
 
         for (std::size_t i = 0; i < action_specs.size(); ++i) {
@@ -593,11 +604,13 @@ private:
         Spec panel{
             [layout = std::move(layout),
              body_scroll = std::move(body_scroll),
-             on_default = std::move(on_default)]() mutable {
+             on_default = std::move(on_default),
+             title = spec.title]() mutable {
                 return std::make_unique<detail::DialogPanelComponent>(
                     std::move(layout),
                     std::move(body_scroll),
-                    std::move(on_default));
+                    std::move(on_default),
+                    std::move(title));
             },
             std::move(children)};
 

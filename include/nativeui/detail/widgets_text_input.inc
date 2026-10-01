@@ -1,4 +1,6 @@
-class TextInputComponent final : public Component, public detail::ThemeBinding {
+class TextInputComponent final : public Component,
+                                 public detail::ThemeBinding,
+                                 public detail::SemanticActionHandler {
 public:
     using SubmitCallback = std::function<void(const std::string&)>;
     using KeyDownCallback = std::function<EventResult(const InputEvent&)>;
@@ -20,6 +22,29 @@ public:
           style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return detail::text_edit_semantic_info(label_, model_.text(), false);
+    }
+
+    /// Semantic writes follow the ordinary committed-edit policy: single-line
+    /// normalization and the configured maximum length. The application State
+    /// remains the single value owner; mount-time state observation already
+    /// synchronizes the retained editor from it.
+    [[nodiscard]] bool perform_semantic_action(
+        const detail::SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::SetValue ||
+            !effective_enabled() || effective_read_only() ||
+            !request.text_value) {
+            return false;
+        }
+
+        auto incoming = text::single_line(*request.text_value);
+        incoming = text::truncate_codepoints(incoming, model_.max_length());
+        auto state = state_;
+        if (state.get() != incoming) state.set(incoming);
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);

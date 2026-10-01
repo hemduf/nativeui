@@ -1,6 +1,8 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/slider_value.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/slider_style.hpp>
@@ -8,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -25,6 +28,115 @@ namespace detail {
 enum class RangeSliderThumb {
     Lower,
     Upper,
+};
+
+/// Shared per-handle semantic runtime.
+///
+/// Both `RangeSliderHandle` semantic children reference the same application
+/// binding and edit domain as the parent component, so value reads and semantic
+/// writes observe exactly the normal RangeSlider commit policy without creating
+/// a second retained value owner.
+struct RangeSliderHandleRuntime final {
+    RangeSliderHandleRuntime(
+        Binding<RangeValue> state_value,
+        float minimum,
+        float maximum,
+        float step)
+        : state(std::move(state_value)), domain(minimum, maximum, step) {}
+
+    [[nodiscard]] static RangeValue clamp_range(
+        RangeValue value,
+        const SliderDomain& domain) noexcept {
+        RangeValue effective{
+            std::isfinite(value.low)
+                ? std::clamp(value.low, domain.minimum(), domain.maximum())
+                : domain.minimum(),
+            std::isfinite(value.high)
+                ? std::clamp(value.high, domain.minimum(), domain.maximum())
+                : domain.maximum(),
+        };
+        if (effective.low > effective.high) std::swap(effective.low, effective.high);
+        return effective;
+    }
+
+    [[nodiscard]] RangeValue effective() const noexcept {
+        return clamp_range(state.get(), domain);
+    }
+
+    [[nodiscard]] float value(RangeSliderThumb thumb) const noexcept {
+        const auto current = effective();
+        return thumb == RangeSliderThumb::Lower ? current.low : current.high;
+    }
+
+    [[nodiscard]] bool edit(RangeSliderThumb thumb, double requested) {
+        if (!std::isfinite(requested)) return false;
+        const auto current = state.get();
+        const auto effective_value = clamp_range(current, domain);
+        RangeValue next = effective_value;
+        const float normalized = domain.normalize(requested);
+        if (thumb == RangeSliderThumb::Lower) {
+            next.low = std::min(normalized, effective_value.high);
+        } else {
+            next.high = std::max(normalized, effective_value.low);
+        }
+        if (!(current == next)) state.set(next);
+        return true;
+    }
+
+    Binding<RangeValue> state;
+    SliderDomain domain;
+};
+
+/// One exposed `RangeSliderHandle` semantic child. It owns no visuals; the
+/// parent keeps the single composite Tab stop, track hit testing and paint.
+class RangeSliderHandleComponent final : public Component,
+                                         public SemanticActionHandler {
+public:
+    RangeSliderHandleComponent(
+        std::shared_ptr<RangeSliderHandleRuntime> runtime,
+        RangeSliderThumb thumb)
+        : runtime_(std::move(runtime)), thumb_(thumb) {}
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return range_slider_handle_semantic_info(
+            runtime_->value(thumb_),
+            runtime_->domain.minimum(),
+            runtime_->domain.maximum(),
+            runtime_->domain.step());
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (!effective_enabled() || effective_read_only()) return false;
+
+        // Compute the complete target before publishing; observers may
+        // synchronously reconcile or remove this component.
+        auto runtime = runtime_;
+        const float current = runtime->value(thumb_);
+        const double increment = runtime->domain.keyboard_increment(false);
+
+        switch (request.action) {
+            case SemanticAction::Increment:
+                return runtime->edit(thumb_, static_cast<double>(current) + increment);
+            case SemanticAction::Decrement:
+                return runtime->edit(thumb_, static_cast<double>(current) - increment);
+            case SemanticAction::SetValue:
+                if (!request.numeric_value) return false;
+                return runtime->edit(thumb_, *request.numeric_value);
+            default:
+                return false;
+        }
+    }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    std::shared_ptr<RangeSliderHandleRuntime> runtime_;
+    RangeSliderThumb thumb_{RangeSliderThumb::Lower};
 };
 
 class RangeSliderComponent final : public Component, public ThemeBinding {
@@ -53,6 +165,38 @@ public:
         return orientation_ == SliderOrientation::Horizontal
             ? Size{160.0f, compact_cross_axis}
             : Size{compact_cross_axis, 160.0f};
+    }
+
+    void layout_children(
+        Rect bounds,
+        const std::vector<ChildMetrics>&,
+        std::vector<ChildPlacement>& placements) const override {
+        if (placements.size() < 2) return;
+
+        // The two retained handle children mirror the painted thumb geometry so
+        // exposed RangeSliderHandle bounds match the visible handles. They stay
+        // non-focusable/non-hit-testable; the parent remains the composite Tab
+        // stop and pointer owner.
+        const auto effective = effective_range(state_.get());
+        const auto resolved = resolved_style(focused_);
+        const auto axis = slider_track_axis(bounds, orientation_);
+        const float radius = resolved.thumb_diameter * 0.5f + resolved.focus_ring_width;
+        const float diameter = radius * 2.0f;
+
+        if (orientation_ == SliderOrientation::Horizontal) {
+            const float y = bounds.y + bounds.h * 0.5f;
+            const float low_x = axis.position(domain_.fraction(effective.low));
+            const float high_x = axis.position(domain_.fraction(effective.high));
+            placements[0].bounds = Rect{low_x - radius, y - radius, diameter, diameter};
+            placements[1].bounds = Rect{high_x - radius, y - radius, diameter, diameter};
+            return;
+        }
+
+        const float x = bounds.x + bounds.w * 0.5f;
+        const float low_y = axis.position(domain_.fraction(effective.low));
+        const float high_y = axis.position(domain_.fraction(effective.high));
+        placements[0].bounds = Rect{x - radius, low_y - radius, diameter, diameter};
+        placements[1].bounds = Rect{x - radius, high_y - radius, diameter, diameter};
     }
 
     void mount(MountContext& context) override {
@@ -438,12 +582,31 @@ public:
         const float step = step_;
         const auto orientation = orientation_;
         auto style = std::move(style_);
+
+        auto handle_runtime = std::make_shared<detail::RangeSliderHandleRuntime>(
+            state, minimum, maximum, step);
+        std::vector<Spec> handles;
+        handles.reserve(2);
+        handles.push_back(Spec{
+            [handle_runtime] {
+                return std::make_unique<detail::RangeSliderHandleComponent>(
+                    handle_runtime, detail::RangeSliderThumb::Lower);
+            },
+            {}});
+        handles.push_back(Spec{
+            [handle_runtime] {
+                return std::make_unique<detail::RangeSliderHandleComponent>(
+                    handle_runtime, detail::RangeSliderThumb::Upper);
+            },
+            {}});
+
         return Spec{
-            [state = std::move(state), minimum, maximum, step, orientation, style = std::move(style)]() mutable {
+            [state = std::move(state), minimum, maximum, step, orientation,
+             style = std::move(style)]() mutable {
                 return std::make_unique<detail::RangeSliderComponent>(
                     std::move(state), minimum, maximum, step, orientation, std::move(style));
             },
-            {}};
+            std::move(handles)};
     }
 
 private:

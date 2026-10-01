@@ -8,6 +8,26 @@ enum class NativeViewConstructionFaultStage : std::uint8_t {
     AfterInvalidationCallback,
 };
 
+/// Per-view C++ sink that forwards one committed native publication batch to
+/// the platform accessibility bridge. The owning ViewCore detaches the bridge
+/// (and uninstalls this sink) before the raw bridge pointer could dangle; the
+/// bridge itself contains every failure and never throws into the pump.
+class NativeAccessibilityNotificationForwarder final
+    : public ui::detail::SemanticNativeNotificationSink {
+public:
+    explicit NativeAccessibilityNotificationForwarder(
+        NativeUIAccessibilityBridge* bridge) noexcept
+        : bridge_(bridge) {}
+
+    void on_native_publication(
+        const ui::detail::SemanticNativePublicationBatch& batch) override {
+        if (bridge_) (void)nativeuiAccessibilityDeliver(bridge_, &batch);
+    }
+
+private:
+    NativeUIAccessibilityBridge* bridge_{};
+};
+
 struct NativeViewConstructionFaultResult {
     bool injected_failure{};
     bool unexpected_failure{};
@@ -189,6 +209,63 @@ public:
     ViewCore(const ViewCore&) = delete;
     ViewCore& operator=(const ViewCore&) = delete;
 
+    /// Bind exactly one accessibility semantic domain after the concrete native owner and
+    /// its dispatcher DispatcherOwner are fully constructed. Keeping this out of the
+    /// ViewCore constructor avoids cross-casting a partially constructed
+    /// DispatcherProvider and preserves one dispatcher namespace per view.
+    void bind_semantics(Dispatcher dispatcher) {
+        if (semantic_domain_) return;
+        if (!view_ || should_close_ || !semantic_view_lifetime_ ||
+            !ui_.lifetime_ || !dispatcher.valid()) {
+            throw std::runtime_error("NativeUI semantic view binding failed");
+        }
+
+        semantic_domain_ = std::make_shared<SemanticRetainedViewDomain>(
+            std::move(dispatcher),
+            std::weak_ptr<const void>{ui_.lifetime_},
+            ui_.tree_);
+        attach_accessibility();
+    }
+
+    [[nodiscard]] std::weak_ptr<const void> semantic_view_lifetime() const noexcept {
+        return std::weak_ptr<const void>{semantic_view_lifetime_};
+    }
+
+    [[nodiscard]] std::shared_ptr<SemanticRetainedViewDomain>
+    semantic_domain() const noexcept {
+        return semantic_domain_;
+    }
+
+    /// Retain the tiny geometry native-geometry source for an outer semantic pump.
+    /// The returned object contains only scale + physical screen origin values;
+    /// it does not retain this ViewCore, the retained tree, or a native handle.
+    /// A pump may therefore keep it alive across a re-entrant dispatcher drain and
+    /// sample it afterwards only if the independent view lifetime survives.
+    [[nodiscard]] std::shared_ptr<const ViewNativeGeometryCaptureState>
+    semantic_native_geometry_capture_state() {
+        return geometry_.retain_native_geometry_capture_state();
+    }
+
+    /// Retain the lifetime-safe write-back handle for the owned geometry geometry
+    /// state. The returned weak value owns nothing and stays valid across a
+    /// re-entrant dispatcher drain; the pump locks it at the post-drain
+    /// checkpoint before accepting one platform screen-origin observation.
+    [[nodiscard]] std::weak_ptr<detail::ViewGeometryObservationWriter>
+    semantic_native_geometry_observation_writer() {
+        return geometry_.retain_native_geometry_observation_writer();
+    }
+
+    /// Copy the borrowed platform tokens needed to refresh an Embedded view's
+    /// physical screen origin. The returned value owns nothing and is safe to
+    /// keep across a dispatcher drain only when paired with semantic_view_lifetime().
+    [[nodiscard]] detail::NativeScreenOriginCaptureSource
+    semantic_native_screen_origin_capture_source() const noexcept {
+        if (!native_view_open() || !world_) return {};
+        return detail::NativeScreenOriginCaptureSource{
+            static_cast<std::uintptr_t>(puglGetNativeView(view_)),
+            puglGetNativeWorld(world_)};
+    }
+
     bool poll(double timeout) {
         if (!world_ || should_close_) return false;
         const auto status = puglUpdate(world_, timeout);
@@ -275,6 +352,37 @@ public:
     [[nodiscard]] std::optional<PlatformReadbackPixel>
     take_gpu_readback() noexcept {
         return renderer_.take_readback();
+    }
+
+    /// Deterministic geometry observation seam used by the platform publication
+    /// smoke. Production geometry is still owned and validated by
+    /// ViewGeometryState; these only expose the same accepted/rejected
+    /// observation path to the UI-thread test callback.
+    bool observe_native_scale(float reported_scale) noexcept {
+        return geometry_.observe_scale(reported_scale);
+    }
+
+    bool observe_native_physical_screen_origin(Point origin) noexcept {
+        return geometry_.observe_physical_screen_origin(origin);
+    }
+
+    /// Read the retained geometry capture pair without creating a capture source.
+    [[nodiscard]] std::optional<detail::SemanticNativeGeometry>
+    retained_native_geometry_for_test() const noexcept {
+        const auto source = geometry_.native_geometry_capture_state();
+        if (!source) return std::nullopt;
+        return detail::SemanticNativeGeometry{source->last_valid_scale(),
+                                              source->physical_screen_origin()};
+    }
+
+    [[nodiscard]] detail::EmbeddedNativeScreenOriginQuery
+    embedded_screen_origin_query_for_test() const noexcept {
+        return embedded_screen_origin_query_for_test_;
+    }
+
+    void set_embedded_screen_origin_query_for_test(
+        detail::EmbeddedNativeScreenOriginQuery query) noexcept {
+        embedded_screen_origin_query_for_test_ = query;
     }
 
     [[nodiscard]] bool request_gpu_readback_region(int x,
@@ -400,6 +508,11 @@ public:
     }
 
     bool close_native_view() noexcept {
+        // Publish semantic endpoint death before retained focus/component/native
+        // teardown can run application callbacks. Any in-flight immutable read
+        // keeps only its snapshot; queued action work becomes fail-closed.
+        retire_semantics();
+
         if (!view_) {
             should_close_ = true;
             visibility_.set_visible(false);
@@ -569,6 +682,13 @@ public:
     }
 
 private:
+    // View lifetime is distinct from the UI/tree lifetime. Outer pump code takes
+    // only a weak copy so a dispatcher callback can close/destroy this native view
+    // while a leased semantic domain safely finishes the checkpoint stack.
+    std::shared_ptr<int> semantic_view_lifetime_{std::make_shared<int>(0)};
+    std::shared_ptr<SemanticRetainedViewDomain> semantic_domain_;
+    NativeUIAccessibilityBridge* accessibility_bridge_{};
+
     struct ConstructionCleanup {
         explicit ConstructionCleanup(ViewCore& owner,
                                      NativeViewConstructionFaultResult* fault_result) noexcept
@@ -679,6 +799,57 @@ private:
             auto callback = preferred_size_callback_;
             if (callback) callback(preferred);
         });
+    }
+
+    void retire_semantics() noexcept {
+        // Native accessibility delivery dies first: uninstall the per-view sink
+        // and detach the AppKit bridge before the semantic domain publishes
+        // endpoint death and before any retained/native teardown.
+        detach_accessibility();
+        semantic_view_lifetime_.reset();
+        if (!semantic_domain_) return;
+        semantic_domain_->shutdown();
+        semantic_domain_.reset();
+    }
+
+    /// Attach the platform accessibility bridge to this view's already-bound
+    /// semantic domain. Attach failure disables accessibility for this view
+    /// only; the native view and its retained semantics remain fully valid.
+    void attach_accessibility() noexcept {
+        if (!view_ || !semantic_domain_ || accessibility_bridge_) return;
+        const auto native_view = puglGetNativeView(view_);
+        if (!native_view) return;
+
+        const ui::detail::NativeAccessibilityAttachBinding binding{
+            semantic_domain_->bridge().native_reader_source(),
+            semantic_domain_->bridge().native_action_endpoint()};
+        accessibility_bridge_ = nativeuiAccessibilityCreate(
+            reinterpret_cast<void*>(static_cast<std::uintptr_t>(native_view)),
+            &binding);
+        if (!accessibility_bridge_) return;
+
+        try {
+            auto sink = std::make_shared<NativeAccessibilityNotificationForwarder>(
+                accessibility_bridge_);
+            if (!semantic_domain_->set_native_notification_sink(std::move(sink))) {
+                nativeuiAccessibilityDestroy(accessibility_bridge_);
+                accessibility_bridge_ = nullptr;
+            }
+        } catch (...) {
+            nativeuiAccessibilityDestroy(accessibility_bridge_);
+            accessibility_bridge_ = nullptr;
+        }
+    }
+
+    /// Detach in dependency order: uninstall the C++ sink first so no later
+    /// delivery can reach the raw bridge pointer, then destroy the bridge.
+    void detach_accessibility() noexcept {
+        if (!accessibility_bridge_) return;
+        if (semantic_domain_) {
+            (void)semantic_domain_->set_native_notification_sink(nullptr);
+        }
+        nativeuiAccessibilityDestroy(accessibility_bridge_);
+        accessibility_bridge_ = nullptr;
     }
 
     void remember_teardown_error(const char* message) noexcept {

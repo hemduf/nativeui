@@ -2,6 +2,8 @@
 
 #include <nativeui/component.hpp>
 #include <nativeui/detail/focus_group.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
 #include <nativeui/state.hpp>
@@ -164,12 +166,31 @@ struct RadioStateInvalidation final {
     }
 };
 
-class CheckboxComponent final : public Component, public ThemeBinding {
+class CheckboxComponent final : public Component,
+                                public ThemeBinding,
+                                public SemanticActionHandler {
 public:
     CheckboxComponent(Binding<bool> state, std::string label, CheckboxStyle style)
         : state_(std::move(state)), label_(std::move(label)), style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return checkbox_semantic_info(label_, state_.get());
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Toggle ||
+            !effective_enabled() || effective_read_only()) {
+            return false;
+        }
+
+        auto state = state_;
+        const bool target = !state.get();
+        state.set(target);
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);
@@ -402,7 +423,8 @@ private:
 
 class RadioButtonComponent final : public Component,
                                    public FocusGroupParticipant,
-                                   public ThemeBinding {
+                                   public ThemeBinding,
+                                   public SemanticActionHandler {
 public:
     using IsSelected = std::function<bool()>;
     using Select = std::function<void()>;
@@ -423,6 +445,24 @@ public:
           style_(std::move(style)) {}
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return radio_button_semantic_info(
+            label_, is_selected_ && is_selected_());
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Select ||
+            !effective_enabled() || effective_read_only()) {
+            return false;
+        }
+
+        auto select = select_;
+        if (!select) return false;
+        select();
+        return true;
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
         const auto resolved = resolved_style(focused_);

@@ -94,6 +94,15 @@ if(NATIVEUI_BUILD_PLATFORM)
       message(FATAL_ERROR "NativeUI/Pugl supports macOS, Windows, Linux/X11 and WebAssembly")
     endif()
 
+    # Windows compiles the real accessibility UIA fragment provider into the platform
+    # target (see the root CMakeLists.txt). Linux/WebAssembly keep the same
+    # fail-closed accessibility C ABI stub so the portable platform layer can
+    # call it unconditionally.
+    if(NOT WIN32)
+      list(APPEND _pugl_sources
+        "${CMAKE_CURRENT_LIST_DIR}/../src/detail/native_accessibility_stub.c")
+    endif()
+
     add_library(nativeui_pugl STATIC ${_pugl_sources})
     add_library(NativeUI::Pugl ALIAS nativeui_pugl)
     set_target_properties(nativeui_pugl PROPERTIES POSITION_INDEPENDENT_CODE ON)

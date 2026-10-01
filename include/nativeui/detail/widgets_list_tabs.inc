@@ -1,6 +1,8 @@
 #pragma once
 
 #include <nativeui/component.hpp>
+#include <nativeui/detail/semantic_action.hpp>
+#include <nativeui/detail/semantic_widget_info.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/layout.hpp>
 #include <nativeui/list_tabs_style.hpp>
@@ -109,7 +111,9 @@ struct ListViewRuntime final {
 };
 
 template <class T>
-class ListRowComponent final : public Component, public ThemeBinding {
+class ListRowComponent final : public Component,
+                               public ThemeBinding,
+                               public SemanticActionHandler {
 public:
     ListRowComponent(std::shared_ptr<ListViewRuntime<T>> runtime, std::size_t index)
         : runtime_(std::move(runtime)), index_(index) {}
@@ -118,6 +122,40 @@ public:
         ComponentAvailability result{};
         result.enabled = runtime_->enabled_at(index_);
         return result;
+    }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        if (index_ >= runtime_->keys.size()) return {};
+        const auto& selected = runtime_->selection.get();
+        const bool is_selected =
+            selected.has_value() && *selected == runtime_->keys[index_];
+        return list_item_semantic_info(
+            list_item_key_name(runtime_->keys[index_]),
+            is_selected,
+            static_cast<bool>(runtime_->activation_callback));
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (!effective_enabled()) return false;
+
+        auto runtime = runtime_;
+        switch (request.action) {
+        case SemanticAction::Select:
+            // `Select` is a value-changing action in the frozen semantic/availability
+            // classification, so a read-only row keeps it rejected here as well
+            // as filtered from the projection.
+            if (effective_read_only()) return false;
+            return runtime->select(index_);
+        case SemanticAction::Activate:
+            // read-only: a read-only ListView still runs Space/`.on_activate`, so
+            // Activate stays executable and follows the same selection-then-
+            // callback policy as the input path.
+            if (!runtime->activation_callback) return false;
+            return runtime->activate(index_);
+        default:
+            return false;
+        }
     }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
@@ -279,6 +317,10 @@ public:
 
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return list_view_semantic_info();
+    }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         return children.empty() ? Size{} : children.front().preferred;
@@ -556,6 +598,53 @@ struct TabsRuntime final {
 };
 
 template <class T>
+class TabComponent final : public Component, public SemanticActionHandler {
+public:
+    TabComponent(std::shared_ptr<TabsRuntime<T>> runtime, std::size_t index)
+        : runtime_(std::move(runtime)), index_(index) {}
+
+    [[nodiscard]] ComponentAvailability local_availability() const noexcept override {
+        ComponentAvailability result{};
+        result.enabled = runtime_->enabled_at(index_);
+        return result;
+    }
+
+    /// One exposed Tab header inside the composite Tabs control. It carries the
+    /// selected/enabled state and the Select/Focus actions while the retained
+    /// tab strip keeps the header visuals and pointer hit testing on
+    /// TabsComponent; keyboard focus therefore stays one composite Tab stop.
+    [[nodiscard]] SemanticInfo semantics() const override {
+        std::string_view label{};
+        if (index_ < runtime_->labels.size()) {
+            label = runtime_->labels[index_];
+        }
+        const bool selected = index_ < runtime_->keys.size() &&
+            runtime_->selection.get() == runtime_->keys[index_];
+        return tab_semantic_info(label, selected);
+    }
+
+    [[nodiscard]] bool perform_semantic_action(
+        const SemanticActionRequest& request) override {
+        if (request.action != SemanticAction::Select ||
+            !effective_enabled() || effective_read_only()) {
+            return false;
+        }
+        auto runtime = runtime_;
+        return runtime->select(index_);
+    }
+
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
+        return {};
+    }
+
+    void paint(PaintContext&) const override {}
+
+private:
+    std::shared_ptr<TabsRuntime<T>> runtime_;
+    std::size_t index_{};
+};
+
+template <class T>
 class TabPanelComponent final : public Component {
 public:
     TabPanelComponent(std::shared_ptr<TabsRuntime<T>> runtime, std::size_t index)
@@ -565,6 +654,10 @@ public:
         ComponentAvailability result{};
         result.visibility = selected() ? VisibilityMode::Visible : VisibilityMode::Collapsed;
         return result;
+    }
+
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return tab_panel_semantic_info();
     }
 
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
@@ -612,6 +705,10 @@ public:
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool pointer_targetable() const noexcept override { return true; }
 
+    [[nodiscard]] SemanticInfo semantics() const override {
+        return tabs_semantic_info();
+    }
+
     [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
         const auto resolved = container_style(focused_);
         Size result{120.0f, resolved.header_height};
@@ -649,7 +746,29 @@ public:
             bounds.y + header_height + gap,
             bounds.w,
             std::max(0.0f, bounds.h - header_height - gap)};
-        for (auto& placement : placements) placement.bounds = panel;
+
+        // Retained children alternate [Tab, TabPanel] in logical order. Tab
+        // header nodes only own the exposed semantics/bounds; TabsComponent
+        // keeps the header visuals and pointer handling.
+        const auto tab_count = runtime_->keys.size();
+        for (std::size_t index = 0; index < placements.size(); ++index) {
+            if (index % 2 == 0 && index / 2 < tab_count) {
+                const auto tab_index = index / 2;
+                const float width = tab_count == 0
+                    ? 0.0f
+                    : bounds.w / static_cast<float>(tab_count);
+                const float x = bounds.x + width * static_cast<float>(tab_index);
+                placements[index].bounds = Rect{
+                    x,
+                    bounds.y,
+                    tab_index + 1 == tab_count
+                        ? std::max(0.0f, bounds.x + bounds.w - x)
+                        : width,
+                    header_height};
+                continue;
+            }
+            placements[index].bounds = panel;
+        }
     }
 
     void mount(MountContext& context) override {
@@ -1091,15 +1210,20 @@ public:
         runtime->labels.reserve(tabs_.size());
         runtime->enabled.reserve(tabs_.size());
 
-        std::vector<Spec> panels;
-        panels.reserve(tabs_.size());
+        std::vector<Spec> children;
+        children.reserve(tabs_.size() * 2);
         for (std::size_t index = 0; index < tabs_.size(); ++index) {
             runtime->keys.push_back(tabs_[index].key);
             runtime->labels.push_back(tabs_[index].label);
             runtime->enabled.push_back(tabs_[index].enabled);
+            children.push_back(Spec{
+                [runtime, index] {
+                    return std::make_unique<detail::TabComponent<T>>(runtime, index);
+                },
+                {}});
             std::vector<Spec> panel_children;
             panel_children.push_back(std::move(tabs_[index].panel));
-            panels.push_back(Spec{
+            children.push_back(Spec{
                 [runtime, index] {
                     return std::make_unique<detail::TabPanelComponent<T>>(runtime, index);
                 },
@@ -1110,7 +1234,7 @@ public:
             [runtime] {
                 return std::make_unique<detail::TabsComponent<T>>(runtime);
             },
-            std::move(panels)};
+            std::move(children)};
     }
 
 private:
