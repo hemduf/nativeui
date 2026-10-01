@@ -508,6 +508,29 @@ void color_texture_channel_contract() {
     }
 }
 
+void caller_mutation_snapshot_contract() {
+    const auto program = compile_probe(R"(
+        uniform float value;
+        half4 main(float2) {
+            return half4(value, 0.0, 0.0, 1.0);
+        }
+    )");
+    ui::ShaderInstance shader{program};
+    check(shader.set_float("value", 0.25f) == ui::ShaderSetResult::Ok,
+          "ScalarSource caller-mutation shader setup failed");
+
+    const auto scalar = ui::ScalarSource::from_brush(
+        ui::Brush{shader}, ui::ScalarChannel::Red);
+    const auto before = render_probe(scalar_probe(scalar), 8, 8);
+    check(before[0] > 0.24f && before[0] < 0.26f,
+          "ScalarSource snapshot captured the wrong shader value");
+
+    check(shader.set_float("value", 0.85f) == ui::ShaderSetResult::Ok,
+          "ScalarSource caller-mutation shader update failed");
+    const auto after = render_probe(scalar_probe(scalar), 8, 8);
+    check_pixel_near(after, before);
+}
+
 void snapshot_lifetime_contract() {
     const auto gradient_scalar = [] {
         ui::Brush temporary{ui::LinearGradient{
@@ -780,6 +803,7 @@ int main() {
     source_construction_side_effect_contract();
     data_texture_channel_contract();
     color_texture_channel_contract();
+    caller_mutation_snapshot_contract();
     snapshot_lifetime_contract();
     noise_sampling_contract();
     backend_failure_retry_contract();
