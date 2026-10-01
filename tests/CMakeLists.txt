@@ -165,6 +165,18 @@ if(NATIVEUI_BUILD_TESTS)
     set_tests_properties(${name} PROPERTIES LABELS "unit")
   endfunction()
 
+  add_executable(nativeui_skia_log_handler_contract_tests
+    ${PROJECT_SOURCE_DIR}/tests/skia_log_handler_contract_tests.cpp)
+  target_compile_features(nativeui_skia_log_handler_contract_tests PRIVATE cxx_std_20)
+  target_link_libraries(nativeui_skia_log_handler_contract_tests PRIVATE SkiaBuilder::svg)
+  nativeui_enable_project_warnings(nativeui_skia_log_handler_contract_tests)
+  nativeui_enable_sanitizers(nativeui_skia_log_handler_contract_tests)
+  add_test(NAME nativeui_skia_log_handler_contract_tests
+    COMMAND nativeui_skia_log_handler_contract_tests)
+  set_tests_properties(nativeui_skia_log_handler_contract_tests PROPERTIES
+    LABELS "unit;research"
+  )
+
   nativeui_add_core_test(
     nativeui_advanced_rendering_docs_snippets
     ${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_snippets.cpp)
