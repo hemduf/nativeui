@@ -322,6 +322,33 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t091_worley_noise_tests ${PROJECT_SOURCE_DIR}/tests/t091_worley_noise_tests.cpp)
   target_include_directories(nativeui_t091_worley_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_fractal_noise_tests ${PROJECT_SOURCE_DIR}/tests/fractal_noise_tests.cpp)
+  nativeui_add_core_test(nativeui_scalar_source_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_tests.cpp)
+  target_include_directories(nativeui_scalar_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_scalar_source_fault_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_fault_tests.cpp)
+  target_include_directories(nativeui_scalar_source_fault_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  add_executable(nativeui_scalar_source_source_tests
+    ${PROJECT_SOURCE_DIR}/tests/scalar_source_source_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/headless.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+  )
+  target_include_directories(nativeui_scalar_source_source_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_scalar_source_source_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_scalar_source_source_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
+    SkiaBuilder::svg
+    NativeUI::Core
+  )
+  nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
+  nativeui_enable_sanitizers(nativeui_scalar_source_source_tests)
+  add_test(NAME nativeui_scalar_source_source_tests COMMAND nativeui_scalar_source_source_tests)
+  set_tests_properties(nativeui_scalar_source_source_tests PROPERTIES LABELS "unit")
   target_include_directories(nativeui_fractal_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
 
   # Fault controls remain in this isolated executable, never NativeUI::Core.
@@ -577,6 +604,19 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_fractal_noise_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_fractal_noise_gpu_reference_tests)
 
+    add_executable(nativeui_scalar_source_gpu_reference_tests
+      ${PROJECT_SOURCE_DIR}/tests/scalar_source_gpu_reference_tests.cpp
+    )
+    target_include_directories(nativeui_scalar_source_gpu_reference_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_scalar_source_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.scalar-source-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_scalar_source_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_scalar_source_gpu_reference_tests)
+
     add_executable(nativeui_t095_scene_gpu_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_gpu_tests.cpp)
     target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
       "${PROJECT_SOURCE_DIR}"
@@ -688,6 +728,8 @@ if(NATIVEUI_BUILD_TESTS)
         COMMAND nativeui_t091_worley_noise_gpu_reference_tests)
       add_test(NAME nativeui_fractal_noise_gpu_reference_tests
         COMMAND nativeui_fractal_noise_gpu_reference_tests)
+      add_test(NAME nativeui_scalar_source_gpu_reference_tests
+        COMMAND nativeui_scalar_source_gpu_reference_tests)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       add_test(NAME nativeui_t096_scene_gpu_tests COMMAND nativeui_t096_scene_gpu_tests)
       add_test(NAME nativeui_render_resource_gpu_tests
@@ -702,6 +744,7 @@ if(NATIVEUI_BUILD_TESTS)
         nativeui_t090_simplex_noise_gpu_reference_tests
         nativeui_t091_worley_noise_gpu_reference_tests
         nativeui_fractal_noise_gpu_reference_tests
+        nativeui_scalar_source_gpu_reference_tests
         nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests
         nativeui_render_resource_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
@@ -712,7 +755,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit edit text theme path resource embedded_resource resource_manager image shader noise svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state edit dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise scalar_source svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
     add_library(nativeui_header_${_header}_compile OBJECT ${PROJECT_SOURCE_DIR}/tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)
