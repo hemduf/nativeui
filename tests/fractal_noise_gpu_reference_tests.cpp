@@ -89,6 +89,8 @@ struct GpuComparisonSummary {
     int max_red_delta = 0;
     int max_green_delta = 0;
     int max_blue_delta = 0;
+    int max_alpha_delta = 0;
+    std::size_t sample_count = 0;
     std::size_t mismatch_count = 0;
 };
 
@@ -171,14 +173,18 @@ void compare(ui::Application& app,
         const int dr = int(actual->r) - int(expected.r);
         const int dg = int(actual->g) - int(expected.g);
         const int db = int(actual->b) - int(expected.b);
+        const int da = int(actual->a) - int(expected.a);
+        ++summary.sample_count;
         summary.max_red_delta = std::max(summary.max_red_delta, std::abs(dr));
         summary.max_green_delta =
             std::max(summary.max_green_delta, std::abs(dg));
         summary.max_blue_delta =
             std::max(summary.max_blue_delta, std::abs(db));
+        summary.max_alpha_delta =
+            std::max(summary.max_alpha_delta, std::abs(da));
 
         if (std::abs(dr) > 5 || std::abs(dg) > 5 || std::abs(db) > 5 ||
-            actual->a != expected.a) {
+            da != 0) {
             ++summary.mismatch_count;
             std::cerr
                 << "fractal GPU mismatch: seed=" << seed
@@ -191,7 +197,11 @@ void compare(ui::Application& app,
                 << "," << int(expected.b) << "," << int(expected.a) << ")"
                 << " actual=(" << int(actual->r) << "," << int(actual->g)
                 << "," << int(actual->b) << "," << int(actual->a) << ")"
-                << " delta=(" << dr << "," << dg << "," << db << ")\n";
+                << " cpu=" << cpu
+                << " raster_error="
+                << std::abs(double(expected.r) / 255.0 - cpu)
+                << " delta=(" << dr << "," << dg << "," << db << "," << da
+                << ")\n";
         }
     }
 }
@@ -273,6 +283,8 @@ int main(int argc, char** argv) {
         std::cout << "Fractal GPU delta maxima: red=" << summary.max_red_delta
                   << " green=" << summary.max_green_delta
                   << " blue=" << summary.max_blue_delta
+                  << " alpha=" << summary.max_alpha_delta
+                  << " samples=" << summary.sample_count
                   << " mismatches=" << summary.mismatch_count << '\n';
         if (summary.mismatch_count != 0) {
             throw std::runtime_error{
