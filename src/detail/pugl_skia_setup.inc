@@ -201,7 +201,15 @@ private:
         const SkAutoCanvasRestore restore{canvas, true};
         canvas->scale(request.device_scale, request.device_scale);
         canvas->translate(-extent.x, -extent.y);
-        if (!paint_callback(callback_state, *canvas, nullptr)) return false;
+        const detail::PainterPrivateHooks nested_hooks{
+            hook_state,
+            &materialize_cached_image_texture,
+            &materialize_cached_runtime_shader,
+            &materialize_cached_effect,
+            &materialize_cached_linear_gradient,
+            &materialize_cached_radial_gradient,
+            &paint_cached_raster_boundary};
+        if (!paint_callback(callback_state, *canvas, &nested_hooks)) return false;
     }
 
     const auto submission = hook_state->context->flushAndSubmit(surface.get());
