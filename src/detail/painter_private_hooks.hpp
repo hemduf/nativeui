@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nativeui/component_base.hpp>
 #include <nativeui/paint_style.hpp>
 #include <nativeui/detail/raster_cache_epoch.hpp>
 
