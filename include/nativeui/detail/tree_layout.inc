@@ -495,7 +495,6 @@
             token,
             local_extent,
             visible,
-            1.0f,
             reusable_raster_cache_content(node.id, token)};
 
         const auto paint_callback =
