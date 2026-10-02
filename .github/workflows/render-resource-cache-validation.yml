@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - feature/render-resource-cache-impl
-      - feature/offscreen-subtree-raster-cache
 
 permissions:
   contents: read
