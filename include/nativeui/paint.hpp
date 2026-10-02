@@ -151,9 +151,6 @@ public:
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
     // Renderer-internal effect observability for scene update validation.
     [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
-    [[nodiscard]] bool used_nontrivial_transform() const noexcept {
-        return used_nontrivial_transform_;
-    }
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;
     }
