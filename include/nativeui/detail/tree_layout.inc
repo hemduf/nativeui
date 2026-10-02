@@ -513,11 +513,6 @@
                 return true;
             };
 
-        const auto unsafe_callback = [](void* raw) noexcept {
-            auto& callback = *static_cast<CallbackState*>(raw);
-            callback.reuse_safe = false;
-        };
-
         const auto validate_callback = [](void* raw) noexcept -> bool {
             const auto& callback = *static_cast<CallbackState*>(raw);
             return callback.reuse_safe &&
@@ -536,7 +531,6 @@
             request,
             &state,
             paint_callback,
-            unsafe_callback,
             validate_callback,
             commit_callback);
     }
