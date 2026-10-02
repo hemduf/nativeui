@@ -652,6 +652,7 @@ private:
         const detail::RasterCachePaintRequest& request,
         void* callback_state,
         detail::RasterCachePaintCallback paint_callback,
+        detail::RasterCacheValidateCallback validate_callback,
         detail::RasterCacheCommitCallback commit_callback);
 
     [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
