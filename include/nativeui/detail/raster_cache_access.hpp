@@ -23,6 +23,11 @@ struct RasterCacheAccess final {
         return tree.reusable_raster_cache_content(id, token);
     }
 
+    [[nodiscard]] static bool committable(
+        const Tree& tree, NodeId id, const Token& token) noexcept {
+        return tree.committable_raster_cache_content(id, token);
+    }
+
     [[nodiscard]] static bool commit(Tree& tree, NodeId id, const Token& token) noexcept {
         return tree.commit_raster_cache_content(id, token);
     }
