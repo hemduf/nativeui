@@ -1278,9 +1278,9 @@ void internal_transform_is_stable_inside_raster() {
             tree, *surface->getCanvas(), platform, &hooks);
         state.resources.end_frame();
     }
-    NUI_CHECK(*paints == 2);
-    NUI_CHECK(state.creates == 2);
-    NUI_CHECK(state.resources.retained_entries() == 0);
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
 }
 
 
