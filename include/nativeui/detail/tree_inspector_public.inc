@@ -60,17 +60,6 @@
     [[nodiscard]] debug::InspectorSnapshot paint_with_inspector_snapshot(
         SkCanvas& canvas,
         PlatformServices& platform) {
-        if (lifecycle_transition_active()) return {};
-        flush_dynamic_mutations();
-        if (active_) {
-            sync_availability_structure(platform);
-            sync_focus_structure(platform);
-        }
-        ensure_layout();
-
-        auto snapshot = inspector_snapshot();
-        Painter painter{canvas};
-        paint_node(*root_, painter, platform, viewport_rect());
-        paint_dirty_.clear();
-        return snapshot;
+        return paint_with_inspector_snapshot_with_resources(
+            canvas, platform, nullptr);
     }

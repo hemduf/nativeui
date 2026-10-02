@@ -18,6 +18,7 @@
 #include "include/core/SkSamplingOptions.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkTileMode.h"
+#include "detail/image_access.hpp"
 #include "detail/image_texture_test_seams.hpp"
 
 #include <algorithm>
@@ -38,12 +39,6 @@ struct ImageData {
     sk_sp<SkImage> image;
     sk_sp<SkImage> raw_image;
     Size size{};
-};
-
-struct ImageAccess {
-    [[nodiscard]] static const std::shared_ptr<const ImageData>& data(const Image& image) noexcept {
-        return image.data_;
-    }
 };
 
 namespace {
@@ -705,6 +700,7 @@ sk_sp<SkShader> materialize_image_texture(const ImageTexture& texture) {
         &tile_local_matrix,
         &subset);
 }
+
 
 void draw_image(Painter& painter, const Image& image, Rect destination, ImageFit fit) {
     const auto& data = ImageAccess::data(image);

@@ -46,6 +46,9 @@ struct SceneDiagnostics final {
     std::uint64_t deferred_redraw_attempts{};
     std::uint64_t deferred_redraw_rejections{};
     std::uint64_t redraw_requests_during_render{};
+    std::uint64_t render_resource_cache_clears{};
+    std::uint64_t render_resource_entries{};
+    std::uint64_t render_resource_accounted_bytes{};
     // Physical extent of the persistent scene surface.
     int scene_width{};
     int scene_height{};

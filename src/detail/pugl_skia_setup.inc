@@ -18,6 +18,9 @@
 #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
+
+#include "painter_private_hooks.hpp"
+#include "render_resource_materialization.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
 #endif
@@ -64,6 +67,76 @@ public:
 private:
     Callback callback_;
 };
+
+[[nodiscard]] sk_sp<SkShader> materialize_cached_image_texture(
+    void* state,
+    const ImageTexture& texture) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::materialize_image_texture(texture);
+
+    auto acquisition = resources->acquire_image_texture(
+        texture,
+        [&texture] { return detail::materialize_image_texture(texture); });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] sk_sp<SkShader> materialize_cached_runtime_shader(
+    void* state,
+    const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::materialize_shader_brush(snapshot);
+
+    auto acquisition = resources->acquire_runtime_shader(
+        snapshot,
+        [&snapshot] { return detail::materialize_shader_brush(snapshot); });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] sk_sp<SkImageFilter> materialize_cached_effect(
+    void* state,
+    const Effect& effect) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::EffectCacheAccess::materialize(effect);
+
+    auto acquisition = resources->acquire_effect(
+        effect,
+        [&effect] { return detail::EffectCacheAccess::materialize(effect); });
+    return acquisition ? std::move(acquisition.filter)
+                       : sk_sp<SkImageFilter>{};
+}
+
+[[nodiscard]] sk_sp<SkShader> materialize_cached_linear_gradient(
+    void* state,
+    const LinearGradient& gradient) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::GradientCacheAccess::materialize(gradient);
+
+    auto acquisition = resources->acquire_linear_gradient(
+        gradient,
+        [&gradient] {
+            return detail::GradientCacheAccess::materialize(gradient);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] sk_sp<SkShader> materialize_cached_radial_gradient(
+    void* state,
+    const RadialGradient& gradient) {
+    auto* resources =
+        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    if (!resources) return detail::GradientCacheAccess::materialize(gradient);
+
+    auto acquisition = resources->acquire_radial_gradient(
+        gradient,
+        [&gradient] {
+            return detail::GradientCacheAccess::materialize(gradient);
+        });
+    return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
 
 PuglSpan to_pugl_span(float physical) {
     return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
@@ -113,16 +186,28 @@ public:
         snapshot_.reset();
         presentation_.reset();
         scene_.reset();
+        // Live-context teardown releases cache-owned backend handles before
+        // dropping the Ganesh context they belong to.
+        render_resources_.clear();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        ++render_resource_cache_clears_;
+#endif
         context_.reset();
         interface_.reset();
         clear_identity();
     }
 
     void abandon() noexcept {
+        // Confirmed context loss: abandon first so releasing cached Skia handles
+        // cannot attempt stale backend work, then discard this view's cache.
         if (context_) context_->abandonContext();
         snapshot_.reset();
         presentation_.reset();
         scene_.reset();
+        render_resources_.clear();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+        ++render_resource_cache_clears_;
+#endif
         context_.reset();
         interface_.reset();
         clear_identity();
@@ -269,6 +354,12 @@ public:
             .deferred_redraw_attempts = 0,
             .deferred_redraw_rejections = 0,
             .redraw_requests_during_render = 0,
+            .render_resource_cache_clears = render_resource_cache_clears_,
+            .render_resource_entries =
+                static_cast<std::uint64_t>(render_resources_.retained_entries()),
+            .render_resource_accounted_bytes =
+                static_cast<std::uint64_t>(
+                    render_resources_.retained_accounted_bytes()),
             .scene_width = width_,
             .scene_height = height_,
             .last_update_x = last_update_x_,
@@ -455,11 +546,21 @@ public:
             scene_frame_captured_ = true;
             const ScopeExit finish_capture{
                 [this]() noexcept { scene_frame_captured_ = false; }};
+            render_resources_.begin_frame();
+            const ScopeExit finish_resources{
+                [this]() noexcept { render_resources_.end_frame(); }};
+            const detail::PainterPrivateHooks painter_hooks{
+                &render_resources_,
+                &materialize_cached_image_texture,
+                &materialize_cached_runtime_shader,
+                &materialize_cached_effect,
+                &materialize_cached_linear_gradient,
+                &materialize_cached_radial_gradient};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 canvas->scale(scale_factor, scale_factor);
-                ui.paint(*canvas, services);
+                ui.paint_with_resources(*canvas, services, &painter_hooks);
             } catch (...) {
                 invalidate();
                 throw;
@@ -554,19 +655,30 @@ public:
 
             bool used_effects = false;
             bool painted = false;
+            render_resources_.begin_frame();
+            const ScopeExit finish_resources{
+                [this]() noexcept { render_resources_.end_frame(); }};
+            const detail::PainterPrivateHooks painter_hooks{
+                &render_resources_,
+                &materialize_cached_image_texture,
+                &materialize_cached_runtime_shader,
+                &materialize_cached_effect,
+                &materialize_cached_linear_gradient,
+                &materialize_cached_radial_gradient};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_full_scene_prepared(
-                        transaction, *canvas, services, used_effects);
+                        transaction, *canvas, services,
+                        &painter_hooks, used_effects);
                 } else {
                     canvas->resetMatrix();
                     canvas->clipIRect(partial_clip, SkClipOp::kIntersect);
                     canvas->scale(scale_factor, scale_factor);
                     painted = ui.paint_partial_scene_prepared(
                         transaction, *canvas, services,
-                        damage->logical_query, used_effects);
+                        damage->logical_query, &painter_hooks, used_effects);
                 }
             } catch (...) {
                 invalidate();
@@ -785,6 +897,7 @@ private:
 #endif
     sk_sp<const GrGLInterface> interface_;
     sk_sp<GrDirectContext> context_;
+    RenderResourceMaterializationContext render_resources_;
     GrGLBindFramebufferFn* bind_framebuffer_{};
     sk_sp<SkSurface> scene_;
     sk_sp<SkImage> snapshot_;
@@ -814,6 +927,7 @@ private:
     std::uint64_t scene_builds_{};
     std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};
+    std::uint64_t render_resource_cache_clears_{};
     int readback_x_{};
     int readback_y_{};
     bool readback_pending_{};

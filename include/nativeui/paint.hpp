@@ -52,6 +52,8 @@ struct ShaderBrushSnapshot;
 [[nodiscard]] sk_sp<SkShader> materialize_image_texture(
     const ImageTexture& texture);
 
+struct PainterPrivateHooks;
+
 struct ResolvedTextRun {
     std::size_t byte_offset{};
     std::size_t byte_count{};
@@ -78,6 +80,7 @@ struct ResolvedTextLayout {
 
 } // namespace detail
 
+class Tree;
 
 class Painter {
     struct ScopeFrame {
@@ -99,6 +102,7 @@ class Painter {
     friend struct detail::PainterLayerFaultAccess;
     friend struct detail::PainterEffectFaultAccess;
     friend struct detail::PainterTransformHistoryFaultAccess;
+    friend class Tree;
 
 public:
     class StateGuard {
@@ -127,7 +131,7 @@ public:
         ScopeFrame frame_{};
     };
 
-    explicit Painter(SkCanvas& canvas) : canvas_(canvas) {}
+    explicit Painter(SkCanvas& canvas) noexcept : Painter(canvas, nullptr) {}
     ~Painter() noexcept {
         // Framework-owned tree scopes may be unwinding because component paint
         // threw before the matching manual pop. Restore every outstanding save
@@ -634,33 +638,8 @@ private:
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
 
-    [[nodiscard]] static sk_sp<SkImageFilter> materialize_effect_filter(
-        const Effect& effect) {
-        switch (effect.kind_) {
-            case Effect::Kind::GaussianBlur:
-                return SkImageFilters::Blur(
-                    effect.sigma_x_, effect.sigma_y_, SkTileMode::kDecal, nullptr);
-            case Effect::Kind::DropShadow:
-                return SkImageFilters::DropShadow(
-                    effect.offset_.x,
-                    effect.offset_.y,
-                    effect.sigma_x_,
-                    effect.sigma_y_,
-                    to_sk_color(effect.color_),
-                    nullptr,
-                    nullptr);
-            case Effect::Kind::DropShadowOnly:
-                return SkImageFilters::DropShadowOnly(
-                    effect.offset_.x,
-                    effect.offset_.y,
-                    effect.sigma_x_,
-                    effect.sigma_y_,
-                    to_sk_color(effect.color_),
-                    nullptr,
-                    nullptr);
-        }
-        return nullptr;
-    }
+    [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
+        const Effect& effect);
 
     [[nodiscard]] bool effect_source_device_bounds(
         const SkRect& source_bounds,
@@ -805,45 +784,15 @@ private:
         paint.setColor4f(to_sk_color(color));
     }
 
-    static void apply_fill_source(SkPaint& paint, const LinearGradient& gradient) {
-        const auto start = gradient.start();
-        const auto end = gradient.end();
-        const SkPoint points[2] = {{start.x, start.y}, {end.x, end.y}};
-        apply_gradient(paint, gradient.stops(), [points](const SkGradient& sk_gradient) {
-            return SkShaders::LinearGradient(points, sk_gradient);
-        });
-    }
+    void apply_fill_source(SkPaint& paint, const LinearGradient& gradient);
 
-    static void apply_fill_source(SkPaint& paint, const RadialGradient& gradient) {
-        const auto center = gradient.center();
-        const SkPoint sk_center{center.x, center.y};
-        apply_gradient(paint, gradient.stops(), [sk_center, &gradient](const SkGradient& sk_gradient) {
-            if (!(gradient.radius() > 0.0f) || !std::isfinite(gradient.radius())) {
-                return sk_sp<SkShader>{};
-            }
-            return SkShaders::RadialGradient(sk_center, gradient.radius(), sk_gradient);
-        });
-    }
+    void apply_fill_source(SkPaint& paint, const RadialGradient& gradient);
 
-    static void apply_fill_source(SkPaint& paint, const ImageTexture& texture) {
-        auto shader = detail::materialize_image_texture(texture);
-        if (!shader) {
-            throw std::runtime_error(
-                "NativeUI image texture materialization returned no shader");
-        }
-        paint.setShader(std::move(shader));
-    }
+    void apply_fill_source(SkPaint& paint, const ImageTexture& texture);
 
-    static void apply_fill_source(
+    void apply_fill_source(
         SkPaint& paint,
-        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-        auto shader = detail::materialize_shader_brush(snapshot);
-        if (!shader) {
-            throw std::runtime_error(
-                "NativeUI runtime shader materialization returned no shader");
-        }
-        paint.setShader(std::move(shader));
-    }
+        const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot);
 
     [[nodiscard]] static SkPaint make_fill_paint(Color color, PaintOptions options) {
         SkPaint paint;
@@ -854,7 +803,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const LinearGradient& gradient,
+    [[nodiscard]] SkPaint make_fill_paint(const LinearGradient& gradient,
                                                  PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -867,7 +816,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const RadialGradient& gradient,
+    [[nodiscard]] SkPaint make_fill_paint(const RadialGradient& gradient,
                                                  PaintOptions options) {
         SkPaint paint;
         paint.setAntiAlias(true);
@@ -877,7 +826,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(
+    [[nodiscard]] SkPaint make_fill_paint(
         const ImageTexture& texture,
         PaintOptions options) {
         SkPaint paint;
@@ -888,7 +837,7 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(
+    [[nodiscard]] SkPaint make_fill_paint(
         const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot,
         PaintOptions options) {
         SkPaint paint;
@@ -899,13 +848,13 @@ private:
         return paint;
     }
 
-    [[nodiscard]] static SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
-        return brush.visit([options](const auto& source) {
-            return make_fill_paint(source, options);
+    [[nodiscard]] SkPaint make_fill_paint(const Brush& brush, PaintOptions options) {
+        return brush.visit([this, options](const auto& source) {
+            return this->make_fill_paint(source, options);
         });
     }
 
-    [[nodiscard]] static SkPaint make_stroke_paint(const Brush& brush,
+    [[nodiscard]] SkPaint make_stroke_paint(const Brush& brush,
                                                    StrokeStyle style,
                                                    PaintOptions options) {
         auto paint = make_fill_paint(brush, options);
@@ -1045,7 +994,13 @@ private:
         }
     }
 
+    explicit Painter(
+        SkCanvas& canvas,
+        const detail::PainterPrivateHooks* private_hooks) noexcept
+        : canvas_(canvas), private_hooks_(private_hooks) {}
+
     SkCanvas& canvas_;
+    const detail::PainterPrivateHooks* private_hooks_{};
     Transform2D current_transform_{};
     std::array<Transform2D, kInlineTransformSaveDepth> transform_history_inline_{};
     std::vector<Transform2D> transform_history_overflow_;

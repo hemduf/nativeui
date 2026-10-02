@@ -1278,10 +1278,15 @@ bool run_canonical_reset_fixture(ui::Application& application) {
         if (!surface) return failure("asymmetric surface readback failed");
         const float scale = window.scale_factor();
         const auto logical_extent = window.size();
-        const int expected_width =
-            covering_physical_pixel(logical_extent.w, scale);
-        const int expected_height =
-            covering_physical_pixel(logical_extent.h, scale);
+        // PUGL_CONFIGURE is authoritative and reports an integral physical
+        // client extent. window.size() is that extent divided by scale, so
+        // recover it with nearest-integer rounding. The outbound ceil rule is
+        // only for logical size requests and can add one pixel after a
+        // physical -> logical -> physical round trip at fractional DPI.
+        const int expected_width = static_cast<int>(std::lround(
+            static_cast<double>(logical_extent.w) * static_cast<double>(scale)));
+        const int expected_height = static_cast<int>(std::lround(
+            static_cast<double>(logical_extent.h) * static_cast<double>(scale)));
         if (surface->width != expected_width ||
             surface->height != expected_height ||
             surface->width == surface->height) {
