@@ -60,6 +60,10 @@ struct PainterHookState final {
     detail::RenderResourceMaterializationContext* resources{};
     GrDirectContext* context{};
     float device_scale{1.0f};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t* raster_cache_hits{};
+    std::uint64_t* raster_cache_updates{};
+#endif
 };
 
 template <class Callback>
@@ -248,6 +252,9 @@ private:
 
     if (request.allow_reuse) {
         if (auto cached = hook_state->resources->find_raster(key)) {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook_state->raster_cache_hits) ++*hook_state->raster_cache_hits;
+#endif
             return draw(cached);
         }
     }
@@ -294,6 +301,9 @@ private:
     if (!image) {
         throw std::runtime_error("subtree raster cache snapshot failed");
     }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->raster_cache_updates) ++*hook_state->raster_cache_updates;
+#endif
 
     if (!validate_callback(callback_state)) {
         return draw(image);
@@ -522,6 +532,8 @@ public:
     [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
         return SceneDiagnostics{
             .scene_allocations = scene_allocations_,
+            .raster_cache_hits = raster_cache_hits_,
+            .raster_cache_updates = raster_cache_updates_,
             .scene_builds = scene_builds_,
             .partial_scene_updates = partial_scene_updates_,
             .presentations = presentations_,
@@ -726,6 +738,10 @@ public:
                 [this]() noexcept { render_resources_.end_frame(); }};
             PainterHookState painter_hook_state{
                 &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
                 &painter_hook_state,
                 &materialize_cached_image_texture,
@@ -838,6 +854,10 @@ public:
                 [this]() noexcept { render_resources_.end_frame(); }};
             PainterHookState painter_hook_state{
                 &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
                 &painter_hook_state,
                 &materialize_cached_image_texture,
@@ -1105,6 +1125,8 @@ private:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     SceneFaultStage fault_stage_{SceneFaultStage::None};
     std::uint64_t scene_allocations_{};
+    std::uint64_t raster_cache_hits_{};
+    std::uint64_t raster_cache_updates_{};
     std::uint64_t scene_builds_{};
     std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};
