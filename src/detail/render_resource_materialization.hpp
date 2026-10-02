@@ -1,5 +1,8 @@
 #pragma once
 
+#include <nativeui/component_base.hpp>
+#include <nativeui/detail/raster_cache_epoch.hpp>
+
 #include "effect_cache_key.hpp"
 #include "gradient_cache_key.hpp"
 #include "image_texture_cache_key.hpp"
