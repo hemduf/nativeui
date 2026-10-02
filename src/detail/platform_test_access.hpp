@@ -35,6 +35,9 @@ enum class SceneFaultStage : std::uint8_t {
     Snapshot,
     PresentationCopy,
     PresentationSubmission,
+    RasterSurfaceAllocation,
+    RasterSubmission,
+    RasterSnapshot,
 };
 
 struct SceneDiagnostics final {
@@ -69,6 +72,11 @@ struct PlatformTestAccess final {
     [[nodiscard]] static bool register_root_raster_cache_boundary(
         UI& ui) {
         return ui.register_root_raster_cache_boundary_for_test();
+    }
+
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(
+        UI& ui) noexcept {
+        return ui.invalidate_root_raster_cache_boundary_for_test();
     }
 
     [[nodiscard]] static bool request_gpu_readback(
