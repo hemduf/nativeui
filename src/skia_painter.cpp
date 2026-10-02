@@ -1,3 +1,4 @@
+#include <nativeui/component_tree.hpp>
 #include <nativeui/paint.hpp>
 
 #include "detail/gradient_cache_key.hpp"
@@ -5,22 +6,85 @@
 
 namespace ui {
 
-bool Painter::raster_cache_hook_available() const noexcept {
-    return private_hooks_ && private_hooks_->paint_raster_cache_boundary;
-}
+bool Tree::try_paint_raster_cache_boundary(
+    const Node& node,
+    Painter& painter,
+    PlatformServices& platform,
+    Rect inherited_clip) {
+    const auto boundary = raster_cache_epochs_.find(node.id);
+    if (boundary == raster_cache_epochs_.end() ||
+        !painter.private_hooks_ ||
+        !painter.private_hooks_->paint_raster_cache_boundary ||
+        raster_cache_has_nested_boundary(node)) {
+        return false;
+    }
 
-bool Painter::paint_raster_cache_boundary(
-    const detail::RasterCachePaintRequest& request,
-    void* callback_state,
-    detail::RasterCachePaintCallback paint_callback,
-    detail::RasterCacheValidateCallback validate_callback,
-    detail::RasterCacheCommitCallback commit_callback) {
-    if (!raster_cache_hook_available()) return false;
-    return private_hooks_->paint_raster_cache_boundary(
-        private_hooks_->state,
+    const auto subtree = raster_cache_subtree_visual_bounds(node);
+    if (!subtree) return false;
+    const Rect visible = intersect(*subtree, inherited_clip);
+    if (visible.empty()) return true;
+
+    const Rect local_extent{
+        visible.x - node.bounds.x,
+        visible.y - node.bounds.y,
+        visible.w,
+        visible.h};
+    auto token = capture_raster_cache_content(node.id);
+    if (token.expired()) return false;
+
+    struct CallbackState final {
+        Tree* tree{};
+        const Node* node{};
+        PlatformServices* platform{};
+        Rect inherited_clip{};
+        Painter* parent_painter{};
+        detail::RasterCacheEpoch::Token token{};
+        bool reuse_safe{true};
+    } state{
+        this, &node, &platform, inherited_clip, &painter, token, true};
+
+    const detail::RasterCachePaintRequest request{
+        node.id,
+        token,
+        local_extent,
+        visible,
+        reusable_raster_cache_content(node.id, token)};
+
+    const auto paint_callback =
+        [](void* raw,
+           SkCanvas& canvas,
+           const detail::PainterPrivateHooks* hooks) -> bool {
+            auto& callback = *static_cast<CallbackState*>(raw);
+            Painter nested{canvas, hooks};
+            callback.tree->paint_node_contents(
+                *callback.node,
+                nested,
+                *callback.platform,
+                callback.inherited_clip);
+            callback.parent_painter->used_effects_ |= nested.used_effects();
+            callback.reuse_safe &= !nested.used_effects();
+            return true;
+        };
+
+    const auto validate_callback = [](void* raw) noexcept -> bool {
+        const auto& callback = *static_cast<CallbackState*>(raw);
+        return callback.reuse_safe &&
+               callback.tree->committable_raster_cache_content(
+                   callback.node->id, callback.token);
+    };
+
+    const auto commit_callback = [](void* raw) noexcept -> bool {
+        auto& callback = *static_cast<CallbackState*>(raw);
+        return callback.reuse_safe &&
+               callback.tree->commit_raster_cache_content(
+                   callback.node->id, callback.token);
+    };
+
+    return painter.private_hooks_->paint_raster_cache_boundary(
+        painter.private_hooks_->state,
         request,
-        canvas_,
-        callback_state,
+        painter.canvas_,
+        &state,
         paint_callback,
         validate_callback,
         commit_callback);
