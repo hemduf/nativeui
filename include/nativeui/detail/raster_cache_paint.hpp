@@ -1,16 +1,18 @@
 #pragma once
 
-#include <nativeui/component_base.hpp>
+#include <nativeui/geometry.hpp>
 #include <nativeui/detail/raster_cache_epoch.hpp>
 
 #include "include/core/SkCanvas.h"
+
+#include <cstdint>
 
 namespace ui::detail {
 
 struct PainterPrivateHooks;
 
 struct RasterCachePaintRequest final {
-    NodeId node_id{};
+    std::uint64_t node_id{};
     RasterCacheEpoch::Token token{};
     Rect local_extent{};
     Rect scene_extent{};
