@@ -9,18 +9,10 @@ bool Painter::raster_cache_hook_available() const noexcept {
     return private_hooks_ && private_hooks_->paint_raster_cache_boundary;
 }
 
-void Painter::note_raster_cache_transform() noexcept {
-    if (private_hooks_ && private_hooks_->note_raster_cache_unsafe) {
-        private_hooks_->note_raster_cache_unsafe(
-            private_hooks_->raster_observer_state);
-    }
-}
-
 bool Painter::paint_raster_cache_boundary(
     const detail::RasterCachePaintRequest& request,
     void* callback_state,
     detail::RasterCachePaintCallback paint_callback,
-    detail::RasterCacheUnsafeCallback unsafe_callback,
     detail::RasterCacheValidateCallback validate_callback,
     detail::RasterCacheCommitCallback commit_callback) {
     if (!raster_cache_hook_available()) return false;
@@ -30,7 +22,6 @@ bool Painter::paint_raster_cache_boundary(
         canvas_,
         callback_state,
         paint_callback,
-        unsafe_callback,
         validate_callback,
         commit_callback);
 }
