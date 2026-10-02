@@ -158,7 +158,7 @@ private:
     }
 
     const auto extent = request.local_extent;
-    const double scale = static_cast<double>(request.device_scale);
+    const double scale = static_cast<double>(hook_state->device_scale);
     const double physical_width = std::ceil(static_cast<double>(extent.w) * scale);
     const double physical_height = std::ceil(static_cast<double>(extent.h) * scale);
     if (!std::isfinite(extent.x) || !std::isfinite(extent.y) ||
@@ -171,7 +171,7 @@ private:
     }
 
     const detail::RenderResourceMaterializationContext::RasterCacheKey key{
-        request.node_id, request.token, extent, request.device_scale};
+        request.node_id, request.token, extent, hook_state->device_scale};
 
     auto draw = [&](const sk_sp<SkImage>& image) {
         if (!image) return false;
@@ -199,7 +199,7 @@ private:
     canvas->clear(SK_ColorTRANSPARENT);
     {
         const SkAutoCanvasRestore restore{canvas, true};
-        canvas->scale(request.device_scale, request.device_scale);
+        canvas->scale(hook_state->device_scale, hook_state->device_scale);
         canvas->translate(-extent.x, -extent.y);
         const detail::PainterPrivateHooks nested_hooks{
             hook_state,
