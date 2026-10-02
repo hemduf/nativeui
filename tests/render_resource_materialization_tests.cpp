@@ -769,6 +769,72 @@ void clear_is_instance_local() {
     NUI_CHECK(b_acquisition.frame_lease);
 }
 
+
+void retained_raster_uses_lifetime_identity_and_shared_budget() {
+    ui::detail::RenderResourceMaterializationContext context;
+    ui::detail::RasterCacheEpoch first_epoch;
+    const auto first_token = first_epoch.capture();
+
+    const auto info = SkImageInfo::MakeN32Premul(4, 4);
+    auto surface = SkSurfaces::Raster(info);
+    NUI_CHECK(surface);
+    surface->getCanvas()->clear(SK_ColorRED);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        7U, first_token, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
+    auto retained = context.retain_raster(key, 64U, image);
+    NUI_CHECK(retained);
+    NUI_CHECK(context.retained_entries() == 1);
+    NUI_CHECK(context.retained_accounted_bytes() == 64U);
+    NUI_CHECK(context.find_raster(key) == retained);
+
+    ui::detail::RasterCacheEpoch remounted_epoch;
+    const auto remounted_token = remounted_epoch.capture();
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey remounted{
+        7U, remounted_token, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
+    NUI_CHECK(!context.find_raster(remounted));
+
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2) { return half4(1.0); }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance instance{compiled.program};
+    const ui::Brush brush{instance};
+    const auto* snapshot = ui::detail::ShaderBrushAccess::snapshot(brush);
+    NUI_CHECK(snapshot && *snapshot);
+    auto shader = context.acquire_runtime_shader(
+        *snapshot,
+        [&] { return ui::detail::materialize_shader_brush(*snapshot); });
+    NUI_CHECK(shader);
+    NUI_CHECK(context.retained_entries() == 2);
+    NUI_CHECK(context.retained_accounted_bytes() >= 64U);
+}
+
+void raster_signature_separates_scale_and_local_extent() {
+    ui::detail::RenderResourceMaterializationContext context;
+    ui::detail::RasterCacheEpoch epoch;
+    const auto token = epoch.capture();
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(2, 2));
+    NUI_CHECK(surface);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey base{
+        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, 1.0f};
+    NUI_CHECK(context.retain_raster(base, 16U, image));
+
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey scale{
+        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, 2.0f};
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey extent{
+        11U, token, {0.0f, 0.0f, 2.0f, 2.0f}, 1.0f};
+    NUI_CHECK(!context.find_raster(scale));
+    NUI_CHECK(!context.find_raster(extent));
+}
+
+
 } // namespace
 
 int main() {
@@ -791,5 +857,7 @@ int main() {
     transient_frame_bookkeeping_is_released_at_frame_boundary();
     clear_releases_context_owned_frame_leases();
     clear_is_instance_local();
+    retained_raster_uses_lifetime_identity_and_shared_budget();
+    raster_signature_separates_scale_and_local_extent();
     return 0;
 }
