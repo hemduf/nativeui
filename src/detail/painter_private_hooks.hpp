@@ -30,6 +30,7 @@ struct PainterPrivateHooks final {
         SkCanvas& destination,
         void* callback_state,
         RasterCachePaintCallback paint_callback,
+        RasterCacheValidateCallback validate_callback,
         RasterCacheCommitCallback commit_callback){};
 };
 
