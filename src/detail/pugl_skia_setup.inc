@@ -56,6 +56,12 @@ constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 constexpr GrGLenum kGlFramebuffer = 0x8D40u;
 
+struct PainterHookState final {
+    detail::RenderResourceMaterializationContext* resources{};
+    GrDirectContext* context{};
+    float device_scale{1.0f};
+};
+
 template <class Callback>
 class ScopeExit final {
 public:
@@ -71,8 +77,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_image_texture(
     void* state,
     const ImageTexture& texture) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_image_texture(texture);
 
     auto acquisition = resources->acquire_image_texture(
@@ -84,8 +90,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_runtime_shader(
     void* state,
     const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_shader_brush(snapshot);
 
     auto acquisition = resources->acquire_runtime_shader(
@@ -97,8 +103,8 @@ private:
 [[nodiscard]] sk_sp<SkImageFilter> materialize_cached_effect(
     void* state,
     const Effect& effect) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::EffectCacheAccess::materialize(effect);
 
     auto acquisition = resources->acquire_effect(
@@ -111,8 +117,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_linear_gradient(
     void* state,
     const LinearGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_linear_gradient(
@@ -126,8 +132,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_radial_gradient(
     void* state,
     const RadialGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_radial_gradient(
@@ -136,6 +142,80 @@ private:
             return detail::GradientCacheAccess::materialize(gradient);
         });
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] bool paint_cached_raster_boundary(
+    void* state,
+    const detail::RasterCachePaintRequest& request,
+    SkCanvas& destination,
+    void* callback_state,
+    detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheCommitCallback commit_callback) {
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    if (!hook_state || !hook_state->resources || !hook_state->context ||
+        !paint_callback || !commit_callback) {
+        return false;
+    }
+
+    const auto extent = request.local_extent;
+    const double scale = static_cast<double>(request.device_scale);
+    const double physical_width = std::ceil(static_cast<double>(extent.w) * scale);
+    const double physical_height = std::ceil(static_cast<double>(extent.h) * scale);
+    if (!std::isfinite(extent.x) || !std::isfinite(extent.y) ||
+        !std::isfinite(extent.w) || !std::isfinite(extent.h) ||
+        !(extent.w > 0.0f) || !(extent.h > 0.0f) ||
+        !std::isfinite(scale) || !(scale > 0.0) ||
+        physical_width > static_cast<double>((std::numeric_limits<int>::max)()) ||
+        physical_height > static_cast<double>((std::numeric_limits<int>::max)())) {
+        return false;
+    }
+
+    const detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        request.node_id, request.token, extent, request.device_scale};
+
+    auto draw = [&](const sk_sp<SkImage>& image) {
+        if (!image) return false;
+        const SkRect dst = SkRect::MakeXYWH(
+            extent.x, extent.y, extent.w, extent.h);
+        destination.drawImageRect(
+            image, dst, SkSamplingOptions(SkFilterMode::kLinear), nullptr);
+        return true;
+    };
+
+    if (request.allow_reuse) {
+        if (auto cached = hook_state->resources->find_raster(key)) {
+            return draw(cached);
+        }
+    }
+
+    const int width = static_cast<int>(physical_width);
+    const int height = static_cast<int>(physical_height);
+    const SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
+    auto surface = SkSurfaces::RenderTarget(
+        hook_state->context, skgpu::Budgeted::kYes, info);
+    if (!surface) return false;
+
+    auto* canvas = surface->getCanvas();
+    canvas->clear(SK_ColorTRANSPARENT);
+    {
+        const SkAutoCanvasRestore restore{canvas, true};
+        canvas->scale(request.device_scale, request.device_scale);
+        canvas->translate(-extent.x, -extent.y);
+        if (!paint_callback(callback_state, *canvas, nullptr)) return false;
+    }
+
+    const auto submission = hook_state->context->flushAndSubmit(surface.get());
+    if (!submission.fSuccess) return false;
+    auto image = surface->makeImageSnapshot();
+    if (!image) return false;
+
+    const bool current = commit_callback(callback_state);
+    if (current) {
+        image = hook_state->resources->retain_raster(
+            key, detail::raster_retained_storage_bytes(width, height),
+            std::move(image));
+    }
+    return draw(image);
 }
 
 PuglSpan to_pugl_span(float physical) {
@@ -549,13 +629,16 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -658,13 +741,16 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
