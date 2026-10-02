@@ -148,6 +148,37 @@ int main() {
         return fail("warm subtree raster was not reused pixel-equivalently");
     }
 
+    for (const auto stage : {
+             SceneFaultStage::RasterSurfaceAllocation,
+             SceneFaultStage::RasterSubmission,
+             SceneFaultStage::RasterSnapshot}) {
+        const auto before_fault = PlatformTestAccess::scene_diagnostics(*first);
+        if (!PlatformTestAccess::invalidate_root_raster_cache_boundary(first_ui) ||
+            !PlatformTestAccess::inject_scene_fault(*first, stage) ||
+            !PlatformTestAccess::request_gpu_readback(*first, {8.0f, 8.0f}) ||
+            !wait_for_failure(
+                application, *first, before_fault.failed_exposes)) {
+            return fail("offscreen raster fault did not abort the frame");
+        }
+
+        const auto after_fault = PlatformTestAccess::scene_diagnostics(*first);
+        if (after_fault.raster_cache_updates != before_fault.raster_cache_updates) {
+            return fail("failed offscreen raster was counted as a complete update");
+        }
+
+        const auto recovered_pixel =
+            read_pixel(application, *first, {8.0f, 8.0f});
+        const auto after_recovery =
+            PlatformTestAccess::scene_diagnostics(*first);
+        if (!recovered_pixel ||
+            after_recovery.raster_cache_updates <=
+                after_fault.raster_cache_updates ||
+            after_recovery.render_resource_entries < 2 ||
+            !after_recovery.scene_valid) {
+            return fail("offscreen raster fault did not recover on retry");
+        }
+    }
+
     const auto first_before_recreate =
         PlatformTestAccess::scene_diagnostics(*first);
     const auto second_before_recreate =
