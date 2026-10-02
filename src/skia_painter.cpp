@@ -5,6 +5,25 @@
 
 namespace ui {
 
+bool Painter::raster_cache_hook_available() const noexcept {
+    return private_hooks_ && private_hooks_->paint_raster_cache_boundary;
+}
+
+bool Painter::paint_raster_cache_boundary(
+    const detail::RasterCachePaintRequest& request,
+    void* callback_state,
+    detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheCommitCallback commit_callback) {
+    if (!raster_cache_hook_available()) return false;
+    return private_hooks_->paint_raster_cache_boundary(
+        private_hooks_->state,
+        request,
+        canvas_,
+        callback_state,
+        paint_callback,
+        commit_callback);
+}
+
 void Painter::apply_fill_source(
     SkPaint& paint,
     const LinearGradient& gradient) {
