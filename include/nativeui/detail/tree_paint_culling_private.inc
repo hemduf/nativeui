@@ -186,6 +186,79 @@
         }
     }
 
+    void paint_with_resources(
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        const detail::PainterPrivateHooks* private_hooks) {
+        if (lifecycle_transition_active()) return;
+        flush_dynamic_mutations();
+        if (active_) {
+            sync_availability_structure(platform);
+            sync_focus_structure(platform);
+        }
+        ensure_layout();
+
+        Rect pending_dirty[DirtyRegion::kMaxRects]{};
+        const auto pending_dirty_count = paint_dirty_.rects().size();
+        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+            pending_dirty[index] = paint_dirty_.rects()[index];
+        }
+        paint_dirty_.clear();
+
+        try {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            Painter painter{canvas, private_hooks};
+            paint_node(*root_, painter, platform, viewport_rect());
+        } catch (...) {
+            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+                (void)retain_dirty(pending_dirty[index]);
+            }
+            throw;
+        }
+    }
+
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+    [[nodiscard]] debug::InspectorSnapshot
+    paint_with_inspector_snapshot_with_resources(
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        const detail::PainterPrivateHooks* private_hooks) {
+        if (lifecycle_transition_active()) return {};
+        flush_dynamic_mutations();
+        if (active_) {
+            sync_availability_structure(platform);
+            sync_focus_structure(platform);
+        }
+        ensure_layout();
+
+        auto snapshot = inspector_snapshot();
+
+        // Consume only damage that existed before entering application paint.
+        // Any invalidation raised reentrantly by paint callbacks belongs to the
+        // next frame and must survive this inspector-enabled traversal too.
+        Rect pending_dirty[DirtyRegion::kMaxRects]{};
+        const auto pending_dirty_count = paint_dirty_.rects().size();
+        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+            pending_dirty[index] = paint_dirty_.rects()[index];
+        }
+        paint_dirty_.clear();
+
+        try {
+            LifecycleTransitionScope paint_scope{
+                *this, LifecycleTransition::Paint, true};
+            Painter painter{canvas, private_hooks};
+            paint_node(*root_, painter, platform, viewport_rect());
+        } catch (...) {
+            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
+                (void)retain_dirty(pending_dirty[index]);
+            }
+            throw;
+        }
+        return snapshot;
+    }
+#endif
+
     void paint_cull_paint_region(Painter& painter,
                                  PlatformServices& platform,
                                  Rect requested_region) {
@@ -225,6 +298,7 @@
     [[nodiscard]] bool paint_full_scene_prepared(
         SkCanvas& canvas,
         PlatformServices& platform,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         if (!scene_frame_transaction_active_ || !root_ ||
             lifecycle_transition_ != LifecycleTransition::None) {
@@ -233,7 +307,7 @@
 
         LifecycleTransitionScope paint_scope{
             *this, LifecycleTransition::Paint, true};
-        Painter painter{canvas};
+        Painter painter{canvas, private_hooks};
         paint_node(*root_, painter, platform, viewport_rect());
         used_effects = painter.used_effects();
         return true;
@@ -243,13 +317,14 @@
         SkCanvas& canvas,
         PlatformServices& platform,
         Rect repaint_region,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         if (!scene_frame_transaction_active_ || !root_ ||
             lifecycle_transition_ != LifecycleTransition::None) {
             return false;
         }
 
-        Painter painter{canvas};
+        Painter painter{canvas, private_hooks};
         const bool painted = paint_cull_paint_region_prepared(
             painter, platform, repaint_region);
         used_effects = painter.used_effects();

@@ -23,7 +23,9 @@
 namespace ui {
 
 class Dialog;
-namespace detail { class SkiaGlRenderer; }
+namespace detail {
+class SkiaGlRenderer;
+}
 
 /// Retained UI root for one view-domain component tree.
 ///
@@ -556,20 +558,7 @@ public:
     /// damage before propagating. Painting is UI-thread work, may allocate/invoke
     /// application code and is not audio/DSP real-time safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
-        if (tree_.lifecycle_transition_active()) return;
-        (void)apply_pending_viewport_resize();
-        if (!overlay_state_->entries.empty()) {
-            prepare_overlay_layout();
-            enforce_new_modal_capture_barrier(platform);
-        }
-#if defined(NATIVEUI_ENABLE_INSPECTOR)
-        if (inspector_enabled_) {
-            auto snapshot = tree_.paint_with_inspector_snapshot(canvas, platform);
-            detail::paint_inspector_overlay(canvas, snapshot, inspector_selected_node_);
-            return;
-        }
-#endif
-        tree_.paint(canvas, platform);
+        paint_with_resources(canvas, platform, nullptr);
     }
 
     /// Publish one retained in-view overlay owned by this UI.
@@ -603,6 +592,27 @@ public:
 private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
+
+    void paint_with_resources(
+        SkCanvas& canvas,
+        PlatformServices& platform,
+        const detail::PainterPrivateHooks* private_hooks) {
+        if (tree_.lifecycle_transition_active()) return;
+        (void)apply_pending_viewport_resize();
+        if (!overlay_state_->entries.empty()) {
+            prepare_overlay_layout();
+            enforce_new_modal_capture_barrier(platform);
+        }
+#if defined(NATIVEUI_ENABLE_INSPECTOR)
+        if (inspector_enabled_) {
+            auto snapshot = tree_.paint_with_inspector_snapshot_with_resources(
+                canvas, platform, private_hooks);
+            detail::paint_inspector_overlay(canvas, snapshot, inspector_selected_node_);
+            return;
+        }
+#endif
+        tree_.paint_with_resources(canvas, platform, private_hooks);
+    }
 
     class ScenePaintTransaction final {
         friend class UI;
@@ -681,9 +691,11 @@ private:
         ScenePaintTransaction& transaction,
         SkCanvas& canvas,
         PlatformServices& platform,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         return transaction.tree_.valid() &&
-               tree_.paint_full_scene_prepared(canvas, platform, used_effects);
+               tree_.paint_full_scene_prepared(
+                   canvas, platform, private_hooks, used_effects);
     }
 
     [[nodiscard]] bool paint_partial_scene_prepared(
@@ -691,10 +703,11 @@ private:
         SkCanvas& canvas,
         PlatformServices& platform,
         Rect repaint_region,
+        const detail::PainterPrivateHooks* private_hooks,
         bool& used_effects) {
         return transaction.tree_.valid() &&
                tree_.paint_partial_scene_prepared(
-                   canvas, platform, repaint_region, used_effects);
+                   canvas, platform, repaint_region, private_hooks, used_effects);
     }
 
     void commit_scene_paint(ScenePaintTransaction& transaction) noexcept {
