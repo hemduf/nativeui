@@ -12,6 +12,7 @@
 namespace ui::detail {
 
 struct ShaderBrushSnapshot;
+struct PainterPrivateHooks;
 
 struct RasterCachePaintRequest final {
     NodeId node_id{};
