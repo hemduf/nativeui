@@ -25,7 +25,6 @@ namespace ui {
 class Dialog;
 namespace detail {
 class SkiaGlRenderer;
-struct PlatformTestAccess;
 }
 
 /// One retained NativeUI component tree.
@@ -355,21 +354,6 @@ public:
 private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
-    friend struct detail::PlatformTestAccess;
-
-    [[nodiscard]] bool register_root_raster_cache_boundary_for_test() {
-        return tree_.root_ &&
-               tree_.register_raster_cache_boundary(tree_.root_->id);
-    }
-
-    [[nodiscard]] bool invalidate_root_raster_cache_boundary_for_test() noexcept {
-        if (!tree_.root_) return false;
-        const auto found = tree_.raster_cache_epochs_.find(tree_.root_->id);
-        if (found == tree_.raster_cache_epochs_.end()) return false;
-        tree_.invalidate_raster_cache_ancestry(tree_.root_.get());
-        tree_.invalidate();
-        return true;
-    }
 
     void paint_with_resources(
         SkCanvas& canvas,
