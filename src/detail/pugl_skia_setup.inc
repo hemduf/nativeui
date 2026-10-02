@@ -150,11 +150,13 @@ private:
     SkCanvas& destination,
     void* callback_state,
     detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheUnsafeCallback unsafe_callback,
     detail::RasterCacheValidateCallback validate_callback,
     detail::RasterCacheCommitCallback commit_callback) {
     auto* hook_state = static_cast<PainterHookState*>(state);
     if (!hook_state || !hook_state->resources || !hook_state->context ||
-        !paint_callback || !validate_callback || !commit_callback) {
+        !paint_callback || !unsafe_callback ||
+        !validate_callback || !commit_callback) {
         return false;
     }
 
@@ -278,7 +280,9 @@ private:
             &materialize_cached_effect,
             &materialize_cached_linear_gradient,
             &materialize_cached_radial_gradient,
-            &paint_cached_raster_boundary};
+            &paint_cached_raster_boundary,
+            callback_state,
+            unsafe_callback};
         if (!paint_callback(callback_state, *canvas, &nested_hooks)) return false;
     }
 
