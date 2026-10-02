@@ -196,7 +196,8 @@ private:
     const int height = static_cast<int>(physical_height);
     const SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
     auto surface = SkSurfaces::RenderTarget(
-        hook_state->context, skgpu::Budgeted::kYes, info);
+        hook_state->context, skgpu::Budgeted::kYes, info, 0,
+        kBottomLeft_GrSurfaceOrigin, nullptr);
     if (!surface) return false;
 
     auto* canvas = surface->getCanvas();
@@ -217,9 +218,13 @@ private:
     }
 
     const auto submission = hook_state->context->flushAndSubmit(surface.get());
-    if (!submission.fSuccess) return false;
+    if (!submission.fSuccess) {
+        throw std::runtime_error("subtree raster cache submission failed");
+    }
     auto image = surface->makeImageSnapshot();
-    if (!image) return false;
+    if (!image) {
+        throw std::runtime_error("subtree raster cache snapshot failed");
+    }
 
     const bool current = commit_callback(callback_state);
     if (current) {
