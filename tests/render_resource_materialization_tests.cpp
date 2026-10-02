@@ -803,7 +803,6 @@ bool raster_test_hook(
     SkCanvas& destination,
     void* callback_state,
     ui::detail::RasterCachePaintCallback paint_callback,
-    ui::detail::RasterCacheUnsafeCallback unsafe_callback,
     ui::detail::RasterCacheValidateCallback validate_callback,
     ui::detail::RasterCacheCommitCallback commit_callback) {
     auto& state = *static_cast<RasterHookState*>(opaque);
@@ -849,9 +848,7 @@ bool raster_test_hook(
             nullptr,
             nullptr,
             nullptr,
-            nullptr,
-            callback_state,
-            unsafe_callback};
+            nullptr};
         NUI_CHECK(paint_callback(callback_state, *canvas, &nested_hooks));
     }
     auto image = surface->makeImageSnapshot();
@@ -1256,7 +1253,7 @@ private:
     std::shared_ptr<int> paints_;
 };
 
-void unqualified_transform_bypasses_retention() {
+void internal_transform_is_stable_inside_raster() {
     auto paints = std::make_shared<int>(0);
     ui::Spec spec{
         [paints] { return std::make_unique<TransformPaintComponent>(paints); },
@@ -1622,7 +1619,7 @@ int main() {
     raster_retention_failure_leaves_boundary_stale_and_retryable();
     subtree_paint_failure_leaves_boundary_retryable();
     subtree_materialization_failure_leaves_boundary_retryable();
-    unqualified_transform_bypasses_retention();
+    internal_transform_is_stable_inside_raster();
     unqualified_effect_bypasses_raster_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
     raster_signature_separates_scale_and_local_extent();
