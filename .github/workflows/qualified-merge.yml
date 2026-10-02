@@ -1,0 +1,105 @@
+name: Qualified Merge
+run-name: Qualified merge request for PR ${{ github.event.issue.number || inputs.pull_number }}
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pull_number:
+        description: Pull request number
+        required: true
+        type: number
+      request:
+        description: JSON evidence request, with an explicit dry-run, merge or post-merge mode
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: nativeui-qualified-merge-main
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    if: >-
+      github.repository == 'hemduf/nativeui' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.issue.pull_request && startsWith(github.event.comment.body, '/nativeui-merge')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      actions: write
+      statuses: read
+    steps:
+      - name: Verify evidence and execute the authorized request
+        id: execute
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          DISPATCH_REQUEST: ${{ inputs.request }}
+          DISPATCH_PR: ${{ inputs.pull_number }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        with:
+          retries: 0
+          script: |
+            const { Module } = require('node:module');
+            const repo = context.repo;
+            const isComment = context.eventName === 'issue_comment';
+            const number = isComment ? context.payload.issue.number : Number(process.env.DISPATCH_PR);
+            const author = isComment ? context.payload.comment.user.login : context.actor;
+            let expectedHead = 'not parsed';
+            try {
+              for (const username of new Set([author, process.env.TRIGGERING_ACTOR])) {
+                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username });
+                if (!['write', 'maintain', 'admin'].includes(data.permission)) {
+                  throw new Error('Request author or rerun actor lacks repository write permission');
+                }
+              }
+              let body;
+              if (isComment) {
+                const { data: current } = await github.rest.issues.getComment({ ...repo, comment_id: context.payload.comment.id });
+                if (current.body !== context.payload.comment.body || current.user.login !== author) {
+                  throw new Error('The merge request was edited after its event; publish a fresh request');
+                }
+                body = current.body;
+              } else {
+                body = '/nativeui-merge\n' + process.env.DISPATCH_REQUEST;
+              }
+              // Load only the executor version already on the workflow's trusted main snapshot.
+              // No checkout, PR artifacts, PR scripts, or requester-supplied executable code.
+              const { data: file } = await github.rest.repos.getContent({
+                ...repo, path: '.github/automation/merge-executor.cjs', ref: process.env.WORKFLOW_SHA
+              });
+              if (file.type !== 'file' || file.encoding !== 'base64') throw new Error('Trusted executor is unavailable');
+              const implementation = new Module('nativeui-merge-executor');
+              implementation._compile(Buffer.from(file.content, 'base64').toString('utf8'), 'nativeui-merge-executor.cjs');
+              const request = implementation.exports.parseRequest(body);
+              expectedHead = request.head_sha;
+              const result = await implementation.exports.execute({ github, context, core, body,
+                pullNumber: number, actor: author, commandId: isComment ? context.payload.comment.id : null });
+              core.setOutput('state', result.state);
+              await core.summary.addHeading('Qualified merge result')
+                .addCodeBlock(JSON.stringify({ pull_number: number, expected_head: expectedHead, ...result }, null, 2), 'json').write();
+            } catch (error) {
+              // A timeout/error is not proof that a mutation did not happen. Observe before reporting.
+              let observed;
+              try {
+                const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
+                observed = { head: pr.head.sha, state: pr.state, draft: pr.draft, merged: pr.merged,
+                  merge_commit_sha: pr.merged ? pr.merge_commit_sha : null };
+                if (pr.merged) core.setOutput('merged_sha', pr.merge_commit_sha);
+              } catch (readError) {
+                observed = { refetch_error: `${readError.status || 'unknown'} ${readError.message}` };
+              }
+              const diagnostic = { pull_number: number, expected_head: expectedHead,
+                operation: error.request ? `${error.request.method} ${error.request.url}` : 'qualification/execution',
+                status: error.status || null, error: error.message, observed };
+              await core.summary.addHeading('Merge request not completed')
+                .addCodeBlock(JSON.stringify(diagnostic, null, 2), 'json').write();
+              core.setFailed(error.message);
+            }
