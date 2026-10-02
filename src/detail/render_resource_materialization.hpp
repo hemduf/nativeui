@@ -7,6 +7,7 @@
 #include "render_resource_cache.hpp"
 #include "shader_brush_access.hpp"
 
+#include "include/core/SkImage.h"
 #include "include/core/SkImageFilter.h"
 #include "include/core/SkShader.h"
 
@@ -23,8 +24,25 @@ namespace ui::detail {
 
 class RenderResourceMaterializationContext final {
 public:
+    struct RasterCacheKey final {
+        NodeId node_id{};
+        RasterCacheEpoch::Token token{};
+        Rect local_extent{};
+        float device_scale{1.0f};
+
+        [[nodiscard]] bool operator==(const RasterCacheKey& other) const noexcept {
+            return node_id == other.node_id &&
+                   token.same_content(other.token) &&
+                   local_extent.x == other.local_extent.x &&
+                   local_extent.y == other.local_extent.y &&
+                   local_extent.w == other.local_extent.w &&
+                   local_extent.h == other.local_extent.h &&
+                   device_scale == other.device_scale;
+        }
+    };
+
     using CachedResource =
-        std::variant<sk_sp<SkShader>, sk_sp<SkImageFilter>>;
+        std::variant<sk_sp<SkShader>, sk_sp<SkImageFilter>, sk_sp<SkImage>>;
 
     struct ImageTextureAcquisition final {
         sk_sp<SkShader> shader;
@@ -195,6 +213,33 @@ public:
             acquisition.retained};
     }
 
+    [[nodiscard]] sk_sp<SkImage> find_raster(
+        const RasterCacheKey& key) {
+        auto acquisition = resources_.find(RenderResourceKey{key});
+        if (!acquisition) return {};
+        retain_frame_resource(acquisition.resource, true);
+        const auto* image = std::get_if<sk_sp<SkImage>>(acquisition.resource.get());
+        return image ? *image : sk_sp<SkImage>{};
+    }
+
+    [[nodiscard]] sk_sp<SkImage> retain_raster(
+        const RasterCacheKey& key,
+        std::size_t accounted_bytes,
+        sk_sp<SkImage> image) {
+        if (!image) return {};
+        auto acquisition = resources_.acquire(
+            RenderResourceKey{key},
+            accounted_bytes,
+            [image = std::move(image)]() mutable -> std::shared_ptr<CachedResource> {
+                return std::make_shared<CachedResource>(std::move(image));
+            });
+        if (!acquisition) return {};
+        retain_frame_resource(acquisition.resource, acquisition.retained);
+        const auto* retained =
+            std::get_if<sk_sp<SkImage>>(acquisition.resource.get());
+        return retained ? *retained : sk_sp<SkImage>{};
+    }
+
     [[nodiscard]] std::size_t retained_entries() const noexcept {
         return resources_.retained_entries();
     }
@@ -223,7 +268,8 @@ private:
         RuntimeShaderKey,
         EffectCacheKey,
         LinearGradientCacheKey,
-        RadialGradientCacheKey>;
+        RadialGradientCacheKey,
+        RasterCacheKey>;
 
     static_assert(std::is_nothrow_destructible_v<CachedResource>,
                   "cached backend resources must tear down without throwing");
@@ -246,8 +292,21 @@ private:
                         return EffectCacheKeyHash{}(value);
                     } else if constexpr (std::is_same_v<Value, LinearGradientCacheKey>) {
                         return LinearGradientCacheKeyHash{}(value);
-                    } else {
+                    } else if constexpr (std::is_same_v<Value, RadialGradientCacheKey>) {
                         return RadialGradientCacheKeyHash{}(value);
+                    } else {
+                        std::size_t hash = std::hash<NodeId>{}(value.node_id);
+                        hash ^= std::hash<std::uint64_t>{}(value.token.generation()) +
+                            0x9e3779b9U + (hash << 6U) + (hash >> 2U);
+                        const float values[] = {
+                            value.local_extent.x, value.local_extent.y,
+                            value.local_extent.w, value.local_extent.h,
+                            value.device_scale};
+                        for (const float item : values) {
+                            const auto part = std::hash<float>{}(item == 0.0f ? 0.0f : item);
+                            hash ^= part + 0x9e3779b9U + (hash << 6U) + (hash >> 2U);
+                        }
+                        return hash;
                     }
                 },
                 key);
@@ -286,8 +345,10 @@ private:
                         return left == right;
                     } else if constexpr (std::is_same_v<Left, LinearGradientCacheKey>) {
                         return LinearGradientCacheKeyEqual{}(left, right);
-                    } else {
+                    } else if constexpr (std::is_same_v<Left, RadialGradientCacheKey>) {
                         return RadialGradientCacheKeyEqual{}(left, right);
+                    } else {
+                        return left == right;
                     }
                 },
                 a, b);
