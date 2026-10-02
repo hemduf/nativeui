@@ -94,6 +94,10 @@ int main() {
     const auto brush = make_shader_brush();
     auto first_ui = make_ui(brush);
     auto second_ui = make_ui(brush);
+    if (!PlatformTestAccess::register_root_raster_cache_boundary(first_ui) ||
+        !PlatformTestAccess::register_root_raster_cache_boundary(second_ui)) {
+        return fail("failed to register retained raster cache boundary");
+    }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
     // The inspector uses the normal retained paint path and must not bypass
     // per-view render-resource materialization/caching.
@@ -110,8 +114,11 @@ int main() {
         ui::WindowDesc{.title = "render-resource-b", .size = {32.0f, 32.0f}}};
     if (!first->valid() || !second.valid()) return fail("window creation failed");
 
-    if (!read_pixel(application, *first, {8.0f, 8.0f}) ||
-        !read_pixel(application, second, {8.0f, 8.0f}) ||
+    const auto first_initial_pixel =
+        read_pixel(application, *first, {8.0f, 8.0f});
+    const auto second_initial_pixel =
+        read_pixel(application, second, {8.0f, 8.0f});
+    if (!first_initial_pixel || !second_initial_pixel ||
         !wait_for_resource(application, *first) ||
         !wait_for_resource(application, second)) {
         return fail("initial renderer cache did not populate");
@@ -119,9 +126,57 @@ int main() {
 
     const auto first_before = PlatformTestAccess::scene_diagnostics(*first);
     const auto second_before = PlatformTestAccess::scene_diagnostics(second);
-    if (first_before.render_resource_entries == 0 ||
-        second_before.render_resource_entries == 0) {
-        return fail("resource cache was empty after warm render");
+    if (first_before.render_resource_entries < 2 ||
+        second_before.render_resource_entries < 2 ||
+        first_before.raster_cache_updates == 0 ||
+        second_before.raster_cache_updates == 0) {
+        return fail("subtree raster did not share the renderer resource cache");
+    }
+
+    first_ui.invalidate();
+    const auto first_warm_pixel =
+        read_pixel(application, *first, {8.0f, 8.0f});
+    const auto first_after_warm =
+        PlatformTestAccess::scene_diagnostics(*first);
+    if (!first_warm_pixel ||
+        first_warm_pixel->r != first_initial_pixel->r ||
+        first_warm_pixel->g != first_initial_pixel->g ||
+        first_warm_pixel->b != first_initial_pixel->b ||
+        first_warm_pixel->a != first_initial_pixel->a ||
+        first_after_warm.raster_cache_hits <= first_before.raster_cache_hits ||
+        first_after_warm.raster_cache_updates != first_before.raster_cache_updates) {
+        return fail("warm subtree raster was not reused pixel-equivalently");
+    }
+
+    for (const auto stage : {
+             SceneFaultStage::RasterSurfaceAllocation,
+             SceneFaultStage::RasterSubmission,
+             SceneFaultStage::RasterSnapshot}) {
+        const auto before_fault = PlatformTestAccess::scene_diagnostics(*first);
+        if (!PlatformTestAccess::invalidate_root_raster_cache_boundary(first_ui) ||
+            !PlatformTestAccess::inject_scene_fault(*first, stage) ||
+            !PlatformTestAccess::request_gpu_readback(*first, {8.0f, 8.0f}) ||
+            !wait_for_failure(
+                application, *first, before_fault.failed_exposes)) {
+            return fail("offscreen raster fault did not abort the frame");
+        }
+
+        const auto after_fault = PlatformTestAccess::scene_diagnostics(*first);
+        if (after_fault.raster_cache_updates != before_fault.raster_cache_updates) {
+            return fail("failed offscreen raster was counted as a complete update");
+        }
+
+        const auto recovered_pixel =
+            read_pixel(application, *first, {8.0f, 8.0f});
+        const auto after_recovery =
+            PlatformTestAccess::scene_diagnostics(*first);
+        if (!recovered_pixel ||
+            after_recovery.raster_cache_updates <=
+                after_fault.raster_cache_updates ||
+            after_recovery.render_resource_entries < 2 ||
+            !after_recovery.scene_valid) {
+            return fail("offscreen raster fault did not recover on retry");
+        }
     }
 
     const auto first_before_recreate =
@@ -153,12 +208,16 @@ int main() {
             first_before_recreate.render_resource_cache_clears ||
         first_after_recreate.scene_allocations <=
             first_before_recreate.scene_allocations ||
+        first_after_recreate.raster_cache_updates <=
+            first_before_recreate.raster_cache_updates ||
         !first_after_recreate.scene_valid ||
-        first_after_recreate.render_resource_entries == 0) {
+        first_after_recreate.render_resource_entries < 2) {
         return fail("live recreation did not clear and rebuild owning cache");
     }
     if (second_after_recreate.render_resource_cache_clears !=
             second_before_recreate.render_resource_cache_clears ||
+        second_after_recreate.raster_cache_updates !=
+            second_before_recreate.raster_cache_updates ||
         second_after_recreate.render_resource_entries !=
             second_before_recreate.render_resource_entries) {
         return fail("live recreation in one view mutated another view cache");
@@ -179,6 +238,8 @@ int main() {
     }
     if (second_after_loss.render_resource_cache_clears !=
             second_before.render_resource_cache_clears ||
+        second_after_loss.raster_cache_updates !=
+            second_before.raster_cache_updates ||
         second_after_loss.render_resource_entries !=
             second_before.render_resource_entries) {
         return fail("context loss in one view mutated another view cache");

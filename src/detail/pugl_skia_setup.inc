@@ -1,4 +1,5 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/detail/raster_cache_access.hpp>
 
 #include "view_geometry.hpp"
 #include "scene_extent.hpp"
@@ -56,6 +57,17 @@ constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 constexpr GrGLenum kGlFramebuffer = 0x8D40u;
 
+struct PainterHookState final {
+    detail::RenderResourceMaterializationContext* resources{};
+    GrDirectContext* context{};
+    float device_scale{1.0f};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t* raster_cache_hits{};
+    std::uint64_t* raster_cache_updates{};
+    detail::SceneFaultStage* fault_stage{};
+#endif
+};
+
 template <class Callback>
 class ScopeExit final {
 public:
@@ -71,8 +83,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_image_texture(
     void* state,
     const ImageTexture& texture) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_image_texture(texture);
 
     auto acquisition = resources->acquire_image_texture(
@@ -84,8 +96,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_runtime_shader(
     void* state,
     const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_shader_brush(snapshot);
 
     auto acquisition = resources->acquire_runtime_shader(
@@ -97,8 +109,8 @@ private:
 [[nodiscard]] sk_sp<SkImageFilter> materialize_cached_effect(
     void* state,
     const Effect& effect) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::EffectCacheAccess::materialize(effect);
 
     auto acquisition = resources->acquire_effect(
@@ -111,8 +123,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_linear_gradient(
     void* state,
     const LinearGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_linear_gradient(
@@ -126,8 +138,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_radial_gradient(
     void* state,
     const RadialGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_radial_gradient(
@@ -136,6 +148,199 @@ private:
             return detail::GradientCacheAccess::materialize(gradient);
         });
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] bool paint_cached_raster_boundary(
+    void* state,
+    const detail::RasterCachePaintRequest& request,
+    SkCanvas& destination,
+    void* callback_state,
+    detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheValidateCallback validate_callback,
+    detail::RasterCacheCommitCallback commit_callback) {
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    if (!hook_state || !hook_state->resources || !hook_state->context ||
+        !paint_callback || !validate_callback || !commit_callback) {
+        return false;
+    }
+
+    const auto requested_local = request.local_extent;
+    const auto requested_scene = request.scene_extent;
+    const double scale = static_cast<double>(hook_state->device_scale);
+    const double requested_right =
+        static_cast<double>(requested_scene.x) + requested_scene.w;
+    const double requested_bottom =
+        static_cast<double>(requested_scene.y) + requested_scene.h;
+    if (!std::isfinite(requested_local.x) ||
+        !std::isfinite(requested_local.y) ||
+        !std::isfinite(requested_local.w) ||
+        !std::isfinite(requested_local.h) ||
+        !std::isfinite(requested_scene.x) ||
+        !std::isfinite(requested_scene.y) ||
+        !std::isfinite(requested_scene.w) ||
+        !std::isfinite(requested_scene.h) ||
+        !(requested_local.w > 0.0f) ||
+        !(requested_local.h > 0.0f) ||
+        requested_scene.w != requested_local.w ||
+        requested_scene.h != requested_local.h ||
+        !std::isfinite(requested_right) ||
+        !std::isfinite(requested_bottom) ||
+        !std::isfinite(scale) ||
+        !(scale > 0.0)) {
+        return false;
+    }
+
+    const double device_left =
+        std::floor(static_cast<double>(requested_scene.x) * scale);
+    const double device_top =
+        std::floor(static_cast<double>(requested_scene.y) * scale);
+    const double device_right = std::ceil(requested_right * scale);
+    const double device_bottom = std::ceil(requested_bottom * scale);
+    const double device_width = device_right - device_left;
+    const double device_height = device_bottom - device_top;
+    const double max_int =
+        static_cast<double>((std::numeric_limits<int>::max)());
+    constexpr double kMaxExactFloatInteger = 16777216.0; // 2^24
+    if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
+        !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
+        !(device_width > 0.0) || !(device_height > 0.0) ||
+        device_width > max_int || device_height > max_int ||
+        device_left < -kMaxExactFloatInteger ||
+        device_top < -kMaxExactFloatInteger ||
+        device_right > kMaxExactFloatInteger ||
+        device_bottom > kMaxExactFloatInteger ||
+        device_width > hook_state->context->maxRenderTargetSize() ||
+        device_height > hook_state->context->maxRenderTargetSize()) {
+        return false;
+    }
+
+    const SkMatrix destination_matrix = destination.getLocalToDeviceAs3x3();
+    if (!destination_matrix.isFinite() || destination_matrix.hasPerspective() ||
+        destination_matrix.getScaleX() != hook_state->device_scale ||
+        destination_matrix.getScaleY() != hook_state->device_scale ||
+        destination_matrix.getSkewX() != 0.0f ||
+        destination_matrix.getSkewY() != 0.0f ||
+        destination_matrix.getTranslateX() != 0.0f ||
+        destination_matrix.getTranslateY() != 0.0f) {
+        return false;
+    }
+
+    const int width = static_cast<int>(device_width);
+    const int height = static_cast<int>(device_height);
+    const detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        request.node_id,
+        request.token,
+        requested_local,
+        requested_scene,
+        hook_state->device_scale};
+
+    auto draw = [&](const sk_sp<SkImage>& image) {
+        if (!image) return false;
+        const SkAutoCanvasRestore restore_destination{&destination, true};
+        destination.resetMatrix();
+        destination.drawImageRect(
+            image,
+            SkRect::MakeXYWH(
+                static_cast<float>(device_left),
+                static_cast<float>(device_top),
+                static_cast<float>(width),
+                static_cast<float>(height)),
+            SkSamplingOptions{SkFilterMode::kNearest},
+            nullptr);
+        return true;
+    };
+
+    if (request.allow_reuse) {
+        if (auto cached = hook_state->resources->find_raster(key)) {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook_state->raster_cache_hits) ++*hook_state->raster_cache_hits;
+#endif
+            return draw(cached);
+        }
+    }
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSurfaceAllocation) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::bad_alloc{};
+    }
+#endif
+
+    const SkImageInfo info = SkImageInfo::Make(
+        width,
+        height,
+        kRGBA_8888_SkColorType,
+        kPremul_SkAlphaType,
+        SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::RenderTarget(
+        hook_state->context, skgpu::Budgeted::kYes, info, 0,
+        kBottomLeft_GrSurfaceOrigin, nullptr);
+    if (!surface) {
+        throw std::bad_alloc{};
+    }
+
+    auto* canvas = surface->getCanvas();
+    canvas->clear(SK_ColorTRANSPARENT);
+    {
+        const SkAutoCanvasRestore restore{canvas, true};
+        canvas->setMatrix(SkMatrix::MakeAll(
+            hook_state->device_scale, 0.0f, -static_cast<float>(device_left),
+            0.0f, hook_state->device_scale, -static_cast<float>(device_top),
+            0.0f, 0.0f, 1.0f));
+        const detail::PainterPrivateHooks nested_hooks{
+            hook_state,
+            &materialize_cached_image_texture,
+            &materialize_cached_runtime_shader,
+            &materialize_cached_effect,
+            &materialize_cached_linear_gradient,
+            &materialize_cached_radial_gradient,
+            &paint_cached_raster_boundary};
+        if (!paint_callback(callback_state, *canvas, &nested_hooks)) return false;
+    }
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSubmission) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::runtime_error("injected subtree raster submission failure");
+    }
+#endif
+    const auto submission = hook_state->context->flushAndSubmit(surface.get());
+    if (!submission.fSuccess) {
+        throw std::runtime_error("subtree raster cache submission failed");
+    }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSnapshot) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::runtime_error("injected subtree raster snapshot failure");
+    }
+#endif
+    auto image = surface->makeImageSnapshot();
+    if (!image) {
+        throw std::runtime_error("subtree raster cache snapshot failed");
+    }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->raster_cache_updates) ++*hook_state->raster_cache_updates;
+#endif
+
+    if (!validate_callback(callback_state)) {
+        return draw(image);
+    }
+
+    auto acquisition = hook_state->resources->retain_raster(
+        key,
+        detail::raster_retained_storage_bytes(width, height),
+        image);
+    if (!acquisition) {
+        return draw(image);
+    }
+
+    if (!commit_callback(callback_state)) {
+        return draw(image);
+    }
+    return draw(acquisition.image);
 }
 
 PuglSpan to_pugl_span(float physical) {
@@ -342,11 +547,21 @@ private:
 
 public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::register_root(ui.tree_);
+    }
+
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::invalidate_root(ui.tree_);
+    }
+
     void inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
 
     [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
         return SceneDiagnostics{
             .scene_allocations = scene_allocations_,
+            .raster_cache_hits = raster_cache_hits_,
+            .raster_cache_updates = raster_cache_updates_,
             .scene_builds = scene_builds_,
             .partial_scene_updates = partial_scene_updates_,
             .presentations = presentations_,
@@ -549,13 +764,21 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -658,13 +881,21 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
@@ -924,6 +1155,8 @@ private:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     SceneFaultStage fault_stage_{SceneFaultStage::None};
     std::uint64_t scene_allocations_{};
+    std::uint64_t raster_cache_hits_{};
+    std::uint64_t raster_cache_updates_{};
     std::uint64_t scene_builds_{};
     std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};
