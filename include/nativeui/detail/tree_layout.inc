@@ -461,8 +461,7 @@
         Rect inherited_clip) {
         const auto boundary = raster_cache_epochs_.find(node.id);
         if (boundary == raster_cache_epochs_.end() ||
-            !painter.private_hooks_ ||
-            !painter.private_hooks_->paint_raster_cache_boundary ||
+            !painter.raster_cache_hook_available() ||
             raster_cache_has_nested_boundary(node)) {
             return false;
         }
@@ -523,10 +522,8 @@
                        callback.node->id, callback.token);
         };
 
-        return painter.private_hooks_->paint_raster_cache_boundary(
-            painter.private_hooks_->state,
+        return painter.paint_raster_cache_boundary(
             request,
-            painter.canvas_,
             &state,
             paint_callback,
             commit_callback);
