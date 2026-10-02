@@ -789,6 +789,7 @@ bool raster_test_hook(
     SkCanvas& destination,
     void* callback_state,
     ui::detail::RasterCachePaintCallback paint_callback,
+    ui::detail::RasterCacheUnsafeCallback unsafe_callback,
     ui::detail::RasterCacheValidateCallback validate_callback,
     ui::detail::RasterCacheCommitCallback commit_callback) {
     auto& state = *static_cast<RasterHookState*>(opaque);
@@ -827,7 +828,10 @@ bool raster_test_hook(
     {
         const SkAutoCanvasRestore restore{canvas, true};
         canvas->translate(-request.scene_extent.x, -request.scene_extent.y);
-        NUI_CHECK(paint_callback(callback_state, *canvas, nullptr));
+        const ui::detail::PainterPrivateHooks nested_hooks{
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+            callback_state, unsafe_callback};
+        NUI_CHECK(paint_callback(callback_state, *canvas, &nested_hooks));
     }
     auto image = surface->makeImageSnapshot();
     NUI_CHECK(image);
