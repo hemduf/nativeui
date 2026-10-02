@@ -783,7 +783,19 @@ struct RasterHookState {
     ui::detail::RenderResourceMaterializationContext resources;
     int creates{};
     bool fail_after_validate_once{};
+    bool fail_shader_materialization_once{};
 };
+
+[[nodiscard]] sk_sp<SkShader> raster_test_shader_hook(
+    void* opaque,
+    const std::shared_ptr<const ui::detail::ShaderBrushSnapshot>& snapshot) {
+    auto& state = *static_cast<RasterHookState*>(opaque);
+    if (state.fail_shader_materialization_once) {
+        state.fail_shader_materialization_once = false;
+        throw std::bad_alloc{};
+    }
+    return ui::detail::materialize_shader_brush(snapshot);
+}
 
 bool raster_test_hook(
     void* opaque,
@@ -831,8 +843,15 @@ bool raster_test_hook(
         const SkAutoCanvasRestore restore{canvas, true};
         canvas->translate(-request.scene_extent.x, -request.scene_extent.y);
         const ui::detail::PainterPrivateHooks nested_hooks{
-            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-            callback_state, unsafe_callback};
+            &state,
+            nullptr,
+            &raster_test_shader_hook,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            callback_state,
+            unsafe_callback};
         NUI_CHECK(paint_callback(callback_state, *canvas, &nested_hooks));
     }
     auto image = surface->makeImageSnapshot();
@@ -1046,6 +1065,167 @@ void raster_retention_failure_leaves_boundary_stale_and_retryable() {
     state.resources.end_frame();
     NUI_CHECK(*paints == 2);
     NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+}
+
+
+class ThrowOncePaintComponent final : public ui::Component {
+public:
+    ThrowOncePaintComponent(
+        std::shared_ptr<int> paints,
+        std::shared_ptr<bool> throw_once)
+        : paints_(std::move(paints)),
+          throw_once_(std::move(throw_once)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        ++*paints_;
+        if (*throw_once_) {
+            *throw_once_ = false;
+            throw std::runtime_error("injected cached subtree paint failure");
+        }
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, ui::Color{0.5f, 0.25f, 0.75f, 1.0f});
+    }
+
+private:
+    std::shared_ptr<int> paints_;
+    std::shared_ptr<bool> throw_once_;
+};
+
+void subtree_paint_failure_leaves_boundary_retryable() {
+    auto paints = std::make_shared<int>(0);
+    auto throw_once = std::make_shared<bool>(true);
+    ui::Tree tree{ui::compile(ui::Spec{
+        [paints, throw_once] {
+            return std::make_unique<ThrowOncePaintComponent>(
+                paints, throw_once);
+        },
+        {}})};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, root_id));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    bool threw = false;
+    state.resources.begin_frame();
+    try {
+        ui::TreeTestAccess::paint_with_resources(
+            tree, *surface->getCanvas(), platform, &hooks);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    state.resources.end_frame();
+    NUI_CHECK(threw);
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+
+    const auto failed_token =
+        ui::detail::RasterCacheAccess::capture(tree, root_id);
+    NUI_CHECK(!ui::detail::RasterCacheAccess::reusable(
+        tree, root_id, failed_token));
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+}
+
+class ShaderPaintComponent final : public ui::Component {
+public:
+    ShaderPaintComponent(ui::Brush brush, std::shared_ptr<int> paints)
+        : brush_(std::move(brush)), paints_(std::move(paints)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        ++*paints_;
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, brush_);
+    }
+
+private:
+    ui::Brush brush_;
+    std::shared_ptr<int> paints_;
+};
+
+void subtree_materialization_failure_leaves_boundary_retryable() {
+    const auto compiled = ui::ShaderProgram::compile(R"(
+        half4 main(float2) {
+            return half4(0.25, 0.5, 0.75, 1.0);
+        }
+    )");
+    NUI_CHECK(compiled.ok());
+    ui::ShaderInstance shader{compiled.program};
+    ui::Brush brush{shader};
+    auto paints = std::make_shared<int>(0);
+
+    ui::Tree tree{ui::compile(ui::Spec{
+        [brush, paints] {
+            return std::make_unique<ShaderPaintComponent>(brush, paints);
+        },
+        {}})};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, root_id));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    state.fail_shader_materialization_once = true;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    bool threw = false;
+    state.resources.begin_frame();
+    try {
+        ui::TreeTestAccess::paint_with_resources(
+            tree, *surface->getCanvas(), platform, &hooks);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    state.resources.end_frame();
+    NUI_CHECK(threw);
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.resources.retained_entries() == 2);
 
     tree.invalidate();
     state.resources.begin_frame();
@@ -1440,6 +1620,8 @@ int main() {
     tree_raster_boundary_cold_warm_stale_warm();
     reentrant_invalidation_cannot_publish_captured_generation();
     raster_retention_failure_leaves_boundary_stale_and_retryable();
+    subtree_paint_failure_leaves_boundary_retryable();
+    subtree_materialization_failure_leaves_boundary_retryable();
     unqualified_transform_bypasses_retention();
     unqualified_effect_bypasses_raster_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
