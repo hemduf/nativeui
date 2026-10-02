@@ -1,0 +1,48 @@
+name: Automation Validation
+
+on:
+  pull_request:
+    paths:
+      - '.github/automation/**'
+      - '.github/workflows/qualified-merge.yml'
+      - '.github/workflows/automation-validation.yml'
+      - '.github/workflows/main-smoke.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/package-contract.yml'
+      - '.github/workflows/wasm.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/automation/**'
+      - '.github/workflows/qualified-merge.yml'
+      - '.github/workflows/automation-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automation-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Merge executor contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Run the complete merge-executor contract suite
+        run: node --test .github/automation/merge-executor.test.cjs
+      - name: Validate automation workflow syntax
+        run: >-
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          .github/workflows/qualified-merge.yml
+          .github/workflows/automation-validation.yml
