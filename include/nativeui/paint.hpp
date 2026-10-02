@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/geometry.hpp>
+#include <nativeui/detail/raster_cache_paint.hpp>
 #include <nativeui/paint_style.hpp>
 #include <nativeui/path.hpp>
 #include <nativeui/text.hpp>
@@ -645,6 +646,13 @@ private:
     [[nodiscard]] static bool finite_point(Point point) noexcept {
         return std::isfinite(point.x) && std::isfinite(point.y);
     }
+
+    [[nodiscard]] bool raster_cache_hook_available() const noexcept;
+    [[nodiscard]] bool paint_raster_cache_boundary(
+        const detail::RasterCachePaintRequest& request,
+        void* callback_state,
+        detail::RasterCachePaintCallback paint_callback,
+        detail::RasterCacheCommitCallback commit_callback);
 
     [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
         const Effect& effect);
