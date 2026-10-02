@@ -13,6 +13,7 @@ bool Painter::paint_raster_cache_boundary(
     const detail::RasterCachePaintRequest& request,
     void* callback_state,
     detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheValidateCallback validate_callback,
     detail::RasterCacheCommitCallback commit_callback) {
     if (!raster_cache_hook_available()) return false;
     return private_hooks_->paint_raster_cache_boundary(
@@ -21,6 +22,7 @@ bool Painter::paint_raster_cache_boundary(
         canvas_,
         callback_state,
         paint_callback,
+        validate_callback,
         commit_callback);
 }
 
