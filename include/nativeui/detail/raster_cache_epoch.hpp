@@ -87,6 +87,10 @@ public:
         return !stale_ && current(token);
     }
 
+    [[nodiscard]] bool committable(const Token& token) const noexcept {
+        return captured_ && current(token);
+    }
+
     [[nodiscard]] bool commit(const Token& token) noexcept {
         if (!captured_ || !current(token)) return false;
         stale_ = false;
