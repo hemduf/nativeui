@@ -512,7 +512,7 @@
                     callback.inherited_clip);
                 callback.parent_painter->used_effects_ |= nested.used_effects();
                 callback.reuse_safe =
-                    !nested.used_effects() && !nested.used_nontrivial_transform();
+                    !nested.used_effects() && !nested.used_nontrivial_transform_;
                 return true;
             };
 
