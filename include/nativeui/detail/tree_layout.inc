@@ -397,16 +397,39 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
-    void paint_node(
+    [[nodiscard]] bool raster_cache_has_nested_boundary(
+        const Node& node) const noexcept {
+        for (const auto& child : node.children) {
+            if (raster_cache_epochs_.find(child->id) != raster_cache_epochs_.end() ||
+                raster_cache_has_nested_boundary(*child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::optional<Rect> raster_cache_subtree_visual_bounds(
+        const Node& node) const noexcept {
+        if (!node.visual_bounds_published) return std::nullopt;
+        Rect bounds = node.published_visual_bounds;
+        for (const auto& child : node.children) {
+            const auto child_bounds = raster_cache_subtree_visual_bounds(*child);
+            if (!child_bounds) return std::nullopt;
+            bounds = unite(bounds, *child_bounds);
+        }
+        if (!std::isfinite(bounds.x) || !std::isfinite(bounds.y) ||
+            !std::isfinite(bounds.w) || !std::isfinite(bounds.h) ||
+            !(bounds.w > 0.0f) || !(bounds.h > 0.0f)) {
+            return std::nullopt;
+        }
+        return bounds;
+    }
+
+    void paint_node_contents(
         const Node& node,
         Painter& painter,
         PlatformServices& platform,
-        Rect inherited_clip) const {
-        if (inherited_clip.empty() ||
-            node.component->effective_visibility() != VisibilityMode::Visible) {
-            return;
-        }
-
+        Rect inherited_clip) {
         const bool focused =
             focus_active_ && !focusables_.empty() && focusables_[focused_index_] == &node;
 
@@ -429,6 +452,101 @@
         for (const auto& child : node.children) {
             paint_node(*child, painter, platform, inherited_clip);
         }
+    }
+
+    [[nodiscard]] bool try_paint_raster_cache_boundary(
+        const Node& node,
+        Painter& painter,
+        PlatformServices& platform,
+        Rect inherited_clip) {
+        const auto boundary = raster_cache_epochs_.find(node.id);
+        if (boundary == raster_cache_epochs_.end() ||
+            !painter.private_hooks_ ||
+            !painter.private_hooks_->paint_raster_cache_boundary ||
+            raster_cache_has_nested_boundary(node)) {
+            return false;
+        }
+
+        const auto subtree = raster_cache_subtree_visual_bounds(node);
+        if (!subtree) return false;
+        const Rect visible = intersect(*subtree, inherited_clip);
+        if (visible.empty()) return true;
+
+        const Rect local_extent{
+            visible.x - node.bounds.x,
+            visible.y - node.bounds.y,
+            visible.w,
+            visible.h};
+        auto token = capture_raster_cache_content(node.id);
+        if (token.expired()) return false;
+
+        struct CallbackState final {
+            Tree* tree{};
+            const Node* node{};
+            PlatformServices* platform{};
+            Rect inherited_clip{};
+            Painter* parent_painter{};
+            detail::RasterCacheEpoch::Token token{};
+            bool reuse_safe{true};
+        } state{
+            this, &node, &platform, inherited_clip, &painter, token, true};
+
+        const detail::RasterCachePaintRequest request{
+            node.id,
+            token,
+            local_extent,
+            visible,
+            1.0f,
+            reusable_raster_cache_content(node.id, token)};
+
+        const auto paint_callback =
+            [](void* raw,
+               SkCanvas& canvas,
+               const detail::PainterPrivateHooks* hooks) -> bool {
+                auto& callback = *static_cast<CallbackState*>(raw);
+                Painter nested{canvas, hooks};
+                callback.tree->paint_node_contents(
+                    *callback.node,
+                    nested,
+                    *callback.platform,
+                    callback.inherited_clip);
+                callback.parent_painter->used_effects_ |= nested.used_effects();
+                callback.reuse_safe =
+                    !nested.used_effects() && !nested.used_nontrivial_transform();
+                return true;
+            };
+
+        const auto commit_callback = [](void* raw) noexcept -> bool {
+            auto& callback = *static_cast<CallbackState*>(raw);
+            return callback.reuse_safe &&
+                   callback.tree->commit_raster_cache_content(
+                       callback.node->id, callback.token);
+        };
+
+        return painter.private_hooks_->paint_raster_cache_boundary(
+            painter.private_hooks_->state,
+            request,
+            painter.canvas_,
+            &state,
+            paint_callback,
+            commit_callback);
+    }
+
+    void paint_node(
+        const Node& node,
+        Painter& painter,
+        PlatformServices& platform,
+        Rect inherited_clip) {
+        if (inherited_clip.empty() ||
+            node.component->effective_visibility() != VisibilityMode::Visible) {
+            return;
+        }
+
+        if (try_paint_raster_cache_boundary(
+                node, painter, platform, inherited_clip)) {
+            return;
+        }
+        paint_node_contents(node, painter, platform, inherited_clip);
     }
 
     static Node* hit_test_focusable(Node& node, Point p, Rect inherited_clip) {
