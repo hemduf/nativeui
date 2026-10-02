@@ -32,6 +32,7 @@ public:
         NodeId node_id{};
         RasterCacheEpoch::Token token{};
         Rect local_extent{};
+        Rect scene_extent{};
         float device_scale{1.0f};
 
         [[nodiscard]] bool operator==(const RasterCacheKey& other) const noexcept {
@@ -41,6 +42,10 @@ public:
                    local_extent.y == other.local_extent.y &&
                    local_extent.w == other.local_extent.w &&
                    local_extent.h == other.local_extent.h &&
+                   scene_extent.x == other.scene_extent.x &&
+                   scene_extent.y == other.scene_extent.y &&
+                   scene_extent.w == other.scene_extent.w &&
+                   scene_extent.h == other.scene_extent.h &&
                    device_scale == other.device_scale;
         }
     };
@@ -67,6 +72,16 @@ public:
 
         [[nodiscard]] explicit operator bool() const noexcept {
             return static_cast<bool>(filter);
+        }
+    };
+
+    struct RasterAcquisition final {
+        sk_sp<SkImage> image;
+        bool hit{false};
+        bool retained{false};
+
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return static_cast<bool>(image);
         }
     };
 
@@ -226,7 +241,7 @@ public:
         return image ? *image : sk_sp<SkImage>{};
     }
 
-    [[nodiscard]] sk_sp<SkImage> retain_raster(
+    [[nodiscard]] RasterAcquisition retain_raster(
         const RasterCacheKey& key,
         std::size_t accounted_bytes,
         sk_sp<SkImage> image) {
@@ -241,7 +256,8 @@ public:
         retain_frame_resource(acquisition.resource, acquisition.retained);
         const auto* retained =
             std::get_if<sk_sp<SkImage>>(acquisition.resource.get());
-        return retained ? *retained : sk_sp<SkImage>{};
+        if (!retained || !*retained) return {};
+        return {*retained, acquisition.hit, acquisition.retained};
     }
 
     [[nodiscard]] std::size_t retained_entries() const noexcept {
@@ -305,6 +321,8 @@ private:
                         const float values[] = {
                             value.local_extent.x, value.local_extent.y,
                             value.local_extent.w, value.local_extent.h,
+                            value.scene_extent.x, value.scene_extent.y,
+                            value.scene_extent.w, value.scene_extent.h,
                             value.device_scale};
                         for (const float item : values) {
                             const auto part = std::hash<float>{}(item == 0.0f ? 0.0f : item);
