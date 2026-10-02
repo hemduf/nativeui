@@ -847,8 +847,8 @@ public:
 
     void paint(ui::PaintContext& context) const override {
         ++*paints_;
-        context.painter().fill_rect(
-            context.bounds(), ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
     }
 
 private:
@@ -924,8 +924,8 @@ public:
 
     void paint(ui::PaintContext& context) const override {
         ++*paints_;
-        context.painter().fill_rect(
-            context.bounds(), ui::Color{0.0f, 0.0f, 1.0f, 1.0f});
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, ui::Color{0.0f, 0.0f, 1.0f, 1.0f});
         if (*invalidate_once_) {
             auto callback = std::move(*invalidate_once_);
             *invalidate_once_ = {};
@@ -998,8 +998,8 @@ public:
     void paint(ui::PaintContext& context) const override {
         ++*paints_;
         context.painter().translate(1.0f, 0.0f);
-        context.painter().fill_rect(
-            context.bounds(), ui::Color{0.0f, 1.0f, 0.0f, 1.0f});
+        context.painter().fill_rounded_rect(
+            context.bounds(), 0.0f, ui::Color{0.0f, 1.0f, 0.0f, 1.0f});
     }
 
 private:
