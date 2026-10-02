@@ -13,10 +13,18 @@
 
 namespace ui {
 
+/// Two-endpoint scalar value used by RangeSlider.
+///
+/// Values use the same application scalar units as RangeSlider::range(). External
+/// values may temporarily be non-finite, out of range or reversed; presentation
+/// derives a finite/clamped/ordered effective pair without rewriting State.
 struct RangeValue {
+    /// Lower endpoint in application scalar units.
     float low{};
+    /// Upper endpoint in application scalar units.
     float high{1.0f};
 
+    /// Exact field-wise equality; no normalization is applied by comparison.
     friend bool operator==(const RangeValue&, const RangeValue&) = default;
 };
 
@@ -405,32 +413,56 @@ private:
 
 } // namespace detail
 
+/// Detached two-thumb range slider backed by a Binding<RangeValue>.
+///
+/// The component owns the Binding handle. For presentation, low/high are clamped
+/// to the configured domain, non-finite low falls back to minimum, non-finite
+/// high to maximum, and reversed effective endpoints are ordered. This does not
+/// rewrite externally supplied State by itself. User interaction writes a finite,
+/// clamped, ordered pair and prevents one thumb crossing the other. UI interaction
+/// and state publication are synchronous and not audio/DSP real-time.
 class RangeSlider {
 public:
+    /// Take ownership of a copyable range binding handle.
     explicit RangeSlider(Binding<RangeValue> state) : state_(std::move(state)) {}
+    /// Convenience overload that immediately obtains state.binding().
     explicit RangeSlider(State<RangeValue>& state) : RangeSlider(state.binding()) {}
 
+    /// Configure the scalar domain.
+    ///
+    /// Retained materialization throws std::invalid_argument unless both endpoints
+    /// are finite and minimum < maximum.
     RangeSlider&& range(float minimum, float maximum) && {
         minimum_ = minimum;
         maximum_ = maximum;
         return std::move(*this);
     }
 
+    /// Configure per-thumb edit quantization; zero means continuous.
+    ///
+    /// Retained materialization rejects negative or non-finite values. Positive
+    /// steps quantize from minimum before range/order clamping.
     RangeSlider&& step(float value) && {
         step_ = value;
         return std::move(*this);
     }
 
+    /// Select horizontal or vertical logical-geometry mapping.
     RangeSlider&& orientation(SliderOrientation value) && {
         orientation_ = value;
         return std::move(*this);
     }
 
+    /// Replace the complete owned SliderStyle value used by both thumbs.
     RangeSlider&& style(SliderStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume the builder and transfer binding/domain/style configuration.
+    ///
+    /// The returned Spec borrows nothing from this RangeSlider object. Domain
+    /// validation occurs when the retained component is materialized.
     Spec spec() && {
         auto state = std::move(state_);
         const float minimum = minimum_;

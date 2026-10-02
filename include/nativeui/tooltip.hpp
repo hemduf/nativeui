@@ -621,36 +621,88 @@ private:
 
 } // namespace detail
 
-/// Retained Tooltip decorator. V1 content is plain UTF-8 text only.
+/// Retained text-tooltip decorator for exactly one retained child.
+///
+/// The builder owns its UTF-8 `text` and converted child `Spec`; neither is
+/// borrowed from the constructor arguments after construction. Empty text is a
+/// valid configuration and suppresses tooltip presentation/description rather
+/// than synthesizing fallback content.
+///
+/// Presentation is per decorated instance. Hover or focus arms one full delay;
+/// pointer-button interaction, anchor unavailability, pointer-down dismissal,
+/// deactivation, and teardown cancel or dismiss the transient presentation
+/// according to the retained interaction contract. The overlay is non-modal,
+/// pointer-transparent, and positioned in logical UI pixels by the overlay
+/// service; Tooltip does not expose or retain a native window handle.
+///
+/// Building/configuring this detached value does not access a live UI. Moving it
+/// into `spec() &&` consumes the builder and transfers the owned text/child into
+/// retained composition. Materialization and later interaction are UI/main-thread
+/// work and may allocate; this API is not suitable for an audio/DSP real-time
+/// callback.
 ///
 /// ```cpp
-/// ui::Tooltip{"Reset to default", child}
+/// auto decorated = ui::Tooltip{"Reset to default", child}
 ///     .delay(std::chrono::milliseconds{500});
+/// auto spec = std::move(decorated).spec();
 /// ```
 class Tooltip {
 public:
+    /// Default eligibility-to-presentation delay in milliseconds.
+    /// A new genuine hover/focus eligibility transition waits this full duration.
     static constexpr std::chrono::milliseconds kDefaultDelay{500};
+
+    /// Maximum tooltip surface width in logical UI pixels before text wrapping.
+    /// The value describes the built-in v1 presentation surface, not anchor width.
     static constexpr float kDefaultMaxWidth = detail::kTooltipDefaultMaxWidth;
 
+    /// Creates a tooltip that owns `text` and exactly one retained child.
+    ///
+    /// `child` is forwarded through `make_spec()` during construction; the
+    /// resulting `Spec` is owned by this builder, so the original child argument
+    /// need not outlive the constructor call. UTF-8 bytes are retained verbatim;
+    /// empty text is accepted and results in no tooltip presentation.
+    ///
+    /// Conversion/owned storage may allocate and exceptions propagate. This is a
+    /// detached builder operation with no UI callbacks or reentrant dispatch.
     template <class Child>
     Tooltip(std::string text, Child&& child)
         : text_(std::move(text)) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+    /// Sets the presentation delay in milliseconds on an rvalue builder.
+    /// Negative durations are clamped to zero. Returns the same builder for
+    /// fluent chaining; no timer is armed until the retained component is live.
     Tooltip&& delay(std::chrono::milliseconds value) && noexcept {
         set_delay(value);
         return std::move(*this);
     }
 
+    /// Sets the presentation delay in milliseconds on an lvalue builder.
+    /// Negative durations are clamped to zero and the same builder is returned.
+    /// The operation is local value mutation and invokes no callbacks.
     Tooltip& delay(std::chrono::milliseconds value) & noexcept {
         set_delay(value);
         return *this;
     }
 
+    /// Returns the currently configured non-negative delay in milliseconds.
     [[nodiscard]] std::chrono::milliseconds delay() const noexcept { return delay_; }
+
+    /// Borrows the builder-owned UTF-8 tooltip text.
+    /// The reference remains valid only while this builder remains alive and
+    /// unmoved; consuming the builder with `spec() &&` invalidates that borrow.
     [[nodiscard]] const std::string& text() const noexcept { return text_; }
 
+    /// Consumes the builder and returns the retained composition specification.
+    ///
+    /// Owned text, configured delay, and the child `Spec` are transferred into
+    /// the returned value; the resulting specification does not borrow this
+    /// Tooltip object. Creating/materializing the retained component may allocate
+    /// and allocation failure propagates. The produced component's interaction,
+    /// timers, overlay publication, and teardown run in the owning UI/main-thread
+    /// domain and are not audio-real-time operations.
     Spec spec() && {
         auto text = std::move(text_);
         const auto delay_value = delay_;

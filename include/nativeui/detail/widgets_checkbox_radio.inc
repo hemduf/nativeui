@@ -631,19 +631,37 @@ private:
 
 } // namespace detail
 
+/// Detached retained checkbox builder backed by a Binding<bool>.
+///
+/// The builder/component owns the Binding handle and UTF-8 label; it does not
+/// retain a raw reference to the source State. Accepted pointer/Space activation
+/// toggles the current binding value synchronously. Binding observers may
+/// re-enter and rebuild/destroy retained content during that write, so the
+/// implementation performs no component/context access afterwards. Effective
+/// read-only availability consumes mutating input without changing the value.
+/// State work is UI/main-thread confined and is not audio/DSP real-time.
 class Checkbox {
 public:
+    /// Take ownership of a copyable binding handle and label bytes.
     Checkbox(Binding<bool> state, std::string label)
         : state_(std::move(state)), label_(std::move(label)) {}
 
+    /// Convenience overload that immediately obtains state.binding().
+    ///
+    /// The retained checkbox owns that Binding handle rather than borrowing the
+    /// State object itself; Binding invalidation follows the State/Binding v1 contract.
     Checkbox(State<bool>& state, std::string label)
         : Checkbox(state.binding(), std::move(label)) {}
 
+    /// Replace the complete owned CheckboxStyle value.
     Checkbox&& style(CheckboxStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume this builder and transfer binding/label/style into a Spec.
+    ///
+    /// The returned specification borrows nothing from this Checkbox object.
     Spec spec() && {
         auto state = std::move(state_);
         auto label = std::move(label_);
@@ -664,14 +682,23 @@ private:
     CheckboxStyle style_;
 };
 
+/// Shared selection identity for a set of RadioButton<T> builders.
+///
+/// RadioGroup owns a Binding<T>, a focus-group identity and an option registry.
+/// RadioButton construction copies those handles, so an already-constructed
+/// RadioButton/Spec does not borrow the RadioGroup object and may outlive it.
+/// Option values produced from one group must be unique while their registered
+/// identities remain live; duplicate registration is rejected by RadioButton::spec().
 template <class T>
 class RadioGroup {
 public:
+    /// Create a group from an owned/copyable selection binding handle.
     explicit RadioGroup(Binding<T> selected)
         : selected_(std::move(selected)),
           token_(std::make_shared<detail::RadioGroupToken>()),
           registry_(std::make_shared<detail::RadioOptionRegistry<T>>()) {}
 
+    /// Convenience overload that immediately obtains selected.binding().
     explicit RadioGroup(State<T>& selected)
         : RadioGroup(selected.binding()) {}
 
@@ -684,9 +711,20 @@ private:
     std::shared_ptr<detail::RadioOptionRegistry<T>> registry_;
 };
 
+/// Detached retained radio-option builder associated with one RadioGroup<T>.
+///
+/// Construction copies the group's Binding/shared identities and owns value/label.
+/// Selection compares T with operator== and writes the option value synchronously
+/// through the binding. Effective read-only availability prevents writes. State
+/// observers may re-enter during selection; retained code completes its own input
+/// bookkeeping before invoking the write. Builder/materialization paths may
+/// allocate and are not audio/DSP real-time.
 template <class T>
 class RadioButton {
 public:
+    /// Copy group handles and take ownership of one option value and label.
+    ///
+    /// The group object itself need not outlive this RadioButton after construction.
     RadioButton(const RadioGroup<T>& group, T value, std::string label)
         : selected_(group.selected_),
           token_(group.token_),
@@ -694,11 +732,17 @@ public:
           value_(std::move(value)),
           label_(std::move(label)) {}
 
+    /// Replace the complete owned RadioStyle value.
     RadioButton&& style(RadioStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume this builder and register/transfer the option into a Spec.
+    ///
+    /// Throws std::invalid_argument if an equal option value is already registered
+    /// and still live in the same RadioGroup. Allocation failures propagate.
+    /// The resulting Spec owns all handles/value identity/label/style it needs.
     Spec spec() && {
         auto selected = std::move(selected_);
         auto token = std::move(token_);
@@ -746,6 +790,7 @@ private:
     RadioStyle style_;
 };
 
+/// Deduction guide preserving the RadioGroup selection type.
 template <class T>
 RadioButton(const RadioGroup<T>&, T, std::string) -> RadioButton<T>;
 

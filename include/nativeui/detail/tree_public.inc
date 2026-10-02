@@ -1,8 +1,15 @@
+    /// Take exclusive ownership of one already-compiled retained root.
+    ///
+    /// `root` must be a valid non-null hierarchy such as `compile()` returns;
+    /// Tree does not define a nullable-root mode. Ownership transfers completely
+    /// to this Tree. Construction may allocate while reserving transition state.
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {
         focus_transition_stack_.reserve(4);
         pointer_hover_transition_stack_.reserve(4);
     }
 
+    /// Best-effort no-throw teardown. Explicit lifecycle calls may propagate
+    /// application callback failures; destructor cleanup contains them.
     ~Tree() noexcept {
         try {
             unmount();
@@ -13,6 +20,8 @@
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
 
+    /// Mount the retained hierarchy once. Parents mount before children.
+    /// Partial failure is rolled back before the exception propagates.
     void mount() {
         if (mounted_) return;
         reset_semantic_recovery();
@@ -63,12 +72,24 @@
         mounted_ = true;
     }
 
+    /// Measure the root under logical constraints without publishing layout.
+    ///
+    /// Inputs and returned metrics use logical pixels. Pending dynamic structure
+    /// is flushed first, so this const API is not a pure read: component factories
+    /// or measure callbacks may allocate/throw. During a lifecycle transition it
+    /// is suppressed and returns a default ChildMetrics.
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
         if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
 
+    /// Publish retained geometry for one logical-pixel viewport.
+    ///
+    /// Pending dynamic structure is reconciled first. Unchanged clean geometry is
+    /// a no-op. Layout callbacks may allocate/throw; failure rolls publication
+    /// back to the last coherent geometry and keeps layout dirty for retry.
+    /// Suppressed while another lifecycle transition is active.
     void layout(Size viewport) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -85,6 +106,12 @@
         commit_layout_publication();
     }
 
+    /// Activate mounted components and the retained focus/input domain.
+    ///
+    /// `platform` is borrowed for the active interval and must remain alive until
+    /// deactivation/teardown clears that borrow. Activation may invoke component
+    /// and focus callbacks. On failure Tree performs best-effort deactivation,
+    /// clears active focus/capture/platform state, then rethrows.
     void activate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Activate, true};
         if (!mounted_) return;
@@ -138,6 +165,11 @@
         }
     }
 
+    /// Re-notify the active focused component after structural synchronization.
+    ///
+    /// The focused component receives `focus_changed(true, ...)` again; that
+    /// callback may re-enter Tree or throw. Inactive/unfocused/lifecycle-transition
+    /// cases are no-ops. `platform` is borrowed only for this call.
     void refresh_focus(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -151,6 +183,11 @@
         node->component->focus_changed(true, context);
     }
 
+    /// Clear hover/capture/focus and deactivate the active retained hierarchy.
+    ///
+    /// Cleanup continues across pointer/focus/lifecycle callback failures. The
+    /// first captured exception is rethrown only after active state and the
+    /// retained PlatformServices borrow have been cleared.
     void deactivate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Deactivate, true};
         std::exception_ptr first_error;
@@ -200,6 +237,7 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
+    /// Unmount child-to-parent, deactivating first when still active.
     void unmount() {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) {
@@ -234,18 +272,33 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
+    /// True when layout or paint work remains.
     [[nodiscard]] bool dirty() const noexcept {
         return layout_dirty_ || !paint_dirty_.empty();
     }
+    /// True when retained geometry must be recomputed.
     [[nodiscard]] bool layout_dirty() const noexcept { return layout_dirty_; }
+
+    /// True when one or more logical paint regions remain dirty.
     [[nodiscard]] bool paint_dirty() const noexcept { return !paint_dirty_.empty(); }
+
+    /// Borrow current logical-pixel damage rectangles.
+    ///
+    /// The vector is Tree-owned and may be invalidated by later layout/paint/
+    /// invalidation mutation. Copy it when a longer lifetime is required.
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
     }
+    /// Borrow the latest structural-reconciliation diagnostic.
+    ///
+    /// The string is Tree-owned and may change on later dynamic reconciliation.
+    /// Copy it for retention beyond immediate inspection.
     [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
         return structural_diagnostic_;
     }
 
+    /// Read effective availability for one retained node, or nullopt for a
+    /// stale/missing identity.
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
         if (!root_) return std::nullopt;
@@ -254,6 +307,13 @@
         return node->component->effective_availability();
     }
 
+    /// Replace the logical-region invalidation callback.
+    ///
+    /// Tree owns the callable. Notification is synchronous on the UI/main thread
+    /// when newly exposed damage is published, and existing dirty rectangles are
+    /// replayed immediately on installation. A callback may re-enter or throw;
+    /// dirty state is already retained and the new callback remains installed.
+    /// Empty clears notification without clearing damage.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         invalidation_callback_ = std::move(callback);
         if (invalidation_callback_) {
@@ -261,6 +321,7 @@
         }
     }
 
+    /// Region-agnostic invalidation callback convenience overload.
     void set_invalidation_callback(std::function<void()> callback) {
         if (!callback) {
             set_invalidation_callback(std::function<void(Rect)>{});
@@ -270,10 +331,22 @@
             [callback = std::move(callback)](Rect) mutable { callback(); });
     }
 
+    /// Mark the complete viewport for repaint.
     void invalidate() { invalidate_paint(viewport_rect()); }
+    /// Mark one root-logical rectangle for repaint.
+    ///
+    /// Damage is bounded by the current viewport/DirtyRegion policy. If this
+    /// publishes new damage, the invalidation callback runs synchronously and
+    /// may re-enter/throw after the dirty state has been recorded.
     void invalidate(Rect rect) { invalidate_paint(rect); }
+    /// Mark retained layout dirty from the root.
+    ///
+    /// Bounds may move on the next layout, so this also conservatively dirties
+    /// the complete viewport. Callback exceptions propagate after dirty/layout
+    /// state has already been recorded.
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
+    /// Move focus to the next eligible retained target.
     void focus_next(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -281,6 +354,7 @@
         move_focus(1, platform);
     }
 
+    /// Move focus to the previous eligible retained target.
     void focus_previous(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -288,15 +362,28 @@
         move_focus(-1, platform);
     }
 
+    /// Replace semantic-command fallback after retained routing returns Ignored.
+    ///
+    /// Tree owns the callback; it runs on the UI/main thread and its EventResult
+    /// becomes the dispatch result. Exceptions propagate. Empty removes it.
     void set_global_command_handler(std::function<EventResult(Command)> handler) {
         global_command_handler_ = std::move(handler);
     }
 
+    /// Replace fallback handling for KeyDown left unconsumed by retained routing.
+    ///
+    /// Tree owns the callback and keeps the currently executing callable alive
+    /// across reentrant replacement/clear. Exceptions propagate only after input
+    /// dispatch bookkeeping has been restored. Empty removes the fallback.
     void set_global_key_down_handler(
         std::function<EventResult(const InputEvent&)> handler) {
         global_key_down_handler_ = std::move(handler);
     }
 
+    /// Return the internal slot index for one active pointer interaction.
+    ///
+    /// Advanced integration/test seam. An untracked ID returns the current
+    /// interaction count as an end sentinel. No allocation or callbacks.
     [[nodiscard]] std::size_t pointer_interaction_index(
         PointerId pointer) const noexcept {
         for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
@@ -305,6 +392,10 @@
         return active_pointer_interaction_count_;
     }
 
+    /// Return the Tree-local dispatch generation for `pointer`, or 0 if absent.
+    ///
+    /// The token distinguishes older outer events from newer reentrant contacts
+    /// reusing the same PointerId; it is not a persistent application identity.
     [[nodiscard]] std::uint64_t pointer_interaction_dispatch_token(
         PointerId pointer) const noexcept {
         const auto index = pointer_interaction_index(pointer);
@@ -313,6 +404,10 @@
             : active_pointer_interactions_[index].dispatch_token;
     }
 
+    /// Begin/refresh one allocation-free Tree-local pointer interaction.
+    ///
+    /// The current dispatch generation is captured. Up to 16 PointerIds are
+    /// tracked; a new ID is not appended when capacity is already full.
     void begin_pointer_interaction(PointerId pointer = 0U) noexcept {
         const auto index = pointer_interaction_index(pointer);
         if (index != active_pointer_interaction_count_) {
@@ -328,6 +423,7 @@
         pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
     }
 
+    /// End one tracked pointer interaction; absent IDs are no-ops.
     void end_pointer_interaction(PointerId pointer = 0U) noexcept {
         const auto index = pointer_interaction_index(pointer);
         if (index == active_pointer_interaction_count_) return;
@@ -340,6 +436,10 @@
         pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
     }
 
+    /// End only the interaction whose dispatch generation still matches.
+    ///
+    /// Mismatch/absence is a no-op, protecting a newer nested interaction with
+    /// the same PointerId from cleanup owned by an older outer event.
     void end_pointer_interaction_if_token(
         PointerId pointer, std::uint64_t dispatch_token) noexcept {
         const auto index = pointer_interaction_index(pointer);
@@ -350,6 +450,10 @@
         end_pointer_interaction(pointer);
     }
 
+    /// Clear tracked interaction generations without delivering PointerCancel.
+    ///
+    /// Normal lifecycle owners should use `cancel_pointer()` when callbacks and
+    /// capture teardown are required.
     void clear_pointer_interactions() noexcept {
         for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
             active_pointer_interactions_[i] = {};
@@ -358,6 +462,18 @@
         pointer_interaction_active_ = false;
     }
 
+    /// Route one normalized event through retained focus/hit-test/capture policy.
+    ///
+    /// Non-drop events require an active Tree; DropOffer/DropData may target a
+    /// mounted inactive Tree. Pointer positions are root-logical coordinates.
+    /// The call may flush dynamic structure, invoke application callbacks,
+    /// allocate and throw.
+    ///
+    /// Dispatch is reentrant. Tree-local generation tokens prevent cleanup from
+    /// an older PointerDown/Up/Cancel frame from erasing a newer nested contact
+    /// with the same PointerId. On exception depth/token bookkeeping is restored
+    /// before propagation; outermost successful return flushes pending structural
+    /// and availability/focus work. `platform` is borrowed for this call.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
         const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
@@ -637,6 +753,11 @@
         }
     }
 
+    /// Deliver PointerCancel to active capture owners and clear interaction state.
+    ///
+    /// Component callbacks may re-enter or throw; cleanup owned by cancellation
+    /// is completed before an error propagates. Suppressed during lifecycle
+    /// transitions. `platform` is borrowed for the call.
     EventResult cancel_pointer(PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
@@ -644,6 +765,13 @@
         return cancel_all_pointer_captures(platform);
     }
 
+    /// Paint the complete retained tree into a borrowed SkCanvas.
+    ///
+    /// Pending structure/focus/layout is prepared first. A successful traversal
+    /// consumes only damage that existed before the first component paint
+    /// callback; invalidation raised reentrantly survives for the next frame.
+    /// On paint failure pre-existing damage is merged back before propagation.
+    /// `canvas` and `platform` are borrowed synchronously. Not audio-RT safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         paint_with_resources(canvas, platform, nullptr);
     }

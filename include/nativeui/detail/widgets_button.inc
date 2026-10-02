@@ -15,11 +15,19 @@
 
 namespace ui {
 
+/// Resolved interaction state exposed by the standard push-button control.
+///
+/// Values describe presentation only; they do not own or mutate retained state.
 enum class ButtonVisualState {
+    /// Enabled, not hovered/pressed/focused.
     Normal,
+    /// Pointer hover presentation.
     Hover,
+    /// Active pointer/keyboard press presentation.
     Pressed,
+    /// Keyboard-focus presentation when not pressed or hovered.
     Focused,
+    /// Effective availability disables activation.
     Disabled,
 };
 
@@ -290,18 +298,35 @@ private:
 
 } // namespace detail
 
+/// Detached builder for one retained push button.
+///
+/// The builder owns its UTF-8 label, activation callback and style. Activation
+/// is delivered synchronously from the owning UI/input domain. The component
+/// finishes its own interaction bookkeeping and copies the callback before
+/// invoking application code, so the callback may re-enter NativeUI or destroy
+/// surrounding retained objects. Exceptions propagate through input dispatch.
+/// None of this surface is intended for an audio/DSP real-time callback.
 class Button {
 public:
+    /// Owned no-argument callback invoked once for each accepted activation.
     using ActivateCallback = detail::ButtonComponent::ActivateCallback;
 
+    /// Take ownership of label bytes and the activation callback.
+    ///
+    /// An empty callback is valid and leaves activation as a no-op after normal
+    /// retained interaction handling.
     Button(std::string label, ActivateCallback on_activate)
         : label_(std::move(label)), on_activate_(std::move(on_activate)) {}
 
+    /// Replace the complete owned ButtonStyle value.
     Button&& style(ButtonStyle value) && {
         style_ = std::move(value);
         return std::move(*this);
     }
 
+    /// Consume this builder and transfer label/callback/style into a Spec.
+    ///
+    /// The returned specification borrows nothing from this Button object.
     Spec spec() && {
         auto label = std::move(label_);
         auto callback = std::move(on_activate_);

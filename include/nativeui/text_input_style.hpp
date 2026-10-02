@@ -6,80 +6,185 @@
 #include <string>
 #include <vector>
 
+/// \file
+/// Single-line TextInput style values. Float geometry uses logical UI units.
+/// Patches are stored verbatim; resolving may allocate for owned font strings.
 namespace ui {
 
-/// Typed single-line text-input presentation and measurement overrides.
-/// Empty fields inherit from the already-resolved theme/inherited recipe.
+/// Typed single-line TextInput presentation and measurement overrides.
+///
+/// A disengaged optional inherits the value already produced by an earlier
+/// recipe layer; an engaged optional replaces it verbatim. Numeric geometry is
+/// expressed in logical UI units and is deliberately not clamped or normalized
+/// here, so callers can detect/configure invalid values before a live widget
+/// consumes the resolved recipe.
+///
+/// Geometry participates in different retained invalidation classes:
+/// control/field extents, padding, label/text sizes and font selection can affect
+/// measurement/layout; border, selection, caret and composition geometry are
+/// paint geometry inside the published field bounds. The patch itself does not
+/// classify or publish invalidation.
+///
+/// Font-family strings and fallback lists are owned. The patch retains no Theme,
+/// UI, Tree, widget, renderer, or native handle, invokes no callbacks, and has no
+/// reentrant dispatch path. Copying owned strings/vectors may allocate, so style
+/// construction/resolution is UI/setup work rather than an audio-RT contract.
 struct TextInputStylePatch {
+    /// Field background.
     std::optional<Color> field_fill;
+    /// Field border color.
     std::optional<Color> border;
+    /// Label color.
     std::optional<Color> label;
+    /// Editor/preedit text color.
     std::optional<Color> text;
+    /// Placeholder color.
     std::optional<Color> placeholder;
+    /// Selection highlight color.
     std::optional<Color> selection;
+    /// Caret color.
     std::optional<Color> caret;
+    /// IME/preedit underline color.
     std::optional<Color> composition_underline;
+    /// Border width in logical units.
     std::optional<float> border_width;
+    /// Field corner radius in logical units.
     std::optional<float> corner_radius;
+    /// Preferred measured control width.
     std::optional<float> control_width;
+    /// Preferred measured control height.
     std::optional<float> control_height;
+    /// Field top offset from control top.
     std::optional<float> field_top;
+    /// Field height.
     std::optional<float> field_height;
+    /// Left/right editable-content inset.
     std::optional<float> horizontal_padding;
+    /// Top/bottom editable-content inset.
     std::optional<float> content_vertical_inset;
+    /// Label center-Y offset from control top.
     std::optional<float> label_offset_y;
+    /// Label font size.
     std::optional<float> label_size;
+    /// Editor font size.
     std::optional<float> text_size;
+    /// Selection highlight radius.
     std::optional<float> selection_corner_radius;
+    /// Selection vertical inset.
     std::optional<float> selection_vertical_inset;
+    /// Caret stroke width.
     std::optional<float> caret_width;
+    /// Caret top/bottom inset.
     std::optional<float> caret_vertical_inset;
+    /// IME underline stroke width.
     std::optional<float> composition_underline_width;
+    /// IME underline distance from field bottom.
     std::optional<float> composition_underline_inset;
+    /// Label/editor font weight.
     std::optional<FontWeight> text_weight;
+    /// Label/editor font slant.
     std::optional<FontSlant> text_slant;
+    /// Preferred font family.
     std::optional<std::string> font_family;
+    /// Ordered fallback font families.
     std::optional<std::vector<std::string>> fallback_families;
 };
 
+/// Complete single-line TextInput recipe.
+///
+/// Resolution order is base -> one interaction branch -> read_only -> focused.
+/// Interaction precedence is disabled > pressed > hovered > normal. Within every
+/// layer inherited fields are applied before component-local fields, so the
+/// component-local recipe wins on overlap.
+///
+/// Recipes are detached owned values. They may be copied, retained, or built
+/// before a UI exists and borrow nothing from the Theme used to create defaults.
+/// Merely mutating a recipe does not touch retained state or invoke invalidation;
+/// that happens only when a live TextInput consumes a new resolved style.
 struct TextInputStyle {
+    /// Base patch.
     TextInputStylePatch base;
+    /// Hover interaction patch.
     TextInputStylePatch hovered;
+    /// Pressed interaction patch.
     TextInputStylePatch pressed;
+    /// Disabled interaction patch.
     TextInputStylePatch disabled;
+    /// Read-only orthogonal patch.
     TextInputStylePatch read_only;
+    /// Focused orthogonal patch.
     TextInputStylePatch focused;
 };
 
+/// Concrete single-line editor presentation/measurement values after resolution.
+///
+/// The snapshot is fully owned: font strings/vectors are copied and no field
+/// borrows from either input recipe or Theme. Default construction performs no
+/// Theme lookup, so a field omitted by both inherited and local recipes remains
+/// its ordinary zero/default value.
+///
+/// Numeric fields preserve the exact selected recipe payload, including
+/// negative/non-finite values. Resolution therefore never hides invalid style
+/// data behind fallback/clamping; validation/canonicalization belongs to the
+/// consuming widget/renderer contract.
 struct ResolvedTextInputStyle {
+    /// Resolved field background.
     Color field_fill{};
+    /// Resolved border color.
     Color border{};
+    /// Resolved label color.
     Color label{};
+    /// Resolved text color.
     Color text{};
+    /// Resolved placeholder color.
     Color placeholder{};
+    /// Resolved selection color.
     Color selection{};
+    /// Resolved caret color.
     Color caret{};
+    /// Resolved IME underline color.
     Color composition_underline{};
+    /// Resolved border width, logical units.
     float border_width{};
+    /// Resolved corner radius, logical units.
     float corner_radius{};
+    /// Resolved preferred width, logical units.
     float control_width{};
+    /// Resolved preferred height, logical units.
     float control_height{};
+    /// Resolved field top offset, logical units.
     float field_top{};
+    /// Resolved field height, logical units.
     float field_height{};
+    /// Resolved horizontal content inset.
     float horizontal_padding{};
+    /// Resolved vertical content inset.
     float content_vertical_inset{};
+    /// Resolved label center-Y offset.
     float label_offset_y{};
+    /// Resolved label font size.
     float label_size{};
+    /// Resolved editor font size.
     float text_size{};
+    /// Resolved selection radius.
     float selection_corner_radius{};
+    /// Resolved selection vertical inset.
     float selection_vertical_inset{};
+    /// Resolved caret width.
     float caret_width{};
+    /// Resolved caret inset.
     float caret_vertical_inset{};
+    /// Resolved IME underline width.
     float composition_underline_width{};
+    /// Resolved IME underline inset.
     float composition_underline_inset{};
+    /// Resolved font weight.
     FontWeight text_weight{FontWeight::Regular};
+    /// Resolved font slant.
     FontSlant text_slant{FontSlant::Upright};
+    /// Owned resolved preferred family.
     std::string font_family;
+    /// Owned resolved fallback families.
     std::vector<std::string> fallback_families;
 };
 
@@ -138,6 +243,16 @@ inline void apply_text_input_interaction_patch(ResolvedTextInputStyle& target,
 
 } // namespace detail
 
+/// Build the complete default TextInput recipe from a synchronously borrowed Theme.
+///
+/// The Theme is read only for this call. The result owns copied family/fallback
+/// strings and can outlive the Theme. Default interaction variants preserve the
+/// normal control/field geometry; hover/pressed/disabled/focused defaults change
+/// presentation only.
+///
+/// No callback, retained-tree mutation, or platform/native lookup occurs here.
+/// Copying Theme-owned strings/vectors may allocate and allocation failure
+/// propagates. This helper is intended for UI/style setup, not audio/DSP RT use.
 [[nodiscard]] inline TextInputStyle default_text_input_style(const Theme& theme) {
     TextInputStyle style;
     style.base.field_fill = theme.palette.control_background;
@@ -182,6 +297,18 @@ inline void apply_text_input_interaction_patch(ResolvedTextInputStyle& target,
     return style;
 }
 
+/// Resolve inherited and component-local TextInput recipes for one VisualState.
+///
+/// Inputs are borrowed only for the synchronous call. Resolution is
+/// base -> interaction -> read_only -> focused, with
+/// disabled > pressed > hovered > normal interaction precedence and local fields
+/// overriding inherited fields within each layer. The returned snapshot owns all
+/// copied font strings/vectors.
+///
+/// The resolver performs no Theme lookup, numeric sanitization, retained-state
+/// mutation, invalidation, callback invocation, or reentrant UI dispatch. Fields
+/// omitted by both recipes remain default constructed. Owned string/vector copies
+/// may allocate and allocation failure propagates.
 [[nodiscard]] inline ResolvedTextInputStyle resolve_text_input_style(
     const TextInputStyle& inherited,
     const TextInputStyle& explicit_style,

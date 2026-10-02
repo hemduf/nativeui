@@ -40,6 +40,15 @@ class Dialog;
 class UI;
 struct TreeTestAccess;
 
+/// Low-level retained component-tree runtime.
+///
+/// Most applications should own a `UI`, which wraps Tree with overlay/dialog
+/// policy and view-oriented lifecycle conveniences. Tree is the advanced public
+/// surface for integrations/tests that intentionally drive retained mounting,
+/// measurement/layout, focus/input, invalidation and painting themselves.
+///
+/// Tree is non-copyable, instance-owned and UI/main-thread confined. It does not
+/// provide synchronization for concurrent calls or an audio-thread transport.
 class Tree {
 public:
 #include <nativeui/detail/tree_public.inc>

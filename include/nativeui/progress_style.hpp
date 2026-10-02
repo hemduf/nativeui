@@ -7,53 +7,110 @@
 
 namespace ui {
 
-/// Shared typed presentation fields for display-only progress controls. Empty
-/// fields inherit from the already-resolved Theme/T039/component layer.
+/// Partial presentation and intrinsic-size override shared by ProgressBar and Meter.
+///
+/// Every disengaged optional inherits the value produced by the preceding style
+/// layer. Engaged numeric values are stored verbatim: this value layer does not
+/// clamp negative or non-finite geometry. All scalar geometry and Size values use
+/// logical UI pixels rather than framebuffer pixels.
+///
+/// The patch is detached value data. It owns no UI/tree/native resources, invokes
+/// no callbacks, and can outlive the Theme or recipes from which it was copied.
 struct ProgressStylePatch {
+    /// Unfilled track/background color.
     std::optional<Color> track;
+    /// Filled-progress color.
     std::optional<Color> fill;
+    /// Outer border color.
     std::optional<Color> border;
+    /// Formatted-value text color.
     std::optional<Color> text;
+    /// Outer border width in logical UI pixels.
     std::optional<float> border_width;
+    /// Outer control corner radius in logical UI pixels.
     std::optional<float> corner_radius;
+    /// Filled-region corner radius in logical UI pixels.
     std::optional<float> fill_corner_radius;
+    /// Formatted-value text size in logical UI pixels.
     std::optional<float> text_size;
+    /// Preferred horizontal size without formatted text, in logical UI pixels.
     std::optional<Size> horizontal_size;
+    /// Preferred horizontal size with formatted text, in logical UI pixels.
     std::optional<Size> horizontal_formatted_size;
+    /// Preferred vertical size without formatted text, in logical UI pixels.
     std::optional<Size> vertical_size;
+    /// Preferred vertical size with formatted text, in logical UI pixels.
     std::optional<Size> vertical_formatted_size;
 };
 
+/// Complete ProgressBar style recipe.
+///
+/// Resolution applies base first, then exactly one interaction branch
+/// (disabled > pressed > hovered > normal), then read_only, then focused.
+/// Within each layer inherited values are applied before component-local values.
 struct ProgressBarStyle {
+    /// Normal-state baseline.
     ProgressStylePatch base;
+    /// Overrides while hovered.
     ProgressStylePatch hovered;
+    /// Overrides while actively pressed.
     ProgressStylePatch pressed;
+    /// Overrides while disabled.
     ProgressStylePatch disabled;
+    /// Orthogonal read-only overrides applied after interaction.
     ProgressStylePatch read_only;
+    /// Orthogonal focus overrides applied last.
     ProgressStylePatch focused;
 };
 
+/// Complete Meter style recipe.
+///
+/// Meter uses the same resolution precedence as ProgressBar but has independent
+/// defaults, including a tighter default fill radius.
 struct MeterStyle {
+    /// Normal-state baseline.
     ProgressStylePatch base;
+    /// Overrides while hovered.
     ProgressStylePatch hovered;
+    /// Overrides while actively pressed.
     ProgressStylePatch pressed;
+    /// Overrides while disabled.
     ProgressStylePatch disabled;
+    /// Orthogonal read-only overrides applied after interaction.
     ProgressStylePatch read_only;
+    /// Orthogonal focus overrides applied last.
     ProgressStylePatch focused;
 };
 
+/// Owned concrete ProgressBar/Meter style consumed by measurement and paint.
+///
+/// No field borrows from the input recipes or Theme used to produce it. Numeric
+/// geometry remains exactly what resolution selected; no validation or fallback
+/// is inserted at this layer.
 struct ResolvedProgressStyle {
+    /// Resolved unfilled track/background color.
     Color track{};
+    /// Resolved filled-progress color.
     Color fill{};
+    /// Resolved outer border color.
     Color border{};
+    /// Resolved formatted-value text color.
     Color text{};
+    /// Resolved outer border width in logical UI pixels.
     float border_width{};
+    /// Resolved outer corner radius in logical UI pixels.
     float corner_radius{};
+    /// Resolved filled-region radius in logical UI pixels.
     float fill_corner_radius{};
+    /// Resolved formatted-value text size in logical UI pixels.
     float text_size{};
+    /// Resolved preferred horizontal size without formatted text.
     Size horizontal_size{};
+    /// Resolved preferred horizontal size with formatted text.
     Size horizontal_formatted_size{};
+    /// Resolved preferred vertical size without formatted text.
     Size vertical_size{};
+    /// Resolved preferred vertical size with formatted text.
     Size vertical_formatted_size{};
 };
 
@@ -138,8 +195,14 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
 
 } // namespace detail
 
-/// T037-backed ProgressBar defaults preserve the pre-T038 geometry and paint
-/// contract. Interaction variants do not change geometry by default.
+/// Builds the default ProgressBar recipe from a synchronously borrowed Theme.
+///
+/// The returned recipe owns all copied values and does not retain the Theme.
+/// Default geometry is expressed in logical UI pixels; interaction defaults do
+/// not change geometry. No retained state is touched and no callbacks run.
+///
+/// This helper is intended for UI/style setup. NativeUI does not promise it as
+/// an audio/DSP real-time-safe API.
 [[nodiscard]] inline ProgressBarStyle default_progress_bar_style(const Theme& theme) {
     ProgressBarStyle style;
     detail::populate_progress_defaults(style.base, theme);
@@ -149,7 +212,11 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
     return style;
 }
 
-/// Meter shares the same field model, but retains its tighter fill radius.
+/// Builds the default Meter recipe from a synchronously borrowed Theme.
+///
+/// The returned recipe is detached/owned. Meter shares ProgressBar geometry but
+/// uses a 3 logical-pixel default fill radius. No UI callbacks or retained-tree
+/// mutation occur; this helper is not an audio/DSP real-time contract.
 [[nodiscard]] inline MeterStyle default_meter_style(const Theme& theme) {
     MeterStyle style;
     detail::populate_progress_defaults(style.base, theme);
@@ -159,6 +226,15 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
     return style;
 }
 
+/// Resolves inherited and local ProgressBar recipes for one visual state.
+///
+/// Inputs are borrowed only for the duration of the call. Resolution order is
+/// base -> interaction -> read_only -> focused, with inherited-before-local
+/// precedence inside every layer. The returned value is fully owned.
+///
+/// The resolver performs no Theme lookup, retained mutation, callback dispatch,
+/// or error fallback. If both recipes omit a field, that field keeps the
+/// default-constructed value in ResolvedProgressStyle.
 [[nodiscard]] inline ResolvedProgressStyle resolve_progress_bar_style(
     const ProgressBarStyle& inherited,
     const ProgressBarStyle& explicit_style,
@@ -166,6 +242,12 @@ inline void populate_progress_defaults(ProgressStylePatch& base, const Theme& th
     return detail::resolve_progress_style(inherited, explicit_style, state);
 }
 
+/// Resolves inherited and local Meter recipes for one visual state.
+///
+/// Inputs are synchronous borrows and the result owns its values. Resolution is
+/// deterministic: base -> interaction -> read_only -> focused, with local fields
+/// winning inherited fields at the same layer. No callbacks, Theme lookup, or
+/// retained-tree mutation occur.
 [[nodiscard]] inline ResolvedProgressStyle resolve_meter_style(
     const MeterStyle& inherited,
     const MeterStyle& explicit_style,

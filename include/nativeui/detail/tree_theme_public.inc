@@ -1,5 +1,14 @@
+    /// Borrow the current tree-owned Theme.
+    ///
+    /// The reference ends with Tree lifetime and should not be retained across
+    /// `set_theme()`; copy when an independent lifetime is needed.
     [[nodiscard]] const Theme& theme() const noexcept { return theme_; }
 
+    /// Consume a Theme value and publish only the required invalidation.
+    ///
+    /// Mounted theme-aware components are rebound before paint/layout publication.
+    /// Theme-owned strings/vectors may allocate. Synchronous invalidation callback
+    /// reentrancy/error semantics are the same as other Tree invalidation APIs.
     void set_theme(Theme value) {
         const auto invalidation = classify_theme_change(theme_, value);
         if (invalidation == ThemeInvalidation::None) {

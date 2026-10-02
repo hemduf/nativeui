@@ -13,24 +13,42 @@
 
 namespace ui {
 
+/// Cross-axis placement policy for Row/Column children.
+///
+/// Alignment is evaluated in logical UI pixels after measurement. This detached
+/// enum owns no retained state and invokes no callbacks.
 enum class Align {
+    /// Place the child at the cross-axis start without changing its extent.
     Start,
+    /// Center the child within available cross-axis space.
     Center,
+    /// Place the child at the cross-axis end.
     End,
+    /// Expand the child to the available cross-axis extent.
     Stretch,
 };
 
+/// Main-axis placement/distribution policy for Row/Column children.
 enum class Justify {
+    /// Pack children at the main-axis start.
     Start,
+    /// Center the packed child sequence.
     Center,
+    /// Pack children at the main-axis end.
     End,
+    /// Distribute remaining space between adjacent children.
     SpaceBetween,
 };
 
-
+/// Axes controlled by ScrollState and ScrollView.
+///
+/// Disabled axes are forced to offset zero. Geometry uses logical UI pixels.
 enum class ScrollAxis {
+    /// Scroll only horizontally.
     Horizontal,
+    /// Scroll only vertically.
     Vertical,
+    /// Scroll both axes independently.
     Both,
 };
 
@@ -38,6 +56,18 @@ namespace detail {
 class RetainedScrollComponent;
 } // namespace detail
 
+/// Application-owned controller for retained scrolling.
+///
+/// ScrollState owns committed offset, latest viewport/content metrics and its
+/// observer registry. Retained Scroll/ScrollView recipes borrow it through a
+/// weak LifetimeToken; destroying the controller makes those borrowers inert
+/// instead of extending its lifetime.
+///
+/// Offsets and sizes use logical UI pixels. Mutation/observation is synchronous,
+/// may invoke application callbacks, is UI/main-thread confined and is not
+/// audio/DSP real-time safe. Reentrant offset writes are serialized. A committed
+/// value is visible before observers run; if an observer throws, that value
+/// remains while unstarted observers and pending recursive work are not retried.
 class ScrollState {
     struct Listener {
         std::size_t id{};
@@ -97,10 +127,15 @@ class ScrollState {
     };
 
 public:
+    /// Weak liveness probe for retained ScrollState borrowers.
+    ///
+    /// The token never owns or prolongs controller lifetime.
     class LifetimeToken {
     public:
+        /// Construct an inactive token.
         LifetimeToken() = default;
 
+        /// Return whether the originating ScrollState still exists.
         [[nodiscard]] bool active() const noexcept {
             if (auto control = control_.lock()) return control->owner_alive;
             return false;
@@ -114,9 +149,15 @@ public:
         std::weak_ptr<Control> control_;
     };
 
+    /// Move-only RAII registration returned by observe().
+    ///
+    /// Reset/destruction disconnects without owning the ScrollState and remains
+    /// safe after controller destruction.
     class Subscription {
     public:
+        /// Construct a disconnected subscription.
         Subscription() = default;
+        /// Construct one observer-slot handle.
         Subscription(std::weak_ptr<Control> control, std::size_t id)
             : control_(std::move(control)), id_(id) {}
         Subscription(const Subscription&) = delete;
@@ -132,6 +173,10 @@ public:
         }
         ~Subscription() { reset(); }
 
+        /// Disconnect the observer. Repeated calls are no-ops.
+        ///
+        /// Removal during dispatch is deferred until the active pass can compact
+        /// the listener table.
         void reset() noexcept {
             if (id_ == 0) return;
             if (auto control = control_.lock()) control->remove_listener(id_);
@@ -139,6 +184,8 @@ public:
             id_ = 0;
         }
 
+        /// Return whether this handle still names an active observer on a live
+        /// controller. This is a snapshot, not a synchronization primitive.
         [[nodiscard]] bool active() const noexcept {
             if (id_ == 0) return false;
             if (auto control = control_.lock()) {
@@ -152,28 +199,48 @@ public:
         std::size_t id_{};
     };
 
+    /// Create a controller for the selected axes.
+    ///
+    /// Offset starts at zero; viewport/content metrics remain zero until retained
+    /// layout publishes them. Construction allocates and may throw.
     explicit ScrollState(ScrollAxis axis = ScrollAxis::Vertical)
         : control_(std::make_shared<Control>(axis)) {}
 
     ScrollState(const ScrollState&) = delete;
     ScrollState& operator=(const ScrollState&) = delete;
 
+    /// Invalidate weak borrowers/subscriptions without invoking callbacks.
     ~ScrollState() { control_->invalidate_owner(); }
 
+    /// Return configured scroll axes.
     [[nodiscard]] ScrollAxis axis() const noexcept { return control_->axis; }
+    /// Return committed offset in logical pixels.
     [[nodiscard]] Point offset() const noexcept { return control_->offset; }
+    /// Return latest viewport size in logical pixels; zero before first layout.
     [[nodiscard]] Size viewport_size() const noexcept { return control_->viewport; }
+    /// Return latest content size in logical pixels; zero before first layout.
     [[nodiscard]] Size content_size() const noexcept { return control_->content; }
+    /// Return clamped maximum offset; disabled axes report zero.
     [[nodiscard]] Point max_offset() const noexcept { return maximum_offset(*control_); }
+    /// Create a non-owning liveness token for retained/deferred borrowers.
     [[nodiscard]] LifetimeToken lifetime_token() const noexcept {
         return LifetimeToken{control_};
     }
 
+    /// Set an absolute logical-pixel offset.
+    ///
+    /// Negative/non-finite coordinates normalize to zero, disabled axes become
+    /// zero, and valid metrics clamp to max_offset(). The value commits before
+    /// observers run; callback exceptions propagate.
     void set_offset(Point value) {
         auto control = control_;
         dispatch_offset(control, clamp(*control, value));
     }
 
+    /// Add a logical-pixel delta to the current/pending offset.
+    ///
+    /// Non-finite components behave as zero. Observer ordering, reentrancy and
+    /// exception behavior are identical to set_offset().
     void scroll_by(Point delta) {
         auto control = control_;
         if (!control->owner_alive) return;
@@ -185,6 +252,11 @@ public:
             Point{base.x + finite_or_zero(delta.x), base.y + finite_or_zero(delta.y)});
     }
 
+    /// Observe committed offset changes synchronously.
+    ///
+    /// The callable is owned until Subscription reset/destruction. Registration
+    /// may allocate/throw. Callbacks may re-enter mutation, disconnect observers
+    /// or destroy ScrollState; the dispatch transaction tolerates those cases.
     Subscription observe(std::function<void(Point)> callback) {
         auto control = control_;
         if (!control->owner_alive) return {};
@@ -295,27 +367,42 @@ private:
     std::shared_ptr<Control> control_;
 };
 
+/// Grid track sizing strategy.
 enum class TrackType {
+    /// Explicit logical-pixel extent.
     Fixed,
+    /// Intrinsic content sizing.
     Auto,
+    /// Weighted distribution of remaining space.
     Flex,
 };
 
+/// Detached grid-track specification.
+///
+/// Non-finite/negative extents or weights normalize to zero. The value owns no
+/// external storage and invokes no callbacks.
 class Track {
 public:
+    /// Create a fixed logical-pixel track.
     [[nodiscard]] static Track fixed(float extent) noexcept {
         return Track{TrackType::Fixed, sanitize(extent)};
     }
 
+    /// Create an intrinsic content-sized track.
     [[nodiscard]] static Track auto_size() noexcept {
         return Track{TrackType::Auto, 0.0f};
     }
 
+    /// Create a weighted flexible track.
+    ///
+    /// Weight is dimensionless. Zero weight falls back to intrinsic sizing.
     [[nodiscard]] static Track flex(float weight = 1.0f) noexcept {
         return Track{TrackType::Flex, sanitize(weight)};
     }
 
+    /// Return the sizing strategy.
     [[nodiscard]] TrackType type() const noexcept { return type_; }
+    /// Return fixed extent in logical pixels or flex weight; Auto reports zero.
     [[nodiscard]] float value() const noexcept { return value_; }
 
 private:
@@ -329,8 +416,13 @@ private:
     float value_{};
 };
 
+/// Owned column/row track lists consumed by Grid.
+///
+/// Empty dimensions are valid. The vectors own Track values and may allocate.
 struct GridTracks {
+    /// Column definitions in left-to-right order.
     std::vector<Track> columns;
+    /// Row definitions in top-to-bottom order.
     std::vector<Track> rows;
 };
 

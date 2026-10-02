@@ -1,3 +1,10 @@
+/// \file
+/// Retained drawing surface used by NativeUI component paint callbacks.
+///
+/// Painter borrows a backend SkCanvas for one paint traversal while tracking
+/// NativeUI save/restore and logical-transform state. Public drawing coordinates
+/// and lengths are logical UI units unless stated otherwise. This is UI/render-
+/// thread work and is not an audio-real-time API.
 #pragma once
 
 #include <nativeui/geometry.hpp>
@@ -82,6 +89,22 @@ struct ResolvedTextLayout {
 
 class Tree;
 
+/// Backend-backed drawing context for one retained paint traversal.
+///
+/// Painter does not own the SkCanvas supplied at construction and must not
+/// outlive it. Prefer typed Painter methods over mutating the raw canvas:
+/// backend save/restore/transform calls can bypass NativeUI's transform history
+/// and protected-scope invariants.
+///
+/// Path/gradient/effect/text materialization and unusually deep save stacks may
+/// allocate. Exceptions from fallible protected-scope setup roll back backend
+/// state before propagating. Ordinary draw/materialization failures propagate.
+///
+/// Painter is traversal-local mutable state with no internal synchronization.
+/// Path, Brush, gradient, TextStyle and string/view arguments are borrowed only
+/// for the synchronous call and are never retained after return. Painter,
+/// StateGuard and canvas references must not escape the owning paint traversal;
+/// this API is not suitable for an audio/DSP real-time callback.
 class Painter {
     struct ScopeFrame {
         int previous_floor{};
@@ -105,6 +128,11 @@ class Painter {
     friend class Tree;
 
 public:
+    /// Non-copyable lexical guard that restores one protected Painter scope.
+    ///
+    /// The guard borrows its Painter and must die first. Manual save()/restore()
+    /// calls inside the scope must balance before guard destruction; debug builds
+    /// diagnose imbalance while cleanup still restores outstanding frames.
     class StateGuard {
     public:
         StateGuard(const StateGuard&) = delete;
@@ -131,7 +159,12 @@ public:
         ScopeFrame frame_{};
     };
 
+    /// Borrow `canvas`; no ownership is transferred and Painter must die first.
     explicit Painter(SkCanvas& canvas) noexcept : Painter(canvas, nullptr) {}
+    /// Restore outstanding backend saves before releasing the borrowed canvas.
+    ///
+    /// Destruction is noexcept so component-paint unwinding cannot poison the
+    /// backend save stack used by a later frame.
     ~Painter() noexcept {
         // Framework-owned tree scopes may be unwinding because component paint
         // threw before the matching manual pop. Restore every outstanding save
@@ -146,15 +179,34 @@ public:
         }
     }
 
+    /// Return the borrowed backend canvas.
+    ///
+    /// This low-level escape hatch is valid only for the Painter/canvas lifetime.
+    /// Avoid backend save/restore/transform mutations through it because Painter
+    /// tracks those operations separately.
     [[nodiscard]] SkCanvas& canvas() noexcept { return canvas_; }
+    /// Save drawing state and restore it automatically at lexical scope exit.
     [[nodiscard]] StateGuard scoped_state() { return StateGuard{*this}; }
+    /// Current Painter-managed backend save depth, primarily for diagnostics.
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
+    /// Report whether a non-trivial image effect was materialized.
+    ///
+    /// This renderer-observability bit supports conservative partial/full scene
+    /// decisions; ordinary opacity, blend and gradients do not set it.
     // Renderer-internal effect observability for scene update validation.
     [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
+    /// Current logical affine transform accumulated through Painter.
+    ///
+    /// It is restored with Painter's save stack. Direct raw-canvas transforms are
+    /// outside this tracking contract.
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;
     }
 
+    /// Intersect drawing with a logical rectangle until guard destruction.
+    ///
+    /// Non-finite, empty or non-positive geometry becomes an empty clip. Backend
+    /// failure rolls back the newly entered save frame before propagating.
     [[nodiscard]] StateGuard scoped_clip(Rect rect) {
         const SkRect clip = valid_clip_rect(rect) ? to_sk_rect(rect) : SkRect::MakeEmpty();
         const ScopeFrame frame = begin_scope();
@@ -167,6 +219,11 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Intersect drawing with a rounded logical rectangle.
+    ///
+    /// Radius is logical: non-finite/non-positive becomes zero and positive
+    /// values clamp to half the smaller rectangle dimension. Invalid rectangle
+    /// geometry produces an empty rectangular clip.
     [[nodiscard]] StateGuard scoped_clip(Rect rect, float radius) {
         const bool valid_rect = valid_clip_rect(rect);
         const SkRect sk_rect = valid_rect ? to_sk_rect(rect) : SkRect::MakeEmpty();
@@ -190,6 +247,10 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Intersect drawing with `path` until scope exit.
+    ///
+    /// Path conversion may allocate and finishes before publishing the protected
+    /// save frame. Any non-finite path coordinate yields an empty clip.
     [[nodiscard]] StateGuard scoped_clip(const Path& path) {
         // Path conversion may allocate inside the backend value builder. Finish
         // it before entering the Painter save frame so construction failure
@@ -205,6 +266,11 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Create a bounded offscreen composition layer.
+    ///
+    /// Bounds are logical. PaintOptions opacity/blend apply once when restoring
+    /// the layer. Invalid bounds create an empty clip-only scope instead of an
+    /// unbounded backend layer. Fallible setup is transactional.
     [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
                                           PaintOptions options = {}) {
         const bool valid_bounds = valid_clip_rect(logical_bounds);
@@ -258,6 +324,12 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Create a bounded filtered layer and apply `effect` on composition.
+    ///
+    /// Effects use logical/local units. Zero blur reduces to a normal layer.
+    /// Transparent DropShadow keeps the source; transparent DropShadowOnly yields
+    /// empty output. Non-finite/unrepresentable support fails closed. Filter
+    /// materialization may allocate/throw and successful effects set used_effects().
     [[nodiscard]] StateGuard scoped_layer(Rect logical_bounds,
                                           const Effect& effect,
                                           PaintOptions options = {}) {
@@ -345,28 +417,51 @@ public:
         return StateGuard{*this, frame, StateGuard::AdoptFrameTag{}};
     }
 
+    /// Push backend state plus Painter's logical-transform snapshot.
+    ///
+    /// Ordinary nesting uses inline storage; unusually deep nesting may allocate
+    /// and throw before the backend save is published. Pair with restore().
     void save() {
         push_backend_frame([&] { canvas_.save(); });
     }
 
+    /// Restore one matching Painter save().
+    ///
+    /// Crossing a protected scoped_state/scoped_clip/scoped_layer restore floor
+    /// is a programming error and is ignored at that floor.
     void restore() {
         assert(save_depth_ > restore_floor_ && "Painter restore() crossed a protected paint scope");
         if (save_depth_ <= restore_floor_) return;
         restore_unchecked();
     }
 
+    /// Post-concatenate a logical translation; non-finite inputs are ignored.
     void translate(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
         const Transform2D operation = Transform2D::translation(x, y);
         apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
     }
+    /// Post-concatenate a logical translation vector.
+    ///
+    /// `offset.x` and `offset.y` are logical UI units. The value is copied and
+    /// no caller storage is retained. Non-finite components are ignored exactly
+    /// like the scalar overload, leaving backend and tracked transform unchanged.
     void translate(Point offset) { translate(offset.x, offset.y); }
+    /// Post-concatenate dimensionless X/Y scale factors; non-finite input is ignored.
     void scale(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
         const Transform2D operation = Transform2D::scaling(x, y);
         apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
     }
+    /// Post-concatenate one dimensionless scale factor on both axes.
+    ///
+    /// Non-finite input is ignored. Zero and negative finite factors are forwarded;
+    /// callers that require invertible geometry must enforce that invariant.
     void scale(float uniform) { scale(uniform, uniform); }
+    /// Post-concatenate a rotation measured in radians.
+    ///
+    /// Finite values are forwarded to affine composition. Non-finite input is a
+    /// no-op and does not publish partial tracked transform state.
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
         const Transform2D operation = Transform2D::rotation(radians);
@@ -377,6 +472,10 @@ public:
                 0.0f, 0.0f, 1.0f));
         });
     }
+    /// Post-concatenate an affine logical transform.
+    ///
+    /// Non-finite input/composition is ignored. Backend mutation completes before
+    /// Painter publishes the new logical transform.
     void concat(const Transform2D& transform) {
         apply_logical_transform(transform, [&] {
             canvas_.concat(SkMatrix::MakeAll(
@@ -386,52 +485,101 @@ public:
         });
     }
 
+    /// Fill a rounded rectangle with a solid color.
+    ///
+    /// Rect/radius are logical UI units. Unlike scoped_clip(), primitive drawing
+    /// forwards geometry directly and does not canonicalize invalid rectangles or
+    /// clamp radius; callers provide finite meaningful geometry. Color is copied
+    /// by value and no caller-owned object is retained.
     void fill_rounded_rect(Rect rect, float radius, Color color) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(color, {}));
     }
 
+    /// Fill a rounded logical rectangle with a borrowed linear gradient.
+    ///
+    /// Rect/radius are logical and are forwarded without clip-style canonicalization.
+    /// Gradient storage is read only during this call; materialization may allocate
+    /// or throw, and Painter retains no reference after return.
     void fill_rounded_rect(Rect rect, float radius, const LinearGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(gradient, options));
     }
 
+    /// Fill a rounded logical rectangle with a borrowed radial gradient.
+    ///
+    /// Geometry is logical and forwarded without primitive-level validation.
+    /// Gradient storage is consumed synchronously; materialization may allocate
+    /// or throw, and no caller-owned reference survives return.
     void fill_rounded_rect(Rect rect, float radius, const RadialGradient& gradient,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(gradient, options));
     }
 
+    /// Fill a rounded logical rectangle from any Brush source.
+    ///
+    /// Brush is borrowed only for this synchronous call. Its gradient/image/
+    /// runtime-shader source is materialized immediately, may allocate or throw,
+    /// and is not retained by Painter. PaintOptions apply to the materialized
+    /// source. Primitive geometry is expected to be finite and meaningful.
     void fill_rounded_rect(Rect rect, float radius, const Brush& brush,
                            PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_fill_paint(brush, options));
     }
 
+    /// Stroke a rounded rectangle with a copied solid color.
+    ///
+    /// Radius and width are logical lengths. This convenience overload delegates
+    /// to the Brush path and adds no finite/positive geometry validation.
     void stroke_rounded_rect(Rect rect, float radius, float width, Color color) {
         stroke_rounded_rect(rect, radius, width, Brush{color});
     }
 
+    /// Brush overload for stroking a rounded logical rectangle.
+    ///
+    /// Brush is borrowed only for the synchronous draw and materialization may
+    /// allocate/throw. This helper does not define a no-op rule for invalid
+    /// radius/width; use finite positive stroke geometry for portable behavior.
     void stroke_rounded_rect(Rect rect, float radius, float width, const Brush& brush,
                              PaintOptions options = {}) {
         canvas_.drawRoundRect(to_sk_rect(rect), radius, radius,
                               make_stroke_paint(brush, StrokeStyle{width}, options));
     }
 
+    /// Fill a logical-coordinate circle with a copied solid color.
+    ///
+    /// Center/radius use logical units. Geometry is forwarded directly, so portable
+    /// deterministic output requires a finite center and finite non-negative radius.
     void circle(Point center, float radius, Color color) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(color, {}));
     }
 
+    /// Fill a logical-coordinate circle from a borrowed Brush source.
+    ///
+    /// Brush materialization is synchronous and may allocate or throw. No reference
+    /// into caller-owned Brush state is retained after the draw returns.
     void circle(Point center, float radius, const Brush& brush,
                 PaintOptions options = {}) {
         canvas_.drawCircle(center.x, center.y, radius, make_fill_paint(brush, options));
     }
 
+    /// Stroke an arc with a copied solid color.
+    ///
+    /// Start/end are radians, sweep is end-start, and radius/width are logical.
+    /// Round caps are used. The overload delegates to the Brush path and retains
+    /// no caller-owned state.
     void arc(Point center, float radius, float start, float end, float width, Color color) {
         arc(center, radius, start, end, width, Brush{color});
     }
 
+    /// Brush overload for an arc; angles are radians and caps are round.
+    ///
+    /// Sweep is end-start. Brush is borrowed only for this synchronous draw and
+    /// source materialization may allocate/throw. Radius, angles and width are
+    /// forwarded without primitive-level finite/positive canonicalization.
     void arc(Point center, float radius, float start, float end, float width,
              const Brush& brush, PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -442,10 +590,19 @@ public:
         canvas_.drawArc(oval, start * rad_to_deg, (end - start) * rad_to_deg, false, paint);
     }
 
+    /// Stroke a logical-coordinate line segment with a copied solid color.
+    ///
+    /// Endpoints and width are logical and round caps are used. The overload
+    /// delegates to the Brush path and performs no additional validation.
     void line(Point a, Point b, float width, Color color) {
         line(a, b, width, Brush{color});
     }
 
+    /// Brush overload for a logical-coordinate line segment with round caps.
+    ///
+    /// Brush is borrowed only for the synchronous draw; materialization may
+    /// allocate/throw. Endpoints and width are logical units and are forwarded
+    /// without validation, so callers provide finite geometry and positive width.
     void line(Point a, Point b, float width, const Brush& brush,
               PaintOptions options = {}) {
         const auto paint = make_stroke_paint(
@@ -453,26 +610,46 @@ public:
         canvas_.drawLine(a.x, a.y, b.x, b.y, paint);
     }
 
+    /// Fill a Path with solid color; an empty path is a no-op.
     void fill_path(const Path& path, Color color) {
         if (path.empty()) return;
         canvas_.drawPath(to_sk_path(path), make_fill_paint(color, {}));
     }
 
+    /// Fill a Path from a Brush; an empty path is a no-op.
+    ///
+    /// Path and Brush are borrowed only for this call. Backend path conversion
+    /// and brush materialization are synchronous and may allocate/throw. Unlike
+    /// scoped_clip(path), drawing does not reject non-finite path coordinates.
     void fill_path(const Path& path, const Brush& brush, PaintOptions options = {}) {
         if (path.empty()) return;
         canvas_.drawPath(to_sk_path(path), make_fill_paint(brush, options));
     }
 
+    /// Stroke a Path with solid color and StrokeStyle.
     void stroke_path(const Path& path, Color color, StrokeStyle style = {}) {
         stroke_path(path, Brush{color}, style);
     }
 
+    /// Brush overload for stroking a Path.
+    ///
+    /// Empty paths and widths <= 0 are no-ops. NaN width is not rejected by that
+    /// check, so callers provide finite positive width. Path and Brush are borrowed
+    /// only for the synchronous call; conversion/materialization may allocate and
+    /// throw. Miter limit is clamped to at least zero before backend use.
     void stroke_path(const Path& path, const Brush& brush, StrokeStyle style = {},
                      PaintOptions options = {}) {
         if (path.empty() || style.width <= 0.0f) return;
         canvas_.drawPath(to_sk_path(path), make_stroke_paint(brush, style, options));
     }
 
+    /// Draw UTF-8 text centered vertically on `position.y`.
+    ///
+    /// position.x follows TextStyle::align. Font size/coordinates are logical.
+    /// The UTF-8 view and TextStyle are borrowed only until return; font fallback
+    /// resolution/layout is synchronous and may allocate/throw. Malformed UTF-8
+    /// is repaired into temporary owned bytes before Skia, negative size clamps to
+    /// zero, and no pointer into caller storage is retained after the call.
     void text(Point position, std::string_view text, const TextStyle& style) {
         const auto layout = detail::resolve_text_layout(text, style);
         text = layout.text_bytes(text);
@@ -501,6 +678,10 @@ public:
         }
     }
 
+    /// Draw text using an ephemeral TextStyle built from scalar arguments.
+    ///
+    /// Position/size use logical units. The UTF-8 view is borrowed only until
+    /// return; fallback/layout may allocate or throw and no caller view is retained.
     void text(Point position, std::string_view text, float size, Color color,
               TextAlign align = TextAlign::Left) {
         TextStyle style{};
@@ -510,13 +691,28 @@ public:
         this->text(position, text, style);
     }
 
+    /// Manually save then intersect a rectangular clip.
+    ///
+    /// Rect is logical and forwarded directly. A successful call must pair with
+    /// pop_clip() in the same traversal. Unlike scoped_clip(), this legacy helper
+    /// neither canonicalizes invalid geometry nor provides protected transactional
+    /// rollback semantics around clip setup; prefer the scoped form in fallible code.
     void push_clip(Rect rect) {
         save();
         canvas_.clipRect(to_sk_rect(rect), SkClipOp::kIntersect, true);
     }
 
+    /// Restore the state pushed by the matching successful `push_clip()`.
+    ///
+    /// This follows manual stack discipline and the same protected restore-floor
+    /// rules as `restore()`; prefer scoped_clip() for exception-safe pairing.
     void pop_clip() { restore(); }
 
+    /// Measure UTF-8 text width in logical units using TextService defaults.
+    ///
+    /// Text is borrowed only for synchronous measurement. Font fallback and
+    /// malformed-UTF-8 repair follow TextService and may allocate/throw; no view
+    /// into caller storage is retained.
     [[nodiscard]] static float measure_text(std::string_view text, float size) {
         return TextService::measure(text, size).width;
     }
@@ -1011,30 +1207,73 @@ private:
     bool used_effects_{};
 };
 
+/// Platform-neutral services used by retained input/focus/paint callbacks.
+///
+/// UI/Tree code borrows a PlatformServices implementation; ownership is not
+/// transferred. The implementation must remain alive for every callback or UI
+/// operation that can invoke it. These services are UI/main-thread facilities,
+/// may cross native platform boundaries, and are not audio-real-time safe.
+///
+/// Custom/headless backends may override only the services they support. Text
+/// measurement has a TextService fallback, text-input and native pointer-capture
+/// hooks default to no-op, drag/drop defaults to rejection, while clipboard
+/// write/request are required operations.
 class PlatformServices {
 public:
+    /// Polymorphic destructor for platform-service implementations.
     virtual ~PlatformServices() = default;
+    /// Measure UTF-8 text in logical units using `style`.
+    ///
+    /// The default implementation delegates to TextService::measure(). The
+    /// returned value is owned by the caller; `text` is borrowed only for the call.
     [[nodiscard]] virtual TextMetrics text_metrics(std::string_view text, const TextStyle& style) {
         return TextService::measure(text, style);
     }
+    /// Width-only convenience measurement in logical units.
+    ///
+    /// The default implementation delegates to TextService::measure().
     [[nodiscard]] virtual float text_width(std::string_view text, float size) {
         return TextService::measure(text, size).width;
     }
+    /// Enable/disable native text/IME integration for the focused editor.
+    ///
+    /// `area` is the logical text-input rectangle and `cursor_offset` a logical
+    /// caret offset used by the platform bridge for candidate/caret placement.
+    /// Disabling text input permits callers to pass zero/default geometry.
     virtual void set_text_input(bool active, Rect area = {}, float cursor_offset = 0.0f) {
         (void)active; (void)area; (void)cursor_offset;
     }
     // Pointer capture remains owned by the retained tree. These platform-neutral
     // lifecycle hooks let a concrete native view mirror only real none<->owner
     // transitions when its OS requires an explicit native pointer grab.
+    /// Mirror a retained none->owner pointer-capture transition to the OS.
+    ///
+    /// Retained Tree state remains authoritative; this hook carries no target
+    /// identity and must not create a second platform-owned capture model.
     virtual void begin_pointer_capture() noexcept {}
+    /// Mirror the retained owner->none pointer-capture transition to the OS.
     virtual void end_pointer_capture() noexcept {}
+    /// Publish UTF-8 plain text to the platform clipboard.
+    ///
+    /// `text` is borrowed for this call; an asynchronous backend must make its
+    /// own copy before returning.
     virtual void set_clipboard_text(std::string_view text) = 0;
+    /// Request clipboard text delivery through the normal platform input/data path.
+    ///
+    /// This is a request, not a synchronous getter; no text is returned here.
     virtual void request_clipboard_text() = 0;
     // Drag-and-drop is synchronous at offer time. The default implementation
     // rejects support so headless/custom platform services need no DnD code.
+    /// Accept the current synchronous drag/drop offer for MIME/data `type`.
+    ///
+    /// `region` is the logical target region. Returns true only when the backend
+    /// accepted the current offer; the default implementation rejects it.
     virtual bool accept_drop(std::string_view type, Rect region) {
         (void)type; (void)region; return false;
     }
+    /// Explicitly reject the current drag/drop offer for a logical target region.
+    ///
+    /// The default implementation is a no-op for backends without drop support.
     virtual void reject_drop(Rect region) { (void)region; }
 };
 
