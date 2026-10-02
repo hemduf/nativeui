@@ -158,12 +158,16 @@ private:
     }
 
     const auto extent = request.local_extent;
+    const auto scene_extent = request.scene_extent;
     const double scale = static_cast<double>(hook_state->device_scale);
     const double physical_width = std::ceil(static_cast<double>(extent.w) * scale);
     const double physical_height = std::ceil(static_cast<double>(extent.h) * scale);
     if (!std::isfinite(extent.x) || !std::isfinite(extent.y) ||
         !std::isfinite(extent.w) || !std::isfinite(extent.h) ||
+        !std::isfinite(scene_extent.x) || !std::isfinite(scene_extent.y) ||
+        !std::isfinite(scene_extent.w) || !std::isfinite(scene_extent.h) ||
         !(extent.w > 0.0f) || !(extent.h > 0.0f) ||
+        scene_extent.w != extent.w || scene_extent.h != extent.h ||
         !std::isfinite(scale) || !(scale > 0.0) ||
         physical_width > static_cast<double>((std::numeric_limits<int>::max)()) ||
         physical_height > static_cast<double>((std::numeric_limits<int>::max)())) {
@@ -176,7 +180,7 @@ private:
     auto draw = [&](const sk_sp<SkImage>& image) {
         if (!image) return false;
         const SkRect dst = SkRect::MakeXYWH(
-            extent.x, extent.y, extent.w, extent.h);
+            scene_extent.x, scene_extent.y, scene_extent.w, scene_extent.h);
         destination.drawImageRect(
             image, dst, SkSamplingOptions(SkFilterMode::kLinear), nullptr);
         return true;
@@ -200,7 +204,7 @@ private:
     {
         const SkAutoCanvasRestore restore{canvas, true};
         canvas->scale(hook_state->device_scale, hook_state->device_scale);
-        canvas->translate(-extent.x, -extent.y);
+        canvas->translate(-scene_extent.x, -scene_extent.y);
         const detail::PainterPrivateHooks nested_hooks{
             hook_state,
             &materialize_cached_image_texture,
