@@ -83,4 +83,19 @@ inline constexpr std::size_t kRenderResourceOverBudgetBytes =
     return rgba_storage(source, false);
 }
 
+[[nodiscard]] inline std::size_t raster_retained_storage_bytes(
+    int width,
+    int height) noexcept {
+    constexpr std::size_t kBytesPerPixel = 4U;
+    if (width <= 0 || height <= 0) return kRenderResourceOverBudgetBytes;
+    const auto w = static_cast<std::size_t>(width);
+    const auto h = static_cast<std::size_t>(height);
+    constexpr std::size_t kMaxPixels =
+        kRenderResourceMaxAccountedBytes / kBytesPerPixel;
+    if (h != 0U && w > kMaxPixels / h) return kRenderResourceOverBudgetBytes;
+    const auto pixels = w * h;
+    if (pixels > kMaxPixels) return kRenderResourceOverBudgetBytes;
+    return pixels * kBytesPerPixel;
+}
+
 } // namespace ui::detail
