@@ -1037,6 +1037,37 @@ void unqualified_transform_bypasses_retention() {
 }
 
 
+
+void unqualified_effect_bypasses_raster_retention() {
+    const auto effect = ui::Effect::gaussian_blur(2.0f, 2.0f);
+    ui::Spec spec{
+        [effect] { return std::make_unique<EffectProbeComponent>(effect); },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(
+        tree, ui::TreeTestAccess::root_id(tree)));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    for (int frame = 0; frame < 2; ++frame) {
+        tree.invalidate();
+        state.resources.begin_frame();
+        ui::TreeTestAccess::paint_with_resources(
+            tree, *surface->getCanvas(), platform, &hooks);
+        state.resources.end_frame();
+    }
+    NUI_CHECK(state.creates == 2);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+}
+
+
 void retained_raster_uses_lifetime_identity_and_shared_budget() {
     ui::detail::RenderResourceMaterializationContext context;
     ui::detail::RasterCacheEpoch first_epoch;
@@ -1127,6 +1158,7 @@ int main() {
     tree_raster_boundary_cold_warm_stale_warm();
     reentrant_invalidation_cannot_publish_captured_generation();
     unqualified_transform_bypasses_retention();
+    unqualified_effect_bypasses_raster_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
     raster_signature_separates_scale_and_local_extent();
     return 0;
