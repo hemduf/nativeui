@@ -111,13 +111,13 @@ jobs:
           Copy-Item $gallium.FullName build\libgallium_wgl.dll -Force
       - name: Run offscreen raster cache contracts
         if: runner.os != 'Linux'
-        run: ctest --test-dir build --output-on-failure -C Release -R '^(nativeui_raster_cache_|nativeui_render_resource_materialization)'
+        run: ctest --test-dir build --output-on-failure -C Release -R '^(nativeui_raster_cache_|nativeui_render_resource_materialization|nativeui_render_resource_gpu_tests$)'
       - name: Run offscreen raster cache contracts on Linux
         if: runner.os == 'Linux'
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release -R '^(nativeui_raster_cache_|nativeui_render_resource_materialization)'
+          ctest --test-dir build --output-on-failure -C Release -R '^(nativeui_raster_cache_|nativeui_render_resource_materialization|nativeui_render_resource_gpu_tests$)'
       - name: Test Linux
         if: runner.os == 'Linux'
         run: >-
