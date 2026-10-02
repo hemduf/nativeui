@@ -10,8 +10,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace ui {
 
@@ -1206,6 +1208,213 @@ void raster_signature_separates_scale_and_local_extent() {
 }
 
 
+std::vector<std::uint32_t> read_surface_pixels(
+    SkSurface& surface, int width, int height) {
+    std::vector<std::uint32_t> pixels(
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    const auto info = SkImageInfo::MakeN32Premul(width, height);
+    NUI_CHECK(surface.readPixels(
+        info,
+        pixels.data(),
+        static_cast<std::size_t>(width) * sizeof(std::uint32_t),
+        0,
+        0));
+    return pixels;
+}
+
+void cold_and_warm_raster_pixels_match_reference() {
+    auto make_tree = [] {
+        return ui::Tree{ui::compile(ui::Spec{
+            [] {
+                return std::make_unique<PaintCounterComponent>(
+                    std::make_shared<int>(0));
+            },
+            {}})};
+    };
+    test::MockPlatform platform;
+
+    auto reference_tree = make_tree();
+    reference_tree.mount();
+    reference_tree.layout({32.0f, 32.0f});
+    auto reference_surface =
+        SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(reference_surface);
+    reference_surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    ui::TreeTestAccess::paint_with_resources(
+        reference_tree, *reference_surface->getCanvas(), platform, nullptr);
+    const auto reference =
+        read_surface_pixels(*reference_surface, 32, 32);
+
+    auto cached_tree = make_tree();
+    cached_tree.mount();
+    cached_tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(cached_tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(
+        cached_tree, root_id));
+
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    auto cold_surface =
+        SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(cold_surface);
+    cold_surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        cached_tree, *cold_surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    const auto cold = read_surface_pixels(*cold_surface, 32, 32);
+    NUI_CHECK(cold == reference);
+
+    cached_tree.invalidate();
+    auto warm_surface =
+        SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(warm_surface);
+    warm_surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        cached_tree, *warm_surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    const auto warm = read_surface_pixels(*warm_surface, 32, 32);
+    NUI_CHECK(warm == reference);
+    NUI_CHECK(warm == cold);
+}
+
+void remount_same_node_id_gets_new_raster_lifetime() {
+    auto paints = std::make_shared<int>(0);
+    ui::Tree tree{ui::compile(ui::Spec{
+        [paints] { return std::make_unique<PaintCounterComponent>(paints); },
+        {}})};
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto first_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, first_id));
+    const auto first_token =
+        ui::detail::RasterCacheAccess::capture(tree, first_id);
+    NUI_CHECK(!first_token.expired());
+
+    tree.unmount();
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto second_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(second_id == first_id);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, second_id));
+    const auto second_token =
+        ui::detail::RasterCacheAccess::capture(tree, second_id);
+    NUI_CHECK(!second_token.expired());
+    NUI_CHECK(!first_token.same_lifetime(second_token));
+
+    ui::detail::RenderResourceMaterializationContext context;
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(1, 1));
+    NUI_CHECK(surface);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey old_key{
+        first_id, first_token,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        1.0f};
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey new_key{
+        second_id, second_token,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        1.0f};
+    NUI_CHECK(context.retain_raster(old_key, 4U, image));
+    NUI_CHECK(!context.find_raster(new_key));
+}
+
+void oversize_raster_is_transient() {
+    ui::detail::RenderResourceMaterializationContext context;
+    ui::detail::RasterCacheEpoch epoch;
+    const auto token = epoch.capture();
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(1, 1));
+    NUI_CHECK(surface);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        41U, token,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        1.0f};
+
+    context.begin_frame();
+    auto acquisition = context.retain_raster(
+        key, ui::detail::kRenderResourceOverBudgetBytes, image);
+    NUI_CHECK(acquisition);
+    NUI_CHECK(!acquisition.retained);
+    NUI_CHECK(!acquisition.hit);
+    NUI_CHECK(context.retained_entries() == 0);
+    NUI_CHECK(context.retained_accounted_bytes() == 0);
+    context.end_frame();
+}
+
+void raster_shader_effect_share_budget_and_frame_pinning() {
+    ui::detail::RenderResourceMaterializationContext context;
+    ui::detail::RasterCacheEpoch epoch;
+    const auto token = epoch.capture();
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(1, 1));
+    NUI_CHECK(surface);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+
+    context.begin_frame();
+    constexpr std::size_t raster_entries =
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries - 2U;
+    for (std::size_t index = 0; index < raster_entries; ++index) {
+        const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
+            static_cast<ui::NodeId>(1000U + index),
+            token,
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f, 1.0f},
+            1.0f};
+        auto acquisition = context.retain_raster(key, 4U, image);
+        NUI_CHECK(acquisition && acquisition.retained && !acquisition.hit);
+    }
+
+    const ui::LinearGradient gradient{
+        {0.0f, 0.0f},
+        {1.0f, 0.0f},
+        {
+            {0.0f, {0.0f, 0.0f, 0.0f, 1.0f}},
+            {1.0f, {1.0f, 1.0f, 1.0f, 1.0f}},
+        }};
+    auto gradient_resource = context.acquire_linear_gradient(
+        gradient,
+        [&] { return ui::detail::GradientCacheAccess::materialize(gradient); });
+    NUI_CHECK(gradient_resource && gradient_resource.retained);
+
+    const auto effect = ui::Effect::gaussian_blur(1.0f, 1.0f);
+    auto effect_resource = context.acquire_effect(
+        effect,
+        [&] { return ui::detail::EffectCacheAccess::materialize(effect); });
+    NUI_CHECK(effect_resource && effect_resource.retained);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey overflow{
+        999999U, token,
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        {0.0f, 0.0f, 1.0f, 1.0f},
+        1.0f};
+    auto transient = context.retain_raster(overflow, 4U, image);
+    NUI_CHECK(transient);
+    NUI_CHECK(!transient.retained);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+    context.end_frame();
+
+    transient = {};
+    auto after_frame = context.retain_raster(overflow, 4U, image);
+    NUI_CHECK(after_frame && after_frame.retained && !after_frame.hit);
+    NUI_CHECK(
+        context.retained_entries() ==
+        ui::detail::RenderResourceMaterializationContext::kMaxRetainedEntries);
+}
+
+
 } // namespace
 
 int main() {
@@ -1235,5 +1444,9 @@ int main() {
     unqualified_effect_bypasses_raster_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
     raster_signature_separates_scale_and_local_extent();
+    cold_and_warm_raster_pixels_match_reference();
+    remount_same_node_id_gets_new_raster_lifetime();
+    oversize_raster_is_transient();
+    raster_shader_effect_share_budget_and_frame_pinning();
     return 0;
 }
