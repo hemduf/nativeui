@@ -788,10 +788,15 @@ bool raster_test_hook(
     SkCanvas& destination,
     void* callback_state,
     ui::detail::RasterCachePaintCallback paint_callback,
+    ui::detail::RasterCacheValidateCallback validate_callback,
     ui::detail::RasterCacheCommitCallback commit_callback) {
     auto& state = *static_cast<RasterHookState*>(opaque);
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
-        request.node_id, request.token, request.local_extent, 1.0f};
+        request.node_id,
+        request.token,
+        request.local_extent,
+        request.scene_extent,
+        1.0f};
 
     auto draw = [&](const sk_sp<SkImage>& image) {
         if (!image) return false;
@@ -802,7 +807,7 @@ bool raster_test_hook(
                 request.scene_extent.y,
                 request.scene_extent.w,
                 request.scene_extent.h),
-            SkSamplingOptions(SkFilterMode::kLinear),
+            SkSamplingOptions{SkFilterMode::kNearest},
             nullptr);
         return true;
     };
@@ -825,14 +830,15 @@ bool raster_test_hook(
     }
     auto image = surface->makeImageSnapshot();
     NUI_CHECK(image);
-    if (commit_callback(callback_state)) {
-        image = state.resources.retain_raster(
-            key,
-            ui::detail::raster_retained_storage_bytes(
-                image->width(), image->height()),
-            std::move(image));
-    }
-    return draw(image);
+    if (!validate_callback(callback_state)) return draw(image);
+    auto acquisition = state.resources.retain_raster(
+        key,
+        ui::detail::raster_retained_storage_bytes(
+            image->width(), image->height()),
+        image);
+    if (!acquisition) return draw(image);
+    if (!commit_callback(callback_state)) return draw(image);
+    return draw(acquisition.image);
 }
 
 class PaintCounterComponent final : public ui::Component {
@@ -1081,17 +1087,17 @@ void retained_raster_uses_lifetime_identity_and_shared_budget() {
     NUI_CHECK(image);
 
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
-        7U, first_token, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
+        7U, first_token, {0.0f, 0.0f, 4.0f, 4.0f}, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
     auto retained = context.retain_raster(key, 64U, image);
     NUI_CHECK(retained);
     NUI_CHECK(context.retained_entries() == 1);
     NUI_CHECK(context.retained_accounted_bytes() == 64U);
-    NUI_CHECK(context.find_raster(key) == retained);
+    NUI_CHECK(context.find_raster(key) == retained.image);
 
     ui::detail::RasterCacheEpoch remounted_epoch;
     const auto remounted_token = remounted_epoch.capture();
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey remounted{
-        7U, remounted_token, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
+        7U, remounted_token, {0.0f, 0.0f, 4.0f, 4.0f}, {0.0f, 0.0f, 4.0f, 4.0f}, 1.0f};
     NUI_CHECK(!context.find_raster(remounted));
 
     const auto compiled = ui::ShaderProgram::compile(R"(
@@ -1121,15 +1127,20 @@ void raster_signature_separates_scale_and_local_extent() {
     NUI_CHECK(image);
 
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey base{
-        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, 1.0f};
+        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, {10.0f, 10.0f, 2.0f, 2.0f}, 1.0f};
     NUI_CHECK(context.retain_raster(base, 16U, image));
 
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey scale{
-        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, 2.0f};
+        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f}, {10.0f, 10.0f, 2.0f, 2.0f}, 2.0f};
     const ui::detail::RenderResourceMaterializationContext::RasterCacheKey extent{
-        11U, token, {0.0f, 0.0f, 2.0f, 2.0f}, 1.0f};
+        11U, token, {0.0f, 0.0f, 2.0f, 2.0f},
+        {10.0f, 10.0f, 2.0f, 2.0f}, 1.0f};
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey placement{
+        11U, token, {-1.0f, -1.0f, 2.0f, 2.0f},
+        {11.0f, 10.0f, 2.0f, 2.0f}, 1.0f};
     NUI_CHECK(!context.find_raster(scale));
     NUI_CHECK(!context.find_raster(extent));
+    NUI_CHECK(!context.find_raster(placement));
 }
 
 
