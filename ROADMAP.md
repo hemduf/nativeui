@@ -193,7 +193,7 @@ pre-freeze public additions:
   T177(done) -----------------------------------------> M2 raw touch/pen contact routing
 
 v1 critical path:
-  T070(closed, not planned) -X-> T122/docs closeout -> release-path replan
+  T070(closed, not planned) -X-> T122(docs complete; merge pending) -> release-path replan
   T071(closed, not planned)
   T049(done) -----------------------------------------> release-path replan
   T044(done) -----------------------------------------> release-path replan
@@ -257,7 +257,7 @@ post-1.0 / later-release work already landed:
 The remaining v1 sequence is:
 
 1. replan the reference-application/Getting Started path after T070 / #82 closed as not planned; T133–T137 remain unresolved;
-2. complete explicitly scheduled v1 documentation closeout including T122 where applicable;
+2. merge the completed and validated T122 v1 documentation closeout;
 3. define a new release qualification ticket after the T070/T071 closure, then qualify one exact RC SHA under the current workflow rules in `AGENTS.md`.
 
 ## Completed safety and pre-freeze closeouts
@@ -314,4 +314,4 @@ The remaining v1 sequence is:
 
 ## Release policy
 
-T069/#81 is deprecated. T070/#82 and T071/#83 are closed as not planned; the v1 reference-app/documentation and release path needs replanning rather than implicit completion. T122 and T133–T137 remain open. T073–T091, T094, T095, T096 and T098 are merged as later-release foundations. T092's implementation is merged and PR #477 is exact-head remotely qualified, but regression #479 still blocks completion until its required Apple M1 Pro evidence is recorded; T093 remains blocked until #176 is fully qualified and Done. Retained per-view shader/resource caching remains deferred to T097. A future release ticket must freeze one candidate SHA and run full CI plus relevant package/WebAssembly checks against an explicit approved benchmark baseline before publication. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
+T069/#81 is deprecated. T070/#82 and T071/#83 are closed as not planned; the v1 reference-app/documentation and release path needs replanning rather than implicit completion. T122 documentation is complete and validated in its canonical PR, with merge/completion bookkeeping pending; T133–T137 remain open. T073–T091, T094, T095, T096 and T098 are merged as later-release foundations. T092's implementation is merged and PR #477 is exact-head remotely qualified, but regression #479 still blocks completion until its required Apple M1 Pro evidence is recorded; T093 remains blocked until #176 is fully qualified and Done. Retained per-view shader/resource caching remains deferred to T097. A future release ticket must freeze one candidate SHA and run full CI plus relevant package/WebAssembly checks against an explicit approved benchmark baseline before publication. T068 remains outside the v1 critical path and is targeted for NativeUI 1.2.
