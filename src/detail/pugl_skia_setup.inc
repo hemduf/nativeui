@@ -249,11 +249,18 @@ private:
         }
     }
 
-    const SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
+    const SkImageInfo info = SkImageInfo::Make(
+        width,
+        height,
+        kRGBA_8888_SkColorType,
+        kPremul_SkAlphaType,
+        SkColorSpace::MakeSRGB());
     auto surface = SkSurfaces::RenderTarget(
         hook_state->context, skgpu::Budgeted::kYes, info, 0,
         kBottomLeft_GrSurfaceOrigin, nullptr);
-    if (!surface) return false;
+    if (!surface) {
+        throw std::bad_alloc{};
+    }
 
     auto* canvas = surface->getCanvas();
     canvas->clear(SK_ColorTRANSPARENT);
