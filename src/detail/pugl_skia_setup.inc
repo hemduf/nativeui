@@ -1,4 +1,5 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/detail/raster_cache_access.hpp>
 
 #include "view_geometry.hpp"
 #include "scene_extent.hpp"
@@ -546,6 +547,14 @@ private:
 
 public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::register_root(ui.tree_);
+    }
+
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::invalidate_root(ui.tree_);
+    }
+
     void inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
 
     [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
