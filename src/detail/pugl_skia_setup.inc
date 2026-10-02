@@ -194,50 +194,51 @@ private:
     const double device_height = device_bottom - device_top;
     const double max_int =
         static_cast<double>((std::numeric_limits<int>::max)());
+    constexpr double kMaxExactFloatInteger = 16777216.0; // 2^24
     if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
         !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
         !(device_width > 0.0) || !(device_height > 0.0) ||
         device_width > max_int || device_height > max_int ||
+        device_left < -kMaxExactFloatInteger ||
+        device_top < -kMaxExactFloatInteger ||
+        device_right > kMaxExactFloatInteger ||
+        device_bottom > kMaxExactFloatInteger ||
         device_width > hook_state->context->maxRenderTargetSize() ||
         device_height > hook_state->context->maxRenderTargetSize()) {
         return false;
     }
 
-    const int width = static_cast<int>(device_width);
-    const int height = static_cast<int>(device_height);
-    const Rect scene_extent{
-        static_cast<float>(device_left / scale),
-        static_cast<float>(device_top / scale),
-        static_cast<float>(device_width / scale),
-        static_cast<float>(device_height / scale)};
-    const Rect local_extent{
-        requested_local.x + (scene_extent.x - requested_scene.x),
-        requested_local.y + (scene_extent.y - requested_scene.y),
-        scene_extent.w,
-        scene_extent.h};
-    if (!std::isfinite(scene_extent.x) || !std::isfinite(scene_extent.y) ||
-        !std::isfinite(scene_extent.w) || !std::isfinite(scene_extent.h) ||
-        !std::isfinite(local_extent.x) || !std::isfinite(local_extent.y) ||
-        !std::isfinite(local_extent.w) || !std::isfinite(local_extent.h)) {
+    const SkMatrix destination_matrix = destination.getLocalToDeviceAs3x3();
+    if (!destination_matrix.isFinite() || destination_matrix.hasPerspective() ||
+        destination_matrix.getScaleX() != hook_state->device_scale ||
+        destination_matrix.getScaleY() != hook_state->device_scale ||
+        destination_matrix.getSkewX() != 0.0f ||
+        destination_matrix.getSkewY() != 0.0f ||
+        destination_matrix.getTranslateX() != 0.0f ||
+        destination_matrix.getTranslateY() != 0.0f) {
         return false;
     }
 
+    const int width = static_cast<int>(device_width);
+    const int height = static_cast<int>(device_height);
     const detail::RenderResourceMaterializationContext::RasterCacheKey key{
         request.node_id,
         request.token,
-        local_extent,
-        scene_extent,
+        requested_local,
+        requested_scene,
         hook_state->device_scale};
 
     auto draw = [&](const sk_sp<SkImage>& image) {
         if (!image) return false;
+        const SkAutoCanvasRestore restore_destination{&destination, true};
+        destination.resetMatrix();
         destination.drawImageRect(
             image,
             SkRect::MakeXYWH(
-                scene_extent.x,
-                scene_extent.y,
-                scene_extent.w,
-                scene_extent.h),
+                static_cast<float>(device_left),
+                static_cast<float>(device_top),
+                static_cast<float>(width),
+                static_cast<float>(height)),
             SkSamplingOptions{SkFilterMode::kNearest},
             nullptr);
         return true;
@@ -266,8 +267,10 @@ private:
     canvas->clear(SK_ColorTRANSPARENT);
     {
         const SkAutoCanvasRestore restore{canvas, true};
-        canvas->scale(hook_state->device_scale, hook_state->device_scale);
-        canvas->translate(-scene_extent.x, -scene_extent.y);
+        canvas->setMatrix(SkMatrix::MakeAll(
+            hook_state->device_scale, 0.0f, -static_cast<float>(device_left),
+            0.0f, hook_state->device_scale, -static_cast<float>(device_top),
+            0.0f, 0.0f, 1.0f));
         const detail::PainterPrivateHooks nested_hooks{
             hook_state,
             &materialize_cached_image_texture,
