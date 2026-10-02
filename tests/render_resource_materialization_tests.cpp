@@ -1,6 +1,7 @@
 #include "src/detail/painter_private_hooks.hpp"
 #include "src/detail/render_resource_materialization.hpp"
 #include "test_support.hpp"
+#include <nativeui/detail/raster_cache_access.hpp>
 
 #include "include/core/SkColor.h"
 #include "include/core/SkShader.h"
@@ -14,6 +15,10 @@
 namespace ui {
 
 struct TreeTestAccess {
+    static NodeId root_id(const Tree& tree) {
+        return tree.root_ ? tree.root_->id : 0U;
+    }
+
     static void paint_with_resources(
         Tree& tree,
         SkCanvas& canvas,
@@ -770,6 +775,190 @@ void clear_is_instance_local() {
 }
 
 
+
+struct RasterHookState {
+    ui::detail::RenderResourceMaterializationContext resources;
+    int creates{};
+};
+
+bool raster_test_hook(
+    void* opaque,
+    const ui::detail::RasterCachePaintRequest& request,
+    SkCanvas& destination,
+    void* callback_state,
+    ui::detail::RasterCachePaintCallback paint_callback,
+    ui::detail::RasterCacheCommitCallback commit_callback) {
+    auto& state = *static_cast<RasterHookState*>(opaque);
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        request.node_id, request.token, request.local_extent, 1.0f};
+
+    auto draw = [&](const sk_sp<SkImage>& image) {
+        if (!image) return false;
+        destination.drawImageRect(
+            image,
+            SkRect::MakeXYWH(
+                request.scene_extent.x,
+                request.scene_extent.y,
+                request.scene_extent.w,
+                request.scene_extent.h),
+            SkSamplingOptions(SkFilterMode::kLinear),
+            nullptr);
+        return true;
+    };
+
+    if (request.allow_reuse) {
+        if (auto image = state.resources.find_raster(key)) return draw(image);
+    }
+
+    ++state.creates;
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(
+        static_cast<int>(request.scene_extent.w),
+        static_cast<int>(request.scene_extent.h)));
+    NUI_CHECK(surface);
+    auto* canvas = surface->getCanvas();
+    canvas->clear(SK_ColorTRANSPARENT);
+    {
+        const SkAutoCanvasRestore restore{canvas, true};
+        canvas->translate(-request.scene_extent.x, -request.scene_extent.y);
+        NUI_CHECK(paint_callback(callback_state, *canvas, nullptr));
+    }
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+    if (commit_callback(callback_state)) {
+        image = state.resources.retain_raster(
+            key,
+            ui::detail::raster_retained_storage_bytes(
+                image->width(), image->height()),
+            std::move(image));
+    }
+    return draw(image);
+}
+
+class PaintCounterComponent final : public ui::Component {
+public:
+    explicit PaintCounterComponent(std::shared_ptr<int> paints)
+        : paints_(std::move(paints)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        ++*paints_;
+        context.painter().fill_rect(
+            context.bounds(), ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
+    }
+
+private:
+    std::shared_ptr<int> paints_;
+};
+
+void tree_raster_boundary_cold_warm_stale_warm() {
+    auto paints = std::make_shared<int>(0);
+    ui::Spec spec{
+        [paints] { return std::make_unique<PaintCounterComponent>(paints); },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, root_id));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.creates == 1);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.creates == 1);
+
+    auto invalidate = ui::detail::RasterCacheAccess::invalidator(tree, root_id);
+    NUI_CHECK(static_cast<bool>(invalidate));
+    invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.creates == 2);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.creates == 2);
+}
+
+class TransformPaintComponent final : public ui::Component {
+public:
+    explicit TransformPaintComponent(std::shared_ptr<int> paints)
+        : paints_(std::move(paints)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        ++*paints_;
+        context.painter().translate(1.0f, 0.0f);
+        context.painter().fill_rect(
+            context.bounds(), ui::Color{0.0f, 1.0f, 0.0f, 1.0f});
+    }
+
+private:
+    std::shared_ptr<int> paints_;
+};
+
+void unqualified_transform_bypasses_retention() {
+    auto paints = std::make_shared<int>(0);
+    ui::Spec spec{
+        [paints] { return std::make_unique<TransformPaintComponent>(paints); },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(
+        tree, ui::TreeTestAccess::root_id(tree)));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    for (int frame = 0; frame < 2; ++frame) {
+        tree.invalidate();
+        state.resources.begin_frame();
+        ui::TreeTestAccess::paint_with_resources(
+            tree, *surface->getCanvas(), platform, &hooks);
+        state.resources.end_frame();
+    }
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.creates == 2);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+}
+
+
 void retained_raster_uses_lifetime_identity_and_shared_budget() {
     ui::detail::RenderResourceMaterializationContext context;
     ui::detail::RasterCacheEpoch first_epoch;
@@ -857,6 +1046,8 @@ int main() {
     transient_frame_bookkeeping_is_released_at_frame_boundary();
     clear_releases_context_owned_frame_leases();
     clear_is_instance_local();
+    tree_raster_boundary_cold_warm_stale_warm();
+    unqualified_transform_bypasses_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
     raster_signature_separates_scale_and_local_extent();
     return 0;
