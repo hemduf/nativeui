@@ -151,6 +151,9 @@ public:
     [[nodiscard]] int save_depth() const noexcept { return save_depth_; }
     // Renderer-internal effect observability for scene update validation.
     [[nodiscard]] bool used_effects() const noexcept { return used_effects_; }
+    [[nodiscard]] bool used_nontrivial_transform() const noexcept {
+        return used_nontrivial_transform_;
+    }
     [[nodiscard]] Transform2D current_transform() const noexcept {
         return current_transform_;
     }
@@ -357,18 +360,21 @@ public:
 
     void translate(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
+        if (x != 0.0f || y != 0.0f) used_nontrivial_transform_ = true;
         const Transform2D operation = Transform2D::translation(x, y);
         apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
     }
     void translate(Point offset) { translate(offset.x, offset.y); }
     void scale(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
+        if (x != 1.0f || y != 1.0f) used_nontrivial_transform_ = true;
         const Transform2D operation = Transform2D::scaling(x, y);
         apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
     }
     void scale(float uniform) { scale(uniform, uniform); }
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
+        if (radians != 0.0f) used_nontrivial_transform_ = true;
         const Transform2D operation = Transform2D::rotation(radians);
         apply_logical_transform(operation, [&] {
             canvas_.concat(SkMatrix::MakeAll(
@@ -378,6 +384,11 @@ public:
         });
     }
     void concat(const Transform2D& transform) {
+        if (transform.m00 != 1.0f || transform.m01 != 0.0f ||
+            transform.m02 != 0.0f || transform.m10 != 0.0f ||
+            transform.m11 != 1.0f || transform.m12 != 0.0f) {
+            used_nontrivial_transform_ = true;
+        }
         apply_logical_transform(transform, [&] {
             canvas_.concat(SkMatrix::MakeAll(
                 transform.m00, transform.m01, transform.m02,
@@ -1009,6 +1020,7 @@ private:
     LayerFaultPoint layer_fault_point_{LayerFaultPoint::None};
     bool fail_transform_history_overflow_{};
     bool used_effects_{};
+    bool used_nontrivial_transform_{};
 };
 
 class PlatformServices {
