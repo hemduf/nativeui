@@ -515,6 +515,13 @@
                 return true;
             };
 
+        const auto validate_callback = [](void* raw) noexcept -> bool {
+            const auto& callback = *static_cast<CallbackState*>(raw);
+            return callback.reuse_safe &&
+                   callback.tree->committable_raster_cache_content(
+                       callback.node->id, callback.token);
+        };
+
         const auto commit_callback = [](void* raw) noexcept -> bool {
             auto& callback = *static_cast<CallbackState*>(raw);
             return callback.reuse_safe &&
@@ -526,6 +533,7 @@
             request,
             &state,
             paint_callback,
+            validate_callback,
             commit_callback);
     }
 
