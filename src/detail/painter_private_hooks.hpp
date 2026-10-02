@@ -1,10 +1,8 @@
 #pragma once
 
-#include <nativeui/component_base.hpp>
 #include <nativeui/paint_style.hpp>
-#include <nativeui/detail/raster_cache_epoch.hpp>
+#include <nativeui/detail/raster_cache_paint.hpp>
 
-#include "include/core/SkCanvas.h"
 #include "include/core/SkImageFilter.h"
 #include "include/core/SkShader.h"
 
@@ -13,25 +11,6 @@
 namespace ui::detail {
 
 struct ShaderBrushSnapshot;
-struct PainterPrivateHooks;
-
-struct RasterCachePaintRequest final {
-    NodeId node_id{};
-    RasterCacheEpoch::Token token{};
-    Rect local_extent{};
-    Rect scene_extent{};
-    float device_scale{1.0f};
-    bool allow_reuse{};
-};
-
-using RasterCachePaintCallback =
-    bool (*)(void* callback_state,
-             SkCanvas& canvas,
-             const PainterPrivateHooks* hooks);
-
-using RasterCacheCommitCallback =
-    bool (*)(void* callback_state) noexcept;
-
 struct PainterPrivateHooks final {
     void* state{};
     sk_sp<SkShader> (*materialize_image_texture)(
