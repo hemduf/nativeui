@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <memory>
 
 namespace ui {
