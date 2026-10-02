@@ -5,6 +5,8 @@
 #include "test_support.hpp"
 
 #include "include/core/SkColor.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkSurface.h"
 #include "include/core/SkShader.h"
 
 #include <array>
@@ -302,6 +304,42 @@ void deep_shader_child_warm_hit_allocates_zero() {
     context.end_frame();
 }
 
+
+void raster_warm_hit_allocates_zero() {
+    ui::detail::RenderResourceMaterializationContext context;
+    ui::detail::RasterCacheEpoch epoch;
+    const auto token = epoch.capture();
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(4, 4));
+    NUI_CHECK(surface);
+    auto image = surface->makeImageSnapshot();
+    NUI_CHECK(image);
+
+    const ui::detail::RenderResourceMaterializationContext::RasterCacheKey key{
+        77U,
+        token,
+        {0.0f, 0.0f, 4.0f, 4.0f},
+        {8.0f, 12.0f, 4.0f, 4.0f},
+        1.0f};
+
+    context.begin_frame();
+    auto cold = context.retain_raster(key, 64U, image);
+    NUI_CHECK(cold && cold.retained && !cold.hit);
+    cold = {};
+    context.end_frame();
+
+    context.begin_frame();
+    sk_sp<SkImage> warm;
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        warm = context.find_raster(key);
+        allocations = guard.allocations();
+    }
+    NUI_CHECK(warm);
+    NUI_CHECK(allocations == 0U);
+    context.end_frame();
+}
+
 } // namespace
 
 
@@ -329,5 +367,6 @@ int main() {
     runtime_shader_warm_hit_allocates_zero();
     effect_warm_hit_allocates_zero();
     deep_shader_child_warm_hit_allocates_zero();
+    raster_warm_hit_allocates_zero();
     return 0;
 }
