@@ -24,9 +24,6 @@ using RasterCachePaintCallback =
              SkCanvas& canvas,
              const PainterPrivateHooks* hooks);
 
-using RasterCacheUnsafeCallback =
-    void (*)(void* callback_state) noexcept;
-
 using RasterCacheValidateCallback =
     bool (*)(void* callback_state) noexcept;
 
