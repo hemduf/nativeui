@@ -69,15 +69,8 @@ struct SceneDiagnostics final {
 };
 
 struct PlatformTestAccess final {
-    [[nodiscard]] static bool register_root_raster_cache_boundary(
-        UI& ui) {
-        return ui.register_root_raster_cache_boundary_for_test();
-    }
-
-    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(
-        UI& ui) noexcept {
-        return ui.invalidate_root_raster_cache_boundary_for_test();
-    }
+    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui);
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui);
 
     [[nodiscard]] static bool request_gpu_readback(
         StandaloneWindow& window,
