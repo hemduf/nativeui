@@ -150,39 +150,96 @@ private:
     SkCanvas& destination,
     void* callback_state,
     detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheValidateCallback validate_callback,
     detail::RasterCacheCommitCallback commit_callback) {
     auto* hook_state = static_cast<PainterHookState*>(state);
     if (!hook_state || !hook_state->resources || !hook_state->context ||
-        !paint_callback || !commit_callback) {
+        !paint_callback || !validate_callback || !commit_callback) {
         return false;
     }
 
-    const auto extent = request.local_extent;
-    const auto scene_extent = request.scene_extent;
+    const auto requested_local = request.local_extent;
+    const auto requested_scene = request.scene_extent;
     const double scale = static_cast<double>(hook_state->device_scale);
-    const double physical_width = std::ceil(static_cast<double>(extent.w) * scale);
-    const double physical_height = std::ceil(static_cast<double>(extent.h) * scale);
-    if (!std::isfinite(extent.x) || !std::isfinite(extent.y) ||
-        !std::isfinite(extent.w) || !std::isfinite(extent.h) ||
-        !std::isfinite(scene_extent.x) || !std::isfinite(scene_extent.y) ||
+    const double requested_right =
+        static_cast<double>(requested_scene.x) + requested_scene.w;
+    const double requested_bottom =
+        static_cast<double>(requested_scene.y) + requested_scene.h;
+    if (!std::isfinite(requested_local.x) ||
+        !std::isfinite(requested_local.y) ||
+        !std::isfinite(requested_local.w) ||
+        !std::isfinite(requested_local.h) ||
+        !std::isfinite(requested_scene.x) ||
+        !std::isfinite(requested_scene.y) ||
+        !std::isfinite(requested_scene.w) ||
+        !std::isfinite(requested_scene.h) ||
+        !(requested_local.w > 0.0f) ||
+        !(requested_local.h > 0.0f) ||
+        requested_scene.w != requested_local.w ||
+        requested_scene.h != requested_local.h ||
+        !std::isfinite(requested_right) ||
+        !std::isfinite(requested_bottom) ||
+        !std::isfinite(scale) ||
+        !(scale > 0.0)) {
+        return false;
+    }
+
+    const double device_left =
+        std::floor(static_cast<double>(requested_scene.x) * scale);
+    const double device_top =
+        std::floor(static_cast<double>(requested_scene.y) * scale);
+    const double device_right = std::ceil(requested_right * scale);
+    const double device_bottom = std::ceil(requested_bottom * scale);
+    const double device_width = device_right - device_left;
+    const double device_height = device_bottom - device_top;
+    const double max_int =
+        static_cast<double>((std::numeric_limits<int>::max)());
+    if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
+        !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
+        !(device_width > 0.0) || !(device_height > 0.0) ||
+        device_width > max_int || device_height > max_int ||
+        device_width > hook_state->context->maxRenderTargetSize() ||
+        device_height > hook_state->context->maxRenderTargetSize()) {
+        return false;
+    }
+
+    const int width = static_cast<int>(device_width);
+    const int height = static_cast<int>(device_height);
+    const Rect scene_extent{
+        static_cast<float>(device_left / scale),
+        static_cast<float>(device_top / scale),
+        static_cast<float>(device_width / scale),
+        static_cast<float>(device_height / scale)};
+    const Rect local_extent{
+        requested_local.x + (scene_extent.x - requested_scene.x),
+        requested_local.y + (scene_extent.y - requested_scene.y),
+        scene_extent.w,
+        scene_extent.h};
+    if (!std::isfinite(scene_extent.x) || !std::isfinite(scene_extent.y) ||
         !std::isfinite(scene_extent.w) || !std::isfinite(scene_extent.h) ||
-        !(extent.w > 0.0f) || !(extent.h > 0.0f) ||
-        scene_extent.w != extent.w || scene_extent.h != extent.h ||
-        !std::isfinite(scale) || !(scale > 0.0) ||
-        physical_width > static_cast<double>((std::numeric_limits<int>::max)()) ||
-        physical_height > static_cast<double>((std::numeric_limits<int>::max)())) {
+        !std::isfinite(local_extent.x) || !std::isfinite(local_extent.y) ||
+        !std::isfinite(local_extent.w) || !std::isfinite(local_extent.h)) {
         return false;
     }
 
     const detail::RenderResourceMaterializationContext::RasterCacheKey key{
-        request.node_id, request.token, extent, hook_state->device_scale};
+        request.node_id,
+        request.token,
+        local_extent,
+        scene_extent,
+        hook_state->device_scale};
 
     auto draw = [&](const sk_sp<SkImage>& image) {
         if (!image) return false;
-        const SkRect dst = SkRect::MakeXYWH(
-            scene_extent.x, scene_extent.y, scene_extent.w, scene_extent.h);
         destination.drawImageRect(
-            image, dst, SkSamplingOptions(SkFilterMode::kLinear), nullptr);
+            image,
+            SkRect::MakeXYWH(
+                scene_extent.x,
+                scene_extent.y,
+                scene_extent.w,
+                scene_extent.h),
+            SkSamplingOptions{SkFilterMode::kNearest},
+            nullptr);
         return true;
     };
 
@@ -192,8 +249,6 @@ private:
         }
     }
 
-    const int width = static_cast<int>(physical_width);
-    const int height = static_cast<int>(physical_height);
     const SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
     auto surface = SkSurfaces::RenderTarget(
         hook_state->context, skgpu::Budgeted::kYes, info, 0,
@@ -226,13 +281,22 @@ private:
         throw std::runtime_error("subtree raster cache snapshot failed");
     }
 
-    const bool current = commit_callback(callback_state);
-    if (current) {
-        image = hook_state->resources->retain_raster(
-            key, detail::raster_retained_storage_bytes(width, height),
-            std::move(image));
+    if (!validate_callback(callback_state)) {
+        return draw(image);
     }
-    return draw(image);
+
+    auto acquisition = hook_state->resources->retain_raster(
+        key,
+        detail::raster_retained_storage_bytes(width, height),
+        image);
+    if (!acquisition) {
+        return draw(image);
+    }
+
+    if (!commit_callback(callback_state)) {
+        return draw(image);
+    }
+    return draw(acquisition.image);
 }
 
 PuglSpan to_pugl_span(float physical) {
