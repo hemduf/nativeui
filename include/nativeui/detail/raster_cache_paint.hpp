@@ -3,9 +3,9 @@
 #include <nativeui/geometry.hpp>
 #include <nativeui/detail/raster_cache_epoch.hpp>
 
-#include "include/core/SkCanvas.h"
-
 #include <cstdint>
+
+class SkCanvas;
 
 namespace ui::detail {
 
