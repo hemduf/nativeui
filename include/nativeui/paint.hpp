@@ -358,21 +358,18 @@ public:
 
     void translate(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
-        if (x != 0.0f || y != 0.0f) note_raster_cache_transform();
         const Transform2D operation = Transform2D::translation(x, y);
         apply_logical_transform(operation, [&] { canvas_.translate(x, y); });
     }
     void translate(Point offset) { translate(offset.x, offset.y); }
     void scale(float x, float y) {
         if (!std::isfinite(x) || !std::isfinite(y)) return;
-        if (x != 1.0f || y != 1.0f) note_raster_cache_transform();
         const Transform2D operation = Transform2D::scaling(x, y);
         apply_logical_transform(operation, [&] { canvas_.scale(x, y); });
     }
     void scale(float uniform) { scale(uniform, uniform); }
     void rotate(float radians) {
         if (!std::isfinite(radians)) return;
-        if (radians != 0.0f) note_raster_cache_transform();
         const Transform2D operation = Transform2D::rotation(radians);
         apply_logical_transform(operation, [&] {
             canvas_.concat(SkMatrix::MakeAll(
@@ -382,11 +379,6 @@ public:
         });
     }
     void concat(const Transform2D& transform) {
-        if (transform.m00 != 1.0f || transform.m01 != 0.0f ||
-            transform.m02 != 0.0f || transform.m10 != 0.0f ||
-            transform.m11 != 1.0f || transform.m12 != 0.0f) {
-            note_raster_cache_transform();
-        }
         apply_logical_transform(transform, [&] {
             canvas_.concat(SkMatrix::MakeAll(
                 transform.m00, transform.m01, transform.m02,
@@ -652,11 +644,8 @@ private:
         const detail::RasterCachePaintRequest& request,
         void* callback_state,
         detail::RasterCachePaintCallback paint_callback,
-        detail::RasterCacheUnsafeCallback unsafe_callback,
         detail::RasterCacheValidateCallback validate_callback,
         detail::RasterCacheCommitCallback commit_callback);
-
-    void note_raster_cache_transform() noexcept;
 
     [[nodiscard]] sk_sp<SkImageFilter> materialize_effect_filter(
         const Effect& effect);
