@@ -780,6 +780,7 @@ void clear_is_instance_local() {
 struct RasterHookState {
     ui::detail::RenderResourceMaterializationContext resources;
     int creates{};
+    bool fail_after_validate_once{};
 };
 
 bool raster_test_hook(
@@ -831,6 +832,10 @@ bool raster_test_hook(
     auto image = surface->makeImageSnapshot();
     NUI_CHECK(image);
     if (!validate_callback(callback_state)) return draw(image);
+    if (state.fail_after_validate_once) {
+        state.fail_after_validate_once = false;
+        throw std::bad_alloc{};
+    }
     auto acquisition = state.resources.retain_raster(
         key,
         ui::detail::raster_retained_storage_bytes(
@@ -990,6 +995,59 @@ void reentrant_invalidation_cannot_publish_captured_generation() {
     NUI_CHECK(*paints == 2);
 }
 
+
+void raster_retention_failure_leaves_boundary_stale_and_retryable() {
+    auto paints = std::make_shared<int>(0);
+    ui::Spec spec{
+        [paints] { return std::make_unique<PaintCounterComponent>(paints); },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, root_id));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    state.fail_after_validate_once = true;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    bool threw = false;
+    state.resources.begin_frame();
+    try {
+        ui::TreeTestAccess::paint_with_resources(
+            tree, *surface->getCanvas(), platform, &hooks);
+    } catch (const std::bad_alloc&) {
+        threw = true;
+    }
+    state.resources.end_frame();
+    NUI_CHECK(threw);
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+
+    const auto after_failure =
+        ui::detail::RasterCacheAccess::capture(tree, root_id);
+    NUI_CHECK(!after_failure.expired());
+    NUI_CHECK(!ui::detail::RasterCacheAccess::reusable(
+        tree, root_id, after_failure));
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+}
 
 class TransformPaintComponent final : public ui::Component {
 public:
@@ -1168,6 +1226,7 @@ int main() {
     clear_is_instance_local();
     tree_raster_boundary_cold_warm_stale_warm();
     reentrant_invalidation_cannot_publish_captured_generation();
+    raster_retention_failure_leaves_boundary_stale_and_retryable();
     unqualified_transform_bypasses_retention();
     unqualified_effect_bypasses_raster_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
