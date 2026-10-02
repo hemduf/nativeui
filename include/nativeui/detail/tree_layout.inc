@@ -509,10 +509,14 @@
                     *callback.platform,
                     callback.inherited_clip);
                 callback.parent_painter->used_effects_ |= nested.used_effects();
-                callback.reuse_safe =
-                    !nested.used_effects() && !nested.used_nontrivial_transform_;
+                callback.reuse_safe &= !nested.used_effects();
                 return true;
             };
+
+        const auto unsafe_callback = [](void* raw) noexcept {
+            auto& callback = *static_cast<CallbackState*>(raw);
+            callback.reuse_safe = false;
+        };
 
         const auto validate_callback = [](void* raw) noexcept -> bool {
             const auto& callback = *static_cast<CallbackState*>(raw);
@@ -532,6 +536,7 @@
             request,
             &state,
             paint_callback,
+            unsafe_callback,
             validate_callback,
             commit_callback);
     }
