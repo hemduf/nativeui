@@ -907,6 +907,83 @@ void tree_raster_boundary_cold_warm_stale_warm() {
     NUI_CHECK(state.creates == 2);
 }
 
+
+class ReentrantInvalidationComponent final : public ui::Component {
+public:
+    ReentrantInvalidationComponent(
+        std::shared_ptr<int> paints,
+        std::shared_ptr<std::function<void()>> invalidate_once)
+        : paints_(std::move(paints)),
+          invalidate_once_(std::move(invalidate_once)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        return {32.0f, 32.0f};
+    }
+
+    void paint(ui::PaintContext& context) const override {
+        ++*paints_;
+        context.painter().fill_rect(
+            context.bounds(), ui::Color{0.0f, 0.0f, 1.0f, 1.0f});
+        if (*invalidate_once_) {
+            auto callback = std::move(*invalidate_once_);
+            *invalidate_once_ = {};
+            callback();
+        }
+    }
+
+private:
+    std::shared_ptr<int> paints_;
+    std::shared_ptr<std::function<void()>> invalidate_once_;
+};
+
+void reentrant_invalidation_cannot_publish_captured_generation() {
+    auto paints = std::make_shared<int>(0);
+    auto invalidate_once = std::make_shared<std::function<void()>>();
+    ui::Spec spec{
+        [paints, invalidate_once] {
+            return std::make_unique<ReentrantInvalidationComponent>(
+                paints, invalidate_once);
+        },
+        {}};
+    ui::Tree tree{ui::compile(std::move(spec))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    const auto root_id = ui::TreeTestAccess::root_id(tree);
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(tree, root_id));
+    *invalidate_once = ui::detail::RasterCacheAccess::invalidator(tree, root_id);
+    NUI_CHECK(static_cast<bool>(*invalidate_once));
+
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    RasterHookState state;
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr, &raster_test_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 1);
+    NUI_CHECK(state.resources.retained_entries() == 0);
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+    NUI_CHECK(state.resources.retained_entries() == 1);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint_with_resources(
+        tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(*paints == 2);
+}
+
+
 class TransformPaintComponent final : public ui::Component {
 public:
     explicit TransformPaintComponent(std::shared_ptr<int> paints)
@@ -1047,6 +1124,7 @@ int main() {
     clear_releases_context_owned_frame_leases();
     clear_is_instance_local();
     tree_raster_boundary_cold_warm_stale_warm();
+    reentrant_invalidation_cannot_publish_captured_generation();
     unqualified_transform_bypasses_retention();
     retained_raster_uses_lifetime_identity_and_shared_budget();
     raster_signature_separates_scale_and_local_extent();
