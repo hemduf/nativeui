@@ -18,6 +18,7 @@ struct RasterCachePaintRequest final {
     NodeId node_id{};
     RasterCacheEpoch::Token token{};
     Rect local_extent{};
+    Rect scene_extent{};
     float device_scale{1.0f};
     bool allow_reuse{};
 };
