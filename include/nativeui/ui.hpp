@@ -25,6 +25,7 @@ namespace ui {
 class Dialog;
 namespace detail {
 class SkiaGlRenderer;
+struct PlatformTestAccess;
 }
 
 /// One retained NativeUI component tree.
@@ -354,6 +355,12 @@ public:
 private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
+    friend struct detail::PlatformTestAccess;
+
+    [[nodiscard]] bool register_root_raster_cache_boundary_for_test() {
+        return tree_.root_ &&
+               tree_.register_raster_cache_boundary(tree_.root_->id);
+    }
 
     void paint_with_resources(
         SkCanvas& canvas,
