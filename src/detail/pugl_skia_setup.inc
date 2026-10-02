@@ -63,6 +63,7 @@ struct PainterHookState final {
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     std::uint64_t* raster_cache_hits{};
     std::uint64_t* raster_cache_updates{};
+    detail::SceneFaultStage* fault_stage{};
 #endif
 };
 
@@ -259,6 +260,14 @@ private:
         }
     }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSurfaceAllocation) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::bad_alloc{};
+    }
+#endif
+
     const SkImageInfo info = SkImageInfo::Make(
         width,
         height,
@@ -293,10 +302,24 @@ private:
         if (!paint_callback(callback_state, *canvas, &nested_hooks)) return false;
     }
 
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSubmission) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::runtime_error("injected subtree raster submission failure");
+    }
+#endif
     const auto submission = hook_state->context->flushAndSubmit(surface.get());
     if (!submission.fSuccess) {
         throw std::runtime_error("subtree raster cache submission failed");
     }
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    if (hook_state->fault_stage &&
+        *hook_state->fault_stage == detail::SceneFaultStage::RasterSnapshot) {
+        *hook_state->fault_stage = detail::SceneFaultStage::None;
+        throw std::runtime_error("injected subtree raster snapshot failure");
+    }
+#endif
     auto image = surface->makeImageSnapshot();
     if (!image) {
         throw std::runtime_error("subtree raster cache snapshot failed");
@@ -741,6 +764,7 @@ public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             painter_hook_state.raster_cache_hits = &raster_cache_hits_;
             painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
 #endif
             const detail::PainterPrivateHooks painter_hooks{
                 &painter_hook_state,
@@ -857,6 +881,7 @@ public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             painter_hook_state.raster_cache_hits = &raster_cache_hits_;
             painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
 #endif
             const detail::PainterPrivateHooks painter_hooks{
                 &painter_hook_state,
