@@ -39,6 +39,8 @@ enum class SceneFaultStage : std::uint8_t {
 
 struct SceneDiagnostics final {
     std::uint64_t scene_allocations{};
+    std::uint64_t raster_cache_hits{};
+    std::uint64_t raster_cache_updates{};
     std::uint64_t scene_builds{};
     std::uint64_t partial_scene_updates{};
     std::uint64_t presentations{};
@@ -64,6 +66,11 @@ struct SceneDiagnostics final {
 };
 
 struct PlatformTestAccess final {
+    [[nodiscard]] static bool register_root_raster_cache_boundary(
+        UI& ui) {
+        return ui.register_root_raster_cache_boundary_for_test();
+    }
+
     [[nodiscard]] static bool request_gpu_readback(
         StandaloneWindow& window,
         Point logical_point) noexcept;
