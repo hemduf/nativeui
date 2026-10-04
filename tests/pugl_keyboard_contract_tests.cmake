@@ -1,0 +1,57 @@
+cmake_minimum_required(VERSION 3.24)
+if(NOT DEFINED SOURCE_DIR OR NOT DEFINED TEST_DIR)
+  message(FATAL_ERROR "Pugl keyboard contract test requires SOURCE_DIR and TEST_DIR")
+endif()
+include("${SOURCE_DIR}/cmake/NativeUIPuglContract.cmake")
+set(required_commit "new-required-revision")
+foreach(previous IN ITEMS
+    195f79b22644010c81a5e0c3231c591856787ec6
+    94982803985eefcbaeb0a1c8d0136ec862d7cb59
+    2b1852a1898020855fb115f5c9ffdb7ddec51ebb
+    165c50f08c6e65505198aa95e2cdf9d4028af7b6
+    c1d7ddd13f74613c83cbbeee9028ca017b50ff0e)
+  set(NATIVEUI_PUGL_COMMIT "${previous}" CACHE STRING "test pin" FORCE)
+  _nativeui_configure_pugl_pin("${required_commit}")
+  if(NOT NATIVEUI_PUGL_COMMIT STREQUAL required_commit)
+    message(FATAL_ERROR "Previous Pugl default was not upgraded: ${previous}")
+  endif()
+endforeach()
+foreach(selected IN ITEMS "${required_commit}" "custom-compatible-revision")
+  set(NATIVEUI_PUGL_COMMIT "${selected}" CACHE STRING "test pin" FORCE)
+  _nativeui_configure_pugl_pin("${required_commit}")
+  if(NOT NATIVEUI_PUGL_COMMIT STREQUAL selected)
+    message(FATAL_ERROR "Selected Pugl revision was overwritten: ${selected}")
+  endif()
+endforeach()
+unset(NATIVEUI_PUGL_COMMIT CACHE)
+_nativeui_configure_pugl_pin("${required_commit}")
+if(NOT NATIVEUI_PUGL_COMMIT STREQUAL required_commit)
+  message(FATAL_ERROR "Fresh configure did not select the required Pugl revision")
+endif()
+
+file(MAKE_DIRECTORY "${TEST_DIR}/compatible/src" "${TEST_DIR}/incompatible/src")
+file(WRITE "${TEST_DIR}/compatible/src/mac.m"
+  "- (BOOL)puglPreserveEmbeddedFocus { return NO; }\n- (void)puglSetEmbeddedFocus:(BOOL)focused {}\n")
+file(WRITE "${TEST_DIR}/incompatible/src/mac.m"
+  "- (void)puglSetEmbeddedFocus:(BOOL)focused {}\n")
+set(NATIVEUI_PUGL_SOURCE "${TEST_DIR}/compatible")
+_nativeui_configure_pugl_pin("${required_commit}")
+if(NOT NATIVEUI_PUGL_SOURCE STREQUAL "${TEST_DIR}/compatible")
+  message(FATAL_ERROR "Pugl source override was overwritten")
+endif()
+_nativeui_validate_pugl_cocoa("${NATIVEUI_PUGL_SOURCE}")
+file(WRITE "${TEST_DIR}/reject.cmake"
+  "include(\"${SOURCE_DIR}/cmake/NativeUIPuglContract.cmake\")\nset(NATIVEUI_PUGL_REQUIRED_COMMIT ${required_commit})\n_nativeui_validate_pugl_cocoa(\"${TEST_DIR}/incompatible\")\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -P "${TEST_DIR}/reject.cmake"
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+  message(FATAL_ERROR "Incompatible Cocoa Pugl override was silently accepted")
+endif()
+set(diagnostic "${output}\n${error}")
+foreach(expected IN ITEMS "puglPreserveEmbeddedFocus" "NATIVEUI_PUGL_SOURCE" "${required_commit}")
+  string(FIND "${diagnostic}" "${expected}" found)
+  if(found EQUAL -1)
+    message(FATAL_ERROR "Incompatible override lacked diagnostic: ${expected}: ${diagnostic}")
+  endif()
+endforeach()
+message(STATUS "Pugl cached pin migration and Cocoa source compatibility passed")

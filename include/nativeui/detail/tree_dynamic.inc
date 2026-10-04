@@ -682,7 +682,7 @@
 
         if (active_ && active_platform_) {
             sync_focus_structure(*active_platform_);
-            if (removed_focus && !focus_active_) {
+            if (active_ && active_platform_ && removed_focus && !focus_active_) {
                 Node* fallback = nullptr;
                 if (removed_focus_restore_target != kInvalidNodeId) {
                     if (auto* restore =

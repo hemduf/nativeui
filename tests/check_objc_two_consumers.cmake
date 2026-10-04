@@ -101,7 +101,7 @@ endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${_fixture_build}"
     --target t053_consumer_a t053_consumer_b t053_consumer_loader
-    --config Release --parallel 2
+    --config Release
   RESULT_VARIABLE _build_result
   OUTPUT_VARIABLE _build_output
   ERROR_VARIABLE _build_error

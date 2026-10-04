@@ -26,6 +26,12 @@ typedef void (*NativeUIImeCallback)(void*                user_data,
 
 typedef struct NativeUIImeBridge NativeUIImeBridge;
 
+#if defined(__APPLE__)
+// The Cocoa responder boundary needs the retained dispatch result, separately
+// from PuglStatus (which reports callback failures, not event consumption).
+void nativeuiImeReportKeyHandled(NativeUIImeBridge* bridge, bool handled);
+#endif
+
 NativeUIImeBridge*
 nativeuiImeCreate(PuglWorld* world,
                   PuglView* view,

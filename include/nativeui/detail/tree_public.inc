@@ -144,8 +144,13 @@
         if (!active_) return;
         sync_availability_structure(platform);
         sync_focus_structure(platform);
-        if (focusables_.empty() || !focus_active_) return;
-        auto* node = focusables_[focused_index_];
+        if (!active_ || focusables_.empty() || !focus_active_) return;
+        // This refresh bypasses the ordinary focus-transition state machine.
+        // Do not deliver stale bounds when layout was invalidated in-place.
+        ensure_layout();
+        if (!active_) return;
+        auto* node = current_focus_node();
+        if (!focus_target_available(node)) return;
         FocusContext context{
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, context);
@@ -367,6 +372,8 @@
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
+        // Focus preparation can run layout callbacks that retire this view.
+        if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
 
         const auto previous_dispatch_depth = dispatch_depth_;
         const auto previous_input_dispatch_token = active_input_dispatch_token_;
@@ -516,6 +523,10 @@
                 }
                 if (target) {
                     focus_nearest_ancestor(target);
+                    if (!active_) {
+                        pointer_route_committed = true;
+                        return finish(EventResult::Ignored);
+                    }
                     const auto result = route_from(*target, event, platform);
                     pointer_route_committed = true;
                     return finish(result);
