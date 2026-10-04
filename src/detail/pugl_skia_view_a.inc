@@ -777,6 +777,20 @@ private:
         }
     }
 
+    void consume_failed_native_key(const PuglEvent* event) noexcept {
+#if defined(__APPLE__)
+        // A component may mutate local state before throwing. Treat failed
+        // keyboard/text dispatch as consumed, rather than invoking a DAW
+        // shortcut for the same partially executed local operation.
+        if (event && (event->type == PUGL_KEY_PRESS || event->type == PUGL_KEY_RELEASE ||
+                      event->type == PUGL_TEXT)) {
+            nativeuiImeReportKeyHandled(ime_bridge_, true);
+        }
+#else
+        (void)event;
+#endif
+    }
+
     static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {
         auto* self = static_cast<ViewCore*>(puglGetHandle(view));
         if (!self) return PUGL_BAD_PARAMETER;
@@ -784,10 +798,12 @@ private:
             return self->on_event(event);
         } catch (const std::exception& e) {
             self->remember_teardown_error(e.what());
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         } catch (...) {
             self->remember_teardown_error("Unknown NativeUI event error");
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         }

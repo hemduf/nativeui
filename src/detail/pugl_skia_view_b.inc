@@ -129,15 +129,22 @@
             const auto tab = detail::normalize_tab_key(event->key.key, input.shift);
             input.key = tab.is_tab ? Key::Tab : translate_key(event->key.key, event->key.state);
             input.shift = tab.shift;
-            if (input.type == InputType::KeyDown && input.key == Key::Quit) {
+            bool key_handled = false;
+            if (!embedded_ && input.type == InputType::KeyDown && input.key == Key::Quit) {
                 if (close_callback_) {
                     close_callback_();
                 } else {
                     (void)close_native_view();
                 }
+                key_handled = true;
             } else if (input.key != Key::None) {
-                ui_.dispatch(input, services_);
+                key_handled = handled(ui_.dispatch(input, services_));
             }
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, key_handled);
+#else
+            (void)key_handled;
+#endif
             return PUGL_SUCCESS;
         }
 
@@ -151,7 +158,12 @@
             input.type = InputType::TextInput;
             input.text.assign(text);
             apply_modifiers(input, event->text.state);
-            ui_.dispatch(input, services_);
+            const bool text_handled = handled(ui_.dispatch(input, services_));
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, text_handled);
+#else
+            (void)text_handled;
+#endif
             return PUGL_SUCCESS;
         }
 

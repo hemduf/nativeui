@@ -185,7 +185,7 @@ NativeUI currently pins:
 
 ```text
 repository: hemduf/pugl
-commit:     195f79b22644010c81a5e0c3231c591856787ec6
+commit:     a4bdafe38f48cf906560e40bd1e9e87986369b06
 license:    ISC
 ```
 
@@ -1076,7 +1076,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=195f79b22644010c81a5e0c3231c591856787ec6
+NATIVEUI_PUGL_COMMIT=a4bdafe38f48cf906560e40bd1e9e87986369b06
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149
@@ -1355,6 +1355,8 @@ The [value editing contract](docs/value-editing.md) defines generic `EditSession
 notifications, standard control input boundaries, exception/reentrancy policy,
 and optional hidden `EmbeddedView` construction. State and editing remain
 UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The [embedded keyboard contract](docs/embedded-keyboard.md) defines consumed-key
+ownership, host responder fallback and retained focus geometry recovery.
 The pinned macOS Pugl backend owns embedded visibility and focus behavior
 directly. NativeUI consumes that exact source commit without build-time source
 rewriting.

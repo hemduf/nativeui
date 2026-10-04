@@ -1,6 +1,12 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
+  add_test(NAME nativeui_pugl_keyboard_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/pugl-keyboard-contract"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/pugl_keyboard_contract_tests.cmake")
+  set_tests_properties(nativeui_pugl_keyboard_contract_tests PROPERTIES LABELS "build;cmake;pugl;keyboard")
   add_test(
     NAME nativeui_advanced_rendering_docs_contract
     COMMAND ${CMAKE_COMMAND}
@@ -175,6 +181,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(
     nativeui_window_control_state_tests
     ${PROJECT_SOURCE_DIR}/tests/window_control_state_tests.cpp)
+  set_property(TEST nativeui_window_control_state_tests APPEND PROPERTY LABELS window-control)
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
@@ -662,6 +669,7 @@ if(NATIVEUI_BUILD_TESTS)
 
     if(APPLE)
       enable_language(OBJCXX)
+      include(${CMAKE_CURRENT_SOURCE_DIR}/EmbeddedKeyboardTests.cmake)
       add_executable(nativeui_embedded_visibility_tests ${PROJECT_SOURCE_DIR}/tests/embedded_visibility_macos_tests.mm)
       set_target_properties(nativeui_embedded_visibility_tests PROPERTIES OBJCXX_STANDARD 20)
       target_compile_options(nativeui_embedded_visibility_tests PRIVATE -fobjc-arc)
