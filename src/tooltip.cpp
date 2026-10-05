@@ -154,9 +154,9 @@ void TooltipController::set_trigger(Trigger trigger, bool value) {
             // suppression. Availability restoration itself is deliberately not
             // a new presentation trigger, and neither is the end of a pointer
             // button interaction.
-            const auto state = state_;
-        if (!state->triggered() && !state->pointer_interaction_active) {
-                state->suppressed = false;
+            const auto current_state = state_;
+        if (!current_state->triggered() && !current_state->pointer_interaction_active) {
+                current_state->suppressed = false;
             }
             return;
         }

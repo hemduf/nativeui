@@ -109,8 +109,8 @@ struct HistoryRuntime : std::enable_shared_from_this<HistoryRuntime> {
       auto next = entries->snapshot();
       if (!mounted || entries->revision() != revision)
         return;
-      const bool valid = valid_entries(next);
-      if (valid) {
+      const bool entries_valid = valid_entries(next);
+      if (entries_valid) {
         auto owned = std::make_shared<const Entries>(std::move(next));
         accepted = std::move(owned);
         diagnostic.clear();

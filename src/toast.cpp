@@ -574,8 +574,8 @@ class Toast::Impl::Row final : public Component,
                                public detail::ThemeBinding,
                                public detail::RetainedInteractionObserver {
   public:
-    Row(std::weak_ptr<Impl> owner, std::shared_ptr<Entry> entry)
-        : owner_(std::move(owner)), entry_(std::move(entry)) {}
+    Row(std::weak_ptr<Impl> controller, std::shared_ptr<Entry> entry)
+        : owner_(std::move(controller)), entry_(std::move(entry)) {}
     bool pointer_targetable() const noexcept override { return true; }
     bool clips_children() const noexcept override { return true; }
     ComponentAvailability local_availability() const noexcept override {
@@ -621,12 +621,12 @@ class Toast::Impl::Row final : public Component,
         }
     }
     void retained_pointer_hover_changed(bool value, bool, Dispatcher) override {
-        if (const auto owner = owner_.lock())
-            owner->pause(entry_->id, true, value);
+        if (const auto controller = owner_.lock())
+            controller->pause(entry_->id, true, value);
     }
     void retained_focus_within_changed(bool value, bool, Dispatcher) override {
-        if (const auto owner = owner_.lock())
-            owner->pause(entry_->id, false, value);
+        if (const auto controller = owner_.lock())
+            controller->pause(entry_->id, false, value);
     }
     SemanticInfo semantics() const override {
         SemanticInfo value;
@@ -657,8 +657,8 @@ class Toast::Impl::Row final : public Component,
 };
 class Toast::Impl::Stack final : public Component, public detail::DynamicChildrenSource {
   public:
-    Stack(std::weak_ptr<Impl> owner, std::uint64_t generation)
-        : owner_(std::move(owner)), generation_(generation) {}
+    Stack(std::weak_ptr<Impl> controller, std::uint64_t generation)
+        : owner_(std::move(controller)), generation_(generation) {}
     bool uses_retained_checkpoint() const noexcept override { return true; }
     bool clips_children() const noexcept override { return true; }
     Size measure(const std::vector<ChildMetrics> &children) const override {
@@ -682,10 +682,10 @@ class Toast::Impl::Stack final : public Component, public detail::DynamicChildre
     }
     void layout_children(Rect bounds, const std::vector<ChildMetrics> &children,
                          std::vector<ChildPlacement> &placements) const override {
-        const auto owner = owner_.lock();
-        if (!owner || generation_ != owner->stack_generation)
+        const auto controller = owner_.lock();
+        if (!controller || generation_ != controller->stack_generation)
             return;
-        const auto snapshot = owner->entries;
+        const auto snapshot = controller->entries;
         if (snapshot.size() != children.size() || children.size() != placements.size())
             throw std::logic_error("Toast stack child snapshot mismatch");
         candidate_.clear();
@@ -705,8 +705,8 @@ class Toast::Impl::Stack final : public Component, public detail::DynamicChildre
         }
     }
     std::vector<std::string> desired_keys() const override {
-        const auto owner = owner_.lock();
-        prepared_ = owner ? owner->entries : std::vector<std::shared_ptr<Entry>>{};
+        const auto controller = owner_.lock();
+        prepared_ = controller ? controller->entries : std::vector<std::shared_ptr<Entry>>{};
         std::vector<std::string> keys;
         keys.reserve(prepared_.size());
         for (const auto &entry : prepared_)
@@ -714,31 +714,31 @@ class Toast::Impl::Stack final : public Component, public detail::DynamicChildre
         return keys;
     }
     std::vector<detail::DynamicChildSpec> desired_children() const override {
-        const auto owner = owner_.lock();
-        if (!owner)
+        const auto controller = owner_.lock();
+        if (!controller)
             return {};
         const auto snapshot = prepared_;
         std::vector<detail::DynamicChildSpec> result;
         result.reserve(snapshot.size());
         for (const auto &entry : snapshot)
-            result.push_back({std::to_string(entry->id), owner->row_spec(entry)});
+            result.push_back({std::to_string(entry->id), controller->row_spec(entry)});
         return result;
     }
     void set_structure_invalidator(std::function<void()> invalidate) override {
-        if (const auto owner = owner_.lock(); owner && generation_ == owner->stack_generation)
-            owner->structure_invalidator = std::move(invalidate);
+        if (const auto controller = owner_.lock(); controller && generation_ == controller->stack_generation)
+            controller->structure_invalidator = std::move(invalidate);
     }
     void mount(MountContext &context) override {
-        if (const auto owner = owner_.lock(); owner && generation_ == owner->stack_generation)
-            owner->availability_invalidator = context.availability_invalidator();
+        if (const auto controller = owner_.lock(); controller && generation_ == controller->stack_generation)
+            controller->availability_invalidator = context.availability_invalidator();
     }
     void deactivate(LifecycleContext &) override {
-        if (const auto owner = owner_.lock(); owner && generation_ == owner->stack_generation)
-            owner->abandon();
+        if (const auto controller = owner_.lock(); controller && generation_ == controller->stack_generation)
+            controller->abandon();
     }
     void unmount(LifecycleContext &) override {
-        if (const auto owner = owner_.lock(); owner && generation_ == owner->stack_generation)
-            owner->abandon();
+        if (const auto controller = owner_.lock(); controller && generation_ == controller->stack_generation)
+            controller->abandon();
     }
     SemanticInfo semantics() const override {
         SemanticInfo value;
@@ -749,19 +749,19 @@ class Toast::Impl::Stack final : public Component, public detail::DynamicChildre
 
   private:
     void retained_checkpoint() override {
-        if (const auto owner = owner_.lock(); owner && generation_ == owner->stack_generation)
-            owner->sync();
+        if (const auto controller = owner_.lock(); controller && generation_ == controller->stack_generation)
+            controller->sync();
     }
     void layout_committed(Rect, Rect) noexcept override {
-        const auto owner = owner_.lock();
-        if (!owner || generation_ != owner->stack_generation)
+        const auto controller = owner_.lock();
+        if (!controller || generation_ != controller->stack_generation)
             return;
         for (const auto &candidate : candidate_) {
             if (candidate.entry->phase != Phase::Active)
                 continue;
             if (candidate.entry->visible != candidate.visible) {
                 candidate.entry->visible = candidate.visible;
-                owner->geometry_availability_pending = true;
+                controller->geometry_availability_pending = true;
             }
         }
     }
@@ -785,8 +785,8 @@ Spec Toast::Impl::row_spec(const std::shared_ptr<Entry> &entry) {
         style.base.control_height = 32.0f;
         children.push_back(Button{entry->value.action_label,
                                   [weak, id = entry->id] {
-                                      if (const auto owner = weak.lock(); owner && owner->alive())
-                                          (void)owner->retire(id, true);
+                                      if (const auto controller = weak.lock(); controller && controller->alive())
+                                          (void)controller->retire(id, true);
                                   }}
                                .variant(ButtonVariant::Primary)
                                .style(std::move(style))
@@ -798,14 +798,14 @@ Spec Toast::Impl::stack_spec(std::uint64_t generation) {
     const std::weak_ptr<Impl> weak = shared_from_this();
     Spec result{[weak, generation] { return std::make_unique<Stack>(weak, generation); }, {}};
     result.children_factory = [weak](Component &) {
-        const auto owner = weak.lock();
-        if (!owner)
+        const auto controller = weak.lock();
+        if (!controller)
             return std::vector<Spec>{};
-        const auto snapshot = owner->entries;
+        const auto snapshot = controller->entries;
         std::vector<Spec> children;
         children.reserve(snapshot.size());
         for (const auto &entry : snapshot)
-            children.push_back(owner->row_spec(entry));
+            children.push_back(controller->row_spec(entry));
         return children;
     };
     return result;
