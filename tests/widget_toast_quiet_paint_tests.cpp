@@ -35,13 +35,13 @@ class SkiaGlRenderer final {
             if (requires_full) {
                 ++full_calls;
                 canvas.clear(SK_ColorBLACK);
-                painted = view.paint_full_scene_prepared(transaction,canvas,platform,used_effects);
+                painted = view.paint_full_scene_prepared(transaction,canvas,platform,nullptr,used_effects);
             } else {
                 ++partial_calls;
                 canvas.clipRect(SkRect::MakeXYWH(damage.x,damage.y,damage.w,damage.h));
                 canvas.clear(SK_ColorBLACK);
                 painted = view.paint_partial_scene_prepared(
-                    transaction,canvas,platform,damage,used_effects);
+                    transaction,canvas,platform,damage,nullptr,used_effects);
             }
         } catch (...) { canvas.restore(); throw; }
         canvas.restore();

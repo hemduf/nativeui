@@ -351,7 +351,6 @@ if(NATIVEUI_BUILD_TESTS)
     NATIVEUI_ENABLE_TEST_SEAMS=1
   )
   target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
-    SkiaBuilder::svg
     NativeUI::Core
   )
   nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
