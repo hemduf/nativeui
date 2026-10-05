@@ -352,15 +352,11 @@ public:
     if (contact->hovered == row)
       return;
     const auto old = contact->hovered;
-    const auto old_style =
-        old ? std::optional<ResolvedListViewStyle>{row_style(*old)}
-            : std::nullopt;
-    const auto next_style =
-        row ? std::optional<ResolvedListViewStyle>{row_style(*row)}
-            : std::nullopt;
+    const auto old_style = old ? row_style(*old) : ResolvedListViewStyle{};
+    const auto next_style = row ? row_style(*row) : ResolvedListViewStyle{};
     contact->hovered = row;
-    if ((old_style && *old_style != row_style(*old)) ||
-        (next_style && *next_style != row_style(*row)))
+    if ((old && old_style != row_style(*old)) ||
+        (row && next_style != row_style(*row)))
       mark(4);
   }
 };
