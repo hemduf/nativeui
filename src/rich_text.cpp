@@ -651,8 +651,9 @@ void cancel_pointer(std::shared_ptr<RichRuntime> runtime,
   if (release)
     release();
 }
-void cancel_pointer_noexcept(std::shared_ptr<RichRuntime> runtime,
-                             std::optional<std::uint64_t> expected = {}) noexcept {
+void cancel_pointer_noexcept(
+    std::shared_ptr<RichRuntime> runtime,
+    std::optional<std::uint64_t> expected = {}) noexcept {
   try {
     cancel_pointer(std::move(runtime), expected);
   } catch (...) {
@@ -684,6 +685,14 @@ void activate_action(std::shared_ptr<RichRuntime> runtime,
   cancel_pointer(runtime);
   auto callback = (*model)[index].on_activate;
   auto final_permission = state->permission;
+  // Callable copying and capture release may remove this node. The owned
+  // action state survives, but the callback-duration InputContext does not
+  // extend the lifetime of its node-bound invalidator.
+  if (!action_live(*runtime, *state, generation, action_generation) ||
+      !span_visible(*runtime, index) ||
+      (input_permission && !input_permission()) ||
+      (final_permission && !final_permission()))
+    return;
   context.invalidate();
   if (callback &&
       action_live(*runtime, *state, generation, action_generation) &&
@@ -736,6 +745,8 @@ public:
     const auto runtime = runtime_;
     const auto state = state_;
     const auto index = index_;
+    const auto generation = runtime->generation,
+               action_generation = state->generation;
     const bool changed = state->focused != focused;
     state->focused = focused;
     if (!focused) {
@@ -745,7 +756,9 @@ public:
       if (runtime->pointer == index)
         cancel_pointer(runtime);
     }
-    if (changed)
+    if (changed && runtime->mounted && state->mounted &&
+        runtime->generation == generation &&
+        state->generation == action_generation)
       context.invalidate();
   }
   EventResult semantic_action(SemanticAction action,
@@ -769,10 +782,13 @@ public:
     if (event.type != InputType::KeyDown && event.type != InputType::KeyUp)
       return EventResult::Ignored;
     if (event.key == Key::Escape && event.type == InputType::KeyDown) {
+      const auto generation = runtime->generation,
+                 action_generation = state->generation;
       state->space_armed = false;
       state->pointer_pressed = false;
       cancel_pointer(runtime);
-      context.invalidate();
+      if (action_live(*runtime, *state, generation, action_generation))
+        context.invalidate();
       return EventResult::Handled;
     }
     if (event.key != Key::Space && event.key != Key::Enter)
@@ -938,12 +954,13 @@ public:
   }
   EventResult input(const InputEvent &event, InputContext &context) override {
     const auto runtime = runtime_;
+    const auto generation = runtime->generation;
     if (event.type == InputType::PointerCancel) {
       if (runtime->pointer && runtime->pointer_id != event.pointer.id)
         return EventResult::Ignored;
       const bool had = runtime->pointer.has_value();
       cancel_pointer(runtime);
-      if (had)
+      if (had && runtime->mounted && runtime->generation == generation)
         context.invalidate();
       return had ? EventResult::Handled : EventResult::Ignored;
     }
@@ -995,8 +1012,7 @@ public:
       auto permission = InputMutationAccess::action_guard(context);
       auto release = context.pointer_releaser();
       auto focus = state->request_focus;
-      const auto generation = runtime->generation,
-                 action_generation = state->generation;
+      const auto action_generation = state->generation;
       if (!action_live(*runtime, *state, generation, action_generation) ||
           (permission && !permission()) ||
           (state->permission && !state->permission()))
@@ -1016,13 +1032,25 @@ public:
         runtime->release_pointer = std::move(release);
         state->pointer_pressed = true;
         state->hovered = true;
+        const auto current = [&] {
+          return runtime->contact_serial == contact_serial &&
+                 action_live(*runtime, *state, generation, action_generation) &&
+                 (!permission || permission()) &&
+                 (!state->permission || state->permission());
+        };
         context.capture_pointer();
+        if (!current()) {
+          cancel_pointer(runtime, contact_serial);
+          return EventResult::Handled;
+        }
         if (focus)
           focus();
+        if (!current()) {
+          cancel_pointer(runtime, contact_serial);
+          return EventResult::Handled;
+        }
         context.invalidate();
-        if (!action_live(*runtime, *state, generation, action_generation) ||
-            (permission && !permission()) ||
-            (state->permission && !state->permission()))
+        if (!current())
           cancel_pointer(runtime, contact_serial);
       } catch (...) {
         cancel_pointer_noexcept(runtime, contact_serial);
@@ -1040,14 +1068,15 @@ public:
       cancel_pointer(runtime);
       if (activate)
         activate_action(runtime, state, index, std::move(permission), context);
-      else
+      else if (runtime->mounted && runtime->generation == generation)
         context.invalidate();
       return EventResult::Handled;
     }
     if (event.type == InputType::KeyDown && event.key == Key::Escape &&
         runtime->pointer) {
       cancel_pointer(runtime);
-      context.invalidate();
+      if (runtime->mounted && runtime->generation == generation)
+        context.invalidate();
       return EventResult::Handled;
     }
     return EventResult::Ignored;
