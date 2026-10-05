@@ -19,8 +19,8 @@ int self_test() {
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
     ui::State<bool> audio{true}, notes{false}, markers{true};
-    ui::UI tree{ui::Padding{20.0f, ui::CheckboxGroup{"Exporter", {
+    ui::UI tree{ui::Padding{20.0f, ui::CheckboxGroup{"Export", {
         {"audio", "Audio", audio.binding()}, {"notes", "Notes", notes.binding()},
-        {"markers", "Marqueurs", markers.binding()}}}}};
+        {"markers", "Markers", markers.binding()}}}}};
     return example::run_window(tree, "NativeUI CheckboxGroup", {360.0f, 220.0f});
 }

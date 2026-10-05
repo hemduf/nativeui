@@ -5,16 +5,16 @@ std::vector<ui::RichTextSpan> spans(std::function<void()> action) {
   ui::TextStyle accent;
   accent.size = 18;
   accent.color = {.1f, .35f, .75f, 1};
-  return {{.text = "Lire "},
+  return {{.text = "Read "},
           {.id = "guide",
-           .text = "le guide",
+           .text = "the guide",
            .style = accent,
            .background = ui::Color{.9f, .95f, 1, 1},
            .underline = true,
            .on_activate = std::move(action)},
-          {.text = " avant de commencer. office / العربية / A\xcc\x81 / "
-                   "👨‍👩‍👧‍👦\nLe texte se replie comme un seul "
-                   "paragraphe."}};
+          {.text = " before you begin. office / العربية / A\xcc\x81 / "
+                   "👨‍👩‍👧‍👦\nThe text wraps as a single "
+                   "paragraph."}};
 }
 int self_test() {
   int calls{};

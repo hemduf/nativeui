@@ -5,8 +5,8 @@
 namespace {
 int self_test() {
     ui::State<bool> allowed{false},value{true};
-    ui::UI tree{ui::Column{ui::Button{"Extérieur",[] {}},
-        ui::Fieldset{"Préférences",ui::Field{"Option",ui::Checkbox{value,""}}}.enabled(allowed)}.padding(0.0f).gap(0.0f)};
+    ui::UI tree{ui::Column{ui::Button{"Outside",[] {}},
+        ui::Fieldset{"Preferences",ui::Field{"Option",ui::Checkbox{value,""}}}.enabled(allowed)}.padding(0.0f).gap(0.0f)};
     example::Platform platform; tree.resize({300.0f,180.0f}); tree.activate(platform);
     // Tab skips the unavailable group and keeps the exterior control active.
     tree.dispatch(example::key(ui::Key::Tab),platform);
@@ -27,8 +27,8 @@ int self_test() {
 int main(int argc,char** argv) {
     if (example::self_test_requested(argc,argv)) return self_test();
     ui::State<bool> allowed{true},checked{true}; ui::State<std::string> city{"Paris"};
-    ui::UI tree{ui::Column{ui::Checkbox{allowed,"Activer les préférences"},
-        ui::Fieldset{"Livraison",ui::Field{"Ville",ui::TextInput{"",city}},ui::Field{"Notifications",ui::Checkbox{checked,""}}}
-            .description("Les valeurs restent conservées lorsque le groupe est désactivé.").enabled(allowed)}.padding(20.0f)};
+    ui::UI tree{ui::Column{ui::Checkbox{allowed,"Enable preferences"},
+        ui::Fieldset{"Shipping",ui::Field{"City",ui::TextInput{"",city}},ui::Field{"Notifications",ui::Checkbox{checked,""}}}
+            .description("Values are preserved while the group is disabled.").enabled(allowed)}.padding(20.0f)};
     return example::run_window(tree,"NativeUI Fieldset",{480.0f,300.0f});
 }

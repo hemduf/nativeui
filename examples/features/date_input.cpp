@@ -3,7 +3,7 @@
 int main(int argc, char **argv) {
   const auto initial = std::chrono::sys_days{std::chrono::year{2026} / 10 / 4};
   ui::State<ui::DateInput::Value> value{initial};
-  ui::UI tree{ui::DateInput{"Échéance", value}};
+  ui::UI tree{ui::DateInput{"Due date", value}};
   if (example::self_test_requested(argc, argv)) {
     example::Platform platform;
     tree.resize({500, 450});

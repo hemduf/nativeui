@@ -26,7 +26,7 @@ int self_test() {
 int main(int argc, char **argv) {
     if (example::self_test_requested(argc, argv))
         return self_test();
-    ui::State<std::vector<ui::TreeNode<int>>> nodes{{{1, {}, "Projet", true, true},
+    ui::State<std::vector<ui::TreeNode<int>>> nodes{{{1, {}, "Project", true, true},
                                                      {2, 1, "Sources", true, true},
                                                      {3, 2, "main.cpp"},
                                                      {4, 2, "widgets.cpp"},

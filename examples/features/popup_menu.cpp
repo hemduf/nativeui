@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
     return self_test();
   ui::State<bool> compact{true};
   auto value = compact.binding();
-  ui::UI tree{ui::PopupMenu{"Présentation", [value] {
+  ui::UI tree{ui::PopupMenu{"Presentation", [value] {
                               auto item = submenu([value]() mutable {
                                 value.set(!value.get());
                               });

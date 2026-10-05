@@ -5,7 +5,7 @@ int self_test() {
     ui::State<bool> open{false};
     int closed = 0;
     ui::UI tree{ui::Column{ui::Popover{open, ui::Button{"Options", [&] { open.set(!open.get()); }},
-                                       ui::Label{"Paramètres avancés"}}
+                                       ui::Label{"Advanced settings"}}
                                .on_close([&] { ++closed; }),
                            ui::Spacer{0.0f, 100.0f}}
                     .padding(0.0f)
@@ -34,13 +34,13 @@ int main(int argc, char **argv) {
         return self_test();
     ui::State<bool> open{false};
     ui::UI tree{ui::Padding{
-        24.0f, ui::Column{ui::Label{"Panneau composé ancré"},
+        24.0f, ui::Column{ui::Label{"Anchored composition panel"},
                           ui::Popover{open, ui::Button{"Options", [&] { open.set(!open.get()); }},
-                                      ui::Column{ui::Label{"Paramètres avancés"},
-                                                 ui::Button{"Fermer", [&] { open.set(false); }}}
+                                      ui::Column{ui::Label{"Advanced settings"},
+                                                 ui::Button{"Close", [&] { open.set(false); }}}
                                           .padding(0.0f)
                                           .gap(8.0f)}
                               .focus_on_open(),
-                          ui::Label{"Escape ou un clic extérieur ferme le panneau."}}}};
+                          ui::Label{"Escape or an outside click closes the panel."}}}};
     return example::run_window(tree, "NativeUI Popover", {440.0f, 320.0f});
 }

@@ -6,7 +6,7 @@ int self_test() {
   ui::UI tree{
       ui::ContextMenu{ui::Button{"Document", [&] { ++primary; }}.spec(),
                       std::vector<ui::PopupMenuItem>{ui::PopupMenuItem::action(
-                          "Copier", [&] { ++contextual; })}}};
+                          "Copy", [&] { ++contextual; })}}};
   example::Platform platform;
   tree.resize({440, 300});
   tree.activate(platform);
@@ -29,12 +29,12 @@ int main(int argc, char **argv) {
   ui::State<int> actions{0};
   auto count = actions.binding();
   ui::UI tree{ui::ContextMenu{
-      ui::Label{"Clic secondaire, Menu ou Shift+F10 : commandes du document"}
+      ui::Label{"Secondary click, Menu or Shift+F10: document commands"}
           .spec(),
       std::vector<ui::PopupMenuItem>{
           ui::PopupMenuItem::action(
-              "Copier", [count]() mutable { count.set(count.get() + 1); }),
+              "Copy", [count]() mutable { count.set(count.get() + 1); }),
           ui::PopupMenuItem::separator(),
-          ui::PopupMenuItem::action("Indisponible", [] {}, false)}}};
+          ui::PopupMenuItem::action("Unavailable", [] {}, false)}}};
   return example::run_window(tree, "NativeUI / ContextMenu", {620, 320});
 }

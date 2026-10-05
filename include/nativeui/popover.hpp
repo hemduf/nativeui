@@ -11,12 +11,12 @@
 namespace ui {
 
 struct PopoverStyle {
-    std::optional<Color> surface;
-    std::optional<Color> border;
-    std::optional<float> border_width;
-    std::optional<float> radius;
-    std::optional<float> padding;
-    std::optional<Size> max_size;
+    std::optional<Color> surface{};
+    std::optional<Color> border{};
+    std::optional<float> border_width{};
+    std::optional<float> radius{};
+    std::optional<float> padding{};
+    std::optional<Size> max_size{};
 };
 
 /// Retained anchor decorator. The opening intent is borrowed through Binding;

@@ -33,10 +33,10 @@ class ToastHandle final {
     std::uint64_t id_{};
 };
 struct ToastSpec {
-    std::string message;
-    std::string action_label;
-    std::function<void()> action;
-    std::optional<std::chrono::milliseconds> duration;
+    std::string message{};
+    std::string action_label{};
+    std::function<void()> action{};
+    std::optional<std::chrono::milliseconds> duration{};
 };
 enum class ToastShowStatus { Shown, InvalidSpec, Unavailable };
 struct ToastShowResult {

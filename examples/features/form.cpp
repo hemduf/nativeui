@@ -7,8 +7,8 @@ namespace {
 int self_test() {
     auto first=std::make_shared<example::BoxObservation>(),second=std::make_shared<example::BoxObservation>();
     ui::UI tree{ui::Form{
-        ui::Field{"Libellé extérieur assez long",example::Box{"A",{120.0f,28.0f},ui::colors::accent,{50.0f,20.0f},first}},
-        ui::Fieldset{"Groupe",ui::Field{"Court",example::Box{"B",{120.0f,28.0f},ui::colors::accent,{50.0f,20.0f},second}}}}
+        ui::Field{"A long external label",example::Box{"A",{120.0f,28.0f},ui::colors::accent,{50.0f,20.0f},first}},
+        ui::Fieldset{"Group",ui::Field{"Short",example::Box{"B",{120.0f,28.0f},ui::colors::accent,{50.0f,20.0f},second}}}}
         .layout(ui::FormLayout::Responsive)};
     ui::HeadlessRenderer wide{{600.0f,240.0f},1.0f};
     if (!wide.render(tree) || !example::near(first->bounds.x,second->bounds.x)) return example::fail("Fieldset did not share the Form label column");
@@ -29,9 +29,9 @@ int main(int argc,char** argv) {
     if (example::self_test_requested(argc,argv)) return self_test();
     ui::State<std::string> name{"Camille"},notes{""}; ui::State<bool> newsletter{true};
     ui::UI tree{ui::Padding{20.0f,ui::Form{
-        ui::Field{"Nom",ui::TextInput{"",name}}.required(),
-        ui::Fieldset{"Préférences",ui::Field{"Lettre d’information",ui::Checkbox{newsletter,""}}},
-        ui::Field{"Notes",ui::TextArea{"",notes}}.description("Entrée ajoute une ligne dans ce champ.")}
+        ui::Field{"Name",ui::TextInput{"",name}}.required(),
+        ui::Fieldset{"Preferences",ui::Field{"Newsletter",ui::Checkbox{newsletter,""}}},
+        ui::Field{"Notes",ui::TextArea{"",notes}}.description("Enter adds a line in this field.")}
         .layout(ui::FormLayout::Responsive)}};
     return example::run_window(tree,"NativeUI Form",{640.0f,360.0f});
 }

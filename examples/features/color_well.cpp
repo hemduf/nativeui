@@ -2,7 +2,7 @@
 #include <nativeui/color_well.hpp>
 int main(int argc, char **argv) {
   ui::State<ui::Color> value{ui::Color{.2f, .4f, .8f, .5f}};
-  ui::UI tree{ui::ColorWell{"Couleur de piste", value}};
+  ui::UI tree{ui::ColorWell{"Track color", value}};
   if (example::self_test_requested(argc, argv)) {
     example::Platform platform;
     tree.resize({500, 480});

@@ -11,7 +11,7 @@ int self_test() {
     ui::State<std::optional<ui::SortOrder>> sort{std::nullopt};
     int requests = 0;
     ui::UI tree{ui::TableView<int>{rows, selection}
-                    .columns({{"name", "Nom", 100, 60, {}, ui::Align::Start, true, false},
+                    .columns({{"name", "Name", 100, 60, {}, ui::Align::Start, true, false},
                               {"id", "ID", 80}})
                     .layout(layout)
                     .sort(sort)
@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     ui::State<ui::TableLayout> layout{{}};
     ui::State<std::optional<ui::SortOrder>> sort{std::nullopt};
     ui::UI tree{ui::TableView<int>{rows, selection}
-                    .columns({{"name", "Nom", 220, 80, {}, ui::Align::Start, true, false},
+                    .columns({{"name", "Name", 220, 80, {}, ui::Align::Start, true, false},
                               {"id", "ID", 100}})
                     .layout(layout)
                     .sort(sort)

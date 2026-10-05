@@ -3,7 +3,7 @@
 namespace {
 int self_test() {
   ui::State<std::string> name{"Preset.oreto"};
-  ui::UI tree{ui::EditableText{"Nom", name}.select_stem()};
+  ui::UI tree{ui::EditableText{"Name", name}.select_stem()};
   example::Platform platform;
   tree.resize({420, 80});
   tree.activate(platform);
@@ -26,6 +26,6 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<std::string> name{"Preset.oreto"};
-  ui::UI tree{ui::EditableText{"Nom du preset", name}.select_stem()};
+  ui::UI tree{ui::EditableText{"Preset name", name}.select_stem()};
   return example::run_window(tree, "NativeUI / EditableText", {420, 110});
 }

@@ -5,7 +5,7 @@ namespace {
 std::vector<ui::TreeNode<int>> rows() {
     std::vector<ui::TreeNode<int>> result;
     for (int i = 0; i < 10000; ++i)
-        result.push_back({i, {}, "Fichier " + std::to_string(i)});
+        result.push_back({i, {}, "File " + std::to_string(i)});
     return result;
 }
 int self_test() {

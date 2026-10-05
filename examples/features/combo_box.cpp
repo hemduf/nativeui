@@ -4,7 +4,7 @@ namespace {
 int self_test() {
   ui::State<int> selected{99};
   ui::UI tree{
-      ui::ComboBox<int>{selected, {{1, "Normal", true}, {2, "Élevé", true}}}};
+      ui::ComboBox<int>{selected, {{1, "Normal", true}, {2, "High", true}}}};
   example::Platform platform;
   tree.resize({360, 220});
   tree.activate(platform);
@@ -26,6 +26,6 @@ int main(int argc, char **argv) {
     return self_test();
   ui::State<int> selected{1};
   ui::UI tree{
-      ui::ComboBox<int>{selected, {{1, "Normal", true}, {2, "Élevé", true}}}};
+      ui::ComboBox<int>{selected, {{1, "Normal", true}, {2, "High", true}}}};
   return example::run_window(tree, "NativeUI / ComboBox", {420, 320});
 }

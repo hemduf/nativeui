@@ -6,13 +6,13 @@ struct View {
   bool operator==(const View &) const = default;
 };
 std::vector<ui::SegmentOption<View>> options() {
-  return {{{0}, "Liste", true}, {{1}, "Grille", true}, {{2}, "Colonnes", true}};
+  return {{{0}, "List", true}, {{1}, "Grid", true}, {{2}, "Columns", true}};
 }
 int self_test() {
   ui::State<View> view{View{0}};
   int notifications{};
   auto subscription = view.observe([&](const View &) { ++notifications; });
-  ui::UI tree{ui::SegmentedControl{"Vue", view, options()}};
+  ui::UI tree{ui::SegmentedControl{"View", view, options()}};
   example::Platform platform;
   tree.resize({400, 70});
   tree.activate(platform);
@@ -33,6 +33,6 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<View> view{View{0}};
-  ui::UI tree{ui::SegmentedControl{"Vue", view, options()}};
+  ui::UI tree{ui::SegmentedControl{"View", view, options()}};
   return example::run_window(tree, "NativeUI / SegmentedControl", {440, 90});
 }

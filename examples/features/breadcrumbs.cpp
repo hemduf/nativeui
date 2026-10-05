@@ -4,9 +4,9 @@ namespace {
 int self_test() {
   ui::State<std::vector<ui::BreadcrumbItem>> path{
       std::vector<ui::BreadcrumbItem>{
-          {"root", "Disque"}, {"home", "Ada"}, {"docs", "Documents"}}};
+          {"root", "Disk"}, {"home", "Ada"}, {"docs", "Documents"}}};
   std::string chosen;
-  ui::UI tree{ui::Breadcrumbs{path}.label("Chemin").on_navigate(
+  ui::UI tree{ui::Breadcrumbs{path}.label("Path").on_navigate(
       [&](const auto &key) { chosen = key; })};
   example::Platform platform;
   tree.resize({500, 50});
@@ -26,13 +26,13 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<std::vector<ui::BreadcrumbItem>> path{
-      std::vector<ui::BreadcrumbItem>{{"root", "Disque"},
+      std::vector<ui::BreadcrumbItem>{{"root", "Disk"},
                                       {"home", "Ada"},
-                                      {"projects", "Projets audio"},
+                                      {"projects", "Audio projects"},
                                       {"nativeui", "NativeUI"},
                                       {"docs", "Documentation"}}};
   auto model = path.binding();
-  ui::UI tree{ui::Breadcrumbs{path}.label("Chemin").on_navigate(
+  ui::UI tree{ui::Breadcrumbs{path}.label("Path").on_navigate(
       [model](const std::string &key) mutable {
         auto next = model.snapshot();
         const auto found =

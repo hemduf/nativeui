@@ -5,7 +5,7 @@ int self_test() {
   ui::State<bool> can{true};
   ui::State<std::vector<ui::HistoryEntry>> entries{
       std::vector<ui::HistoryEntry>{
-          {"one", "Premier"}, {"two", "Deuxième"}, {"three", "Troisième"}}};
+          {"one", "First"}, {"two", "Second"}, {"three", "Third"}}};
   int chosen{};
   ui::UI tree{ui::HistoryButton{
       ui::HistoryDirection::Backward, can, [&](int steps) {
@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
   ui::State<bool> can{true};
   ui::State<std::vector<ui::HistoryEntry>> entries{
       std::vector<ui::HistoryEntry>{
-          {"editor", "Éditeur"}, {"presets", "Presets"}, {"home", "Accueil"}}};
+          {"editor", "Editor"}, {"presets", "Presets"}, {"home", "Home"}}};
   auto available = can.binding();
   ui::HistoryButtonStyle style;
   style.show_label = true;

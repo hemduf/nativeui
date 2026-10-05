@@ -22,8 +22,8 @@ int main(int argc,char** argv) {
     if (example::self_test_requested(argc,argv)) return self_test();
     ui::State<std::optional<int>> selection{1};
     ui::UI tree{ui::ListView{selection}
-        .item(1,ui::Padding{12.0f,ui::Label{"Premier"}})
-        .item(2,ui::Padding{12.0f,ui::Label{"Indisponible"}},false)
-        .item(3,ui::Padding{12.0f,ui::Label{"Troisième"}})};
+        .item(1,ui::Padding{12.0f,ui::Label{"First"}})
+        .item(2,ui::Padding{12.0f,ui::Label{"Unavailable"}},false)
+        .item(3,ui::Padding{12.0f,ui::Label{"Third"}})};
     return example::run_window(tree,"NativeUI ListView",{360.0f,220.0f});
 }

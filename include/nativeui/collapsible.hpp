@@ -18,13 +18,13 @@ struct CollapsibleStyle {
     float chevron_size{12.0f};
     float chevron_gap{6.0f};
     float corner_radius{4.0f};
-    std::optional<Color> background;
-    std::optional<Color> hover_background;
-    std::optional<Color> pressed_background;
-    std::optional<Color> text_color;
-    std::optional<Color> chevron_color;
-    std::optional<Color> focus_color;
-    std::string accessible_name;
+    std::optional<Color> background{};
+    std::optional<Color> hover_background{};
+    std::optional<Color> pressed_background{};
+    std::optional<Color> text_color{};
+    std::optional<Color> chevron_color{};
+    std::optional<Color> focus_color{};
+    std::string accessible_name{};
     bool reduced_motion{};
 };
 

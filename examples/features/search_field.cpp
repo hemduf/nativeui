@@ -4,7 +4,7 @@ namespace {
 int self_test() {
   ui::State<std::string> query{"presets"};
   int submissions{};
-  ui::UI tree{ui::SearchField{"Chercher", query}.on_submit(
+  ui::UI tree{ui::SearchField{"Search", query}.on_submit(
       [&](const auto &) { ++submissions; })};
   example::Platform platform;
   tree.resize({480, 80});
@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<std::string> query{};
-  ui::UI tree{ui::SearchField{"Chercher dans les presets", query}.placeholder(
-      "Rechercher")};
+  ui::UI tree{ui::SearchField{"Search presets", query}.placeholder(
+      "Search")};
   return example::run_window(tree, "NativeUI / SearchField", {480, 110});
 }

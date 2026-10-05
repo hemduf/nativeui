@@ -3,7 +3,7 @@
 int main(int argc, char **argv) {
   ui::State<ui::Color> value{ui::Color{.12f, .34f, .56f, .43f}};
   ui::UI tree{ui::ColorPicker{"Accent", value}.swatches(
-      {{"red", "Rouge", {1, 0, 0, 1}}, {"blue", "Bleu", {0, 0, 1, 1}}})};
+      {{"red", "Red", {1, 0, 0, 1}}, {"blue", "Blue", {0, 0, 1, 1}}})};
   if (example::self_test_requested(argc, argv)) {
     const auto initial = value.get();
     ui::HeadlessRenderer renderer{{280, 450}, 1};

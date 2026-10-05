@@ -5,10 +5,10 @@ namespace {
 ui::Spec group(ui::State<bool> &bold, ui::State<bool> &italic,
                ui::State<bool> &underline) {
   std::vector<ui::Spec> items;
-  items.push_back(ui::ToggleButton{"Gras", bold}.spec());
-  items.push_back(ui::ToggleButton{"Italique", italic}.spec());
-  items.push_back(ui::ToggleButton{"Souligné", underline}.spec());
-  return ui::ToggleGroup{"Style de texte", std::move(items)}.spec();
+  items.push_back(ui::ToggleButton{"Bold", bold}.spec());
+  items.push_back(ui::ToggleButton{"Italic", italic}.spec());
+  items.push_back(ui::ToggleButton{"Underline", underline}.spec());
+  return ui::ToggleGroup{"Text style", std::move(items)}.spec();
 }
 int self_test() {
   ui::State<bool> bold{false}, italic{false}, underline{false};

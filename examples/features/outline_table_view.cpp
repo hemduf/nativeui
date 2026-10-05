@@ -4,13 +4,13 @@
 namespace {
 int self_test() {
     ui::State<std::vector<ui::TreeNode<int>>> nodes{
-        {{1, {}, "Dossier", true, true}, {2, 1, "Fichier"}}};
+        {{1, {}, "Folder", true, true}, {2, 1, "File"}}};
     ui::State<ui::SelectionSnapshot<int>> chosen{{{1}, 1, 1}};
     ui::Selection<int> selection{chosen};
     ui::State<std::vector<int>> expanded{{}};
     ui::State<ui::TableLayout> layout{{{"detail", "name"}, {}}};
     ui::UI tree{ui::OutlineTableView<int>{nodes, selection, expanded}
-                    .columns({{"name", "Nom", 100}, {"detail", "Détails", 100}})
+                    .columns({{"name", "Name", 100}, {"detail", "Details", 100}})
                     .tree_column("name")
                     .layout(layout)};
     example::Platform platform;
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
     ui::State<std::vector<int>> expanded{{1}};
     ui::State<ui::TableLayout> layout{{}};
     ui::UI tree{ui::OutlineTableView<int>{nodes, selection, expanded}
-                    .columns({{"name", "Nom", 280}, {"id", "ID", 100}})
+                    .columns({{"name", "Name", 280}, {"id", "ID", 100}})
                     .tree_column("name")
                     .layout(layout)
                     .cell([](const auto &node, const auto &column) {

@@ -10,15 +10,15 @@ namespace ui {
 enum class AccordionMode { Multiple, Single };
 
 struct AccordionStyle {
-    CollapsibleStyle section;
+    CollapsibleStyle section{};
     float padding{};
     float corner_radius{4.0f};
     float border_width{1.0f};
     float separator_width{1.0f};
-    std::optional<Color> background;
-    std::optional<Color> border_color;
-    std::optional<Color> separator_color;
-    std::string accessible_name;
+    std::optional<Color> background{};
+    std::optional<Color> border_color{};
+    std::optional<Color> separator_color{};
+    std::string accessible_name{};
 };
 
 class Accordion {

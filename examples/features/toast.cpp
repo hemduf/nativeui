@@ -14,8 +14,8 @@ int self_test() {
     tree.resize({360.0f, 240.0f});
     tree.activate(platform);
     ui::Toast notices{tree, dispatcher.dispatcher()};
-    auto first = notices.show({.message = "Document enregistré"});
-    auto replacement = notices.show({.message = "Document enregistré", .duration = 1000ms});
+    auto first = notices.show({.message = "Document saved"});
+    auto replacement = notices.show({.message = "Document saved", .duration = 1000ms});
     if (!first.handle.valid() && replacement.status == ui::ToastShowStatus::Shown &&
         replacement.handle.valid() && tree.overlay_entries().size() == 1) {
         ui::HeadlessRenderer renderer{{360.0f, 240.0f}, 1.0f};
@@ -37,7 +37,7 @@ int self_test() {
         return example::fail("toast expiration retained a message or timer");
     int undo_count = 0;
     auto actionable =
-        notices.show({.message = "Élément supprimé", .action_label = "Annuler", .action = [&] {
+        notices.show({.message = "Item deleted", .action_label = "Undo", .action = [&] {
                           ++undo_count;
                       }});
     tree.resize({360.0f, 240.0f});
@@ -48,7 +48,7 @@ int self_test() {
     tree.dispatch(example::key(ui::Key::Enter), platform);
     if (undo_count != 1 || actionable.handle.valid() || dispatcher.active_timer_count() != 0)
         return example::fail("toast action did not retire exactly once");
-    auto pending = notices.show({.message = "Nouvelle notification"});
+    auto pending = notices.show({.message = "New notification"});
     tree.deactivate(platform);
     if (pending.handle.valid() || dispatcher.active_timer_count() != 0)
         return example::fail("deactivation retained a notification");
@@ -64,18 +64,18 @@ int main(int argc, char **argv) {
     ui::Toast *notices = nullptr;
     int undo_count = 0;
     ui::UI tree{ui::Padding{
-        24.0f, ui::Column{ui::Label{"Notifications temporaires sans transfert de focus"},
-                          ui::Button{"Enregistrer",
+        24.0f, ui::Column{ui::Label{"Temporary notifications without moving focus"},
+                          ui::Button{"Save",
                                      [&] {
                                          if (notices)
                                              (void)notices->show(
-                                                 {.message = "Document enregistré"});
+                                                 {.message = "Document saved"});
                                      }},
-                          ui::Button{"Supprimer",
+                          ui::Button{"Delete",
                                      [&] {
                                          if (notices)
-                                             (void)notices->show({.message = "Élément supprimé",
-                                                                  .action_label = "Annuler",
+                                             (void)notices->show({.message = "Item deleted",
+                                                                  .action_label = "Undo",
                                                                   .action = [&] { ++undo_count; }});
                                      }}}
                    .gap(12.0f)}};

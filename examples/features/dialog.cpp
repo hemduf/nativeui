@@ -3,9 +3,9 @@
 
 namespace {
 ui::AlertDialogSpec alert() {
-    return {"Confirmer", "Voulez-vous continuer ?", {
-        {"cancel", "Annuler", true, ui::DialogActionRole::Cancel},
-        {"ok", "Continuer", true, ui::DialogActionRole::Default}}};
+    return {"Confirm", "Do you want to continue?", {
+        {"cancel", "Cancel", true, ui::DialogActionRole::Cancel},
+        {"ok", "Continue", true, ui::DialogActionRole::Default}}};
 }
 int self_test() {
     ui::UI tree{ui::Button{"Document", [] {}}}; example::Platform platform;
@@ -22,7 +22,7 @@ int self_test() {
 int main(int argc, char** argv) {
     if (example::self_test_requested(argc, argv)) return self_test();
     ui::Dialog* controller{};
-    ui::UI tree{ui::Padding{20.0f, ui::Button{"Ouvrir le dialogue", [&] {
+    ui::UI tree{ui::Padding{20.0f, ui::Button{"Open the dialog", [&] {
         if (controller) (void)controller->show_alert(alert(), [](ui::DialogResult) {});
     }}}};
     ui::Dialog dialog{tree}; controller = &dialog;

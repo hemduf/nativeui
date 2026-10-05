@@ -10,7 +10,7 @@ ui::InputEvent text(std::string value) {
 int self_test() {
   ui::State<std::string> selected{"Inter"};
   ui::UI tree{ui::EditableComboBox{
-      "Police", selected,
+      "Font", selected,
       std::vector<std::string>{"Inter", "Georgia", "Menlo"}}};
   example::Platform platform;
   tree.resize({440, 300});
@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     return self_test();
   ui::State<std::string> selected{"Inter"};
   ui::UI tree{ui::EditableComboBox{
-      "Police", selected,
+      "Font", selected,
       std::vector<std::string>{"Inter", "Georgia", "Menlo"}}};
   return example::run_window(tree, "NativeUI / EditableComboBox", {460, 360});
 }

@@ -3,8 +3,8 @@
 
 namespace {
 int self_test() {
-    ui::State<bool> value{false},locked{false}; ui::State<std::string> error{"Erreur qui se replie sur plusieurs lignes dans un champ étroit."};
-    ui::UI tree{ui::ReadOnly{locked,ui::Field{"Activer",ui::Checkbox{value,""}}.error(error).required()}};
+    ui::State<bool> value{false},locked{false}; ui::State<std::string> error{"An error that wraps across several lines in a narrow field."};
+    ui::UI tree{ui::ReadOnly{locked,ui::Field{"Enable",ui::Checkbox{value,""}}.error(error).required()}};
     example::Platform platform; tree.resize({220.0f,220.0f}); tree.activate(platform);
     tree.dispatch(example::pointer(ui::InputType::PointerDown,4.0f,4.0f),platform);
     tree.dispatch(example::pointer(ui::InputType::PointerUp,4.0f,4.0f),platform);
@@ -22,9 +22,9 @@ int self_test() {
 }
 int main(int argc,char** argv) {
     if (example::self_test_requested(argc,argv)) return self_test();
-    ui::State<std::string> email{""},error{"L’adresse est requise."};
+    ui::State<std::string> email{""},error{"The address is required."};
     ui::UI tree{ui::Column{ui::Header{"Field"},
-        ui::Field{"Adresse",ui::TextInput{"Adresse électronique",email}}.description("Le libellé cible le contrôle du champ.").error(error).required(),
-        ui::Button{"Effacer l’erreur",[&] { error.set(""); }}}.padding(20.0f)};
+        ui::Field{"Address",ui::TextInput{"Email address",email}}.description("The label targets the field control.").error(error).required(),
+        ui::Button{"Clear the error",[&] { error.set(""); }}}.padding(20.0f)};
     return example::run_window(tree,"NativeUI Field",{480.0f,280.0f});
 }

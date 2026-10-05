@@ -4,7 +4,7 @@
 namespace {
 int self_test() {
   ui::State<double> score{3.0};
-  ui::UI tree{ui::Rating{"Note", score, 5}.step(0.5)};
+  ui::UI tree{ui::Rating{"Rating", score, 5}.step(0.5)};
   example::Platform platform;
   tree.resize({160.0f, 32.0f});
   tree.activate(platform);
@@ -22,6 +22,6 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<double> score{3.0};
-  ui::UI tree{ui::Rating{"Note", score, 5}.step(0.5)};
+  ui::UI tree{ui::Rating{"Rating", score, 5}.step(0.5)};
   return example::run_window(tree, "NativeUI / Rating", {240.0f, 90.0f});
 }

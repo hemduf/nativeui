@@ -3,7 +3,7 @@
 int main(int argc, char **argv) {
   const auto initial = std::chrono::sys_days{std::chrono::year{2024} / 1 / 31};
   ui::State<ui::Calendar::Value> value{initial};
-  ui::UI tree{ui::Calendar{"Jour", value}};
+  ui::UI tree{ui::Calendar{"Day", value}};
   if (example::self_test_requested(argc, argv)) {
     example::Platform platform;
     tree.resize({320, 300});

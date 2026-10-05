@@ -3,7 +3,7 @@
 int main(int argc, char **argv) {
   ui::State<ui::TimeInput::Value> value{
       std::chrono::seconds{9 * 3600 + 30 * 60 + 17}};
-  ui::UI tree{ui::TimeInput{"Alarme", value}};
+  ui::UI tree{ui::TimeInput{"Alarm", value}};
   if (example::self_test_requested(argc, argv)) {
     example::Platform platform;
     tree.resize({320, 80});

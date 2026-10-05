@@ -10,7 +10,7 @@ ui::InputEvent text(std::string value) {
 int self_test() {
   ui::State<std::string> value{""};
   int submits{};
-  ui::UI tree{ui::Autocomplete{"Ville", value,
+  ui::UI tree{ui::Autocomplete{"City", value,
                                std::vector<std::string>{"Paris", "Pau", "Lyon"}}
                   .on_submit([&](const auto &) { ++submits; })};
   example::Platform platform;
@@ -28,8 +28,8 @@ int main(int argc, char **argv) {
   if (example::self_test_requested(argc, argv))
     return self_test();
   ui::State<std::string> value{""};
-  ui::UI tree{ui::Autocomplete{"Ville", value,
+  ui::UI tree{ui::Autocomplete{"City", value,
                                std::vector<std::string>{"Paris", "Pau", "Lyon"}}
-                  .placeholder("Texte libre ou suggestion")};
+                  .placeholder("Free text or suggestion")};
   return example::run_window(tree, "NativeUI / Autocomplete", {460, 360});
 }

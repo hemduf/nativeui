@@ -7,13 +7,13 @@
 #include <vector>
 namespace ui {
 struct RichTextSpan {
-  std::string id;
-  std::string text;
-  std::optional<TextStyle> style;
-  std::optional<Color> background;
+  std::string id{};
+  std::string text{};
+  std::optional<TextStyle> style{};
+  std::optional<Color> background{};
   bool underline{};
   bool strikethrough{};
-  std::function<void()> on_activate;
+  std::function<void()> on_activate{};
 };
 class RichText {
 public:
