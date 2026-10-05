@@ -22,7 +22,7 @@ void complete_finite_ascii_drafts_publish_without_step_snap() {
   tree.resize({450, 82});
   tree.activate(platform);
   for (const std::string text :
-       {"", "-", "1e", "1,2", "nan", "inf", "1.0x", "1e9999", "101"}) {
+       {"", "-", "1e", "1,2", "nan", "inf", "1.0x", "1e9999", "101", "++1", "+-1", "0x1p0", "2e-324"}) {
     replace(tree, platform, text);
     NUI_CHECK(value.get() == 4.0);
     tree.dispatch(test::key(ui::Key::Enter), platform);

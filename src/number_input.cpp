@@ -1,11 +1,73 @@
+#include "detail/widget_number_parse.hpp"
 #include "detail/widget_stepper_policy.hpp"
 #include "detail/widget_text_input_policy.hpp"
 #include <array>
 #include <charconv>
 #include <cmath>
 #include <nativeui/number_input.hpp>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 namespace ui {
+namespace detail {
+std::optional<double> parse_decimal_number(std::string_view text) noexcept {
+  const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  std::size_t position{};
+  if (!text.empty() && (text.front() == '+' || text.front() == '-'))
+    ++position;
+  bool mantissa_digit{}, nonzero_mantissa{};
+  const auto consume_digits = [&] {
+    while (position < text.size() && digit(text[position])) {
+      mantissa_digit = true;
+      nonzero_mantissa |= text[position] != '0';
+      ++position;
+    }
+  };
+  consume_digits();
+  if (position < text.size() && text[position] == '.') {
+    ++position;
+    consume_digits();
+  }
+  if (!mantissa_digit)
+    return {};
+  if (position < text.size() &&
+      (text[position] == 'e' || text[position] == 'E')) {
+    ++position;
+    if (position < text.size() &&
+        (text[position] == '+' || text[position] == '-'))
+      ++position;
+    const auto exponent_start = position;
+    while (position < text.size() && digit(text[position]))
+      ++position;
+    if (position == exponent_start)
+      return {};
+  }
+  if (position != text.size())
+    return {};
+  // Exact zero remains representable even with an extreme exponent. Exponent
+  // digits must never be mistaken for a nonzero mantissa.
+  if (!nonzero_mantissa)
+    return text.front() == '-' ? -0.0 : 0.0;
+  try {
+    // Floating from_chars is absent from older Apple standard libraries.
+    // Never change the host's locale or accept locale-specific punctuation.
+    std::istringstream input{std::string{text.data(), text.size()}};
+    input.imbue(std::locale::classic());
+    double value{};
+    input >> std::noskipws >> value;
+    if (!input.eof() || input.bad() || !std::isfinite(value) || value == 0.0)
+      return {};
+    // libc++/MSVC can report ERANGE as failbit for a representable subnormal,
+    // including a boundary rounded to minimum normal. Overflow remains invalid.
+    if (input.fail() && std::abs(value) > std::numeric_limits<double>::min())
+      return {};
+    return value;
+  } catch (...) {
+    // No source edit has been accepted; a later draft can parse normally.
+    return {};
+  }
+}
+} // namespace detail
 namespace {
 bool ascii_space(char c) noexcept {
   return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' ||
@@ -17,15 +79,8 @@ std::optional<double> parse_number(std::string_view text, double minimum,
     text.remove_prefix(1);
   while (!text.empty() && ascii_space(text.back()))
     text.remove_suffix(1);
-  if (!text.empty() && text.front() == '+')
-    text.remove_prefix(1);
-  if (text.empty())
-    return {};
-  double value{};
-  const auto result = std::from_chars(text.data(), text.data() + text.size(),
-                                      value, std::chars_format::general);
-  if (result.ec != std::errc{} || result.ptr != text.data() + text.size() ||
-      !std::isfinite(value) || value < minimum || value > maximum)
+  const auto value = detail::parse_decimal_number(text);
+  if (!value || *value < minimum || *value > maximum)
     return {};
   return value;
 }

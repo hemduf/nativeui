@@ -487,23 +487,23 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
   // The callable's copy and invocation may both replace this retained editor.
   // Keep independent session/source identity before either exposure; an Ignored
   // result may continue the built-in commands only for the same live buffer.
-  const auto session = session_;
-  const auto source = state_;
-  const bool source_valid = source.valid();
-  const auto edit_generation = session->storage_->edit_generation;
-  const auto buffer_generation = session->storage_->buffer_generation;
+  const auto key_session = session_;
+  const auto key_source = state_;
+  const bool source_valid = key_source.valid();
+  const auto edit_generation = key_session->storage_->edit_generation;
+  const auto buffer_generation = key_session->storage_->buffer_generation;
   auto permission = detail::InputMutationAccess::action_guard(ctx);
-  auto callback = on_key_down_;
+  auto key_callback = on_key_down_;
   const auto current = [&] {
-    return session->mounted() && session->storage_->editor == this &&
-           session->storage_->edit_generation == edit_generation &&
-           session->storage_->buffer_generation == buffer_generation &&
-           source.valid() == source_valid && (!permission || permission());
+    return key_session->mounted() && key_session->storage_->editor == this &&
+           key_session->storage_->edit_generation == edit_generation &&
+           key_session->storage_->buffer_generation == buffer_generation &&
+           key_source.valid() == source_valid && (!permission || permission());
   };
   if (!current())
     return EventResult::Handled;
-  if (callback) {
-    const auto result = callback(event);
+  if (key_callback) {
+    const auto result = key_callback(event);
     if (!current())
       return EventResult::Handled;
     if (result == EventResult::Handled) {
@@ -513,7 +513,7 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
   }
   if (model_.composition_active())
     return EventResult::Handled;
-  read_only = effective_read_only() || !source.valid() ||
+  read_only = effective_read_only() || !key_source.valid() ||
               (policy_ && policy_->read_only);
   pending_ime_commit_.clear();
 
