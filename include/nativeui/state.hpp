@@ -53,6 +53,9 @@ template <detail::StateValue T>
 class Binding;
 
 template <detail::StateValue T>
+class EditSession;
+
+template <detail::StateValue T>
 class State {
     struct ReadCopyFrame {
         ReadCopyFrame* previous{};
@@ -438,6 +441,7 @@ private:
 
     friend class State<T>;
     friend struct detail::StateReadAccess;
+    friend class EditSession<T>;
 };
 
 namespace detail {

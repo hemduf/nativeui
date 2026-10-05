@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
+#include <nativeui/edit.hpp>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
@@ -32,6 +33,9 @@ class KnobComponent final : public Component {
 public:
   KnobComponent(std::string label, Binding<float> state, float minimum,
                 float maximum);
+  KnobComponent(std::string label, Binding<float> state, float minimum,
+                float maximum, EditCallbacks<float> callbacks,
+                bool wheel_enabled = false);
 
   [[nodiscard]] bool focusable() const noexcept override;
   [[nodiscard]] bool cancel_capture_on_read_only() const noexcept override;
@@ -51,6 +55,7 @@ public:
 private:
   struct Observation {
     DragGesture gesture;
+    std::shared_ptr<EditSession<float>> edit;
     std::uint64_t generation{};
     std::function<void()> release_pointer;
     bool active{};
@@ -62,7 +67,8 @@ private:
   };
 
   [[nodiscard]] float effective_value(float value) const noexcept;
-  void publish(double value, InputContext &ctx);
+  void publish(double value, InputContext &ctx,
+               EditSource source = EditSource::Pointer);
 
   std::string label_;
   Binding<float> state_;
@@ -70,6 +76,7 @@ private:
   float minimum_{};
   float maximum_{1.0f};
   float drag_start_value_{};
+  bool wheel_enabled_{};
   Binding<float>::Subscription subscription_;
   std::shared_ptr<Observation> observation_;
 };
@@ -82,6 +89,10 @@ public:
 
   Knob &&range(float minimum, float maximum) &&;
 
+  Knob &&on_edit(EditCallbacks<float> callbacks) &&;
+
+  Knob &&wheel_enabled(bool value = true) &&;
+
   Spec spec() &&;
 
 private:
@@ -89,6 +100,8 @@ private:
   Binding<float> state_;
   float minimum_{0.0f};
   float maximum_{1.0f};
+  EditCallbacks<float> callbacks_{};
+  bool wheel_enabled_{};
 };
 
 } // namespace ui

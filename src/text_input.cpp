@@ -151,9 +151,18 @@ TextInputSnapshot TextInputAccess::snapshot(const TextInputComponent &editor) {
 TextInputComponent::TextInputComponent(
     std::string label, Binding<std::string> state, std::string placeholder,
     std::size_t max_length, SubmitCallback on_submit, TextInputStyle style)
+    : TextInputComponent(std::move(label), std::move(state),
+                         std::move(placeholder), max_length,
+                         std::move(on_submit), {}, std::move(style)) {}
+
+TextInputComponent::TextInputComponent(
+    std::string label, Binding<std::string> state, std::string placeholder,
+    std::size_t max_length, SubmitCallback on_submit,
+    KeyDownCallback on_key_down, TextInputStyle style)
     : label_(std::move(label)), state_(std::move(state)),
       model_(state_.get(), max_length), placeholder_(std::move(placeholder)),
-      on_submit_(std::move(on_submit)), style_(std::move(style)) {
+      on_submit_(std::move(on_submit)), on_key_down_(std::move(on_key_down)),
+      style_(std::move(style)) {
   detail::TextInputAccess::initialize(*this);
 }
 
@@ -265,8 +274,8 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
     if (result)
       return *result;
   }
-  const bool read_only = effective_read_only() || !state_.valid() ||
-                         (policy_ && policy_->read_only);
+  bool read_only = effective_read_only() || !state_.valid() ||
+                   (policy_ && policy_->read_only);
 
   if (event.type == InputType::PointerMove) {
     const bool inside = ctx.bounds().contains(event.position);
@@ -475,6 +484,37 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
 
   if (event.type != InputType::KeyDown)
     return EventResult::Ignored;
+  // The callable's copy and invocation may both replace this retained editor.
+  // Keep independent session/source identity before either exposure; an Ignored
+  // result may continue the built-in commands only for the same live buffer.
+  const auto session = session_;
+  const auto source = state_;
+  const bool source_valid = source.valid();
+  const auto edit_generation = session->storage_->edit_generation;
+  const auto buffer_generation = session->storage_->buffer_generation;
+  auto permission = detail::InputMutationAccess::action_guard(ctx);
+  auto callback = on_key_down_;
+  const auto current = [&] {
+    return session->mounted() && session->storage_->editor == this &&
+           session->storage_->edit_generation == edit_generation &&
+           session->storage_->buffer_generation == buffer_generation &&
+           source.valid() == source_valid && (!permission || permission());
+  };
+  if (!current())
+    return EventResult::Handled;
+  if (callback) {
+    const auto result = callback(event);
+    if (!current())
+      return EventResult::Handled;
+    if (result == EventResult::Handled) {
+      pending_ime_commit_.clear();
+      return EventResult::Handled;
+    }
+  }
+  if (model_.composition_active())
+    return EventResult::Handled;
+  read_only = effective_read_only() || !source.valid() ||
+              (policy_ && policy_->read_only);
   pending_ime_commit_.clear();
 
   switch (event.key) {
@@ -1045,6 +1085,11 @@ TextInput &&TextInput::on_submit(SubmitCallback callback) && {
   return std::move(*this);
 }
 
+TextInput &&TextInput::on_key_down(KeyDownCallback callback) && {
+  on_key_down_ = std::move(callback);
+  return std::move(*this);
+}
+
 TextInput &&TextInput::style(TextInputStyle value) && {
   style_ = std::move(value);
   return std::move(*this);
@@ -1055,15 +1100,17 @@ Spec TextInput::spec() && {
   auto state = std::move(state_);
   auto placeholder = std::move(placeholder_);
   auto callback = std::move(on_submit_);
+  auto key_down = std::move(on_key_down_);
   auto style = std::move(style_);
   const auto max_length = max_length_;
   return Spec{[label = std::move(label), state = std::move(state),
                placeholder = std::move(placeholder), max_length,
-               callback = std::move(callback),
+               callback = std::move(callback), key_down = std::move(key_down),
                style = std::move(style)]() mutable {
                 return std::make_unique<TextInputComponent>(
                     std::move(label), std::move(state), std::move(placeholder),
-                    max_length, std::move(callback), std::move(style));
+                    max_length, std::move(callback), std::move(key_down),
+                    std::move(style));
               },
               {}};
 }

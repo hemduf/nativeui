@@ -57,7 +57,20 @@ add_executable(nativeui_t067_benchmark_contract
 )
 nativeui_configure_t051_target(nativeui_t067_benchmark_contract)
 
+add_executable(nativeui_render_resource_cache_benchmarks
+  "${NATIVEUI_SOURCE_DIR}/tests/t051/render_resource_cache_benchmarks.cpp"
+)
+nativeui_configure_t051_target(nativeui_render_resource_cache_benchmarks)
+target_include_directories(nativeui_render_resource_cache_benchmarks PRIVATE
+  "${NATIVEUI_SOURCE_DIR}"
+)
+
 enable_testing()
 add_test(NAME t051.workload_contract COMMAND nativeui_t051_workload_contract_tests)
 add_test(NAME t051.t067_virtual_list COMMAND nativeui_t067_benchmark_contract)
 set_tests_properties(t051.t067_virtual_list PROPERTIES LABELS "benchmark;release-gate;component")
+
+add_test(NAME render_resource_cache.benchmark
+  COMMAND nativeui_render_resource_cache_benchmarks)
+set_tests_properties(render_resource_cache.benchmark PROPERTIES
+  LABELS "benchmark;release-gate;render-resource")

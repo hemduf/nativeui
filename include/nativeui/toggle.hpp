@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
+#include <nativeui/edit.hpp>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
@@ -31,6 +32,8 @@ namespace ui {
 class ToggleComponent final : public Component, public detail::ThemeBinding {
 public:
   ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style);
+  ToggleComponent(std::string label, Binding<bool> state, ToggleStyle style,
+                  EditCallbacks<bool> callbacks);
 
   [[nodiscard]] bool focusable() const noexcept override;
   [[nodiscard]] Size measure(const std::vector<ChildMetrics> &) const override;
@@ -45,13 +48,20 @@ public:
 
   EventResult input(const InputEvent &event, InputContext &ctx) override;
 
-  EventResult semantic_action(SemanticAction action, InputContext &context) override;
+  EventResult semantic_action(SemanticAction action,
+                              InputContext &context) override;
 
   [[nodiscard]] SemanticInfo semantics() const override;
 
   void paint(PaintContext &p) const override;
 
 private:
+  struct InteractionOwner {
+    ToggleComponent *owner{};
+    std::uint64_t generation{};
+    std::function<void()> release_pointer;
+  };
+
   struct PresentationSignature {
     Color fill{};
     Color border{};
@@ -117,6 +127,8 @@ private:
 
   std::string label_;
   Binding<bool> state_;
+  std::shared_ptr<EditSession<bool>> edit_;
+  std::shared_ptr<InteractionOwner> interaction_owner_;
   ToggleStyle style_;
   detail::PressActivationState interaction_;
   bool focused_{};
@@ -133,12 +145,15 @@ public:
 
   Toggle &&style(ToggleStyle value) &&;
 
+  Toggle &&on_edit(EditCallbacks<bool> callbacks) &&;
+
   Spec spec() &&;
 
 private:
   std::string label_;
   Binding<bool> state_;
   ToggleStyle style_;
+  EditCallbacks<bool> callbacks_{};
 };
 
 } // namespace ui

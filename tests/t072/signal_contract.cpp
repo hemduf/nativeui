@@ -95,6 +95,34 @@ void operator delete[](void* memory, std::size_t) noexcept {
     std::free(memory);
 }
 
+// The production transport allocates its libdbus context objects with
+// `new (std::nothrow)` and releases them with ordinary `delete`. The harness
+// must own those allocations too: otherwise the default/sanitizer-intercepted
+// nothrow new is deallocated by the free-based delete below, which sanitizers
+// report as an alloc-dealloc mismatch. An injected failure returns nullptr
+// instead of throwing, exactly like the standard nothrow contract.
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+    if (g_fail_allocation_after == 0) {
+        return nullptr;
+    }
+    if (g_fail_allocation_after > 0) {
+        --g_fail_allocation_after;
+    }
+    return std::malloc(size);
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t& tag) noexcept {
+    return ::operator new(size, tag);
+}
+
+void operator delete(void* memory, const std::nothrow_t&) noexcept {
+    std::free(memory);
+}
+
+void operator delete[](void* memory, const std::nothrow_t&) noexcept {
+    std::free(memory);
+}
+
 int main() {
     using namespace std::chrono_literals;
     using namespace ui::detail;

@@ -36,10 +36,16 @@ struct TextInputAccess;
 class TextInputComponent final : public Component, public detail::ThemeBinding {
 public:
   using SubmitCallback = std::function<void(const std::string &)>;
+  using KeyDownCallback = std::function<EventResult(const InputEvent &)>;
 
   TextInputComponent(std::string label, Binding<std::string> state,
                      std::string placeholder, std::size_t max_length,
                      SubmitCallback on_submit, TextInputStyle style);
+
+  TextInputComponent(std::string label, Binding<std::string> state,
+                     std::string placeholder, std::size_t max_length,
+                     SubmitCallback on_submit, KeyDownCallback on_key_down,
+                     TextInputStyle style);
 
   ~TextInputComponent() override;
 
@@ -160,6 +166,7 @@ private:
   TextEditModel model_;
   std::string placeholder_;
   SubmitCallback on_submit_;
+  KeyDownCallback on_key_down_{};
   TextInputStyle style_;
 
   bool drag_select_{};
@@ -176,6 +183,7 @@ private:
 class TextInput {
 public:
   using SubmitCallback = TextInputComponent::SubmitCallback;
+  using KeyDownCallback = TextInputComponent::KeyDownCallback;
 
   TextInput(std::string label, Binding<std::string> state);
 
@@ -187,6 +195,10 @@ public:
 
   TextInput &&on_submit(SubmitCallback callback) &&;
 
+  /// Handle selected keys before the built-in commands. Active IME composition
+  /// retains ownership; returning Ignored preserves standard editing.
+  TextInput &&on_key_down(KeyDownCallback callback) &&;
+
   TextInput &&style(TextInputStyle value) &&;
 
   Spec spec() &&;
@@ -197,6 +209,7 @@ private:
   std::string placeholder_;
   std::size_t max_length_{256};
   SubmitCallback on_submit_;
+  KeyDownCallback on_key_down_{};
   TextInputStyle style_;
 };
 

@@ -115,6 +115,7 @@
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             if (suppress_platform_focus_) return PUGL_SUCCESS;
 #endif
+            if (suppress_embedded_focus_cleanup_) return PUGL_SUCCESS;
             clear_raw_pointer_positions();
             ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
@@ -128,15 +129,22 @@
             const auto tab = detail::normalize_tab_key(event->key.key, input.shift);
             input.key = tab.is_tab ? Key::Tab : translate_key(event->key.key, event->key.state);
             input.shift = tab.shift;
-            if (input.type == InputType::KeyDown && input.key == Key::Quit) {
+            bool key_handled = false;
+            if (!embedded_ && input.type == InputType::KeyDown && input.key == Key::Quit) {
                 if (close_callback_) {
                     close_callback_();
                 } else {
                     (void)close_native_view();
                 }
+                key_handled = true;
             } else if (input.key != Key::None) {
-                ui_.dispatch(input, services_);
+                key_handled = handled(ui_.dispatch(input, services_));
             }
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, key_handled);
+#else
+            (void)key_handled;
+#endif
             return PUGL_SUCCESS;
         }
 
@@ -150,7 +158,12 @@
             input.type = InputType::TextInput;
             input.text.assign(text);
             apply_modifiers(input, event->text.state);
-            ui_.dispatch(input, services_);
+            const bool text_handled = handled(ui_.dispatch(input, services_));
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, text_handled);
+#else
+            (void)text_handled;
+#endif
             return PUGL_SUCCESS;
         }
 
@@ -407,7 +420,9 @@
     PreferredSizeCallback preferred_size_callback_;
     bool preferred_measure_dirty_{};
     bool should_close_{};
-    bool visible_{};
+    detail::WindowVisibilityState visibility_;
+    bool embedded_{};
+    bool suppress_embedded_focus_cleanup_{};
     bool deferred_scene_redraw_{};
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     std::uint64_t failed_scene_exposes_{};

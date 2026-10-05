@@ -16,6 +16,13 @@ MyGo: `ui/widgets.go`, `Switch`; `ui/base.go`, `SwitchBase`. Its `Toggle` denote
 
 ## 2. Public API and composition
 
+`Toggle::on_edit(EditCallbacks<bool>)` is available after integration
+with main. Pointer, keyboard and semantic activation publish atomic edit callbacks
+with their corresponding `EditSource`. Direct State/Binding writes remain outside
+these UI edit notifications. Retirement or exceptions cancel a begun edit once
+and preserve the next ordinary activation. Historical constructors and styles
+remain compatible. See [value editing](value-editing.md).
+
 Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp

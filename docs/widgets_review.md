@@ -5,28 +5,53 @@ This review applies [CODE_REVIEW.md](../CODE_REVIEW.md) to PR #493 on
 `0f890150735c0b575dff0ca12cf0226c674f10a5`, based on the NativeUI inventory snapshot
 `e10077ff39b8cb977669a7d5604562f66d07cb4c`.
 
-**Crash correction:** executable source `615a8b83d542c6f9170b7ed5c92914622c24ad83` fixes the
-RichText freed-node invalidation reproduced on Linux and under macOS ASan.
-The five RichText suites pass under ASan/UBSan; those five suites and the public
-example pass in Release. The gallery is relinked with the fix and passes its
-eight-screen headless self-test and native first-render/deferred-close check.
-Both serial builds use the default empty warning allowance and report zero
-warnings. Independent review finds **0 Blocking / 0 Important issues in this
-bounded crash correction**.
+## Main integration on October 5, 2026
 
-At the user's request, this last batch addresses the crash. The earlier broad
-Mac checks (384 Release, 66 focused and 27 sanitizer suites) describe `cb601757`;
-they are not reruns of the latest correction. That source passed the strict Linux
-Core build but failed RichText recovery (202/203 units). Complete Linux and
-broader integrated-head qualification remain merge gates. The PR stays Draft
-because current main conflicts are unresolved; this record does not qualify
-that merge.
+The conflict resolution integrates main `6c850ab044ba99b7ccbea7076765cd4efe722adb`
+into branch head `99933d32c1102ebb45d29aafa792436ebc9ab8d1`. All thirteen
+conflicted paths are resolved. The extracted component file pairs and RichText
+crash correction are retained alongside main's rendering-resource/raster-cache
+contracts, focus geometry and teardown guards, ScalarSource and edit sessions.
+Pugl uses main's exact pin `a4bdafe38f48cf906560e40bd1e9e87986369b06`, including
+the Cocoa embedded-focus hooks; dependency versions are not substituted.
 
-The source/test/example diff from the starting head, produced by
-`git diff --no-ext-diff --no-color --binary 0f890150735c0b575dff0ca12cf0226c674f10a5 -- include src tests examples`, has SHA-256
-`3b492580336af16ee9481eb731055e15bb108e39ba646a8d9a33f23bda85209d`.
-This fingerprint identifies executable source `615a8b83`;
-documentation-only completion does not change it.
+Knob, Slider and Toggle preserve main's `on_edit` API and wheel opt-in where
+applicable. TextInput preserves `on_key_down` after the IME guard. Historical
+constructors, includes, State/Binding overloads and template adapters remain.
+Owned sessions and originating-contact release actions protect callback removal,
+exception recovery and newer reentrant contacts.
+
+The integration review reproduced and corrected three additional seams:
+
+- EditSession rejects a State guarded read before any begin/change callback or
+  queued write. Standalone strict C++ selectors `set`, `begin` and `update` each
+  fail before correction and pass afterward. Rejection remains silent, an active
+  edit survives a rejected update, and the next ordinary edit produces `BCE`.
+- Slider keyboard cancellation and Slider/Toggle keyboard failure release the
+  originating tracked touch rather than contact zero. The unchanged production
+  probes fail with touch 7 still captured. Corrected cases preserve a separately
+  captured mouse, then prove another normal touch edit succeeds.
+- Toggle layout invalidation stops before a second borrowed paint invalidation.
+  The unchanged production probe fails when the layout callback removes the
+  subtree. The correction suppresses the stale action and allows remount/edit.
+
+The merged Release Core and eight focused edit/TextInput/RichText suites pass
+with the default empty warning allowance. Tests cover begin/change/end removal,
+throwing callbacks, stale-event suppression, remount, external Knob replacement,
+TextInput callable-copy/invocation removal, and capture/text-input teardown.
+Independent bounded tree and widget re-reviews report **0 Blocking / 0 Important**.
+The pre-merge baseline at `99933d32` also passes its full serial build with zero
+warnings and **384/384** CTest checks (201.29 seconds).
+
+The full integrated Release suite, sanitizer qualification and native checks are
+in progress. Complete Linux qualification remains a separate merge gate; the
+PR stays Draft while qualification is active. Historical results below retain
+their original source identities and are not substituted for integrated results.
+
+The executable source/test/example diff from `0f890150`, produced by
+`git diff --no-ext-diff --no-color --binary 0f890150735c0b575dff0ca12cf0226c674f10a5 -- include src tests examples`,
+has SHA-256 `76ed92322c00c443f3e6a3c024c0bba806af35ed2be3c08be5527acb8e648999`.
+Documentation-only bookkeeping does not change this identity.
 
 ## Findings and corrections
 
@@ -66,7 +91,7 @@ The StyleScope fault injector was also reviewed: its skip counter now advances
 successful allocations before the selected failure. Four repetitions of the first
 allocation are not counted as four independent failure stages.
 
-## Mandatory review record
+## Historical mandatory review record (`615a8b83`)
 
 | Required field | Assessment |
 | --- | --- |

@@ -159,8 +159,13 @@
         if (!active_) return;
         sync_availability_structure(platform);
         sync_focus_structure(platform);
-        if (focusables_.empty() || !focus_active_) return;
-        auto* node = focusables_[focused_index_];
+        if (!active_ || focusables_.empty() || !focus_active_) return;
+        // This refresh bypasses the ordinary focus-transition state machine.
+        // Do not deliver stale bounds when layout was invalidated in-place.
+        ensure_layout();
+        if (!active_) return;
+        auto* node = current_focus_node();
+        if (!focus_target_available(node)) return;
         FocusContext context{
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, context);
@@ -393,6 +398,8 @@ private:
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
+        // Focus preparation can run layout callbacks that retire this view.
+        if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
 
         const bool keyboard_context = source_event.type == InputType::KeyDown &&
             (source_event.key == Key::Menu || (source_event.key == Key::F10 && source_event.shift));
@@ -596,6 +603,10 @@ private:
                 }
                 if (target) {
                     focus_nearest_ancestor(target);
+                    if (!active_) {
+                        pointer_route_committed = true;
+                        return finish(EventResult::Ignored);
+                    }
                     const auto result = route_from(*target, event, platform);
                     pointer_route_committed = true;
                     return finish(result);
@@ -741,38 +752,5 @@ public:
     }
 
     void paint(SkCanvas& canvas, PlatformServices& platform) {
-        if (lifecycle_transition_active()) return;
-        refresh_retained_components();
-        flush_dynamic_mutations();
-        if (active_) {
-            sync_availability_structure(platform);
-            sync_focus_structure(platform);
-        }
-        ensure_layout();
-
-        // A successful full paint consumes only damage that existed before the
-        // first paint callback. Invalidation raised reentrantly by application
-        // paint code belongs to the next frame and must survive this traversal.
-        Rect pending_dirty[DirtyRegion::kMaxRects]{};
-        const auto pending_dirty_count = paint_dirty_.rects().size();
-        for (std::size_t index = 0; index < pending_dirty_count; ++index) {
-            pending_dirty[index] = paint_dirty_.rects()[index];
-        }
-        paint_dirty_.clear();
-
-        try {
-            LifecycleTransitionScope paint_scope{
-                *this, LifecycleTransition::Paint, true};
-            Painter painter{canvas};
-            paint_node(*root_, painter, platform, viewport_rect());
-        } catch (...) {
-            // Failed paint consumes nothing. Merge the pre-existing damage back
-            // into any new invalidation raised before the failure without
-            // re-notifying already exposed regions.
-            for (std::size_t index = 0; index < pending_dirty_count; ++index) {
-                (void)retain_dirty(pending_dirty[index]);
-            }
-            throw;
-        }
-        retain_descendant_action_frame();
+        paint_with_resources(canvas, platform, nullptr);
     }

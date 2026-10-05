@@ -3,6 +3,8 @@
 
 #include "detail/shader_brush_access.hpp"
 #include "detail/shader_instance_access.hpp"
+#include "detail/image_texture_cache_key.hpp"
+#include "detail/render_resource_accounting.hpp"
 #include "detail/shader_test_seams.hpp"
 
 #include "include/core/SkColorSpace.h"
@@ -15,8 +17,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <bit>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <new>
@@ -68,6 +72,61 @@ struct ShaderInstanceChildState final {
     std::vector<std::shared_ptr<const Brush>> children;
 };
 
+namespace {
+
+template <class T>
+void semantic_hash_combine(std::size_t& seed, const T& value) noexcept {
+    const std::size_t hash = std::hash<T>{}(value);
+    seed ^= hash + static_cast<std::size_t>(0x9e3779b9U) +
+        (seed << 6U) + (seed >> 2U);
+}
+
+void semantic_hash_float(std::size_t& seed, float value) noexcept {
+    semantic_hash_combine(seed, value == 0.0f ? 0.0f : value);
+}
+
+void semantic_hash_color(std::size_t& seed, Color value) noexcept {
+    semantic_hash_float(seed, value.r);
+    semantic_hash_float(seed, value.g);
+    semantic_hash_float(seed, value.b);
+    semantic_hash_float(seed, value.a);
+}
+
+bool semantic_same_color(Color a, Color b) noexcept {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+std::size_t semantic_shader_hash(
+    const ShaderProgram* program,
+    std::span<const std::byte> bindings,
+    const std::vector<std::shared_ptr<const Brush>>& children) noexcept {
+    std::size_t seed = std::hash<const ShaderProgram*>{}(program);
+    for (const auto byte : bindings) {
+        semantic_hash_combine(seed, std::to_integer<unsigned char>(byte));
+    }
+    semantic_hash_combine(seed, bindings.size());
+    semantic_hash_combine(seed, children.size());
+    for (const auto& child : children) {
+        semantic_hash_combine(seed, static_cast<bool>(child));
+        if (child) semantic_hash_combine(seed, ShaderBrushAccess::semantic_hash(*child));
+    }
+    return seed;
+}
+
+std::size_t semantic_shader_retained_storage_bytes(
+    const std::vector<std::shared_ptr<const Brush>>& children) noexcept {
+    std::size_t total = 0U;
+    for (const auto& child : children) {
+        if (!child) continue;
+        total = saturated_render_resource_storage_add(
+            total, ShaderBrushAccess::retained_storage_bytes(*child));
+        if (total > kRenderResourceMaxAccountedBytes) return total;
+    }
+    return total;
+}
+
+} // namespace
+
 struct ShaderBrushSnapshot final {
     ShaderBrushSnapshot(std::shared_ptr<const ShaderProgram> program_in,
                         std::span<const std::byte> bindings_in,
@@ -80,12 +139,18 @@ struct ShaderBrushSnapshot final {
         if (!bindings_in.empty()) {
             std::memcpy(bindings.data(), bindings_in.data(), bindings_in.size());
         }
+        semantic_hash = semantic_shader_hash(
+            program.get(), bindings, children);
+        retained_storage_bytes =
+            semantic_shader_retained_storage_bytes(children);
     }
 
     std::shared_ptr<const ShaderProgram> program;
     std::vector<std::byte> bindings;
     std::vector<std::shared_ptr<const Brush>> children;
     std::size_t depth{1};
+    std::size_t semantic_hash{};
+    std::size_t retained_storage_bytes{};
 };
 
 struct ShaderProgramAccess final {
@@ -464,6 +529,45 @@ const Brush* ShaderBrushAccess::child(const Brush& brush, std::size_t index) noe
     return slot.get();
 }
 
+const std::shared_ptr<const ShaderBrushSnapshot>*
+ShaderBrushAccess::snapshot(const Brush& brush) noexcept {
+    return std::get_if<std::shared_ptr<const ShaderBrushSnapshot>>(&brush.value_);
+}
+
+std::size_t ShaderBrushAccess::semantic_hash(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept {
+    return snapshot ? snapshot->semantic_hash : 0U;
+}
+
+std::size_t ShaderBrushAccess::retained_storage_bytes(
+    const std::shared_ptr<const ShaderBrushSnapshot>& snapshot) noexcept {
+    return snapshot ? snapshot->retained_storage_bytes : 0U;
+}
+
+bool ShaderBrushAccess::semantic_equal(
+    const std::shared_ptr<const ShaderBrushSnapshot>& a,
+    const std::shared_ptr<const ShaderBrushSnapshot>& b) noexcept {
+    if (a == b) return true;
+    if (!a || !b ||
+        a->semantic_hash != b->semantic_hash ||
+        a->program.get() != b->program.get() ||
+        a->bindings.size() != b->bindings.size() ||
+        a->children.size() != b->children.size() ||
+        a->depth != b->depth) {
+        return false;
+    }
+    if (!std::equal(a->bindings.begin(), a->bindings.end(), b->bindings.begin())) {
+        return false;
+    }
+    for (std::size_t index = 0; index < a->children.size(); ++index) {
+        const auto& left = a->children[index];
+        const auto& right = b->children[index];
+        if (static_cast<bool>(left) != static_cast<bool>(right)) return false;
+        if (left && !ShaderBrushAccess::semantic_equal(*left, *right)) return false;
+    }
+    return true;
+}
+
 std::size_t ShaderInstanceAccess::child_count(
     const ShaderInstance& instance) noexcept {
     return instance.child_state_ ? instance.child_state_->children.size() : 0U;
@@ -483,6 +587,117 @@ const Brush* ShaderInstanceAccess::child(
 std::size_t ShaderInstanceAccess::depth(
     const ShaderInstance& instance) noexcept {
     return instance.depth_;
+}
+
+std::size_t ShaderBrushAccess::semantic_hash(const Brush& brush) noexcept {
+    return std::visit(
+        [&brush](const auto& source) noexcept -> std::size_t {
+            using Source = std::decay_t<decltype(source)>;
+            std::size_t seed = std::hash<std::size_t>{}(
+                brush.value_.index());
+            if constexpr (std::is_same_v<Source, Color>) {
+                semantic_hash_color(seed, source);
+            } else if constexpr (std::is_same_v<Source, LinearGradient>) {
+                semantic_hash_float(seed, source.start().x);
+                semantic_hash_float(seed, source.start().y);
+                semantic_hash_float(seed, source.end().x);
+                semantic_hash_float(seed, source.end().y);
+                semantic_hash_combine(seed, source.stops().size());
+                for (const auto& stop : source.stops()) {
+                    semantic_hash_float(seed, stop.offset);
+                    semantic_hash_color(seed, stop.color);
+                }
+            } else if constexpr (std::is_same_v<Source, RadialGradient>) {
+                semantic_hash_float(seed, source.center().x);
+                semantic_hash_float(seed, source.center().y);
+                semantic_hash_float(seed, source.radius());
+                semantic_hash_combine(seed, source.stops().size());
+                for (const auto& stop : source.stops()) {
+                    semantic_hash_float(seed, stop.offset);
+                    semantic_hash_color(seed, stop.color);
+                }
+            } else if constexpr (std::is_same_v<Source, ImageTexture>) {
+                const auto key = image_texture_cache_key(source);
+                semantic_hash_combine(
+                    seed, key ? ImageTextureCacheKeyHash{}(*key) : 0U);
+            } else {
+                semantic_hash_combine(
+                    seed, source ? source->semantic_hash : 0U);
+            }
+            return seed;
+        },
+        brush.value_);
+}
+
+std::size_t ShaderBrushAccess::retained_storage_bytes(
+    const Brush& brush) noexcept {
+    return std::visit(
+        [](const auto& source) noexcept -> std::size_t {
+            using Source = std::decay_t<decltype(source)>;
+            if constexpr (std::is_same_v<Source, ImageTexture>) {
+                return image_texture_retained_storage_bytes(source);
+            } else if constexpr (
+                std::is_same_v<
+                    Source,
+                    std::shared_ptr<const ShaderBrushSnapshot>>) {
+                return ShaderBrushAccess::retained_storage_bytes(source);
+            } else {
+                return 0U;
+            }
+        },
+        brush.value_);
+}
+
+bool ShaderBrushAccess::semantic_equal(const Brush& a, const Brush& b) noexcept {
+    if (a.value_.index() != b.value_.index()) return false;
+    return std::visit(
+        [](const auto& left, const auto& right) noexcept -> bool {
+            using Left = std::decay_t<decltype(left)>;
+            using Right = std::decay_t<decltype(right)>;
+            if constexpr (!std::is_same_v<Left, Right>) {
+                return false;
+            } else if constexpr (std::is_same_v<Left, Color>) {
+                return semantic_same_color(left, right);
+            } else if constexpr (std::is_same_v<Left, LinearGradient>) {
+                if (left.start().x != right.start().x ||
+                    left.start().y != right.start().y ||
+                    left.end().x != right.end().x ||
+                    left.end().y != right.end().y ||
+                    left.stops().size() != right.stops().size()) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < left.stops().size(); ++i) {
+                    if (left.stops()[i].offset != right.stops()[i].offset ||
+                        !semantic_same_color(
+                            left.stops()[i].color, right.stops()[i].color)) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<Left, RadialGradient>) {
+                if (left.center().x != right.center().x ||
+                    left.center().y != right.center().y ||
+                    left.radius() != right.radius() ||
+                    left.stops().size() != right.stops().size()) {
+                    return false;
+                }
+                for (std::size_t i = 0; i < left.stops().size(); ++i) {
+                    if (left.stops()[i].offset != right.stops()[i].offset ||
+                        !semantic_same_color(
+                            left.stops()[i].color, right.stops()[i].color)) {
+                        return false;
+                    }
+                }
+                return true;
+            } else if constexpr (std::is_same_v<Left, ImageTexture>) {
+                const auto left_key = image_texture_cache_key(left);
+                const auto right_key = image_texture_cache_key(right);
+                return left_key == right_key;
+            } else {
+                return ShaderBrushAccess::semantic_equal(left, right);
+            }
+        },
+        a.value_, b.value_);
 }
 
 namespace {

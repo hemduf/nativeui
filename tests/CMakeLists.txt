@@ -1,6 +1,22 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
+  add_test(NAME nativeui_pugl_keyboard_contract_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/pugl-keyboard-contract"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/pugl_keyboard_contract_tests.cmake")
+  set_tests_properties(nativeui_pugl_keyboard_contract_tests PROPERTIES LABELS "build;cmake;pugl;keyboard")
+  add_test(
+    NAME nativeui_advanced_rendering_docs_contract
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_contract.cmake"
+  )
+  set_tests_properties(nativeui_advanced_rendering_docs_contract PROPERTIES
+    LABELS "docs;contract"
+  )
+
   add_test(
     NAME nativeui_feature_example_discovery_contract
     COMMAND ${CMAKE_COMMAND}
@@ -155,9 +171,24 @@ if(NATIVEUI_BUILD_TESTS)
     set_tests_properties(${name} PROPERTIES LABELS "unit")
   endfunction()
 
+  nativeui_add_core_test(
+    nativeui_advanced_rendering_docs_snippets
+    ${PROJECT_SOURCE_DIR}/tests/advanced_rendering_docs_snippets.cpp)
+  set_tests_properties(nativeui_advanced_rendering_docs_snippets PROPERTIES
+    LABELS "docs;unit"
+  )
+
+  nativeui_add_core_test(
+    nativeui_window_control_state_tests
+    ${PROJECT_SOURCE_DIR}/tests/window_control_state_tests.cpp)
+  set_property(TEST nativeui_window_control_state_tests APPEND PROPERTY LABELS window-control)
   nativeui_add_core_test(nativeui_dispatcher_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_tests.cpp)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
+  nativeui_add_core_test(nativeui_edit_session_tests ${PROJECT_SOURCE_DIR}/tests/edit_session_tests.cpp)
+  nativeui_add_core_test(nativeui_edit_read_transaction_tests ${PROJECT_SOURCE_DIR}/tests/edit_read_transaction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_edit_tests ${PROJECT_SOURCE_DIR}/tests/widget_edit_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_edit_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_edit_retirement_tests.cpp)
   nativeui_add_core_test(nativeui_component_state_tests ${PROJECT_SOURCE_DIR}/tests/component_state_tests.cpp)
   nativeui_add_core_test(nativeui_focus_tests ${PROJECT_SOURCE_DIR}/tests/focus_tests.cpp)
   nativeui_add_core_test(nativeui_routing_tests ${PROJECT_SOURCE_DIR}/tests/routing_tests.cpp)
@@ -198,6 +229,53 @@ if(NATIVEUI_BUILD_TESTS)
   )
   nativeui_add_core_test(nativeui_invalidation_tests ${PROJECT_SOURCE_DIR}/tests/invalidation_tests.cpp)
   nativeui_add_core_test(nativeui_paint_culling_tests ${PROJECT_SOURCE_DIR}/tests/paint_culling_tests.cpp)
+  nativeui_add_core_test(nativeui_render_resource_cache_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_cache_tests.cpp)
+  target_include_directories(nativeui_render_resource_cache_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_render_resource_key_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_key_tests.cpp)
+  target_include_directories(nativeui_render_resource_key_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_render_resource_materialization_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_materialization_tests.cpp)
+  target_include_directories(nativeui_render_resource_materialization_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_render_resource_allocation_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_tests.cpp)
+  target_sources(nativeui_render_resource_allocation_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_probe.cpp)
+  target_include_directories(nativeui_render_resource_allocation_tests PRIVATE
+    ${PROJECT_SOURCE_DIR})
+
+  # Exact warm-hit counters require existing image/shader test seams. Keep
+  # those seams out of NativeUI::Core by compiling an isolated executable.
+  add_executable(nativeui_render_resource_hot_hit_counter_tests
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_hot_hit_counter_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+  )
+  target_include_directories(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_render_resource_hot_hit_counter_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_render_resource_hot_hit_counter_tests PRIVATE
+    SkiaBuilder::svg
+  )
+  nativeui_enable_project_warnings(nativeui_render_resource_hot_hit_counter_tests)
+  nativeui_enable_sanitizers(nativeui_render_resource_hot_hit_counter_tests)
+  add_test(
+    NAME nativeui_render_resource_hot_hit_counter_tests
+    COMMAND nativeui_render_resource_hot_hit_counter_tests
+  )
+  set_tests_properties(nativeui_render_resource_hot_hit_counter_tests PROPERTIES
+    LABELS "unit"
+  )
   nativeui_add_core_test(nativeui_t096_damage_mapping_tests
     ${PROJECT_SOURCE_DIR}/tests/t096_damage_mapping_tests.cpp)
   target_include_directories(nativeui_t096_damage_mapping_tests PRIVATE
@@ -223,6 +301,7 @@ if(NATIVEUI_BUILD_TESTS)
   add_executable(nativeui_t083_image_texture_fault_tests
     ${PROJECT_SOURCE_DIR}/tests/t083_image_texture_fault_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
   )
   target_include_directories(nativeui_t083_image_texture_fault_tests PRIVATE
@@ -252,6 +331,33 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t091_worley_noise_tests ${PROJECT_SOURCE_DIR}/tests/t091_worley_noise_tests.cpp)
   target_include_directories(nativeui_t091_worley_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
   nativeui_add_core_test(nativeui_fractal_noise_tests ${PROJECT_SOURCE_DIR}/tests/fractal_noise_tests.cpp)
+  nativeui_add_core_test(nativeui_scalar_source_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_tests.cpp)
+  target_include_directories(nativeui_scalar_source_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  nativeui_add_core_test(nativeui_scalar_source_fault_tests ${PROJECT_SOURCE_DIR}/tests/scalar_source_fault_tests.cpp)
+  target_include_directories(nativeui_scalar_source_fault_tests PRIVATE ${PROJECT_SOURCE_DIR})
+  add_executable(nativeui_scalar_source_source_tests
+    ${PROJECT_SOURCE_DIR}/tests/scalar_source_source_tests.cpp
+    ${PROJECT_SOURCE_DIR}/src/headless.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+  )
+  target_include_directories(nativeui_scalar_source_source_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+  )
+  target_compile_features(nativeui_scalar_source_source_tests PRIVATE cxx_std_20)
+  target_compile_definitions(nativeui_scalar_source_source_tests PRIVATE
+    NATIVEUI_ENABLE_TEST_SEAMS=1
+  )
+  target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
+    SkiaBuilder::svg
+    NativeUI::Core
+  )
+  nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
+  nativeui_enable_sanitizers(nativeui_scalar_source_source_tests)
+  add_test(NAME nativeui_scalar_source_source_tests COMMAND nativeui_scalar_source_source_tests)
+  set_tests_properties(nativeui_scalar_source_source_tests PROPERTIES LABELS "unit")
   target_include_directories(nativeui_fractal_noise_tests PRIVATE ${PROJECT_SOURCE_DIR})
 
   # Fault controls remain in this isolated executable, never NativeUI::Core.
@@ -260,6 +366,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t088_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -279,6 +386,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t089_perlin_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -298,6 +406,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t090_simplex_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -317,6 +426,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_t091_worley_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -336,6 +446,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/src/skia_noise.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_fractal_noise_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -366,6 +477,7 @@ if(NATIVEUI_BUILD_TESTS)
     ${PROJECT_SOURCE_DIR}/tests/shader_fault_tests.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_shader.cpp
     ${PROJECT_SOURCE_DIR}/src/skia_image.cpp
+    ${PROJECT_SOURCE_DIR}/src/skia_painter.cpp
   )
   target_include_directories(nativeui_shader_fault_tests PRIVATE
     ${PROJECT_SOURCE_DIR}
@@ -410,6 +522,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t032_slider_completion_tests ${PROJECT_SOURCE_DIR}/tests/t032_slider_completion_tests.cpp)
   nativeui_add_core_test(nativeui_t032_slider_visual_tests ${PROJECT_SOURCE_DIR}/tests/t032_slider_visual_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests ${PROJECT_SOURCE_DIR}/tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_text_input_key_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_text_input_key_retirement_tests.cpp)
   nativeui_add_core_test(nativeui_t095_scene_extent_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_extent_tests.cpp)
   target_include_directories(nativeui_t095_scene_extent_tests PRIVATE
     "${PROJECT_SOURCE_DIR}"
@@ -501,6 +614,19 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_project_warnings(nativeui_fractal_noise_gpu_reference_tests)
     nativeui_enable_sanitizers(nativeui_fractal_noise_gpu_reference_tests)
 
+    add_executable(nativeui_scalar_source_gpu_reference_tests
+      ${PROJECT_SOURCE_DIR}/tests/scalar_source_gpu_reference_tests.cpp
+    )
+    target_include_directories(nativeui_scalar_source_gpu_reference_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_scalar_source_gpu_reference_tests
+      CONSUMER_ID org.nativeui.test.scalar-source-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_scalar_source_gpu_reference_tests)
+    nativeui_enable_sanitizers(nativeui_scalar_source_gpu_reference_tests)
+
     add_executable(nativeui_t095_scene_gpu_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_gpu_tests.cpp)
     target_include_directories(nativeui_t095_scene_gpu_tests PRIVATE
       "${PROJECT_SOURCE_DIR}"
@@ -516,6 +642,18 @@ if(NATIVEUI_BUILD_TESTS)
     target_include_directories(nativeui_t096_scene_gpu_tests PRIVATE
       "${PROJECT_SOURCE_DIR}"
     )
+
+    add_executable(nativeui_render_resource_gpu_tests
+      ${PROJECT_SOURCE_DIR}/tests/render_resource_gpu_tests.cpp)
+    target_include_directories(nativeui_render_resource_gpu_tests PRIVATE
+      "${PROJECT_SOURCE_DIR}"
+    )
+    _nativeui_attach_consumer_platform(
+      TARGET nativeui_render_resource_gpu_tests
+      CONSUMER_ID org.nativeui.test.render-resource-gpu
+    )
+    nativeui_enable_project_warnings(nativeui_render_resource_gpu_tests)
+    nativeui_enable_sanitizers(nativeui_render_resource_gpu_tests)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_t096_scene_gpu_tests
       CONSUMER_ID org.nativeui.test.t096-scene-gpu
@@ -534,6 +672,22 @@ if(NATIVEUI_BUILD_TESTS)
 
     if(APPLE)
       enable_language(OBJCXX)
+      include(${CMAKE_CURRENT_SOURCE_DIR}/EmbeddedKeyboardTests.cmake)
+      add_executable(nativeui_embedded_visibility_tests ${PROJECT_SOURCE_DIR}/tests/embedded_visibility_macos_tests.mm)
+      set_target_properties(nativeui_embedded_visibility_tests PROPERTIES OBJCXX_STANDARD 20)
+      target_compile_options(nativeui_embedded_visibility_tests PRIVATE -fobjc-arc)
+      _nativeui_attach_consumer_platform(
+        TARGET nativeui_embedded_visibility_tests
+        CONSUMER_ID org.nativeui.test.embedded-visibility
+      )
+      nativeui_enable_project_warnings(nativeui_embedded_visibility_tests)
+      nativeui_enable_sanitizers(nativeui_embedded_visibility_tests)
+      if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
+        add_test(NAME nativeui_embedded_visibility_tests COMMAND nativeui_embedded_visibility_tests)
+        set_tests_properties(nativeui_embedded_visibility_tests PROPERTIES
+          LABELS "integration;platform;macos;visibility" TIMEOUT 60)
+      endif()
+
       add_executable(nativeui_smoke_macos_drop ${PROJECT_SOURCE_DIR}/tests/smoke_macos_drop.mm)
       set_target_properties(nativeui_smoke_macos_drop PROPERTIES OBJCXX_STANDARD 20)
       target_compile_options(nativeui_smoke_macos_drop PRIVATE -fobjc-arc)
@@ -585,8 +739,12 @@ if(NATIVEUI_BUILD_TESTS)
         COMMAND nativeui_t091_worley_noise_gpu_reference_tests)
       add_test(NAME nativeui_fractal_noise_gpu_reference_tests
         COMMAND nativeui_fractal_noise_gpu_reference_tests)
+      add_test(NAME nativeui_scalar_source_gpu_reference_tests
+        COMMAND nativeui_scalar_source_gpu_reference_tests)
       add_test(NAME nativeui_t095_scene_gpu_tests COMMAND nativeui_t095_scene_gpu_tests)
       add_test(NAME nativeui_t096_scene_gpu_tests COMMAND nativeui_t096_scene_gpu_tests)
+      add_test(NAME nativeui_render_resource_gpu_tests
+        COMMAND nativeui_render_resource_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
         TIMEOUT 60
@@ -597,7 +755,9 @@ if(NATIVEUI_BUILD_TESTS)
         nativeui_t090_simplex_noise_gpu_reference_tests
         nativeui_t091_worley_noise_gpu_reference_tests
         nativeui_fractal_noise_gpu_reference_tests
-        nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests PROPERTIES
+        nativeui_scalar_source_gpu_reference_tests
+        nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests
+        nativeui_render_resource_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
         TIMEOUT 60
       )
@@ -759,7 +919,7 @@ if(NATIVEUI_BUILD_TESTS)
 
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui row column grid scroll scroll_view clip flex spacer stack padding visibility enabled read_only focus_scope command_scope style_scope label header canvas knob toggle button checkbox slider range_slider text_input text_area progress_bar meter divider badge image_view spinner radio_button toggle_button split_view stepper rating collapsible accordion icon_view avatar link if switch for_each tabs number_input search_field editable_text find_bar list_view form field fieldset dialog checkbox_group autocomplete combo_box editable_combo_box time_input color_well color_picker date_input calendar token_field history_button breadcrumbs popup_menu context_menu collection_model tree_view outline_view grid_view table_view outline_table_view rich_text sidebar popover toast toggle_group segmented_control toolbar)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state edit dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise scalar_source svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui row column grid scroll scroll_view clip flex spacer stack padding visibility enabled read_only focus_scope command_scope style_scope label header canvas knob toggle button checkbox slider range_slider text_input text_area progress_bar meter divider badge image_view spinner radio_button toggle_button split_view stepper rating collapsible accordion icon_view avatar link if switch for_each tabs number_input search_field editable_text find_bar list_view form field fieldset dialog checkbox_group autocomplete combo_box editable_combo_box time_input color_well color_picker date_input calendar token_field history_button breadcrumbs popup_menu context_menu collection_model tree_view outline_view grid_view table_view outline_table_view rich_text sidebar popover toast toggle_group segmented_control toolbar)
     add_library(nativeui_header_${_header}_compile OBJECT ${PROJECT_SOURCE_DIR}/tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

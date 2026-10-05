@@ -16,6 +16,14 @@ MyGo has no standalone Knob among its 54 families; `Slider` in `ui/widgets.go` p
 
 ## 2. Public API and composition
 
+`Knob::on_edit(EditCallbacks<float>)` and `wheel_enabled(bool = true)`
+are available after integration with main. Wheel editing is disabled by default.
+Pointer editing has one begin and one end/cancel; keyboard and opted-in wheel
+commands are atomic edits. Cancellation keeps the last committed value. A direct
+model write does not begin a UI edit; replacing the value during an active Knob
+drag cancels that gesture and its edit session. Callback removal or failure cannot
+reuse the retired control. See [value editing](value-editing.md).
+
 Exact existing API: `Knob(std::string, Binding<float>)`, `Knob(std::string, State<float>&)`, rvalue fluent `range(float minimum, float maximum)`, and `spec() &&`. No `on_change`, formatter, or style currently exists.
 
 Verified example using the existing API:

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -65,6 +66,71 @@ private:
 
     std::optional<Size> min_size_;
     std::optional<Size> max_size_;
+};
+
+/// Restores a temporary boolean guard to its exact previous value on every
+/// exit path. The destructor only performs a no-throw scalar assignment.
+class ScopedBooleanState final {
+public:
+    ScopedBooleanState(bool& slot, bool value) noexcept
+        : slot_(slot), previous_(slot) {
+        slot_ = value;
+    }
+
+    ~ScopedBooleanState() noexcept { slot_ = previous_; }
+
+    ScopedBooleanState(const ScopedBooleanState&) = delete;
+    ScopedBooleanState& operator=(const ScopedBooleanState&) = delete;
+    ScopedBooleanState(ScopedBooleanState&&) = delete;
+    ScopedBooleanState& operator=(ScopedBooleanState&&) = delete;
+
+private:
+    bool& slot_;
+    bool previous_{};
+};
+
+/// Transactional visibility bookkeeping for synchronous native show/hide calls.
+///
+/// Native callbacks may re-enter show/hide before the outer platform call
+/// returns. Each transition gets a monotonically increasing generation so the
+/// outer caller can detect that a nested transition superseded it and must not
+/// publish rollback, cleanup, or redraw work over the newer state.
+class WindowVisibilityState final {
+public:
+    using Generation = std::uint64_t;
+
+    [[nodiscard]] bool visible() const noexcept { return visible_; }
+
+    [[nodiscard]] Generation begin_show() noexcept {
+        visible_ = true;
+        return ++generation_;
+    }
+
+    [[nodiscard]] Generation begin_hide() noexcept {
+        visible_ = false;
+        return ++generation_;
+    }
+
+    [[nodiscard]] bool current(Generation generation) const noexcept {
+        return generation_ == generation;
+    }
+
+    void rollback_show(Generation generation) noexcept {
+        if (current(generation)) visible_ = false;
+    }
+
+    void rollback_hide(Generation generation) noexcept {
+        if (current(generation)) visible_ = true;
+    }
+
+    void set_visible(bool visible) noexcept {
+        visible_ = visible;
+        ++generation_;
+    }
+
+private:
+    Generation generation_{};
+    bool visible_{};
 };
 
 /// Bookkeeping for one best-effort Dispatcher post used only as an optimization

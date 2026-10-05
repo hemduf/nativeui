@@ -21,7 +21,8 @@ require_text("${_root_cmake}" "src/dispatcher.cpp" "dispatcher implementation in
 require_text("${_root_cmake}" "add_subdirectory(tests)" "test directory registration")
 require_text("${_tests_cmake}" "nativeui_add_core_test(nativeui_dispatcher_tests" "dispatcher core test registration")
 require_text("${_tests_cmake}" "nativeui_add_core_test(nativeui_dispatcher_edge_tests" "dispatcher edge test registration")
-require_text("${_tests_cmake}" "foreach(_header IN ITEMS geometry constraints invalidation input gesture state dispatcher" "isolated dispatcher public-header compile coverage")
+string(REGEX MATCH "foreach\\(_header IN ITEMS [^)]*\\)" _public_header_loop "${_tests_cmake}")
+require_text("${_public_header_loop}" " dispatcher " "isolated dispatcher public-header compile coverage")
 require_text("${_umbrella}" "#include <nativeui/dispatcher.hpp>" "dispatcher umbrella export")
 
 if(NOT EXISTS "${_example}")

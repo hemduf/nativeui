@@ -18,6 +18,7 @@ class ShaderInstance;
 
 namespace detail {
 struct EffectTestAccess;
+struct EffectCacheAccess;
 struct ShaderBrushAccess;
 struct ImageTextureBrushAccess;
 struct ShaderBrushMaterializer;
@@ -137,6 +138,7 @@ private:
 
     friend class Painter;
     friend struct detail::EffectTestAccess;
+    friend struct detail::EffectCacheAccess;
 
     Kind kind_{Kind::GaussianBlur};
     float sigma_x_{};

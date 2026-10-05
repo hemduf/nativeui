@@ -142,8 +142,8 @@ void suite() {
     // Existing result and tree-owned Tab semantics.
     {
         auto probe = std::make_shared<test::ProbeState>();
-        ui::UI tree{test::Probe{probe}};
         test::MockPlatform platform;
+        ui::UI tree{test::Probe{probe}};
         tree.resize({200.0f, 100.0f});
         tree.activate(platform);
 
@@ -177,11 +177,11 @@ void suite() {
         parent->result = ui::EventResult::Ignored;
         root->result = ui::EventResult::Handled;
 
+        test::MockPlatform platform;
         ui::UI tree{
             RouteContainer{root,
                 RouteContainer{parent,
                     test::Probe{child}}}};
-        test::MockPlatform platform;
         tree.resize({160.0f, 80.0f});
         tree.activate(platform);
 
@@ -199,8 +199,8 @@ void suite() {
         parent->result = ui::EventResult::Handled;
         child->input_result = ui::EventResult::Handled;
 
-        ui::UI tree{RouteContainer{parent, test::Probe{child}}};
         test::MockPlatform platform;
+        ui::UI tree{RouteContainer{parent, test::Probe{child}}};
         tree.resize({160.0f, 80.0f});
         tree.activate(platform);
 
@@ -252,8 +252,8 @@ void suite() {
             std::shared_ptr<RouteState> state_;
         };
 
-        ui::UI tree{RouteContainer{parent, CapturingLeafSpec{child}}};
         test::MockPlatform platform;
+        ui::UI tree{RouteContainer{parent, CapturingLeafSpec{child}}};
         tree.resize({160.0f, 80.0f});
         tree.activate(platform);
 
@@ -277,8 +277,8 @@ void suite() {
         child->input_result = ui::EventResult::Ignored;
         auto root = std::make_shared<RouteState>();
         root->result = ui::EventResult::Handled;
-        ui::UI tree{RouteContainer{root, test::Probe{child}}};
         test::MockPlatform platform;
+        ui::UI tree{RouteContainer{root, test::Probe{child}}};
         tree.resize({200.0f, 120.0f});
         tree.activate(platform);
 

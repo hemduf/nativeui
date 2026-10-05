@@ -55,7 +55,7 @@ struct PainterEffectFaultAccess {
         const SkRect source_bounds = Painter::to_sk_rect(source);
         SkIRect device_source;
         if (!painter.effect_source_device_bounds(source_bounds, device_source)) return false;
-        auto filter = Painter::materialize_effect_filter(effect);
+        auto filter = painter.materialize_effect_filter(effect);
         return filter &&
                painter.effect_filter_output_bounds(*filter, device_source, output);
     }

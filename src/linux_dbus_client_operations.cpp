@@ -106,6 +106,14 @@ LinuxDbusErrorCode LinuxDbusClientOperations::start() {
     return transport_.start();
 }
 
+LinuxDbusErrorCode LinuxDbusClientOperations::start(std::string_view bus_address) {
+    std::lock_guard lock{mutex_};
+    if (closing_) {
+        return LinuxDbusErrorCode::Shutdown;
+    }
+    return transport_.start(bus_address);
+}
+
 void LinuxDbusClientOperations::stop() noexcept {
     std::vector<LinuxDbusClientId> clients;
     try {

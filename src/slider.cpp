@@ -3,6 +3,23 @@
 namespace ui {
 
 namespace detail {
+
+namespace {
+template <class T, class Cleanup>
+void cancel_after_cleanup(const std::shared_ptr<EditSession<T>> &edit,
+                          Cleanup &&cleanup) {
+  try {
+    std::forward<Cleanup>(cleanup)();
+  } catch (...) {
+    try {
+      edit->cancel();
+    } catch (...) {
+    }
+    throw;
+  }
+  edit->cancel();
+}
+} // namespace
 float SliderTrackAxis::position(float fraction) const noexcept {
   if (!std::isfinite(fraction))
     fraction = 0.0f;
@@ -41,9 +58,23 @@ SliderComponent::SliderComponent(Binding<float> state, float minimum,
                                  float maximum, float step,
                                  SliderOrientation orientation,
                                  Formatter formatter, SliderStyle style)
-    : state_(std::move(state)), domain_(minimum, maximum, step),
+    : SliderComponent(std::move(state), minimum, maximum, step, orientation,
+                      std::move(formatter), std::move(style), {}, false) {}
+
+SliderComponent::SliderComponent(Binding<float> state, float minimum,
+                                 float maximum, float step,
+                                 SliderOrientation orientation,
+                                 Formatter formatter, SliderStyle style,
+                                 EditCallbacks<float> callbacks,
+                                 bool wheel_enabled)
+    : state_(std::move(state)),
+      edit_(std::make_shared<EditSession<float>>(state_, std::move(callbacks))),
+      interaction_(std::make_shared<Interaction>()),
+      wheel_enabled_(wheel_enabled), domain_(minimum, maximum, step),
       orientation_(orientation), formatter_(std::move(formatter)),
-      style_(std::move(style)) {}
+      style_(std::move(style)) {
+  interaction_->owner = this;
+}
 
 bool SliderComponent::focusable() const noexcept { return true; }
 
@@ -70,77 +101,188 @@ Size SliderComponent::measure(const std::vector<ChildMetrics> &) const {
 }
 
 void SliderComponent::mount(MountContext &context) {
+  interaction_->owner = this;
   auto invalidate = context.invalidator();
   subscription_ = state_.observe(
       [invalidate = std::move(invalidate)](const float &) { invalidate(); });
 }
 
-void SliderComponent::unmount(LifecycleContext &) { subscription_.reset(); }
+void SliderComponent::unmount(LifecycleContext &) {
+  const auto interaction = interaction_;
+  const auto edit = edit_;
+  interaction->owner = nullptr;
+  ++interaction->generation;
+  interaction->release_pointer = {};
+  dragging_ = false;
+  subscription_.reset();
+  try {
+    edit->cancel();
+  } catch (...) {
+  }
+}
 
 void SliderComponent::focus_changed(bool focused, FocusContext &context) {
   if (focused_ == focused)
     return;
+  const auto edit = edit_;
+  const auto interaction = interaction_;
   const auto before = resolved_style(focused_);
   focused_ = focused;
-  invalidate_style_transition(before, resolved_style(focused_), context, true);
+  std::function<void()> release;
+  if (!focused) {
+    ++interaction->generation;
+    dragging_ = false;
+    release = std::move(interaction->release_pointer);
+  }
+  const auto after = resolved_style(focused_);
+  if (focused) {
+    invalidate_style_transition(before, after, context, true);
+  } else {
+    cancel_after_cleanup(edit, [&] {
+      try {
+        invalidate_style_transition(before, after, context, true);
+      } catch (...) {
+        try {
+          if (release)
+            release();
+        } catch (...) {
+        }
+        throw;
+      }
+      if (release)
+        release();
+    });
+  }
 }
 
 void SliderComponent::deactivate(LifecycleContext &context) {
-  if (!dragging_ && !hovered_ && !focused_)
+  const auto edit = edit_;
+  const auto interaction = interaction_;
+  if (!dragging_ && !hovered_ && !focused_ && !edit->active())
     return;
   const auto before = resolved_style(focused_);
   const bool focus_changed = focused_;
+  ++interaction->generation;
+  auto release = std::move(interaction->release_pointer);
   dragging_ = false;
   hovered_ = false;
   focused_ = false;
-  invalidate_style_transition(before, resolved_style(focused_), context,
-                              focus_changed);
+  const auto after = resolved_style(focused_);
+  cancel_after_cleanup(edit, [&] {
+    try {
+      invalidate_style_transition(before, after, context, focus_changed);
+    } catch (...) {
+      try {
+        if (release)
+          release();
+      } catch (...) {
+      }
+      throw;
+    }
+    if (release)
+      release();
+  });
 }
 
 EventResult SliderComponent::input(const InputEvent &event,
                                    InputContext &context) {
-  if ((effective_read_only() || !state_.valid()) && mutating_input(event)) {
-    const auto before = resolved_style(focused_);
-    const bool release_capture = dragging_;
-    dragging_ = false;
-    if (event.type == InputType::PointerDown ||
-        event.type == InputType::PointerMove ||
-        event.type == InputType::PointerUp) {
-      hovered_ = context.bounds().contains(event.position);
+  const auto interaction = interaction_;
+  const auto edit = edit_;
+  if (event.type == InputType::PointerDown)
+    ++interaction->generation;
+  const auto generation = interaction->generation;
+  auto release = context.pointer_releaser();
+  try {
+    if (event.type == InputType::KeyDown && event.key == Key::Escape &&
+        dragging_) {
+      const auto before = resolved_style(focused_);
+      dragging_ = false;
+      if (interaction->release_pointer)
+        release = std::move(interaction->release_pointer);
+      invalidate_style_transition(before, resolved_style(focused_), context);
+      if (release)
+        release();
+      edit->cancel();
+      return EventResult::Handled;
     }
-    if (release_capture)
-      context.release_pointer();
-    invalidate_style_transition(before, resolved_style(focused_), context);
-    return EventResult::Handled;
-  }
-
-  switch (event.type) {
-  case InputType::PointerDown:
-    return begin_drag(event, context);
-
-  case InputType::PointerMove:
-    return pointer_move(event, context);
-
-  case InputType::PointerUp:
-    if (!dragging_)
+    if ((effective_read_only() || !state_.valid()) && mutating_input(event)) {
+      const auto before = resolved_style(focused_);
+      const bool release_capture = dragging_;
+      dragging_ = false;
+      if (release_capture && interaction->release_pointer)
+        release = std::move(interaction->release_pointer);
+      if (event.type == InputType::PointerDown ||
+          event.type == InputType::PointerMove ||
+          event.type == InputType::PointerUp)
+        hovered_ = context.bounds().contains(event.position);
+      invalidate_style_transition(before, resolved_style(focused_), context);
+      if (release_capture && release)
+        release();
+      edit->cancel();
+      return EventResult::Handled;
+    }
+    switch (event.type) {
+    case InputType::PointerDown:
+      interaction->release_pointer = release;
+      return begin_drag(event, context);
+    case InputType::PointerMove:
+      return pointer_move(event, context);
+    case InputType::PointerUp:
+      if (!dragging_)
+        return EventResult::Ignored;
+      return update_drag(event, context, true);
+    case InputType::PointerCancel: {
+      if (!dragging_)
+        return EventResult::Ignored;
+      const auto before = resolved_style(focused_);
+      dragging_ = false;
+      hovered_ = false;
+      if (interaction->release_pointer)
+        release = std::move(interaction->release_pointer);
+      invalidate_style_transition(before, resolved_style(focused_), context);
+      if (release)
+        release();
+      edit->cancel();
+      return EventResult::Handled;
+    }
+    case InputType::KeyDown:
+      return key_down(event, context);
+    case InputType::PointerWheel: {
+      if (!wheel_enabled_ || !std::isfinite(event.delta.y))
+        return EventResult::Ignored;
+      const auto target = domain_.normalize(
+          domain_.effective_external(state_.get()) +
+          event.delta.y * domain_.keyboard_increment(event.shift));
+      auto permission = InputMutationAccess::guard(context);
+      if (!effective_read_only() && state_.valid() &&
+          (!permission || permission()))
+        edit->set(target, EditSource::Wheel);
+      return EventResult::Handled;
+    }
+    default:
       return EventResult::Ignored;
-    return update_drag(event, context, true);
-
-  case InputType::PointerCancel: {
-    if (!dragging_)
-      return EventResult::Ignored;
-    const auto before = resolved_style(focused_);
-    dragging_ = false;
-    hovered_ = false;
-    invalidate_style_transition(before, resolved_style(focused_), context);
-    return EventResult::Handled;
-  }
-
-  case InputType::KeyDown:
-    return key_down(event, context);
-
-  default:
-    return EventResult::Ignored;
+    }
+  } catch (...) {
+    // The callback may already have retired this component or started a newer
+    // contact. Restore only matching detached interaction state.
+    if (interaction->owner && interaction->generation == generation) {
+      interaction->owner->dragging_ = false;
+      // Keyboard/wheel contexts do not carry the originating touch contact.
+      // Prefer its retained release action, including when invalidation throws.
+      if (interaction->release_pointer)
+        release = std::move(interaction->release_pointer);
+      ++interaction->generation;
+      try {
+        if (release)
+          release();
+      } catch (...) {
+      }
+      try {
+        edit->cancel();
+      } catch (...) {
+      }
+    }
+    throw;
   }
 }
 
@@ -289,6 +431,8 @@ bool SliderComponent::mutating_input(const InputEvent &event) const noexcept {
       event.type == InputType::PointerUp) {
     return dragging_;
   }
+  if (event.type == InputType::PointerWheel)
+    return wheel_enabled_;
   if (event.type != InputType::KeyDown)
     return false;
   return event.key == Key::Left || event.key == Key::Right ||
@@ -308,15 +452,28 @@ float SliderComponent::value_from_pointer(
 
 EventResult SliderComponent::begin_drag(const InputEvent &event,
                                         InputContext &context) {
+  const auto interaction = interaction_;
+  const auto generation = interaction->generation;
+  const auto edit = edit_;
+  const auto state = state_;
+  auto permission = InputMutationAccess::guard(context);
   const auto before = resolved_style(focused_);
   const float target = value_from_pointer(event, context);
-  auto state = state_;
   dragging_ = true;
   hovered_ = true;
   context.capture_pointer();
+  if (!interaction->owner || interaction->generation != generation)
+    return EventResult::Handled;
   invalidate_style_transition(before, resolved_style(focused_), context);
-  if (state.valid() && InputMutationAccess::allowed(context) && state.get() != target)
-    state.set(target);
+  if (interaction->owner && interaction->generation == generation &&
+      state.valid() && (!permission || permission()) &&
+      edit->begin(EditSource::Pointer)) {
+    if (interaction->owner && interaction->generation == generation &&
+        (!permission || permission()))
+      edit->update(target);
+    else
+      edit->cancel();
+  }
   return EventResult::Handled;
 }
 
@@ -335,27 +492,43 @@ EventResult SliderComponent::pointer_move(const InputEvent &event,
 EventResult SliderComponent::update_drag(const InputEvent &event,
                                          InputContext &context, bool release,
                                          const ResolvedSliderStyle &before) {
+  const auto interaction = interaction_;
+  const auto generation = interaction->generation;
+  const auto edit = edit_;
+  const auto state = state_;
+  auto permission = InputMutationAccess::guard(context);
+  auto release_contact = context.pointer_releaser();
   const auto effective_before = release ? resolved_style(focused_) : before;
   const float target = value_from_pointer(event, context);
-  auto state = state_;
   if (release) {
     hovered_ = context.bounds().contains(event.position);
     dragging_ = false;
-    context.release_pointer();
+    interaction->release_pointer = {};
   }
   invalidate_style_transition(effective_before, resolved_style(focused_),
                               context);
-  if (state.valid() && InputMutationAccess::allowed(context) && state.get() != target)
-    state.set(target);
+  if (release && release_contact)
+    release_contact();
+  if (interaction->owner && interaction->generation == generation &&
+      state.valid() && (!permission || permission())) {
+    if (release)
+      edit->finish(target);
+    else
+      edit->update(target);
+  } else if (release && interaction->generation == generation) {
+    edit->cancel();
+  }
   return EventResult::Handled;
 }
 
-EventResult SliderComponent::key_down(const InputEvent &event, InputContext &context) {
-  auto state = state_;
+EventResult SliderComponent::key_down(const InputEvent &event,
+                                      InputContext &context) {
+  const auto state = state_;
+  const auto edit = edit_;
+  auto permission = InputMutationAccess::guard(context);
   float target = state.get();
   const float effective = domain_.effective_external(target);
   const double increment = domain_.keyboard_increment(event.shift);
-
   switch (event.key) {
   case Key::Left:
   case Key::Down:
@@ -374,11 +547,11 @@ EventResult SliderComponent::key_down(const InputEvent &event, InputContext &con
   default:
     return EventResult::Ignored;
   }
-
-  if (state.valid() && InputMutationAccess::allowed(context) && state.get() != target)
-    state.set(target);
+  if (state.valid() && (!permission || permission()))
+    edit->set(target, EditSource::Keyboard);
   return EventResult::Handled;
 }
+
 } // namespace detail
 
 Slider::Slider(Binding<float> state) : state_(std::move(state)) {}
@@ -411,6 +584,16 @@ Slider &&Slider::style(SliderStyle value) && {
   return std::move(*this);
 }
 
+Slider &&Slider::on_edit(EditCallbacks<float> callbacks) && {
+  callbacks_ = std::move(callbacks);
+  return std::move(*this);
+}
+
+Slider &&Slider::wheel_enabled(bool value) && {
+  wheel_enabled_ = value;
+  return std::move(*this);
+}
+
 Spec Slider::spec() && {
   auto state = std::move(state_);
   const float minimum = minimum_;
@@ -419,12 +602,15 @@ Spec Slider::spec() && {
   const auto orientation = orientation_;
   auto formatter = std::move(formatter_);
   auto style = std::move(style_);
+  auto callbacks = std::move(callbacks_);
+  const bool wheel_enabled = wheel_enabled_;
   return Spec{[state = std::move(state), minimum, maximum, step, orientation,
-               formatter = std::move(formatter),
-               style = std::move(style)]() mutable {
+               formatter = std::move(formatter), style = std::move(style),
+               callbacks = std::move(callbacks), wheel_enabled]() mutable {
                 return std::make_unique<detail::SliderComponent>(
                     std::move(state), minimum, maximum, step, orientation,
-                    std::move(formatter), std::move(style));
+                    std::move(formatter), std::move(style),
+                    std::move(callbacks), wheel_enabled);
               },
               {}};
 }

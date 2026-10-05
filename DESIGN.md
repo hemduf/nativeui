@@ -185,7 +185,7 @@ NativeUI currently pins:
 
 ```text
 repository: hemduf/pugl
-commit:     195f79b22644010c81a5e0c3231c591856787ec6
+commit:     a4bdafe38f48cf906560e40bd1e9e87986369b06
 license:    ISC
 ```
 
@@ -371,6 +371,19 @@ once before publication. Fractal configuration is a value-only, allocation-free
 `FractalNoiseOptions`; no octave resource, seed salt, mutable cache or
 paint-time compilation is introduced. Worley F1/F2 remain explicitly excluded
 as NativeUI 1.1 fractal bases.
+
+T093 adds `ScalarSource` as the backend-neutral immutable numeric-source
+counterpart to `Brush`. A scalar source stores either an unclamped float or a
+channel selection from an immutable Brush snapshot; `from_noise()` reuses the
+existing opaque-black-to-white NoiseSource Brush semantics and does not compile
+or materialize a second source. Constants, moved-from values and invalid channel
+enumerators have deterministic value semantics, while Brush-backed sources keep
+the same Painter-local coordinates, Color/Data interpretation and renderer-owned
+materialization/failure behavior as ordinary Brush child sampling. ScalarSource
+does not apply destination coverage/blending, color conversion, alpha
+unpremultiplication or material-specific physical clamping. It introduces no
+public backend type, callback, mutable global registry or renderer ownership;
+later Material consumers own per-property sanitization and physical ranges.
 
 ---
 
@@ -776,6 +789,8 @@ Embedded-font registration owns/copies the supplied font bytes. Shared registry 
 
 Pugl `PUGL_TEXT` provides committed Unicode text and is the normal insertion path, including dead-key/input-method sequences that produce committed text.
 
+`TextInput::on_key_down` can reserve a navigation key for its containing view. The callback runs before the built-in cursor commands and returns `Handled` to consume the key or `Ignored` to keep normal text editing. Active IME composition retains ownership of its navigation keys, so the callback does not run for those keys until composition ends.
+
 Full IME pre-edit/composition remains a separate future platform-extension feature. This includes marked/pre-edit text and candidate-rectangle behavior that the pinned Pugl API does not fully expose.
 
 If required, advanced IME should be implemented through a very small platform extension layer. It is **not** a reason to replace Pugl or rebuild the complete windowing stack.
@@ -1061,7 +1076,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=195f79b22644010c81a5e0c3231c591856787ec6
+NATIVEUI_PUGL_COMMIT=a4bdafe38f48cf906560e40bd1e9e87986369b06
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149
@@ -1331,6 +1346,20 @@ The main platform risks remain isolated rather than allowed to distort the toolk
 3. the legacy independent-PROGRAM-world standalone constructor remains only until T069 and must not become a second multi-window ownership model.
 
 None of these currently justifies reimplementing Win32, Cocoa and X11 windowing inside NativeUI.
+
+---
+
+## Value edit lifetimes and embedded visibility
+
+The [value editing contract](docs/value-editing.md) defines generic `EditSession<T>`
+notifications, standard control input boundaries, exception/reentrancy policy,
+and optional hidden `EmbeddedView` construction. State and editing remain
+UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The [embedded keyboard contract](docs/embedded-keyboard.md) defines consumed-key
+ownership, host responder fallback and retained focus geometry recovery.
+The pinned macOS Pugl backend owns embedded visibility and focus behavior
+directly. NativeUI consumes that exact source commit without build-time source
+rewriting.
 
 ---
 

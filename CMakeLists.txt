@@ -127,6 +127,7 @@ add_library(nativeui_core STATIC
   src/skia_core.cpp
   src/skia_image.cpp
   src/skia_shader.cpp
+  src/skia_painter.cpp
   src/skia_noise.cpp
   src/skia_svg.cpp
   src/headless.cpp
@@ -489,4 +490,8 @@ if(EMSCRIPTEN AND NATIVEUI_BUILD_WASM_SPIKE)
       LINK_FLAGS "-sEXIT_RUNTIME=0 -sALLOW_MEMORY_GROWTH=1")
     nativeui_enable_project_warnings(nativeui_wasm_app)
   endif()
+endif()
+
+if(NATIVEUI_BUILD_TESTS)
+  add_subdirectory(tests/raster_cache)
 endif()

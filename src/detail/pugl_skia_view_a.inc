@@ -39,10 +39,12 @@ public:
              PuglWorld* shared_world = nullptr,
              std::function<void()> close_callback = {},
              NativeViewConstructionFaultStage fault_stage = NativeViewConstructionFaultStage::AfterViewCreation,
-             NativeViewConstructionFaultResult* fault_result = nullptr)
+             NativeViewConstructionFaultResult* fault_result = nullptr,
+             bool initially_visible = true)
         : ui_(ui),
           services_(services),
           geometry_(validated_initial_size(desc)),
+          embedded_(world_type == PUGL_MODULE),
           close_callback_(std::move(close_callback)) {
         if (!size_constraints_.update(desc.min_size, desc.max_size)) {
             throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
@@ -157,14 +159,16 @@ public:
         if (fault_result) ++fault_result->initial_resize_completed;
         maybe_inject(NativeViewConstructionFaultStage::AfterInitialResize);
 
-        if (const auto status = puglShow(view_, parent ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
-            throw_pugl(status, "puglShow failed");
+        if (initially_visible) {
+            if (const auto status = puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
+                throw_pugl(status, "puglShow failed");
+            }
+            visibility_.set_visible(true);
         }
-        visible_ = true;
         if (fault_result) ++fault_result->show_completed;
         maybe_inject(NativeViewConstructionFaultStage::AfterShow);
 
-        // Attach exposure scheduling only after the native view is visible.
+        // Attach exposure scheduling after realization, also for hidden views.
         // The callback replays the already accumulated initial dirty region,
         // so no redundant whole-view redraw request is needed here.
         construction_cleanup.invalidation_attached = true;
@@ -305,17 +309,69 @@ public:
 
     bool show() {
         if (!native_view_open()) return false;
-        if (visible_) return true;
-        if (puglShow(view_, PUGL_SHOW_RAISE) != PUGL_SUCCESS) return false;
-        visible_ = true;
+        if (visibility_.visible()) return true;
+
+        const auto generation = visibility_.begin_show();
+        const auto status =
+            puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
+        if (status != PUGL_SUCCESS) {
+            visibility_.rollback_show(generation);
+            return false;
+        }
+
+        // A synchronous native callback may have performed a newer visibility
+        // transition or closed the view. The newest transition owns follow-up.
+        if (!visibility_.current(generation) ||
+            !visibility_.visible() ||
+            !native_view_open()) {
+            return true;
+        }
+
+        renderer_.invalidate();
+        const auto logical = geometry_.logical_size();
+        request_redraw({0.0f, 0.0f, logical.w, logical.h});
         return true;
+    }
+
+    [[nodiscard]] bool visible() const noexcept {
+        return native_view_open() && visibility_.visible();
     }
 
     bool hide() {
         if (!native_view_open()) return false;
-        if (!visible_) return true;
-        if (puglHide(view_) != PUGL_SUCCESS) return false;
-        visible_ = false;
+        if (!visibility_.visible()) return true;
+
+        const auto generation = visibility_.begin_hide();
+        PuglStatus hide_status = PUGL_SUCCESS;
+        {
+            detail::ScopedBooleanState suppress_focus_cleanup{
+                suppress_embedded_focus_cleanup_,
+                suppress_embedded_focus_cleanup_ || embedded_};
+            hide_status = puglHide(view_);
+        }
+
+        if (hide_status != PUGL_SUCCESS) {
+            visibility_.rollback_hide(generation);
+            return false;
+        }
+
+        // If a Pugl callback re-entered show/hide (or closed the native view),
+        // that newer transition owns cleanup. Never deactivate a view that a
+        // nested show just made visible again.
+        if (!visibility_.current(generation) ||
+            visibility_.visible() ||
+            !view_) {
+            return true;
+        }
+
+        std::exception_ptr failure;
+        const auto complete = [&](auto&& operation) {
+            try { operation(); } catch (...) { if (!failure) failure = std::current_exception(); }
+        };
+        complete([&] { (void)ui_.cancel_pointer(services_); });
+        complete([&] { ui_.deactivate(services_); });
+        complete([&] { set_text_input(false, {}, 0.0f); });
+        if (failure) std::rethrow_exception(failure);
         return true;
     }
 
@@ -346,7 +402,7 @@ public:
     bool close_native_view() noexcept {
         if (!view_) {
             should_close_ = true;
-            visible_ = false;
+            visibility_.set_visible(false);
             return false;
         }
 
@@ -388,7 +444,7 @@ public:
         renderer_.abandon();
         puglFreeView(view_);
         view_ = nullptr;
-        visible_ = false;
+        visibility_.set_visible(false);
         should_close_ = true;
         return true;
     }
@@ -683,7 +739,7 @@ private:
             cleanup.view_acquired = false;
             if (cleanup.fault_result) ++cleanup.fault_result->view_released;
         }
-        visible_ = false;
+        visibility_.set_visible(false);
         if (world_ && owns_world_) {
             puglFreeWorld(world_);
             world_ = nullptr;
@@ -721,6 +777,20 @@ private:
         }
     }
 
+    void consume_failed_native_key(const PuglEvent* event) noexcept {
+#if defined(__APPLE__)
+        // A component may mutate local state before throwing. Treat failed
+        // keyboard/text dispatch as consumed, rather than invoking a DAW
+        // shortcut for the same partially executed local operation.
+        if (event && (event->type == PUGL_KEY_PRESS || event->type == PUGL_KEY_RELEASE ||
+                      event->type == PUGL_TEXT)) {
+            nativeuiImeReportKeyHandled(ime_bridge_, true);
+        }
+#else
+        (void)event;
+#endif
+    }
+
     static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {
         auto* self = static_cast<ViewCore*>(puglGetHandle(view));
         if (!self) return PUGL_BAD_PARAMETER;
@@ -728,10 +798,12 @@ private:
             return self->on_event(event);
         } catch (const std::exception& e) {
             self->remember_teardown_error(e.what());
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         } catch (...) {
             self->remember_teardown_error("Unknown NativeUI event error");
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         }

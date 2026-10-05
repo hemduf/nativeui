@@ -124,10 +124,20 @@
                     break;
                 }
                 case FocusTransitionPhase::Commit: {
+                    // Focus callbacks consume geometry (for example, text caret
+                    // scrolling). Dynamic/availability reconciliation can reach
+                    // this phase before paint or public layout. Prepare a complete
+                    // frame before publishing the new focus owner; a failed layout
+                    // leaves this phase pending and does not replay the old blur.
+                    if (focus_transition_stack_[index].next != kInvalidNodeId) ensure_layout();
+                    // Layout callbacks may deactivate/unmount this live Tree,
+                    // retiring the transition without destroying the owner.
+                    if (index >= focus_transition_stack_.size()) break;
                     const auto next_id = focus_transition_stack_[index].next;
                     auto* next = focus_transition_node(next_id);
-                    if (!next) {
+                    if (!focus_target_available(next)) {
                         focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -136,6 +146,7 @@
                     const auto it = std::find(focusables_.begin(), focusables_.end(), next);
                     if (it == focusables_.end()) {
                         focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -150,9 +161,15 @@
                     break;
                 }
                 case FocusTransitionPhase::FocusNew: {
+                    // Context preparation can fail after Commit. A later retry
+                    // must also observe any layout invalidated in the meantime.
+                    ensure_layout();
+                    if (index >= focus_transition_stack_.size()) break;
                     const auto id = focus_transition_stack_[index].next;
                     auto* next = focus_transition_node(id);
-                    if (!next) {
+                    if (!focus_target_available(next)) {
+                        focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -571,7 +588,11 @@
     }
 
     void reconcile_scope_deactivations(Node& node, PlatformServices& platform) {
-        for (auto& child : node.children) reconcile_scope_deactivations(*child, platform);
+        for (auto& child : node.children) {
+            if (!active_) return;
+            reconcile_scope_deactivations(*child, platform);
+        }
+        if (!active_) return;
         if (!node.component->is_focus_scope()) return;
         const bool now = scope_effectively_active(node);
         if (node.focus_scope_active_cached && !now) {
@@ -599,21 +620,29 @@
     }
 
     void reconcile_scope_activations(Node& node, PlatformServices& platform) {
+        if (!active_) return;
         if (node.component->is_focus_scope()) {
             const bool now = scope_effectively_active(node);
             if (!node.focus_scope_active_cached && now) {
-                node.focus_scope_active_cached = true;
-                if (auto* restore = current_focus_node()) {
-                    node.focus_restore = restore->id;
-                } else {
-                    node.focus_restore = kInvalidNodeId;
-                }
+                // A structural checkpoint may reconcile another owner before
+                // this scope's dynamic child has mounted. Consume activation
+                // only once a default target exists; an empty scope requests no
+                // extra work and is reconsidered on the next structural change.
                 if (auto* target = default_focus_for_scope(node)) {
+                    node.focus_scope_active_cached = true;
+                    if (auto* restore = current_focus_node()) {
+                        node.focus_restore = restore->id;
+                    } else {
+                        node.focus_restore = kInvalidNodeId;
+                    }
                     set_focus(target, platform);
                 }
             }
         }
-        for (auto& child : node.children) reconcile_scope_activations(*child, platform);
+        for (auto& child : node.children) {
+            if (!active_) return;
+            reconcile_scope_activations(*child, platform);
+        }
     }
 
     void sync_focus_structure(PlatformServices& platform) {
@@ -627,7 +656,7 @@
                 resume_focus_transitions(platform);
             }
         }
-        if (!focus_structure_dirty_) return;
+        if (!active_ || !focus_structure_dirty_) return;
 
         // Only an availability-origin failed blur can be cancelled by an
         // availability reversal. Generic direct-clear recovery must keep its
@@ -643,22 +672,26 @@
         }
 
         reconcile_scope_deactivations(*root_, platform);
+        if (!active_) return;
         reconcile_scope_activations(*root_, platform);
+        if (!active_) return;
         if (focus_active_ && !focus_target_available(current_focus_node())) {
             if (auto* fallback = first_available_focusable())
                 set_focus(fallback, platform, FocusChangeReason::Unavailable);
             else clear_focus(platform, FocusChangeReason::Unavailable);
         }
+        if (!active_) return;
         if (!focus_active_ && focus_target_available(availability_cleared_focus_)) {
             set_focus(availability_cleared_focus_, platform);
         }
+        if (!active_) return;
         if (focus_active_) availability_cleared_focus_ = nullptr;
         focus_structure_dirty_ = false;
     }
 
     void set_focus(Node* node, PlatformServices& platform,
                    FocusChangeReason reason = FocusChangeReason::Ordinary) {
-        if (!node || !focus_target_available(node)) return;
+        if (!active_ || !mounted_ || !node || !focus_target_available(node)) return;
 
         // Pointer targeting and other direct focus moves must not let an
         // already-active trapping scope leak focus into an ordinary sibling.

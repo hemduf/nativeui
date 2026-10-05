@@ -23,6 +23,15 @@ and observations.
 
 ## 2. Public API and composition
 
+`TextInput::KeyDownCallback` and `on_key_down(KeyDownCallback)` are
+available after integration with main. The hook runs after active IME composition
+handling and before built-in key commands: return `Handled` to consume the key,
+`Ignored` to continue normal editing. Copying or invoking the hook can remove the
+subtree; the retired editor must not continue built-in mutation. Exceptions
+propagate after interaction recovery. The historical six-argument
+`TextInputComponent` constructor remains as a delegating overload alongside the
+new callback-taking constructor.
+
 Preserve the current API; the following declarations are in `namespace ui`.
 
 ```cpp

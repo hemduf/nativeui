@@ -304,6 +304,7 @@
 
     void retire_mount_identity(NodeId id) noexcept {
         std::erase(retained_checkpoint_nodes_, id);
+        raster_cache_epochs_.erase(id);
         const auto live = std::lower_bound(retained_invalidation_live_nodes_.begin(),
                                            retained_invalidation_live_nodes_.end(), id);
         if (live != retained_invalidation_live_nodes_.end() && *live == id) {
@@ -453,6 +454,7 @@
         // Record before invoking user code: if activate() itself throws, this
         // node still requires the matching best-effort deactivate().
         journal.push_back(&node);
+        invalidate_raster_cache_ancestry(&node);
         LifecycleContext context{
             node.id,
             node.bounds,
@@ -467,6 +469,7 @@
         for (std::size_t index = journal.size(); index-- > 0;) {
             auto* node = journal[index];
             if (!node) continue;
+            invalidate_raster_cache_ancestry(node);
             try {
                 LifecycleContext context{
                     node->id,

@@ -16,6 +16,13 @@ MyGo: `ui/widgets.go`, `Slider`; `ui/base.go`, `SliderBase`. MyGo's domain is fl
 
 ## 2. Public API and composition
 
+`Slider::on_edit(EditCallbacks<float>)` and `wheel_enabled(bool = true)`
+are available after integration with main. Wheel editing is disabled by default.
+Pointer edits publish begin/change/end or cancel; keyboard and opted-in wheel
+commands are atomic edits. Unchanged commands do not begin an edit. Cancellation
+keeps the last committed value. Owned sessions and originating-contact checks
+protect subtree removal and newer nested gestures. See [value editing](value-editing.md).
+
 Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp

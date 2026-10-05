@@ -3,6 +3,7 @@
 #include <nativeui/component.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/widgets_activation.inc>
+#include <nativeui/edit.hpp>
 #include <nativeui/gesture.hpp>
 #include <nativeui/state.hpp>
 #include <nativeui/text_edit.hpp>
@@ -121,6 +122,10 @@ public:
   SliderComponent(Binding<float> state, float minimum, float maximum,
                   float step, SliderOrientation orientation,
                   Formatter formatter, SliderStyle style);
+  SliderComponent(Binding<float> state, float minimum, float maximum,
+                  float step, SliderOrientation orientation,
+                  Formatter formatter, SliderStyle style,
+                  EditCallbacks<float> callbacks, bool wheel_enabled = false);
 
   [[nodiscard]] bool focusable() const noexcept override;
 
@@ -143,6 +148,12 @@ public:
   void paint(PaintContext &context) const override;
 
 private:
+  struct Interaction {
+    SliderComponent *owner{};
+    std::uint64_t generation{};
+    std::function<void()> release_pointer;
+  };
+
   template <class Context>
   void invalidate_style_transition(const ResolvedSliderStyle &before,
                                    const ResolvedSliderStyle &after,
@@ -180,6 +191,9 @@ private:
   EventResult key_down(const InputEvent &event, InputContext &);
 
   Binding<float> state_;
+  std::shared_ptr<EditSession<float>> edit_;
+  std::shared_ptr<Interaction> interaction_;
+  bool wheel_enabled_{};
   SliderDomain domain_;
   SliderOrientation orientation_{SliderOrientation::Horizontal};
   Formatter formatter_;
@@ -208,6 +222,10 @@ public:
 
   Slider &&style(SliderStyle value) &&;
 
+  Slider &&on_edit(EditCallbacks<float> callbacks) &&;
+
+  Slider &&wheel_enabled(bool value = true) &&;
+
   Spec spec() &&;
 
 private:
@@ -218,6 +236,8 @@ private:
   SliderOrientation orientation_{SliderOrientation::Horizontal};
   Formatter formatter_;
   SliderStyle style_;
+  EditCallbacks<float> callbacks_{};
+  bool wheel_enabled_{};
 };
 
 } // namespace ui

@@ -2,10 +2,37 @@
 
 namespace ui {
 
+namespace {
+template <class T, class Cleanup>
+void cancel_after_cleanup(const std::shared_ptr<EditSession<T>> &edit,
+                          Cleanup &&cleanup) {
+  try {
+    std::forward<Cleanup>(cleanup)();
+  } catch (...) {
+    try {
+      edit->cancel();
+    } catch (...) {
+    }
+    throw;
+  }
+  edit->cancel();
+}
+} // namespace
+
 ToggleComponent::ToggleComponent(std::string label, Binding<bool> state,
                                  ToggleStyle style)
+    : ToggleComponent(std::move(label), std::move(state), std::move(style),
+                      {}) {}
+
+ToggleComponent::ToggleComponent(std::string label, Binding<bool> state,
+                                 ToggleStyle style,
+                                 EditCallbacks<bool> callbacks)
     : label_(std::move(label)), state_(std::move(state)),
-      style_(std::move(style)) {}
+      edit_(std::make_shared<EditSession<bool>>(state_, std::move(callbacks))),
+      interaction_owner_(std::make_shared<InteractionOwner>()),
+      style_(std::move(style)) {
+  interaction_owner_->owner = this;
+}
 
 bool ToggleComponent::focusable() const noexcept { return true; }
 
@@ -15,6 +42,7 @@ Size ToggleComponent::measure(const std::vector<ChildMetrics> &) const {
 }
 
 void ToggleComponent::mount(MountContext &ctx) {
+  interaction_owner_->owner = this;
   const bool checked_changes_layout = patch_affects_layout(style_.checked);
   auto invalidate = ctx.invalidator();
   auto invalidate_layout = ctx.layout_invalidator();
@@ -27,9 +55,30 @@ void ToggleComponent::mount(MountContext &ctx) {
       });
 }
 
-void ToggleComponent::unmount(LifecycleContext &) { subscription_.reset(); }
+void ToggleComponent::unmount(LifecycleContext &) {
+  const auto owner = interaction_owner_;
+  const auto edit = edit_;
+  owner->owner = nullptr;
+  ++owner->generation;
+  owner->release_pointer = {};
+  interaction_ = {};
+  space_pressed_ = false;
+  enter_pressed_ = false;
+  subscription_.reset();
+  try {
+    edit->cancel();
+  } catch (...) {
+  }
+}
 
 void ToggleComponent::focus_changed(bool focused, FocusContext &context) {
+  const auto edit = edit_;
+  const auto owner = interaction_owner_;
+  std::function<void()> release;
+  if (!focused) {
+    ++owner->generation;
+    release = std::move(owner->release_pointer);
+  }
   const auto before = presentation_signature(focused_);
   focused_ = focused;
   interaction_.focus_changed(focused, context, false);
@@ -38,105 +87,176 @@ void ToggleComponent::focus_changed(bool focused, FocusContext &context) {
     enter_pressed_ = false;
   }
   const auto after = presentation_signature(focused_);
-  invalidate_style_transition(before, after, context);
+  if (focused) {
+    invalidate_style_transition(before, after, context);
+  } else {
+    cancel_after_cleanup(edit, [&] {
+      try {
+        invalidate_style_transition(before, after, context);
+      } catch (...) {
+        try {
+          if (release)
+            release();
+        } catch (...) {
+        }
+        throw;
+      }
+      if (release)
+        release();
+    });
+  }
 }
 
 void ToggleComponent::deactivate(LifecycleContext &context) {
+  const auto edit = edit_;
+  ++interaction_owner_->generation;
+  auto release = std::move(interaction_owner_->release_pointer);
   const auto before = presentation_signature(focused_);
   focused_ = false;
   interaction_.deactivate(context, false);
   space_pressed_ = false;
   enter_pressed_ = false;
   const auto after = presentation_signature(focused_);
-  invalidate_style_transition(before, after, context);
+  cancel_after_cleanup(edit, [&] {
+    try {
+      invalidate_style_transition(before, after, context);
+    } catch (...) {
+      try {
+        if (release)
+          release();
+      } catch (...) {
+      }
+      throw;
+    }
+    if (release)
+      release();
+  });
 }
 
 EventResult ToggleComponent::input(const InputEvent &event, InputContext &ctx) {
-  const auto before = presentation_signature(focused_);
-  const bool pointer_event = event.type == InputType::PointerDown ||
-                             event.type == InputType::PointerMove ||
-                             event.type == InputType::PointerUp ||
-                             event.type == InputType::PointerCancel;
-
-  if (pointer_event) {
-    const bool mutating_pointer =
-        event.type == InputType::PointerDown || interaction_.pressed();
-    if ((effective_read_only() || !state_.valid()) && mutating_pointer) {
-      interaction_.cancel_pending_mutation(ctx, false);
-      const auto after = presentation_signature(focused_);
-      invalidate_style_transition(before, after, ctx);
-      return EventResult::Handled;
-    }
-
-    const auto outcome = interaction_.input(event, ctx, false, false);
-    const auto after_interaction = presentation_signature(focused_);
-    invalidate_style_transition(before, after_interaction, ctx);
-    if (event.type == InputType::PointerDown && !effective_read_only() &&
-        state_.valid()) {
-      const bool next = !state_.get();
-      if (state_.valid() && detail::InputMutationAccess::allowed(ctx))
-        state_.set(next);
+  const auto owner = interaction_owner_;
+  const auto edit = edit_;
+  const auto state = state_;
+  auto permission = detail::InputMutationAccess::guard(ctx);
+  auto release = ctx.pointer_releaser();
+  const bool activation = event.type == InputType::PointerDown ||
+                          (event.type == InputType::KeyDown &&
+                           ((event.key == Key::Space && !space_pressed_) ||
+                            (event.key == Key::Enter && !enter_pressed_)));
+  if (activation)
+    ++owner->generation;
+  const auto generation = owner->generation;
+  try {
+    const auto before = presentation_signature(focused_);
+    const bool pointer_event = event.type == InputType::PointerDown ||
+                               event.type == InputType::PointerMove ||
+                               event.type == InputType::PointerUp ||
+                               event.type == InputType::PointerCancel;
+    if (pointer_event) {
+      const bool mutating_pointer =
+          event.type == InputType::PointerDown || interaction_.pressed();
+      if ((effective_read_only() || !state.valid()) && mutating_pointer) {
+        if (owner->release_pointer)
+          release = std::move(owner->release_pointer);
+        interaction_ = {};
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, ctx);
+        if (release)
+          release();
+        edit->cancel();
+        return EventResult::Handled;
+      }
+      const auto expected = state.get();
+      if (event.type == InputType::PointerDown)
+        owner->release_pointer = release;
+      else if (event.type == InputType::PointerUp ||
+               event.type == InputType::PointerCancel)
+        owner->release_pointer = {};
+      const auto outcome = interaction_.input(event, ctx, false, false);
+      if (!owner->owner || owner->generation != generation)
+        return outcome.result;
+      const auto after_interaction = presentation_signature(focused_);
+      invalidate_style_transition(before, after_interaction, ctx);
+      if (event.type == InputType::PointerDown && owner->owner &&
+          owner->generation == generation && state.valid() &&
+          state.get() == expected && (!permission || permission()))
+        edit->set(!expected, EditSource::Pointer);
       return outcome.result;
     }
-    return outcome.result;
-  }
-
-  if (event.type == InputType::KeyDown && event.key == Key::Space) {
-    if (effective_read_only() || !state_.valid())
-      return EventResult::Handled;
-    if (!space_pressed_) {
-      space_pressed_ = true;
+    if (event.type == InputType::KeyDown &&
+        (event.key == Key::Space || event.key == Key::Enter)) {
+      if (effective_read_only() || !state.valid())
+        return EventResult::Handled;
+      const bool pressed =
+          event.key == Key::Space ? space_pressed_ : enter_pressed_;
+      if (pressed)
+        return EventResult::Handled;
+      if (event.key == Key::Space)
+        space_pressed_ = true;
+      else
+        enter_pressed_ = true;
+      const auto expected = state.get();
       const auto after_interaction = presentation_signature(focused_);
       invalidate_style_transition(before, after_interaction, ctx);
-      const bool next = !state_.get();
-      if (state_.valid() && detail::InputMutationAccess::allowed(ctx))
-        state_.set(next);
+      if (owner->owner && owner->generation == generation && state.valid() &&
+          state.get() == expected && (!permission || permission()))
+        edit->set(!expected, EditSource::Keyboard);
       return EventResult::Handled;
     }
-    return EventResult::Handled;
-  }
-  if (event.type == InputType::KeyDown && event.key == Key::Enter) {
-    if (effective_read_only() || !state_.valid())
+    if (event.type == InputType::KeyUp &&
+        (event.key == Key::Space || event.key == Key::Enter)) {
+      const bool pressed =
+          event.key == Key::Space ? space_pressed_ : enter_pressed_;
+      if (pressed) {
+        if (event.key == Key::Space)
+          space_pressed_ = false;
+        else
+          enter_pressed_ = false;
+        const auto after = presentation_signature(focused_);
+        invalidate_style_transition(before, after, ctx);
+      }
       return EventResult::Handled;
-    if (!enter_pressed_) {
-      enter_pressed_ = true;
-      const auto after_interaction = presentation_signature(focused_);
-      invalidate_style_transition(before, after_interaction, ctx);
-      const bool next = !state_.get();
-      if (state_.valid() && detail::InputMutationAccess::allowed(ctx))
-        state_.set(next);
-      return EventResult::Handled;
     }
-    return EventResult::Handled;
-  }
-  if (event.type == InputType::KeyUp && event.key == Key::Space) {
-    if (space_pressed_) {
-      space_pressed_ = false;
-      const auto after = presentation_signature(focused_);
-      invalidate_style_transition(before, after, ctx);
+    return EventResult::Ignored;
+  } catch (...) {
+    if (owner->owner && owner->generation == generation) {
+      auto &component = *owner->owner;
+      component.space_pressed_ = false;
+      component.enter_pressed_ = false;
+      component.interaction_ = {};
+      // An atomic keyboard edit may fail while a touch press is still held.
+      // Release that press, rather than the unrelated keyboard contact zero.
+      if (owner->release_pointer)
+        release = std::move(owner->release_pointer);
+      ++owner->generation;
+      try {
+        if (release)
+          release();
+      } catch (...) {
+      }
+      try {
+        edit->cancel();
+      } catch (...) {
+      }
     }
-    return EventResult::Handled;
+    throw;
   }
-  if (event.type == InputType::KeyUp && event.key == Key::Enter) {
-    if (enter_pressed_) {
-      enter_pressed_ = false;
-      const auto after = presentation_signature(focused_);
-      invalidate_style_transition(before, after, ctx);
-    }
-    return EventResult::Handled;
-  }
-
-  return EventResult::Ignored;
 }
 
-EventResult ToggleComponent::semantic_action(SemanticAction action, InputContext &context) {
-  if ((action != SemanticAction::Toggle && action != SemanticAction::Activate) ||
-      !effective_availability().interactive() || effective_read_only() || !state_.valid())
+EventResult ToggleComponent::semantic_action(SemanticAction action,
+                                             InputContext &context) {
+  if ((action != SemanticAction::Toggle &&
+       action != SemanticAction::Activate) ||
+      !effective_availability().interactive() || effective_read_only() ||
+      !state_.valid())
     return EventResult::Ignored;
-  auto state = state_;
+  const auto state = state_;
+  const auto edit = edit_;
   const bool next = !state.get();
-  if (!detail::InputMutationAccess::allowed(context)) return EventResult::Ignored;
-  state.set(next);
+  auto permission = detail::InputMutationAccess::guard(context);
+  if (permission && !permission())
+    return EventResult::Ignored;
+  edit->set(next, EditSource::Accessibility);
   return EventResult::Handled;
 }
 
@@ -354,8 +474,9 @@ void ToggleComponent::invalidate_style_transition(
   if (same_presentation(before, after))
     return;
   if (!same_layout(before, after)) {
+    // Layout invalidation also schedules paint and may retire this subtree.
+    // Its borrowed context must not be used a second time after that exposure.
     context.invalidate_layout();
-    context.invalidate();
     return;
   }
   context.invalidate();
@@ -401,14 +522,22 @@ Toggle &&Toggle::style(ToggleStyle value) && {
   return std::move(*this);
 }
 
+Toggle &&Toggle::on_edit(EditCallbacks<bool> callbacks) && {
+  callbacks_ = std::move(callbacks);
+  return std::move(*this);
+}
+
 Spec Toggle::spec() && {
   auto label = std::move(label_);
   auto state = std::move(state_);
   auto style = std::move(style_);
+  auto callbacks = std::move(callbacks_);
   return Spec{[label = std::move(label), state = std::move(state),
-               style = std::move(style)]() mutable {
+               style = std::move(style),
+               callbacks = std::move(callbacks)]() mutable {
                 return std::make_unique<ToggleComponent>(
-                    std::move(label), std::move(state), std::move(style));
+                    std::move(label), std::move(state), std::move(style),
+                    std::move(callbacks));
               },
               {}};
 }
