@@ -109,6 +109,22 @@ Les 83 composants du catalogue disposent de leur couple `.hpp` / `.cpp`, intégr
 - Les nouveaux contextes retenus résolvent une durée de vie faible, un NodeId stable et la génération du contact. Les demandes de focus sont différées au checkpoint du Tree. Les hooks de géométrie sont publiés après une transaction de layout réussie.
 - Les ponts d’accessibilité T068 et la préédition IME complète restent des dépendances plateforme. Les rôles/actions neutres et les modèles d’édition headless ne constituent pas une validation VoiceOver, UIA ou AT-SPI.
 
+## Validation de la PR du 5 octobre 2026
+
+La branche `codex/nativeui-widgets-and-gallery`, au commit source `fd2013fd`, a été recompilée entièrement en Release avec `CMAKE_BUILD_PARALLEL_LEVEL=1` : Core, plateforme macOS, tous les exemples et les probes des 83 headers publics. La compilation réussit sans avertissement NativeUI. Cette configuration active plateforme, exemples et tests ; les contrats de package installable et l’inspecteur restent désactivés.
+
+La commande `ctest --test-dir build-widgets --output-on-failure`, exécutée en série avec `TMPDIR`, `TMP` et `TEMP` dans `/Volumes/T7/tmp/`, donne **379 réussites sur 384 tests**, en 303 secondes. Les six validations de la galerie et des correctifs Calendar, DateInput, Sidebar, ColorPicker et ColorWell restent réussies.
+
+| Test en échec | Diagnostic à traiter avant fusion |
+| --- | --- |
+| `nativeui_example_t035_combo_popup_self_test` | Un ancien opener ComboBox n’est pas supprimé après Tab. |
+| `nativeui_example_t038_closure_invalidation_self_test` | Une apparence de survol ComboBox inchangée invalide l’arbre. |
+| `nativeui_example_t038_menu_item_invalidation_self_test` | Une apparence de highlight MenuItem inchangée invalide l’arbre. |
+| `nativeui_t035_combo_popup_tests` | Échap est consommé alors que le test attend `EventResult::Ignored` (`tests/t035_combo_popup_tests.cpp:256`). |
+| `nativeui_widget_style_scope_binding_recovery_tests` | L’oracle d’injection de manque de mémoire termine le processus enfant ; une faute injectée a été atteinte. Cette limite de récupération reste ouverte. |
+
+Ce résultat n’efface pas les résultats historiques ci-dessus et ne constitue pas une qualification des sanitizers ou des autres plateformes. La PR reste en brouillon : ces cinq échecs et les conflits avec les changements récents de `main` doivent être résolus avant fusion. Les 849 liens documentaires locaux vérifiés existent.
+
 ## Contrats encore à compléter dans les composants présents
 
 - Header : projection sémantique distincte des textes du titre et sous-titre.
