@@ -4,7 +4,7 @@ namespace {
 void escapes_compose_clear_then_bubble_and_submit_once() {
   ui::State<std::string> query{"presets"};
   int submissions{};
-  ui::UI tree{ui::SearchField{"Recherche", query}.on_submit(
+  ui::UI tree{ui::SearchField{"Search", query}.on_submit(
       [&](const std::string &value) {
         NUI_CHECK(value == query.get());
         ++submissions;
@@ -41,7 +41,7 @@ void skipped_source_observer_and_invalid_binding_recover_safely() {
       throw std::runtime_error("source observer fault");
   });
   int submissions{};
-  ui::UI tree{ui::SearchField{"Recherche", *query}.on_submit(
+  ui::UI tree{ui::SearchField{"Search", *query}.on_submit(
       [&](const auto &) { ++submissions; })};
   test::MockPlatform platform;
   tree.resize({480, 80});

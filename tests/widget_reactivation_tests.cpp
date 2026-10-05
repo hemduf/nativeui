@@ -136,7 +136,7 @@ void family_suite(std::string_view family,Policy policy) {
                             {200.0f,40.0f},{},down,{up});
     } else if (family == "rating") {
         ui::State<double> value{1.0};
-        publication_fixture(family,policy,value,ui::make_spec(ui::Rating{"Note",value}),
+        publication_fixture(family,policy,value,ui::make_spec(ui::Rating{"Rating",value}),
                             {150.0f,30.0f},{},test::key(ui::Key::Right));
     } else if (family == "toggle_button") {
         ui::State<bool> value{false};

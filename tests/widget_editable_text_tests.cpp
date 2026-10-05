@@ -4,7 +4,7 @@
 namespace {
 void drafts_cancel_external_and_stem_selection() {
   ui::State<std::string> value{"Preset.oreto"};
-  ui::UI tree{ui::EditableText{"Nom", value}.select_stem()};
+  ui::UI tree{ui::EditableText{"Name", value}.select_stem()};
   test::MockPlatform platform;
   tree.resize({420, 80});
   tree.activate(platform);
@@ -24,13 +24,13 @@ void invalid_and_throwing_validator_recover_and_destroy_is_silent() {
   int validations{};
   bool fail{};
   auto make = [&] {
-    return ui::EditableText{"Nom", value}
+    return ui::EditableText{"Name", value}
         .validator([&](std::string_view text) -> std::optional<std::string> {
           ++validations;
           if (fail)
             throw std::runtime_error("validator fault");
           if (text.empty())
-            return "Nom vide";
+            return "Name is empty";
           return {};
         })
         .spec();
@@ -70,7 +70,7 @@ void controller_is_weak_single_mount_and_does_not_begin_synchronously() {
   auto controller = std::make_shared<ui::EditableTextController>();
   ui::State<std::string> value{"one"};
   auto tree = std::make_unique<ui::UI>(
-      ui::EditableText{"Nom", value}.controller(controller));
+      ui::EditableText{"Name", value}.controller(controller));
   test::MockPlatform platform;
   tree->resize({420, 80});
   tree->activate(platform);
@@ -97,7 +97,7 @@ void rejected_controller_post_retries_only_at_dispatcher_checkpoint() {
   platform.dispatcher_value = owner.dispatcher();
   std::string validated;
   ui::UI tree{
-      ui::EditableText{"Nom", value}
+      ui::EditableText{"Name", value}
           .controller(controller)
           .validator([&](std::string_view text) -> std::optional<std::string> {
             validated = text;
@@ -129,7 +129,7 @@ void accepted_controller_requests_are_cancelled_across_activation_owners() {
   test::MockPlatform platform;
   platform.dispatcher_value = first.dispatcher();
   ui::UI tree{
-      ui::EditableText{"Nom", value}
+      ui::EditableText{"Name", value}
           .controller(controller)
           .validator([&](std::string_view) -> std::optional<std::string> {
             ++validations;

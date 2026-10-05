@@ -56,8 +56,8 @@
 
 ui::Spec widget_headers_forward() {
   return ui::make_spec(ui::Row{
-    ui::Label{"En-tête"}.bold(),
+    ui::Label{"Header"}.bold(),
     ui::Header{"Compatible"},
-    ui::Button{"Valider", [] {}},
+    ui::Button{"Confirm", [] {}},
   });
 }

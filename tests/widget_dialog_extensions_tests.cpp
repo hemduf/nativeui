@@ -5,8 +5,8 @@ void suite() {
   ui::UI tree{ui::Button{"Document", [] {}}}; test::MockPlatform platform;
   tree.resize({300,210}); tree.activate(platform); ui::Dialog dialog{tree};
   int completions{}; ui::DialogResult result;
-  ui::AlertDialogSpec alert; alert.title="Confirmer";alert.message="Le message est possédé";
-  alert.actions={{"cancel","Fermer",true,ui::DialogActionRole::Cancel},{"ok","Valider",true,ui::DialogActionRole::Default}};
+  ui::AlertDialogSpec alert; alert.title="Confirm";alert.message="The message is owned";
+  alert.actions={{"cancel","Close",true,ui::DialogActionRole::Cancel},{"ok","Confirm",true,ui::DialogActionRole::Default}};
   NUI_CHECK(dialog.show_alert(std::move(alert),[&](ui::DialogResult r){++completions;result=std::move(r);})==ui::DialogShowResult::Shown);
   ui::HeadlessRenderer renderer{{300,210},1};NUI_CHECK(renderer.render(tree));
   tree.dispatch(test::key(ui::Key::Escape),platform);NUI_CHECK(!dialog.active() && completions==1 && result.action_id=="cancel");

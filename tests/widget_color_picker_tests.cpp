@@ -49,7 +49,7 @@ void hexadecimal_composition_owns_submit_and_cancel_keys() {
 void compact_hex_does_not_overlap_swatches() {
   ui::State<ui::Color> color{ui::Color{0, 0, 1, 1}};
   ui::UI tree{ui::ColorPicker{"Palette", color}.swatches(
-      {{"red", "Rouge", {1, 0, 0, 1}}})};
+      {{"red", "Red", {1, 0, 0, 1}}})};
   test::MockPlatform platform;
   tree.resize({280, 420});
   tree.activate(platform);
@@ -71,7 +71,7 @@ void compact_hex_does_not_overlap_swatches() {
 void swatches_show_their_color_and_select_it() {
   ui::State<ui::Color> color{ui::Color{0, 0, 1, 1}};
   ui::UI tree{ui::ColorPicker{"Palette", color}.swatches(
-      {{"red", "Rouge", {1, 0, 0, 1}}})};
+      {{"red", "Red", {1, 0, 0, 1}}})};
   test::MockPlatform platform;
   tree.resize({280, 420});
   tree.activate(platform);
@@ -79,7 +79,7 @@ void swatches_show_their_color_and_select_it() {
   NUI_CHECK(renderer.render(tree));
   std::optional<ui::SemanticInfo> swatch;
   for (ui::NodeId id = 1; id < 20; ++id)
-    if (auto info = tree.component_semantics(id); info && info->name == "Rouge")
+    if (auto info = tree.component_semantics(id); info && info->name == "Red")
       swatch = std::move(info);
   NUI_CHECK(swatch && swatch->enabled);
   const auto pixel = renderer.pixel(22, 398);
@@ -95,7 +95,7 @@ void swatches_respect_owner_availability_and_expiration() {
   ui::UI tree{ui::Enabled{
       enabled,
       ui::ReadOnly{read_only, ui::ColorPicker{"Palette", color->binding()}
-                                  .swatches({{"red", "Rouge", {1, 0, 0, 1}}})
+                                  .swatches({{"red", "Red", {1, 0, 0, 1}}})
                                   .on_change([&](ui::Color) { ++calls; })}}};
   test::MockPlatform platform;
   tree.resize({280, 420});
@@ -124,7 +124,7 @@ void swatches_respect_owner_availability_and_expiration() {
   bool found = false;
   for (ui::NodeId id = 1; id < 20; ++id)
     if (const auto info = tree.component_semantics(id);
-        info && info->name == "Rouge") {
+        info && info->name == "Red") {
       found = true;
       NUI_CHECK(!info->enabled);
     }

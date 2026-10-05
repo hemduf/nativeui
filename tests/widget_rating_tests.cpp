@@ -13,7 +13,7 @@ void pointer_preview_half_steps_and_clear() {
   ui::RatingStyle style;
   style.star_size = 20.0;
   style.gap = 0.0;
-  ui::UI tree{ui::Rating{"Note", value, 5}.step(0.5).style(style)};
+  ui::UI tree{ui::Rating{"Rating", value, 5}.step(0.5).style(style)};
   test::MockPlatform platform;
   tree.resize({100.0f, 24.0f});
   tree.activate(platform);
@@ -40,7 +40,7 @@ void keyboard_boundaries_throw_recovery_and_empty() {
     if (fail)
       throw std::runtime_error("injected rating observer");
   });
-  ui::UI tree{ui::Rating{"Note", value, 5}.step(0.5)};
+  ui::UI tree{ui::Rating{"Rating", value, 5}.step(0.5)};
   test::MockPlatform platform;
   tree.resize({150.0f, 30.0f});
   tree.activate(platform);
@@ -71,7 +71,7 @@ void fractional_fill_is_clipped_per_star() {
   style.outline_width = 0.0;
   style.empty = ui::Color{0.0f, 0.0f, 0.0f, 1.0f};
   style.filled = ui::Color{1.0f, 0.0f, 0.0f, 1.0f};
-  ui::UI tree{ui::Rating{"Note", value, 5}.step(0.5).style(style)};
+  ui::UI tree{ui::Rating{"Rating", value, 5}.step(0.5).style(style)};
   ui::HeadlessRenderer renderer{{100.0f, 24.0f}, 1.0f};
   NUI_CHECK(renderer.render(tree));
   NUI_CHECK(renderer.pixel(47, 12).r > 240);
@@ -86,7 +86,7 @@ void hover_leaves_to_sibling_restores_model_pixels() {
   style.empty = ui::Color{0, 0, 0, 1};
   style.filled = ui::Color{1, 0, 0, 1};
   style.preview = ui::Color{1, 0, 0, 1};
-  ui::UI tree{ui::Row{ui::Rating{"Note", value, 5}.style(style),
+  ui::UI tree{ui::Row{ui::Rating{"Rating", value, 5}.style(style),
                       ui::Button{"Next", {}}}};
   test::MockPlatform platform;
   tree.resize({200, 24});

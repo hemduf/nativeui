@@ -46,7 +46,7 @@
 
 ui::Spec widget_headers_reverse() {
   return ui::make_spec(ui::Column{
-    ui::Label{"Deuxième instance"}.italic(),
+    ui::Label{"Second instance"}.italic(),
     ui::Padding{4.0f, ui::Spacer{12.0f, 20.0f}},
   });
 }

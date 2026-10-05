@@ -6,7 +6,7 @@
 namespace {
 void external_write_during_number_step_invalidation_wins() {
   ui::State<double> value{2};
-  ui::UI tree{ui::NumberInput{"Nombre", value}.range(0, 10)};
+  ui::UI tree{ui::NumberInput{"Number", value}.range(0, 10)};
   test::MockPlatform platform;
   tree.resize({460, 82});
   tree.activate(platform);
@@ -25,7 +25,7 @@ void external_write_during_number_step_invalidation_wins() {
 }
 void external_write_during_search_clear_invalidation_wins() {
   ui::State<std::string> query{"old"};
-  ui::UI tree{ui::SearchField{"Recherche", query}};
+  ui::UI tree{ui::SearchField{"Search", query}};
   test::MockPlatform platform;
   tree.resize({480, 80});
   tree.activate(platform);
@@ -45,7 +45,7 @@ void external_write_during_search_clear_invalidation_wins() {
 void external_write_during_editable_accept_invalidation_wins() {
   ui::State<std::string> value{"old"};
   auto controller = std::make_shared<ui::EditableTextController>();
-  ui::UI tree{ui::EditableText{"Nom", value}.controller(controller)};
+  ui::UI tree{ui::EditableText{"Name", value}.controller(controller)};
   test::MockPlatform platform;
   tree.resize({420, 80});
   tree.activate(platform);
@@ -94,7 +94,7 @@ void external_current_during_find_invalidation_wins() {
 }
 void external_write_during_number_escape_invalidation_wins() {
   ui::State<double> value{2};
-  ui::UI tree{ui::NumberInput{"Nombre", value}.range(0, 100)};
+  ui::UI tree{ui::NumberInput{"Number", value}.range(0, 100)};
   test::MockPlatform platform;
   tree.resize({460, 82});
   tree.activate(platform);
@@ -120,7 +120,7 @@ void external_write_during_number_escape_invalidation_wins() {
 void read_only_during_search_clear_blocks_the_late_write() {
   ui::State<std::string> query{"old"};
   ui::State<bool> read_only{false};
-  ui::UI tree{ui::ReadOnly{read_only, ui::SearchField{"Recherche", query}}};
+  ui::UI tree{ui::ReadOnly{read_only, ui::SearchField{"Search", query}}};
   test::MockPlatform platform;
   tree.resize({480, 80});
   tree.activate(platform);
