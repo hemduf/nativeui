@@ -544,7 +544,8 @@ std::string calendar_iso(Date value) {
   if (!value || !calendar_day_valid(*value))
     return {};
   const auto ymd = std::chrono::year_month_day{*value};
-  std::array<char, 11> buffer{};
+  // Cover the full chrono field ranges even without the valid-date bound.
+  std::array<char, 16> buffer{};
   std::snprintf(buffer.data(), buffer.size(), "%04d-%02u-%02u", int(ymd.year()),
                 unsigned(ymd.month()), unsigned(ymd.day()));
   return buffer.data();
