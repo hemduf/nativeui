@@ -232,7 +232,8 @@ float DialogPanelComponent::action_gap() const noexcept { return style_.action_g
 std::vector<DialogPanelComponent::ActionRow> DialogPanelComponent::action_rows(const std::vector<ChildMetrics>& children,float width,bool minimum) const {
     std::vector<ActionRow> rows;
     for(const auto index:layout_.action_indices){
-        if(index>=children.size())continue;const auto size=minimum?children[index].minimum:children[index].preferred;
+        if(index>=children.size())continue;
+        const auto size=minimum?children[index].minimum:children[index].preferred;
         const float item_w=std::min(size.w,width);
         if(rows.empty() || (!rows.back().indices.empty() && rows.back().width+action_gap()+item_w>width))rows.emplace_back();
         auto& row=rows.back();if(!row.indices.empty())row.width+=action_gap();row.indices.push_back(index);row.width+=item_w;row.height=std::max(row.height,size.h);

@@ -251,18 +251,28 @@ public:
     void set_focused_index(std::optional<std::size_t> index) {
         if (const auto primary=primary_session()) { primary->set_focused_index(index); return; }
         if (index && *index>=size()) index.reset();
-        if (focused_index_==index) return; focused_index_=index; window_dirty_=true; ++window_serial_; refresh_window();
+        if (focused_index_==index) return;
+        focused_index_=index;
+        window_dirty_=true;
+        ++window_serial_;
+        refresh_window();
     }
     [[nodiscard]] std::optional<std::size_t> focused_index() const noexcept {
-        if (const auto primary=primary_session()) return primary->focused_index(); return focused_index_;
+        if (const auto primary=primary_session()) return primary->focused_index();
+        return focused_index_;
     }
     void set_captured_index(std::optional<std::size_t> index) {
         if (const auto primary=primary_session()) { primary->set_captured_index(index); return; }
         if (index && *index>=size()) index.reset();
-        if (captured_index_==index) return; captured_index_=index; window_dirty_=true; ++window_serial_; refresh_window();
+        if (captured_index_==index) return;
+        captured_index_=index;
+        window_dirty_=true;
+        ++window_serial_;
+        refresh_window();
     }
     [[nodiscard]] std::optional<std::size_t> captured_index() const noexcept {
-        if (const auto primary=primary_session()) return primary->captured_index(); return captured_index_;
+        if (const auto primary=primary_session()) return primary->captured_index();
+        return captured_index_;
     }
     [[nodiscard]] std::optional<std::size_t> materialized_index_for_key(const Key& key) const {
         if (const auto primary=primary_session()) return primary->materialized_index_for_key(key);
@@ -291,7 +301,11 @@ public:
     void set_viewport_height(float height) {
         if (const auto primary=primary_session()) { primary->set_viewport_height(height); return; }
         height=std::isfinite(height)?std::max(0.0f,height):0.0f;
-        if (height==viewport_height_) return; viewport_height_=height; window_dirty_=true; ++window_serial_; refresh_window();
+        if (height==viewport_height_) return;
+        viewport_height_=height;
+        window_dirty_=true;
+        ++window_serial_;
+        refresh_window();
     }
     void set_presentation_invalidator(std::function<void()> invalidator) { presentation_invalidator_=std::move(invalidator); }
     void set_structure_invalidator(std::function<void()> invalidator) {
@@ -304,7 +318,8 @@ public:
         if (attached_) { window_dirty_=true; ++window_serial_; refresh_window(); }
     }
     [[nodiscard]] std::vector<std::string> desired_keys() const {
-        if (const auto primary=primary_session()) return primary->desired_keys(); return window_.keys();
+        if (const auto primary=primary_session()) return primary->desired_keys();
+        return window_.keys();
     }
     [[nodiscard]] std::vector<DynamicChildSpec> desired_children(const std::shared_ptr<VirtualListRetainedRuntime>& self,
         const std::shared_ptr<VirtualListPresentationState<Key>>& presentation) const {
@@ -330,7 +345,8 @@ public:
         const auto& items=window_.items(); return index<items.size()?&items[index]:nullptr;
     }
     [[nodiscard]] std::size_t materialized_count() const noexcept {
-        if (const auto primary=primary_session()) return primary->materialized_count(); return window_.items().size();
+        if (const auto primary=primary_session()) return primary->materialized_count();
+        return window_.items().size();
     }
     void refresh() {
         local_layout_pending_=false;
