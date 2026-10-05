@@ -21,7 +21,7 @@ void complete_finite_ascii_drafts_publish_without_step_snap() {
   test::MockPlatform platform;
   tree.resize({450, 82});
   tree.activate(platform);
-  for (const std::string &text :
+  for (const std::string text :
        {"", "-", "1e", "1,2", "nan", "inf", "1.0x", "1e9999", "101"}) {
     replace(tree, platform, text);
     NUI_CHECK(value.get() == 4.0);

@@ -14,7 +14,7 @@ ui::Spec bar(int &calls) {
   style.overflow_button.base.horizontal_padding = 0;
   style.overflow_button.base.text_size = 1;
   std::vector<ui::ToolbarItem> items;
-  for (const std::string &label : {"Save", "Undo", "Redo"}) {
+  for (const std::string label : {"Save", "Undo", "Redo"}) {
     auto action = [&calls] { ++calls; };
     items.push_back({label, ui::Button{label, action}.style(button).spec(),
                      ui::PopupMenuItem::action(label, action)});
