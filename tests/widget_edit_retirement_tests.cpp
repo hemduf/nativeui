@@ -3,6 +3,8 @@
 #include "test_support.hpp"
 #include <nativeui/if.hpp>
 
+#include <string_view>
+
 namespace ui {
 struct TreeTestAccess {
   static bool captured(Tree &tree, PointerId id) {
@@ -160,7 +162,7 @@ public:
 private:
   int &cancels_;
 };
-void keyboard_cleanup_releases_originating_touch_only(bool toggle) {
+void keyboard_cleanup_releases_originating_touch_only(bool toggle, bool knob = false) {
   for (int mode = 0; mode < (toggle ? 1 : 3); ++mode) {
     ui::State<float> value{0.5f};
     ui::State<bool> checked{false}, read_only{false};
@@ -175,9 +177,11 @@ void keyboard_cleanup_releases_originating_touch_only(bool toggle) {
     auto control = toggle
                        ? ui::make_spec(ui::Toggle{"Switch", checked}.on_edit(
                              callbacks<bool>(notify)))
-                       : ui::make_spec(ui::Slider{value}
-                                           .style(slider_style)
-                                           .on_edit(callbacks<float>(notify)));
+                       : knob ? ui::make_spec(ui::Knob{"Value", value}.on_edit(
+                                    callbacks<float>(notify)))
+                              : ui::make_spec(ui::Slider{value}
+                                                  .style(slider_style)
+                                                  .on_edit(callbacks<float>(notify)));
     int mouse_cancels{};
     ui::Spec mouse{
         [&] { return std::make_unique<MouseCapture>(mouse_cancels); }, {}};
@@ -251,6 +255,9 @@ void slider_contacts() {
 void toggle_contacts() {
   keyboard_cleanup_releases_originating_touch_only(true);
 }
+void knob_contacts() {
+  keyboard_cleanup_releases_originating_touch_only(false, true);
+}
 void toggle_layout_invalidation_can_retire_before_paint_invalidation() {
   ui::State<bool> present{true}, checked{false};
   test::MockPlatform platform;
@@ -291,6 +298,7 @@ void suite() {
   external_knob_write_cancels_the_active_edit();
   slider_contacts();
   toggle_contacts();
+  knob_contacts();
   toggle_layout_invalidation_can_retire_before_paint_invalidation();
 }
 } // namespace
@@ -299,6 +307,8 @@ int main(int argc, char **argv) {
     return test::run("slider contacts", slider_contacts);
   if (argc == 2 && std::string_view{argv[1]} == "toggle_contacts")
     return test::run("toggle contacts", toggle_contacts);
+  if (argc == 2 && std::string_view{argv[1]} == "knob_contacts")
+    return test::run("knob contacts", knob_contacts);
   if (argc == 2 && std::string_view{argv[1]} == "toggle_invalidation")
     return test::run(
         "toggle invalidation",

@@ -4,6 +4,7 @@
 #include <nativeui/knob.hpp>
 
 #include <stdexcept>
+#include <string_view>
 
 namespace ui {
 struct TreeTestAccess {
@@ -148,4 +149,8 @@ void suite() {
   newer_contact_survives_older_failure();
 }
 } // namespace
-int main() { return test::run("widget_knob_lifetime", &suite); }
+int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view{argv[1]} == "newer_contact")
+    return test::run("knob newer contact", newer_contact_survives_older_failure);
+  return test::run("widget_knob_lifetime", &suite);
+}

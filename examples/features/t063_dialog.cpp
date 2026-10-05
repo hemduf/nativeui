@@ -646,6 +646,10 @@ int throwing_completion_releases_slot_contract() {
 
 int overlay_command_failure_recovery_contract() {
     example::Platform platform;
+    const auto is_full_viewport = [](ui::Rect damage) {
+        return damage.x == 0.0f && damage.y == 0.0f &&
+            damage.w == 240.0f && damage.h == 180.0f;
+    };
 
     {
         ui::State<int> selection{1};
@@ -658,9 +662,11 @@ int overlay_command_failure_recovery_contract() {
         tree.activate(platform);
 
         bool fail_invalidation = false;
+        bool close_phase = false;
         int injected_failures = 0;
-        tree.set_invalidation_callback(std::function<void()>{[&] {
-            if (fail_invalidation) {
+        tree.set_invalidation_callback(std::function<void(ui::Rect)>{[&](ui::Rect damage) {
+            if (fail_invalidation &&
+                (!close_phase || is_full_viewport(damage))) {
                 ++injected_failures;
                 throw std::runtime_error{"T131 injected popup transaction failure"};
             }
@@ -697,7 +703,15 @@ int overlay_command_failure_recovery_contract() {
             tree.clear_invalidation_callback();
             return example::fail("T131 ComboBox close fault setup did not consume pending damage");
         }
+        // Panel painting precedes accepting the close command. Inject only
+        // the full-viewport structural notification at the close transaction.
+        const auto close_entries = tree.overlay_entries();
+        if (close_entries.size() != 1 || is_full_viewport(close_entries.front().bounds)) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox close fault needs sub-viewport popup bounds");
+        }
         injected_failures = 0;
+        close_phase = true;
         fail_invalidation = true;
         bool close_threw = false;
         try {
@@ -740,8 +754,12 @@ int overlay_command_failure_recovery_contract() {
         }
         bool fail_invalidation = false;
         int injected_failures = 0;
-        tree.set_invalidation_callback(std::function<void()>{[&] {
-            if (fail_invalidation) {
+        const auto close_entries = tree.overlay_entries();
+        if (close_entries.size() != 1 || is_full_viewport(close_entries.front().bounds)) {
+            return example::fail("T131 PopupMenu close fault needs sub-viewport popup bounds");
+        }
+        tree.set_invalidation_callback(std::function<void(ui::Rect)>{[&](ui::Rect damage) {
+            if (fail_invalidation && is_full_viewport(damage)) {
                 ++injected_failures;
                 throw std::runtime_error{"T131 injected menu close failure"};
             }

@@ -157,8 +157,17 @@ void KnobComponent::focus_changed(bool focused, FocusContext &ctx) {
   observation->cancel_requested = false;
   auto release = std::move(observation->release_pointer);
   cancel_after_cleanup(observation->edit, [&] {
-    if (was_active)
-      ctx.invalidate();
+    try {
+      if (was_active)
+        ctx.invalidate();
+    } catch (...) {
+      try {
+        if (release)
+          release();
+      } catch (...) {
+      }
+      throw;
+    }
     if (release)
       release();
   });
@@ -193,10 +202,17 @@ void KnobComponent::publish(double value, InputContext &ctx,
     ctx.invalidate();
     if (state.valid() && observation->generation == generation &&
         (!permission || permission())) {
-      if (source == EditSource::Pointer)
-        edit->update(next);
-      else
+      if (source == EditSource::Pointer) {
+        // A newer physical contact can begin during the previous State
+        // notification, when starting its logical edit is still prohibited.
+        if (!edit->active() && !edit->begin(EditSource::Pointer))
+          return;
+        if (state.valid() && observation->generation == generation &&
+            observation->gesture.active() && (!permission || permission()))
+          edit->update(next);
+      } else {
         edit->set(next, source);
+      }
     }
   } catch (...) {
     if (observation->generation == generation) {
@@ -206,10 +222,10 @@ void KnobComponent::publish(double value, InputContext &ctx,
       observation->cancel_requested = false;
       auto armed_release = std::move(observation->release_pointer);
       try {
-        if (release)
-          release();
-        else if (armed_release)
+        if (armed_release)
           armed_release();
+        else if (release)
+          release();
       } catch (...) {
       }
       try {
@@ -243,11 +259,10 @@ EventResult KnobComponent::input(const InputEvent &event, InputContext &ctx) {
       (void)observation->gesture.cancel();
       observation->dragging = false;
       observation->cancel_requested = false;
-      auto release = std::move(observation->release_pointer);
+      if (observation->release_pointer)
+        release_contact = std::move(observation->release_pointer);
       ctx.invalidate();
-      if (release)
-        release();
-      else if (release_contact)
+      if (release_contact)
         release_contact();
       edit->cancel();
       return EventResult::Handled;
@@ -332,7 +347,8 @@ EventResult KnobComponent::input(const InputEvent &event, InputContext &ctx) {
       (void)observation->gesture.cancel();
       observation->dragging = false;
       observation->cancel_requested = false;
-      observation->release_pointer = {};
+      if (observation->release_pointer)
+        release_contact = std::move(observation->release_pointer);
       try {
         if (release_contact)
           release_contact();
